@@ -1,0 +1,9 @@
+/* .filtermodel li:nth-child(even){
+    padding-left: 50px;
+
+    
+} */
+ .filtermodel{
+    display: flex;
+    justify-content: space-between;
+ }

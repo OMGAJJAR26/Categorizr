@@ -1,0 +1,184 @@
+/* #root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+} */
+
+.text-align-left{
+  text-align: left;
+}
+
+button.text-gray-500.hover\:text-black.absolute.top-3.right-3.z-50.close-btn {
+    position: absolute;
+    left: 9px;
+    right: unset;
+    top: 9px;
+    height: 30px;
+    width: 30px;
+    background-color: grey;
+    border-radius: 50%;
+}
+
+svg.lucide.lucide-x {
+    stroke: white;
+    position: absolute;
+    top: 5px;
+    left: 5px;
+}
+
+.hide-scrollbar {
+  -ms-overflow-style: none;  /* Internet Explorer 10+ */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;  /* Safari and Chrome */
+}
+
+/* Fix for slick-carousel bullets appearing in modals */
+.slick-dots {
+  display: none !important;
+}
+
+/* Ensure slick carousel dots don't appear anywhere */
+.slick-dots li {
+  display: none !important;
+}
+
+/* Receipt Detail Modal - Remove any list styling */
+.fixed.inset-0 ul,
+.fixed.inset-0 li,
+.fixed.inset-0 ol {
+  list-style: none !important;
+  list-style-type: none !important;
+  margin: 0;
+  padding: 0;
+}
+
+/* Force remove dots/bullets from modal z-50 */
+[class*="z-50"] .slick-dots,
+[class*="z-50"] ul.slick-dots {
+  display: none !important;
+  visibility: hidden !important;
+}
+
+/* Remove any ::marker pseudo-elements in modals */
+.fixed.inset-0 li::marker,
+.fixed.inset-0 ul::marker,
+.fixed.inset-0 ol::marker {
+  content: none !important;
+  display: none !important;
+}
+
+/* Ensure modal content has no list bullets */
+[class*="modal"] li,
+[class*="Modal"] li {
+  list-style: none;
+}
+
+/* Override any slick-theme dots that might appear */
+.slick-dots li button:before {
+  display: none !important;
+}
+
+/* Prevent carousel from affecting modal overlays */
+.backdrop-blur-sm .slick-dots,
+.backdrop-blur-sm ul,
+.bg-white\/30 .slick-dots {
+  display: none !important;
+}
+
+/* Receipt Detail Modal - Complete reset for any list styling */
+.receipt-detail-modal,
+.receipt-detail-modal * {
+  list-style: none !important;
+  list-style-type: none !important;
+}
+
+.receipt-detail-modal ul,
+.receipt-detail-modal ol,
+.receipt-detail-modal li {
+  list-style: none !important;
+  list-style-type: none !important;
+  margin-block-start: 0;
+  margin-block-end: 0;
+  padding-inline-start: 0;
+}
+
+.receipt-detail-modal li::before,
+.receipt-detail-modal li::marker {
+  content: none !important;
+  display: none !important;
+}
+
+/* Make sure the modal header is properly styled */
+.receipt-detail-modal .sticky {
+  background: white;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+/* Receipt Modal Header Specific Styling */
+.receipt-modal-header {
+  list-style: none !important;
+  list-style-type: none !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  min-height: 56px;
+}
+
+.receipt-modal-header::before,
+.receipt-modal-header::after {
+  content: none !important;
+  display: none !important;
+}
+
+/* Ensure close button is visible */
+.receipt-modal-header button {
+  flex-shrink: 0;
+}
+
+/* Ensure title is centered and visible */
+.receipt-modal-header h2 {
+  flex: 1;
+  text-align: center;
+  margin: 0;
+  padding: 0 1rem;
+}

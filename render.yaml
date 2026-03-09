@@ -1,0 +1,76 @@
+# render.yaml — Render.com deployment config for the Node.js chatbot/integrations backend
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: categorizr-chatbot-staging
+    env: node
+    region: oregon           # free-tier region
+    plan: free
+    branch: staging          # only deploy from the staging branch
+    rootDir: server          # Node.js source lives in /server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/chat/health
+
+    envVars:
+      # --- Server ---
+      - key: NODE_ENV
+        value: staging
+      - key: PORT
+        value: 3000
+
+      # --- CORS: set this to your Vercel staging URL after first deploy ---
+      # Example: https://categorizr-git-staging-yourteam.vercel.app
+      - key: FRONTEND_URL
+        sync: false           # Fill in manually in the Render dashboard
+
+      # --- OpenAI (chatbot) ---
+      - key: OPENAI_API_KEY
+        sync: false           # Fill in manually – never commit this
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+
+      # --- QuickBooks ---
+      - key: QB_CLIENT_ID
+        sync: false
+      - key: QB_CLIENT_SECRET
+        sync: false
+      - key: QB_ENVIRONMENT
+        value: sandbox        # use "sandbox" for staging
+      - key: QB_REDIRECT_URI
+        sync: false           # e.g. https://categorizr-chatbot-staging.onrender.com/api/integrations/quickbooks/callback
+
+      # --- Xero ---
+      - key: XERO_CLIENT_ID
+        sync: false
+      - key: XERO_CLIENT_SECRET
+        sync: false
+      - key: XERO_REDIRECT_URI
+        sync: false
+
+      # --- FreshBooks Classic ---
+      - key: FRESHBOOKS_CLIENT_ID
+        sync: false
+      - key: FRESHBOOKS_CLIENT_SECRET
+        sync: false
+      - key: FRESHBOOKS_REDIRECT_URI
+        sync: false
+      - key: FRESHBOOKS_SCOPES
+        sync: false
+      - key: FRESHBOOKS_CURRENCY
+        value: USD
+      - key: FRESHBOOKS_STAFF_ID
+        sync: false
+
+      # --- Sage Intacct ---
+      - key: SAGE_INTACCT_SENDER_ID
+        sync: false
+      - key: SAGE_INTACCT_SENDER_PASSWORD
+        sync: false
+      - key: SAGE_INTACCT_COMPANY_ID
+        sync: false
+      - key: SAGE_INTACCT_USER_ID
+        sync: false
+      - key: SAGE_INTACCT_USER_PASSWORD
+        sync: false

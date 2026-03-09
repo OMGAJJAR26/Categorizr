@@ -1,0 +1,41 @@
+# ── Dependencies ──────────────────────────────────────────────
+node_modules/
+
+# ── Build outputs ─────────────────────────────────────────────
+dist/
+build/
+
+# ── Environment files (NEVER commit secrets) ──────────────────
+.env
+.env.local
+.env.staging
+.env.production
+.env.*.local
+
+# ── Vercel ────────────────────────────────────────────────────
+.vercel
+
+# ── OS / Editor ───────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# ── Logs ──────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+
+# ── Archives / generated files (not needed in git) ────────────
+*.zip
+dist.zip
+server.zip
+
+# ── Old deployment / scratch files (safe to ignore) ──────────
+gcp_deployment_plan*.md
+PUSH_INSTRUCTIONS.md
+push-to-bitbucket*.sh
+create-two-repos.sh
+SPLIT_AND_DEPLOY.md
+TODAY_WORK_SUMMARY.md
+DEPLOY_AND_VERIFY.md
+https:/
