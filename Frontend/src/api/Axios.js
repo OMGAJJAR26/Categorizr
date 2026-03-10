@@ -19,11 +19,28 @@ export const PHP_API_BASE = "https://categorizr.com/emailserver";
  * images blocked by Cross-Origin-Resource-Policy (e.g. logos-world.net)
  * can be displayed on the Vercel staging/production frontend.
  *
- * Falls back to the raw URL when NODE_API_URL is not set (local dev with
- * Vite proxy, where CORP restrictions don't apply).
+ * Safe to call on any string — data URIs, relative paths and already-proxied
+ * URLs are returned unchanged.  Falls back to raw URL in local dev.
  */
 export const proxyImageUrl = (url) => {
-  if (!url) return url;
-  if (!NODE_API_URL) return url; // local dev — no proxy needed
+  if (!url || typeof url !== "string") return url;
+  if (url.startsWith("data:")) return url;          // data URI — no proxy needed
+  if (url.startsWith("/")) return url;               // relative path — no proxy needed
+  if (!url.startsWith("http")) return url;           // not an HTTP URL
+  if (!NODE_API_URL) return url;                     // local dev — Vite handles CORS
+  if (url.includes("/api/imageproxy?url=")) return url; // already proxied
   return `${NODE_API_URL}/api/imageproxy?url=${encodeURIComponent(url)}`;
+};
+
+/** Strip proxy wrapper and return the original raw URL (for localStorage storage). */
+export const unproxyImageUrl = (url) => {
+  if (!url || typeof url !== "string") return url;
+  const marker = "/api/imageproxy?url=";
+  const idx = url.indexOf(marker);
+  if (idx === -1) return url;
+  try {
+    return decodeURIComponent(url.slice(idx + marker.length));
+  } catch {
+    return url;
+  }
 };
