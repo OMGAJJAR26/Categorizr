@@ -1,5 +1,6 @@
 import Tesseract from 'tesseract.js';
 import * as pdfjsLib from 'pdfjs-dist';
+import { proxyImageUrl } from '../api/Axios';
 
 // Configure PDF.js worker - use local file from public folder
 // This must be set BEFORE any PDF.js operations
@@ -741,7 +742,7 @@ async function fetchMerchantLogo(merchantName) {
         if (firstItem && typeof firstItem === 'object') {
           const fullUrl = firstItem.fullurl;
           if (fullUrl && /^https?:\/\//i.test(fullUrl)) {
-            return fullUrl;
+            return proxyImageUrl(fullUrl);
           }
         }
 
@@ -750,7 +751,7 @@ async function fetchMerchantLogo(merchantName) {
           if (item && typeof item === 'object') {
             const url = item.fullurl || item.url || item.image || item.src || item.link || item.thumburl;
             if (url && /^https?:\/\//i.test(url)) {
-              return url;
+              return proxyImageUrl(url);
             }
           }
         }
@@ -764,12 +765,12 @@ async function fetchMerchantLogo(merchantName) {
           const firstItem = arr[0];
           if (firstItem && typeof firstItem === 'object') {
             const url = firstItem.fullurl || firstItem.url || firstItem.image || firstItem.src || firstItem.link;
-            if (url && /^https?:\/\//i.test(url)) return url;
+            if (url && /^https?:\/\//i.test(url)) return proxyImageUrl(url);
           }
         }
 
         const directUrl = data.url || data.image || data.src || data.link || data.fullurl;
-        if (directUrl && /^https?:\/\//i.test(directUrl)) return directUrl;
+        if (directUrl && /^https?:\/\//i.test(directUrl)) return proxyImageUrl(directUrl);
       }
 
       return null;

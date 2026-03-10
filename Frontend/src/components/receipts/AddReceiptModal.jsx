@@ -1,4 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { formatTaxRate } from "../../utils/receiptFormatters";
+import { proxyImageUrl } from "../../api/Axios";
 import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useData } from "../../context/DataContext";
@@ -1866,7 +1868,7 @@ const handleFieldChange = (field, value) => {
               item.link ||
               item.thumburl;
             if (url && /^https?:\/\//i.test(url)) {
-              logoUrls.push(url);
+              logoUrls.push(proxyImageUrl(url));
             }
           }
         }
@@ -1882,7 +1884,7 @@ const handleFieldChange = (field, value) => {
               const url =
                 item.fullurl || item.url || item.image || item.src || item.link;
               if (url && /^https?:\/\//i.test(url)) {
-                logoUrls.push(url);
+                logoUrls.push(proxyImageUrl(url));
               }
             }
           }
@@ -1891,7 +1893,7 @@ const handleFieldChange = (field, value) => {
         const directUrl =
           data.url || data.image || data.src || data.link || data.fullurl;
         if (directUrl && /^https?:\/\//i.test(directUrl)) {
-          logoUrls.push(directUrl);
+          logoUrls.push(proxyImageUrl(directUrl));
         }
       }
 
@@ -3298,13 +3300,7 @@ const handleSelectLogo = (index) => {
                           <div className="flex items-center justify-between">
                             <label className="font-bold">
                               {formData.receipt_tax_values[0]
-                                ? `${
-                                    formData.receipt_tax_values[0].tax_name
-                                  } (${Math.round(
-                                    parseFloat(
-                                      formData.receipt_tax_values[0].tax_rate,
-                                    ) || 0,
-                                  )}%)`
+                                ? `${formData.receipt_tax_values[0].tax_name} (${formatTaxRate(formData.receipt_tax_values[0].tax_rate)}%)`
                                 : "Tax Type #1 (0%)"}
                             </label>
                             <div className="flex items-center gap-2">
@@ -3377,11 +3373,7 @@ const handleSelectLogo = (index) => {
                                             setShowTaxDropdown(false);
                                           }}
                                         >
-                                          {tax.tax_name} (
-                                          {Math.round(
-                                            parseFloat(tax.tax_rate) || 0,
-                                          )}
-                                          %)
+                                          {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
                                         </div>
                                       );
                                     })}
@@ -3443,13 +3435,7 @@ const handleSelectLogo = (index) => {
                           <div className="flex items-center justify-between">
                             <label className="font-bold">
                               {formData.receipt_tax_values[1]
-                                ? `${
-                                    formData.receipt_tax_values[1].tax_name
-                                  } (${Math.round(
-                                    parseFloat(
-                                      formData.receipt_tax_values[1].tax_rate,
-                                    ) || 0,
-                                  )}%)`
+                                ? `${formData.receipt_tax_values[1].tax_name} (${formatTaxRate(formData.receipt_tax_values[1].tax_rate)}%)`
                                 : "Tax Type #2 (0%)"}
                             </label>
                             <div className="flex items-center gap-2">
@@ -3523,11 +3509,7 @@ const handleSelectLogo = (index) => {
                                             setShowTaxDropdown(false);
                                           }}
                                         >
-                                          {tax.tax_name} (
-                                          {Math.round(
-                                            parseFloat(tax.tax_rate) || 0,
-                                          )}
-                                          %)
+                                          {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
                                         </div>
                                       );
                                     })}
@@ -3664,121 +3646,34 @@ const handleSelectLogo = (index) => {
                           className="flex gap-2 pb-2"
                           style={{ minWidth: "max-content" }}
                         >
-                          {/* Starred */}
-                          <button
-                            type="button"
-                            onClick={() => toggleTag("starred")}
-                            className={`flex items-center gap-1 px-3 py-2 border rounded-full ${
-                              tags.starred
-                                ? "border-blue-500 text-blue-600"
-                                : "border-gray-300"
-                            }`}
-                          >
-                            <img
-                              src={getTagImage("starred", tags.starred)}
-                              alt="Starred"
-                              className="w-4 h-4 object-contain"
-                            />
-                            <span className="text-xs font-medium">Starred</span>
-                          </button>
-
-                          {/* Flagged */}
-                          <button
-                            type="button"
-                            onClick={() => toggleTag("flagged")}
-                            className={`flex items-center gap-1 px-3 py-2 border rounded-full ${
-                              tags.flagged
-                                ? "border-blue-500 text-blue-600"
-                                : "border-gray-300"
-                            }`}
-                          >
-                            <img
-                              src={getTagImage("flagged", tags.flagged)}
-                              alt="Flagged"
-                              className="w-4 h-4 object-contain"
-                            />
-                            <span className="text-xs font-medium">Flagged</span>
-                          </button>
-
-                          {/* Verified */}
-                          <button
-                            type="button"
-                            onClick={() => toggleTag("verified")}
-                            className={`flex items-center gap-1 px-3 py-2 border rounded-full ${
-                              tags.verified
-                                ? "border-blue-500 text-blue-600"
-                                : "border-gray-300"
-                            }`}
-                          >
-                            <img
-                              src={getTagImage("verified", tags.verified)}
-                              alt="Verified"
-                              className="w-4 h-4 object-contain"
-                            />
-                            <span className="text-xs font-medium">
-                              Verified
-                            </span>
-                          </button>
-
-                          {/* Reconciled */}
-                          <button
-                            type="button"
-                            onClick={() => toggleTag("reconciled")}
-                            className={`flex items-center gap-1 px-3 py-2 border rounded-full ${
-                              tags.reconciled
-                                ? "border-blue-500 text-blue-600"
-                                : "border-gray-300"
-                            }`}
-                          >
-                            <img
-                              src={getTagImage("reconciled", tags.reconciled)}
-                              alt="Reconciled"
-                              className="w-4 h-4 object-contain"
-                            />
-                            <span className="text-xs font-medium">
-                              Reconciled
-                            </span>
-                          </button>
-
-                          {/* Reimbursed */}
-                          <button
-                            type="button"
-                            onClick={() => toggleTag("reimbursed")}
-                            className={`flex items-center gap-1 px-3 py-2 border rounded-full ${
-                              tags.reimbursed
-                                ? "border-blue-500 text-blue-600"
-                                : "border-gray-300"
-                            }`}
-                          >
-                            <img
-                              src={getTagImage("reimbursed", tags.reimbursed)}
-                              alt="Reimbursed"
-                              className="w-4 h-4 object-contain"
-                            />
-                            <span className="text-xs font-medium">
-                              Reimbursed
-                            </span>
-                          </button>
-
-                          {/* Warrantied */}
-                          <button
-                            type="button"
-                            onClick={() => toggleTag("warrantied")}
-                            className={`flex items-center gap-1 px-3 py-2 border rounded-full ${
-                              tags.warrantied
-                                ? "border-blue-500 text-blue-600"
-                                : "border-gray-300"
-                            }`}
-                          >
-                            <img
-                              src={getTagImage("warrantied", tags.warrantied)}
-                              alt="Warrantied"
-                              className="w-4 h-4 object-contain"
-                            />
-                            <span className="text-xs font-medium">
-                              Warrantied
-                            </span>
-                          </button>
+                          {[
+                            { key: "starred", label: "Starred" },
+                            { key: "flagged", label: "Flagged" },
+                            { key: "verified", label: "Verified" },
+                            { key: "reconciled", label: "Reconciled" },
+                            { key: "reimbursed", label: "Reimbursed" },
+                            { key: "warrantied", label: "Warrantied" },
+                          ]
+                            .sort((a, b) => (tags[b.key] ? 1 : 0) - (tags[a.key] ? 1 : 0))
+                            .map(({ key, label }) => (
+                              <button
+                                key={key}
+                                type="button"
+                                onClick={() => toggleTag(key)}
+                                className={`flex items-center gap-1 px-3 py-2 border rounded-full ${
+                                  tags[key]
+                                    ? "border-blue-500 text-blue-600"
+                                    : "border-gray-300"
+                                }`}
+                              >
+                                <img
+                                  src={getTagImage(key, tags[key])}
+                                  alt={label}
+                                  className="w-4 h-4 object-contain"
+                                />
+                                <span className="text-xs font-medium">{label}</span>
+                              </button>
+                            ))}
                         </div>
                       </div>
                     </div>
@@ -4302,7 +4197,7 @@ const handleSelectLogo = (index) => {
                               {tax.tax_name}
                             </div>
                             <div className="text-sm text-gray-600">
-                              Rate: {tax.tax_rate}%
+                              Rate: {formatTaxRate(tax.tax_rate)}%
                               {tax.tax_number && ` | Number: ${tax.tax_number}`}
                             </div>
                           </div>

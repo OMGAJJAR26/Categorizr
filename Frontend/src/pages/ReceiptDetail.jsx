@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
-import { NODE_API_URL } from "../api/Axios";
+import { NODE_API_URL, proxyImageUrl } from "../api/Axios";
+import { formatTaxRate } from "../utils/receiptFormatters";
 import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus,} from "lucide-react";
 import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationDialog";
 import "../App.css";
@@ -1166,9 +1167,9 @@ const handleDeleteTaxType = async (taxId) => {
         for (const item of data) {
           if (item && typeof item === "object") {
             const url = item.fullurl || item.url || item.image || item.src || item.link || item.thumburl;
-            if (url && /^https?:\/\//i.test(url)) logoUrls.push(url);
+            if (url && /^https?:\/\//i.test(url)) logoUrls.push(proxyImageUrl(url));
           } else if (typeof item === "string" && /^https?:\/\//i.test(item)) {
-            logoUrls.push(item);
+            logoUrls.push(proxyImageUrl(item));
           }
         }
       }
@@ -1179,12 +1180,12 @@ const handleDeleteTaxType = async (taxId) => {
           for (const item of arr) {
             if (item && typeof item === "object") {
               const url = item.fullurl || item.url || item.image || item.src || item.link;
-              if (url && /^https?:\/\//i.test(url)) logoUrls.push(url);
+              if (url && /^https?:\/\//i.test(url)) logoUrls.push(proxyImageUrl(url));
             }
           }
         }
         const directUrl = data.url || data.image || data.src || data.link || data.fullurl;
-        if (directUrl && /^https?:\/\//i.test(directUrl)) logoUrls.push(directUrl);
+        if (directUrl && /^https?:\/\//i.test(directUrl)) logoUrls.push(proxyImageUrl(directUrl));
       }
       return logoUrls.slice(0, 12);
     } catch {
@@ -2105,8 +2106,7 @@ const handleDeleteTaxType = async (taxId) => {
             t?.tax_rate !== undefined && t?.tax_rate !== null
               ? parseFloat(String(t.tax_rate).replace(/%/g, ""))
               : 0;
-          const rounded = Math.round(isNaN(rateNum) ? 0 : rateNum);
-          const rateStr = `${rounded}%`;
+          const rateStr = `${parseFloat((isNaN(rateNum) ? 0 : rateNum).toFixed(3))}%`;
           const amt = Number(t?.tax_amount) || 0;
           const name = (t?.tax_name || "Tax").toString();
           return `
@@ -2621,8 +2621,7 @@ Thank you for using our receipt management system.
             t?.tax_rate !== undefined && t?.tax_rate !== null
               ? parseFloat(String(t.tax_rate).replace(/%/g, ""))
               : 0;
-          const rounded = Math.round(isNaN(rateNum) ? 0 : rateNum);
-          const rateStr = `${rounded}%`;
+          const rateStr = `${parseFloat((isNaN(rateNum) ? 0 : rateNum).toFixed(3))}%`;
           const amt = Number(t?.tax_amount) || 0;
           const name = (t?.tax_name || "Tax").toString();
           return `
@@ -3868,13 +3867,7 @@ Thank you for using our receipt management system.
                                 <div className="flex items-center justify-between">
                                   <label className="font-bold">
                                     {currentTaxValues[0]
-                                      ? `${
-                                          currentTaxValues[0].tax_name
-                                        } (${Math.round(
-                                          parseFloat(
-                                            currentTaxValues[0].tax_rate
-                                          ) || 0
-                                        )}%)`
+                                      ? `${currentTaxValues[0].tax_name} (${formatTaxRate(currentTaxValues[0].tax_rate)}%)`
                                       : "Tax Type #1 (0%)"}
                                   </label>
                                   <div className="flex items-center gap-1">
@@ -3945,11 +3938,7 @@ Thank you for using our receipt management system.
                                               setShowTaxDropdown(null);
                                             }}
                                           >
-                                            {tax.tax_name} (
-                                            {Math.round(
-                                              parseFloat(tax.tax_rate) || 0
-                                            )}
-                                            %)
+                                            {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
                                           </div>
                                         ))}
                                       {allTaxTypes.filter(
@@ -3989,13 +3978,7 @@ Thank you for using our receipt management system.
                                 <div className="flex items-center justify-between">
                                   <label className="font-bold">
                                     {currentTaxValues[1]
-                                      ? `${
-                                          currentTaxValues[1].tax_name
-                                        } (${Math.round(
-                                          parseFloat(
-                                            currentTaxValues[1].tax_rate
-                                          ) || 0
-                                        )}%)`
+                                      ? `${currentTaxValues[1].tax_name} (${formatTaxRate(currentTaxValues[1].tax_rate)}%)`
                                       : "Tax Type #2 (0%)"}
                                   </label>
                                   <div className="flex items-center gap-1">
@@ -4068,11 +4051,7 @@ Thank you for using our receipt management system.
                                               setShowTaxDropdown(null);
                                             }}
                                           >
-                                            {tax.tax_name} (
-                                            {Math.round(
-                                              parseFloat(tax.tax_rate) || 0
-                                            )}
-                                            %)
+                                            {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
                                           </div>
                                         ))}
                                       {allTaxTypes.filter(
@@ -4218,130 +4197,34 @@ Thank you for using our receipt management system.
                           className="flex gap-2 pb-2"
                           style={{ minWidth: "max-content" }}
                         >
-                          {/* Starred */}
-                          <button
-                            type="button"
-                            onClick={() => toggleTag("starred")}
-                            className={`flex items-center gap-1 px-3 py-2 border rounded-full cursor-pointer transition-colors ${
-                              editedTags.starred
-                                ? "border-blue-500 text-blue-600"
-                                : "border-gray-300"
-                            }`}
-                          >
-                            <img
-                              src={getTagImage("starred", editedTags.starred)}
-                              alt="Starred"
-                              className="w-4 h-4 object-contain"
-                            />
-                            <span className="text-xs font-medium">Starred</span>
-                          </button>
-
-                          {/* Flagged */}
-                          <button
-                            type="button"
-                            onClick={() => toggleTag("flagged")}
-                            className={`flex items-center gap-1 px-3 py-2 border rounded-full cursor-pointer transition-colors ${
-                              editedTags.flagged
-                                ? "border-blue-500 text-blue-600"
-                                : "border-gray-300"
-                            }`}
-                          >
-                            <img
-                              src={getTagImage("flagged", editedTags.flagged)}
-                              alt="Flagged"
-                              className="w-4 h-4 object-contain"
-                            />
-                            <span className="text-xs font-medium">Flagged</span>
-                          </button>
-
-                          {/* Verified */}
-                          <button
-                            type="button"
-                            onClick={() => toggleTag("verified")}
-                            className={`flex items-center gap-1 px-3 py-2 border rounded-full cursor-pointer transition-colors ${
-                              editedTags.verified
-                                ? "border-blue-500 text-blue-600"
-                                : "border-gray-300"
-                            }`}
-                          >
-                            <img
-                              src={getTagImage("verified", editedTags.verified)}
-                              alt="Verified"
-                              className="w-4 h-4 object-contain"
-                            />
-                            <span className="text-xs font-medium">
-                              Verified
-                            </span>
-                          </button>
-
-                          {/* Reconciled */}
-                          <button
-                            type="button"
-                            onClick={() => toggleTag("reconciled")}
-                            className={`flex items-center gap-1 px-3 py-2 border rounded-full cursor-pointer transition-colors ${
-                              editedTags.reconciled
-                                ? "border-blue-500 text-blue-600"
-                                : "border-gray-300"
-                            }`}
-                          >
-                            <img
-                              src={getTagImage(
-                                "reconciled",
-                                editedTags.reconciled
-                              )}
-                              alt="Reconciled"
-                              className="w-4 h-4 object-contain"
-                            />
-                            <span className="text-xs font-medium">
-                              Reconciled
-                            </span>
-                          </button>
-
-                          {/* Reimbursed */}
-                          <button
-                            type="button"
-                            onClick={() => toggleTag("reimbursed")}
-                            className={`flex items-center gap-1 px-3 py-2 border rounded-full cursor-pointer transition-colors ${
-                              editedTags.reimbursed
-                                ? "border-blue-500 text-blue-600"
-                                : "border-gray-300"
-                            }`}
-                          >
-                            <img
-                              src={getTagImage(
-                                "reimbursed",
-                                editedTags.reimbursed
-                              )}
-                              alt="Reimbursed"
-                              className="w-4 h-4 object-contain"
-                            />
-                            <span className="text-xs font-medium">
-                              Reimbursed
-                            </span>
-                          </button>
-
-                          {/* Warrantied */}
-                          <button
-                            type="button"
-                            onClick={() => toggleTag("warrantied")}
-                            className={`flex items-center gap-1 px-3 py-2 border rounded-full cursor-pointer transition-colors ${
-                              editedTags.warrantied
-                                ? "border-blue-500 text-blue-600"
-                                : "border-gray-300"
-                            }`}
-                          >
-                            <img
-                              src={getTagImage(
-                                "warrantied",
-                                editedTags.warrantied
-                              )}
-                              alt="Warrantied"
-                              className="w-4 h-4 object-contain"
-                            />
-                            <span className="text-xs font-medium">
-                              Warrantied
-                            </span>
-                          </button>
+                          {[
+                            { key: "starred", label: "Starred" },
+                            { key: "flagged", label: "Flagged" },
+                            { key: "verified", label: "Verified" },
+                            { key: "reconciled", label: "Reconciled" },
+                            { key: "reimbursed", label: "Reimbursed" },
+                            { key: "warrantied", label: "Warrantied" },
+                          ]
+                            .sort((a, b) => (editedTags[b.key] ? 1 : 0) - (editedTags[a.key] ? 1 : 0))
+                            .map(({ key, label }) => (
+                              <button
+                                key={key}
+                                type="button"
+                                onClick={() => toggleTag(key)}
+                                className={`flex items-center gap-1 px-3 py-2 border rounded-full cursor-pointer transition-colors ${
+                                  editedTags[key]
+                                    ? "border-blue-500 text-blue-600"
+                                    : "border-gray-300"
+                                }`}
+                              >
+                                <img
+                                  src={getTagImage(key, editedTags[key])}
+                                  alt={label}
+                                  className="w-4 h-4 object-contain"
+                                />
+                                <span className="text-xs font-medium">{label}</span>
+                              </button>
+                            ))}
                         </div>
                       </div>
                     </div>
@@ -4859,7 +4742,7 @@ Thank you for using our receipt management system.
                                 {tax.tax_name}
                               </span>
                               <span className="text-sm text-gray-500 ml-2">
-                                ({Math.round(parseFloat(tax.tax_rate) || 0)}%)
+                                ({formatTaxRate(tax.tax_rate)}%)
                               </span>
                               {tax.tax_number && (
                                 <span className="text-xs text-gray-400 ml-2">

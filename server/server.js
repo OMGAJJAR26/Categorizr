@@ -5,6 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import chatRoutes from "./routes/chat.js";
 import integrationRoutes from "./routes/integrations.js";
+import imageProxyRoutes from "./routes/imageproxy.js";
 
 dotenv.config();
 
@@ -44,6 +45,7 @@ app.use(express.json({ limit: "10mb" }));
 // API routes
 app.use("/api/chat", chatRoutes);
 app.use("/api/integrations", integrationRoutes);
+app.use("/api/imageproxy", imageProxyRoutes);
 
 // API 404 guard (prevents SPA catch-all from swallowing /api/*)
 app.all("/api/*", (req, res) => {

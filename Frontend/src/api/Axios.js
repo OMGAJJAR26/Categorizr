@@ -13,3 +13,17 @@
 
 export const NODE_API_URL = import.meta.env.VITE_NODE_API_URL ?? "";
 export const PHP_API_BASE = "https://categorizr.com/emailserver";
+
+/**
+ * Wraps a third-party image URL through the Node.js image proxy so that
+ * images blocked by Cross-Origin-Resource-Policy (e.g. logos-world.net)
+ * can be displayed on the Vercel staging/production frontend.
+ *
+ * Falls back to the raw URL when NODE_API_URL is not set (local dev with
+ * Vite proxy, where CORP restrictions don't apply).
+ */
+export const proxyImageUrl = (url) => {
+  if (!url) return url;
+  if (!NODE_API_URL) return url; // local dev — no proxy needed
+  return `${NODE_API_URL}/api/imageproxy?url=${encodeURIComponent(url)}`;
+};

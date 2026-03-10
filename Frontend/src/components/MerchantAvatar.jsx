@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
+import { proxyImageUrl } from "../api/Axios";
 
 const normalizeKey = (name = "") =>
   name
@@ -67,7 +68,7 @@ const MerchantAvatar = ({ name, explicitUrl, className = "w-6 h-6", storename })
               // Extract the fullurl from the first object
               const fullUrl = firstItem.fullurl;
               if (isValidUrl(fullUrl)) {
-                return fullUrl;
+                return proxyImageUrl(fullUrl);
               }
             }
 
@@ -83,7 +84,7 @@ const MerchantAvatar = ({ name, explicitUrl, className = "w-6 h-6", storename })
                   item.link ||
                   item.thumburl;
                 if (isValidUrl(url)) {
-                  return url;
+                  return proxyImageUrl(url);
                 }
               }
             }
@@ -102,13 +103,13 @@ const MerchantAvatar = ({ name, explicitUrl, className = "w-6 h-6", storename })
                   firstItem.image ||
                   firstItem.src ||
                   firstItem.link;
-                if (isValidUrl(url)) return url;
+                if (isValidUrl(url)) return proxyImageUrl(url);
               }
             }
 
             // Check direct properties
             const directUrl = d.url || d.image || d.src || d.link || d.fullurl;
-            if (isValidUrl(directUrl)) return directUrl;
+            if (isValidUrl(directUrl)) return proxyImageUrl(directUrl);
           }
 
           return null;
