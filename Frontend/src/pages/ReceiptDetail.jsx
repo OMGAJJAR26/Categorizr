@@ -141,6 +141,10 @@ const ReceiptDetail = ({
   const [showPaymentDropdown, setShowPaymentDropdown] = useState(false);
   const [showTaxDropdown, setShowTaxDropdown] = useState(null);
 
+  // Add Expense Category inline state
+  const [showAddCategoryInput, setShowAddCategoryInput] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+
   // Add Payment Method modal state
   const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
   const [newPaymentCardType, setNewPaymentCardType] = useState("");
@@ -176,6 +180,7 @@ const ReceiptDetail = ({
 
   // Editable tags state
   const [editedTags, setEditedTags] = useState({
+    locked: false,
     starred: false,
     flagged: false,
     verified: false,
@@ -543,7 +548,7 @@ useEffect(() => {
         product_name: selectedReceipt.product_name || "",
         notes: selectedReceipt.notes || "",
         receipt_tax_values: nonTipTaxValues,
-        tip: tipEntry ? tipEntry.tax_amount : "",
+        tip: tipEntry ? tipEntry.tax_amount : 0,
         store_image: selectedReceipt.store_image || "",
       });
 
@@ -551,6 +556,7 @@ useEffect(() => {
       const tags = parseReceiptTags(selectedReceipt.receipt_tag);
       if (tags) {
         setEditedTags({
+          locked: tags.locked || false,
           starred: tags.starred || false,
           flagged: tags.flagged || false,
           verified: tags.verified || false,
@@ -772,6 +778,7 @@ useEffect(() => {
 
   // Handle field changes in edit mode
   const handleFieldChange = (field, value) => {
+    if (editedTags.locked) return; // Receipt is locked — prevent any changes
     setEditedReceipt((prev) => {
       const newData = { ...prev, [field]: value };
 
@@ -808,7 +815,6 @@ useEffect(() => {
     { name: "Diners Club", logo: DinersClub },
     { name: "PayPal", logo: PayPal },
     { name: "Debit Card", logo: DebitCard },
-    { name: "Cash", logo: Cash },
     { name: "Other", logo: Creditdebitcardicon },
   ];
 
@@ -831,6 +837,10 @@ useEffect(() => {
 
   const handleAddPaymentMethod = () => {
     if (!newPaymentCardType || newPaymentCardType.trim().length === 0) return;
+    if (!newLast4Digits || newLast4Digits.trim().replace(/\D/g, "").length < 4) {
+      alert("Please enter the last 4 digits of the card.");
+      return;
+    }
 
     // Determine selected card type for logo detection
     const cardTypeLower = newPaymentCardType.trim().toLowerCase();
@@ -1196,7 +1206,7 @@ const handleDeleteTaxType = async (taxId) => {
   };
 
   const handleOpenAddMerchantModal = () => {
-    setNewMerchantName(editedReceipt.storeName || "");
+    setNewMerchantName("");
     setNewMerchantLogo("");
     setLogoOptions([]);
     setSelectedLogoIndex(null);
@@ -1249,7 +1259,7 @@ const handleDeleteTaxType = async (taxId) => {
     try {
       // Build receipt_tag string from editedTags
       const receiptTag = [
-        selectedReceipt.receipt_tag?.split(",")[0] || "0", // Keep locked status
+        editedTags.locked ? "1" : "0",
         editedTags.starred ? "1" : "0",
         editedTags.flagged ? "1" : "0",
         editedTags.verified ? "1" : "0",
@@ -1686,7 +1696,7 @@ const handleDeleteTaxType = async (taxId) => {
   const saveReceiptWithoutClosing = async () => {
     // Build receipt_tag string from editedTags
     const receiptTag = [
-      selectedReceipt.receipt_tag?.split(",")[0] || "0", // Keep locked status
+      editedTags.locked ? "1" : "0",
       editedTags.starred ? "1" : "0",
       editedTags.flagged ? "1" : "0",
       editedTags.verified ? "1" : "0",
@@ -3291,6 +3301,13 @@ Thank you for using our receipt management system.
                     exit="exit"
                     className="w-full"
                   >
+                    {/* Locked Banner */}
+                    {editedTags.locked && (
+                      <div className="mx-3 sm:mx-6 mt-3 px-4 py-3 bg-red-50 border border-red-300 rounded-lg flex items-center gap-2 text-red-700 text-sm font-medium">
+                        <img src={locked} alt="Locked" className="w-4 h-4 object-contain" />
+                        This receipt is locked. Toggle the lock in Tags below to make changes.
+                      </div>
+                    )}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 p-3 sm:p-6 text-sm text-gray-800">
                       <div>
                         <h3 className="font-bold mb-4 text-gray-900 text-left">
@@ -3452,9 +3469,20 @@ Thank you for using our receipt management system.
                                 setShowCategoryDropdown(!showCategoryDropdown)
                               }
                             />
-                            {showCategoryDropdown &&
-                              filteredCategories.length > 0 && (
+                            {showCategoryDropdown && (
                                 <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                                  {/* Add Expense Category option */}
+                                  <div
+                                    className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left flex items-center gap-2 border-b border-gray-200 bg-blue-50"
+                                    onClick={() => {
+                                      setShowAddCategoryInput(true);
+                                      setNewCategoryName("");
+                                      setShowCategoryDropdown(false);
+                                    }}
+                                  >
+                                    <Plus size={16} className="text-blue-600" />
+                                    <span className="font-medium text-blue-600">Add Expense Category</span>
+                                  </div>
                                   {filteredCategories.map((category, idx) => (
                                     <div
                                       key={idx}
@@ -3474,6 +3502,52 @@ Thank you for using our receipt management system.
                               )}
                           </div>
                         </div>
+
+                        {/* Inline Add Expense Category input */}
+                        {showAddCategoryInput && (
+                          <div className="mb-4 flex gap-2 items-center">
+                            <input
+                              type="text"
+                              autoFocus
+                              className={inputClass}
+                              value={newCategoryName}
+                              onChange={(e) => setNewCategoryName(e.target.value)}
+                              placeholder="Enter new category name"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && newCategoryName.trim()) {
+                                  addExpenseCategory(newCategoryName.trim());
+                                  handleFieldChange("expense_type", newCategoryName.trim());
+                                  setShowAddCategoryInput(false);
+                                  setNewCategoryName("");
+                                } else if (e.key === "Escape") {
+                                  setShowAddCategoryInput(false);
+                                  setNewCategoryName("");
+                                }
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (newCategoryName.trim()) {
+                                  addExpenseCategory(newCategoryName.trim());
+                                  handleFieldChange("expense_type", newCategoryName.trim());
+                                }
+                                setShowAddCategoryInput(false);
+                                setNewCategoryName("");
+                              }}
+                              className="px-3 py-2 bg-green-600 text-white text-sm rounded-md hover:bg-green-700"
+                            >
+                              Add
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setShowAddCategoryInput(false); setNewCategoryName(""); }}
+                              className="px-3 py-2 bg-gray-200 text-gray-700 text-sm rounded-md hover:bg-gray-300"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )}
 
                         {/* Payment Method with Dropdown */}
                         <div
@@ -3789,11 +3863,13 @@ Thank you for using our receipt management system.
 
                         <div className="mb-4 text-align-left">
                           <label className="font-bold">Subtotal</label>
+                          <div className="relative">
+                          <span className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-500 text-sm mt-1">$</span>
                           <input
                             type="number"
                             step="0.01"
                             readOnly
-                            className={`${inputClass} ${(() => {
+                            className={`${inputClass} pl-5 ${(() => {
                               const total =
                                 parseFloat(editedReceipt.purchasePrice) ||
                                 parseFloat(r.total) ||
@@ -3842,6 +3918,7 @@ Thank you for using our receipt management system.
                                 : "0.00";
                             })()}
                           />
+                          </div>
                         </div>
 
                         {/* Tax Type Selection Dropdowns */}
@@ -4090,9 +4167,9 @@ Thank you for using our receipt management system.
                               <div className="mb-4 text-align-left">
                                 {(() => {
                                   const tipValue =
-                                    editedReceipt.tip !== undefined
+                                    editedReceipt.tip !== undefined && editedReceipt.tip !== ""
                                       ? editedReceipt.tip
-                                      : currentTipTax?.tax_amount || "";
+                                      : currentTipTax?.tax_amount ?? 0;
                                   const subtotal =
                                     parseFloat(editedReceipt.subtotal) ||
                                     parseFloat(r.subtotal) ||
@@ -4109,19 +4186,23 @@ Thank you for using our receipt management system.
                                       <label className="font-bold">
                                         TIP ({tipPercentage}%)
                                       </label>
-                                      <input
-                                        type="number"
-                                        step="0.01"
-                                        className={inputClass}
-                                        value={tipValue}
-                                        onChange={(e) =>
-                                          handleFieldChange(
-                                            "tip",
-                                            e.target.value
-                                          )
-                                        }
-                                        placeholder="0.00"
-                                      />
+                                      <div className="relative">
+                                        <span className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-500 text-sm mt-1">$</span>
+                                        <input
+                                          type="number"
+                                          step="0.01"
+                                          min="0"
+                                          className={`${inputClass} pl-5`}
+                                          value={tipValue}
+                                          onChange={(e) =>
+                                            handleFieldChange(
+                                              "tip",
+                                              e.target.value
+                                            )
+                                          }
+                                          placeholder="0.00"
+                                        />
+                                      </div>
                                     </>
                                   );
                                 })()}
@@ -4197,6 +4278,24 @@ Thank you for using our receipt management system.
                           className="flex gap-2 pb-2"
                           style={{ minWidth: "max-content" }}
                         >
+                          {/* Lock/Unlock button - always shown first */}
+                          <button
+                            type="button"
+                            onClick={() => toggleTag("locked")}
+                            className={`flex items-center gap-1 px-3 py-2 border rounded-full cursor-pointer transition-colors ${
+                              editedTags.locked
+                                ? "border-red-500 text-red-600 bg-red-50"
+                                : "border-gray-300 text-gray-600"
+                            }`}
+                            title={editedTags.locked ? "Receipt is Locked — click to unlock" : "Receipt is Unlocked — click to lock"}
+                          >
+                            <img
+                              src={getTagImage("locked", editedTags.locked)}
+                              alt={editedTags.locked ? "Locked" : "Unlocked"}
+                              className="w-4 h-4 object-contain"
+                            />
+                            <span className="text-xs font-medium">{editedTags.locked ? "Locked" : "Unlocked"}</span>
+                          </button>
                           {[
                             { key: "starred", label: "Starred" },
                             { key: "flagged", label: "Flagged" },
@@ -4210,11 +4309,13 @@ Thank you for using our receipt management system.
                               <button
                                 key={key}
                                 type="button"
-                                onClick={() => toggleTag(key)}
-                                className={`flex items-center gap-1 px-3 py-2 border rounded-full cursor-pointer transition-colors ${
-                                  editedTags[key]
-                                    ? "border-blue-500 text-blue-600"
-                                    : "border-gray-300"
+                                onClick={() => !editedTags.locked && toggleTag(key)}
+                                className={`flex items-center gap-1 px-3 py-2 border rounded-full transition-colors ${
+                                  editedTags.locked
+                                    ? "border-gray-200 text-gray-400 cursor-not-allowed opacity-50"
+                                    : editedTags[key]
+                                    ? "border-blue-500 text-blue-600 cursor-pointer"
+                                    : "border-gray-300 cursor-pointer"
                                 }`}
                               >
                                 <img
@@ -4343,8 +4444,9 @@ Thank you for using our receipt management system.
                       <div className="mt-6 flex justify-end">
                         <button
                           onClick={handleSave}
-                          disabled={isSaving}
+                          disabled={isSaving || editedTags.locked}
                           className="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title={editedTags.locked ? "Unlock receipt to save changes" : ""}
                         >
                           {isSaving ? "Saving..." : "Save Changes"}
                         </button>
@@ -4475,7 +4577,7 @@ Thank you for using our receipt management system.
                 {/* Card Issuer Name & Last 4 Digits */}
                 <div className="mb-6">
                   <label className="block text-sm font-bold text-gray-700 mb-2">
-                    Card Issuer & Card Number (Last 4 digits)
+                    Card Issuer <span className="font-normal text-gray-500">(optional)</span> & Last 4 Digits <span className="text-red-500">*</span>
                   </label>
                   <div className="grid grid-cols-2 gap-3">
                     <input
@@ -4529,7 +4631,7 @@ Thank you for using our receipt management system.
                   <button
                     type="button"
                     onClick={handleAddPaymentMethod}
-                    disabled={!newPaymentCardType}
+                    disabled={!newPaymentCardType || newLast4Digits.replace(/\D/g, "").length < 4}
                     className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     Add Payment Method

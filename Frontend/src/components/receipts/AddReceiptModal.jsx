@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { formatTaxRate } from "../../utils/receiptFormatters";
 import { proxyImageUrl } from "../../api/Axios";
-import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus } from "lucide-react";
+import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus, MoreHorizontal, Minus, ChevronLeft, ChevronRight } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useData } from "../../context/DataContext";
 import { usePaymentDisplay } from "../../hooks/usePaymentDisplay";
@@ -84,6 +84,21 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const [localPaymentMethods, setLocalPaymentMethods] = useState([]); // Local list of payment methods
   const [uploadedMediaUrls, setUploadedMediaUrls] = useState([]);
 
+  // ── Options menu ("...") ──────────────────────────────────────────────────
+  const [showOptionsMenu, setShowOptionsMenu] = useState(false);
+  const optionsMenuRef = useRef(null);
+
+  // ── Duplicate feature ─────────────────────────────────────────────────────
+  const [isDuplicated, setIsDuplicated] = useState(false);       // true = already used once
+  const [showDuplicateConfirm, setShowDuplicateConfirm] = useState(false);
+  const [isDuplicateMode, setIsDuplicateMode] = useState(false); // banner visible
+
+  // ── Split feature ─────────────────────────────────────────────────────────
+  const [showSplitScreen, setShowSplitScreen] = useState(false);
+  const [activeSplitIndex, setActiveSplitIndex] = useState(null); // null=overview, N=editing split N
+  const [splits, setSplits] = useState([]);
+  const [isSavingSplits, setIsSavingSplits] = useState(false);
+
   // Form fields state
   const [formData, setFormData] = useState({
     receipt_category: "", // 0 = Personal, 1 = Business
@@ -118,6 +133,10 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const [showTaxDropdown, setShowTaxDropdown] = useState(null); // null, 1, or 2 for which tax field
   const [isMerchantTyping, setIsMerchantTyping] = useState(false); // Track if user is actively typing
   const [isPaymentTyping, setIsPaymentTyping] = useState(false); // Track if user is actively typing in payment field
+
+  // Add Expense Category inline state
+  const [showAddCategoryInput, setShowAddCategoryInput] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
 
   // Manage Tax Types modal state
   const [showManageTaxModal, setShowManageTaxModal] = useState(false);
@@ -1793,6 +1812,338 @@ const handleFieldChange = (field, value) => {
     }
   };
 
+  // ── Duplicate helpers ─────────────────────────────────────────────────────
+
+  /** Build a minimal receipt API payload from current form state */
+  const buildQuickPayload = (overrideId = null) => {
+    let productDate = 0;
+    if (formData.product_date) {
+      const d = new Date(formData.product_date);
+      if (!isNaN(d.getTime())) productDate = Math.floor(d.getTime() / 1000);
+    }
+    if (!productDate) productDate = Math.floor(Date.now() / 1000);
+
+    const receiptTag = [
+      "0",
+      tags.starred ? "1" : "0",
+      tags.flagged ? "1" : "0",
+      tags.verified ? "1" : "0",
+      tags.reconciled ? "1" : "0",
+      tags.reimbursed ? "1" : "0",
+      tags.warrantied ? "1" : "0",
+    ].join(",");
+
+    const fkUserId = parseInt(localStorage.getItem("fk_user_id")) || 0;
+    const baseId = overrideId !== null ? overrideId : (parseInt(uploadedReceiptData?.id) || 0);
+
+    return {
+      id: baseId,
+      storeName: formData.storeName || "",
+      product_name: formData.product_name || "",
+      emailAttachment: (uploadedMediaUrls[0] || uploadedImageUrl || uploadedReceiptData?.emailAttachment || "0"),
+      purchasePrice: (parseFloat(formData.purchasePrice) || 0).toString(),
+      total_amount: (parseFloat(formData.purchasePrice) || 0).toString(),
+      payment_category_type: parseInt(formData.receipt_category) || 0,
+      status: parseInt(uploadedReceiptData?.status) || 0,
+      paymentType: formData.paymentType || "",
+      last_4_digit_card: formData.last_4_digit_card || "",
+      card_issuer_name: formData.card_issuer_name || "",
+      fk_original_receipt_id: uploadedReceiptData?.fk_original_receipt_id || "0",
+      fk_forward_from_receipt_id: uploadedReceiptData?.fk_forward_from_receipt_id || "0",
+      receipt_category: parseInt(formData.receipt_category) || 0,
+      product_date: productDate,
+      expense_type: formData.expense_type || "",
+      receipt_image: uploadedReceiptData?.receipt_image || uploadedImageUrl || "0",
+      store_image: getMerchantImage(formData.storeName) || detectedMerchantLogo || uploadedReceiptData?.store_image || "",
+      notes: formData.notes || "",
+      receipt_forwarded: uploadedReceiptData?.receipt_forwarded || "0",
+      receipt_tag: receiptTag,
+      create_date: uploadedReceiptData?.create_date || "",
+      receipt_tax_values: formData.receipt_tax_values
+        .filter(t => !(t.tax_name || "").toLowerCase().includes("tip"))
+        .map(t => ({
+          id: parseInt(t.id) || 0,
+          fk_user_id: parseInt(t.fk_user_id) || fkUserId,
+          fk_receipt_id: baseId,
+          fk_tax_id: parseInt(t.fk_tax_id) || 0,
+          tax_name: t.tax_name || "",
+          tax_rate: t.tax_rate || "0",
+          tax_amount: (parseFloat(t.tax_amount) || 0).toString(),
+          created: parseInt(t.created) || 0,
+          updated: parseInt(t.updated) || 0,
+        })),
+    };
+  };
+
+  /** POST a payload to addReceiptv1 and return the response data */
+  const postNewReceipt = async (payload) => {
+    const token = localStorage.getItem("token");
+    const response = await fetch("/api/receipt/addReceiptv1", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accesstoken: token },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error(`Failed to save receipt: ${response.status}`);
+    return response.json();
+  };
+
+  /** PUT payload to updateReceiptv1 */
+  const putUpdateReceipt = async (payload) => {
+    const token = localStorage.getItem("token");
+    const response = await fetch("/api/receipt/updateReceiptv1", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accesstoken: token },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error(`Failed to update receipt: ${response.status}`);
+    return response.json();
+  };
+
+  /** Save original receipt then enter duplicate mode */
+  const handleDuplicateConfirm = async () => {
+    setShowDuplicateConfirm(false);
+    setIsSaving(true);
+    setError(null);
+    try {
+      const payload = buildQuickPayload();
+      const isExisting = parseInt(payload.id) > 0;
+      if (isExisting) {
+        await putUpdateReceipt(payload);
+      } else {
+        await postNewReceipt(payload);
+      }
+      // Signal parent to refresh data
+      if (onReceiptAdded) onReceiptAdded(payload);
+      // Enter duplicate mode: same form data, blank ID so next Save = new receipt
+      setIsDuplicateMode(true);
+      setIsDuplicated(true);
+      setUploadedReceiptData(prev => prev ? { ...prev, id: 0 } : null);
+      if (refreshData) refreshData();
+    } catch (err) {
+      setError("Failed to save original: " + (err.message || "Unknown error"));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // ── Split helpers ─────────────────────────────────────────────────────────
+
+  /** Create a blank split seeded with proportional amounts */
+  const createSplit = (existingSplits = []) => {
+    const mainTotal = parseFloat(formData.purchasePrice) || 0;
+    const mainSubtotal = parseFloat(formData.subtotal) || mainTotal;
+    const mainTaxes = formData.receipt_tax_values || [];
+    const n = existingSplits.length + 1;
+    const frac = mainSubtotal > 0 ? (1 / n) : 0;
+    const splitSubtotal = parseFloat((mainSubtotal * frac).toFixed(2));
+    const splitTotal = parseFloat((mainTotal * frac).toFixed(2));
+    return {
+      _id: Date.now() + Math.random(),
+      receipt_category: formData.receipt_category || 0,
+      expense_type: formData.expense_type || "",
+      subtotal: splitSubtotal,
+      purchasePrice: splitTotal,
+      product_name: "",
+      receipt_tax_values: mainTaxes.map(t => ({
+        ...t,
+        tax_amount: parseFloat(((parseFloat(t.tax_rate) / 100) * splitSubtotal).toFixed(2)),
+      })),
+    };
+  };
+
+  /** Open split screen - validates required fields first */
+  const handleOpenSplit = () => {
+    const missing = [];
+    if (!formData.storeName?.trim()) missing.push("Merchant Name");
+    if (!formData.paymentType?.trim() && !formData.card_issuer_name?.trim()) missing.push("Payment Method");
+    if (!formData.expense_type?.trim()) missing.push("Expense Category");
+    if (!parseFloat(formData.purchasePrice)) missing.push("Total Amount");
+    if (missing.length) {
+      setError(`Please fill in: ${missing.join(", ")} before splitting.`);
+      return;
+    }
+    setError(null);
+    // Default 2 equal splits — both get exactly half
+    const split1 = createSplit([{}]);   // frac = 1/(1+1) = 0.5
+    const split2 = createSplit([{}]);   // frac = 1/(1+1) = 0.5
+    split2._id = Date.now() + 1;        // ensure unique _id
+    setSplits([split1, split2]);
+    setActiveSplitIndex(null);
+    setShowSplitScreen(true);
+  };
+
+  /** Helper: recalculate a split's taxes + total from a given subtotal */
+  const recalcSplitFromSub = (split, sub) => {
+    const taxes = (split.receipt_tax_values || []).map(t => ({
+      ...t,
+      tax_amount: parseFloat(((parseFloat(t.tax_rate) / 100) * sub).toFixed(2)),
+    }));
+    const total = parseFloat(
+      (sub + taxes.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0)).toFixed(2)
+    );
+    return { ...split, subtotal: sub, receipt_tax_values: taxes, purchasePrice: total };
+  };
+
+  /** Update a field on a specific split.
+   *
+   *  For subtotal / purchasePrice changes:
+   *    - Recalculate the edited split's taxes + total
+   *    - The "remainder slot" (split[0] unless that IS the edited split, then last split)
+   *      absorbs whatever is left from the main receipt total, so all splits always sum
+   *      exactly to the main receipt amount.
+   *
+   *  All other fields (category, expense_type, product_name, manual tax edits) just
+   *  update in place without touching any amounts. */
+  const updateSplitField = (idx, field, value) => {
+    setSplits(prev => {
+      const updated = [...prev];
+
+      if (field === "subtotal" || field === "purchasePrice") {
+        // ── 1. Update the edited split ────────────────────────────────────────
+        if (field === "subtotal") {
+          updated[idx] = recalcSplitFromSub(updated[idx], parseFloat(value) || 0);
+        } else {
+          // purchasePrice edited directly: back-calculate subtotal via tax rates
+          const totalNum = parseFloat(value) || 0;
+          const rateSum = (updated[idx].receipt_tax_values || []).reduce(
+            (s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0
+          );
+          const sub = rateSum > 0 ? parseFloat((totalNum / (1 + rateSum)).toFixed(2)) : totalNum;
+          updated[idx] = recalcSplitFromSub({ ...updated[idx], purchasePrice: totalNum }, sub);
+        }
+
+        // ── 2. Remainder slot absorbs the leftover ────────────────────────────
+        // Split[0] is the remainder unless we just edited split[0]; then last split is.
+        const remIdx = idx === 0 ? updated.length - 1 : 0;
+
+        // Sum every split EXCEPT the remainder slot
+        const sumOthers = updated.reduce(
+          (s, sp, i) => i === remIdx ? s : s + (parseFloat(sp.purchasePrice) || 0), 0
+        );
+        const mainTotal = parseFloat(formData.purchasePrice) || 0;
+        const remTotal  = Math.max(0, parseFloat((mainTotal - sumOthers).toFixed(2)));
+
+        // Back-calculate remainder's subtotal from its total
+        const remRateSum = (updated[remIdx].receipt_tax_values || []).reduce(
+          (s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0
+        );
+        const remSub = remRateSum > 0
+          ? parseFloat((remTotal / (1 + remRateSum)).toFixed(2))
+          : remTotal;
+        updated[remIdx] = recalcSplitFromSub(updated[remIdx], remSub);
+        // Force the total to be exact (avoids floating-point drift)
+        updated[remIdx] = { ...updated[remIdx], purchasePrice: remTotal };
+      } else {
+        // Non-amount field — just update in place
+        updated[idx] = { ...updated[idx], [field]: value };
+      }
+
+      return updated;
+    });
+  };
+
+  /** Add a new split — redistribute ALL splits equally so the total stays correct */
+  const addSplit = () => {
+    setSplits(prev => {
+      const newCount = prev.length + 1;
+      const mainSubtotal = parseFloat(formData.subtotal) || parseFloat(formData.purchasePrice) || 0;
+      const mainTotal    = parseFloat(formData.purchasePrice) || 0;
+      const eachSub   = parseFloat((mainSubtotal / newCount).toFixed(2));
+      const eachTotal = parseFloat((mainTotal    / newCount).toFixed(2));
+
+      const redistributed = prev.map(s => recalcSplitFromSub(s, eachSub));
+
+      const newSlot = {
+        _id: Date.now() + Math.random(),
+        receipt_category: formData.receipt_category || 0,
+        expense_type:     formData.expense_type || "",
+        product_name:     "",
+        subtotal:         eachSub,
+        purchasePrice:    eachTotal,
+        receipt_tax_values: (formData.receipt_tax_values || []).map(t => ({
+          ...t,
+          id: 0,
+          tax_amount: parseFloat(((parseFloat(t.tax_rate) / 100) * eachSub).toFixed(2)),
+        })),
+      };
+
+      return [...redistributed, newSlot];
+    });
+  };
+
+  /** Remove a split by index */
+  const removeSplit = (idx) => {
+    setSplits(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  /** Save all splits as separate receipts then close modal */
+  const handleSaveSplits = async () => {
+    if (splits.length === 0) return;
+    setIsSavingSplits(true);
+    setError(null);
+    try {
+      const fkUserId = parseInt(localStorage.getItem("fk_user_id")) || 0;
+      let productDate = 0;
+      if (formData.product_date) {
+        const d = new Date(formData.product_date);
+        if (!isNaN(d.getTime())) productDate = Math.floor(d.getTime() / 1000);
+      }
+      if (!productDate) productDate = Math.floor(Date.now() / 1000);
+      const receiptTag = ["0","0","0","0","0","0","0"].join(",");
+
+      for (const split of splits) {
+        const splitSubtotal = parseFloat(split.subtotal) || 0;
+        const taxValues = (split.receipt_tax_values || []).map(t => ({
+          id: 0,
+          fk_user_id: fkUserId,
+          fk_receipt_id: 0,
+          fk_tax_id: parseInt(t.fk_tax_id) || 0,
+          tax_name: t.tax_name || "",
+          tax_rate: t.tax_rate || "0",
+          tax_amount: (parseFloat(t.tax_amount) || 0).toString(),
+          created: 0,
+          updated: 0,
+        }));
+        const splitTotal = parseFloat(split.purchasePrice) ||
+          (splitSubtotal + taxValues.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0));
+
+        const payload = {
+          id: 0,
+          storeName: formData.storeName || "",
+          product_name: split.product_name || "",
+          emailAttachment: uploadedMediaUrls[0] || uploadedImageUrl || uploadedReceiptData?.emailAttachment || "0",
+          purchasePrice: splitTotal.toString(),
+          total_amount: splitTotal.toString(),
+          payment_category_type: parseInt(split.receipt_category) || 0,
+          status: 0,
+          paymentType: formData.paymentType || "",
+          last_4_digit_card: formData.last_4_digit_card || "",
+          card_issuer_name: formData.card_issuer_name || "",
+          fk_original_receipt_id: "0",
+          fk_forward_from_receipt_id: "0",
+          receipt_category: parseInt(split.receipt_category) || 0,
+          product_date: productDate,
+          expense_type: split.expense_type || formData.expense_type || "",
+          receipt_image: uploadedReceiptData?.receipt_image || uploadedImageUrl || "0",
+          store_image: getMerchantImage(formData.storeName) || detectedMerchantLogo || "",
+          notes: "",
+          receipt_forwarded: "0",
+          receipt_tag: receiptTag,
+          create_date: "",
+          receipt_tax_values: taxValues,
+        };
+        await postNewReceipt(payload);
+        if (onReceiptAdded) onReceiptAdded(payload);
+      }
+      if (refreshData) refreshData();
+      onClose();
+    } catch (err) {
+      setError("Failed to save splits: " + (err.message || "Unknown error"));
+    } finally {
+      setIsSavingSplits(false);
+    }
+  };
+
   const backdropVariants = {
     hidden: { opacity: 0 },
     visible: { opacity: 1, transition: { duration: 0.2 } },
@@ -1973,6 +2324,12 @@ const handleFieldChange = (field, value) => {
       ) {
         setShowPaymentDropdown(false);
       }
+      if (
+        optionsMenuRef.current &&
+        !optionsMenuRef.current.contains(e.target)
+      ) {
+        setShowOptionsMenu(false);
+      }
     };
 
     document.addEventListener("mousedown", handleClickOutside);
@@ -1980,7 +2337,7 @@ const handleFieldChange = (field, value) => {
   }, []);
 
 const handleOpenAddMerchantModal = () => {
-  setNewMerchantName(formData.storeName || "");
+  setNewMerchantName("");
   setNewMerchantLogo("");
   setLogoOptions([]);
   setSelectedLogoIndex(null);
@@ -2108,6 +2465,10 @@ const handleSelectLogo = (index) => {
   const handleAddPaymentMethod = () => {
     if (!newPaymentCardType || newPaymentCardType.trim().length === 0) {
       setError("Payment Card Type is required");
+      return;
+    }
+    if (!newLast4Digits || newLast4Digits.trim().replace(/\D/g, "").length < 4) {
+      setError("Last 4 digits of the card are required");
       return;
     }
 
@@ -2387,66 +2748,327 @@ const handleSelectLogo = (index) => {
                   </div>
                 </div>
               )}
-              {/* Modal Header - Same as ReceiptDetail */}
+              {/* Modal Header */}
               <div className="receipt-modal-header flex items-center border-b border-gray-200 px-3 sm:px-4 py-2 sm:py-2.5 bg-white sticky top-0 z-20">
-                {/* Close Button - Left side */}
+                {/* Left side – Close / Back */}
                 <div className="w-[90px] sm:w-[130px] flex justify-start gap-1">
-                  <button
-                    onClick={onClose}
-                    disabled={isUploading || isSaving}
-                    className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full transition-colors"
-                    style={{ backgroundColor: "#000000" }}
-                    aria-label="Close"
-                  >
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="#FFFFFF"
-                      strokeWidth="3"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <line x1="18" y1="6" x2="6" y2="18"></line>
-                      <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
-                  </button>
-                </div>
-
-                {/* Title - Center */}
-                <h2 className="flex-1 text-center text-sm sm:text-base md:text-lg font-bold text-gray-900">
-                  Add Receipt
-                </h2>
-
-                {/* Right side - Delete icon for form step */}
-                <div className="w-[90px] sm:w-[130px] flex items-center justify-end gap-1 sm:gap-2">
-                  {step === "form" && (
+                  {showSplitScreen && activeSplitIndex !== null ? (
+                    // Back from split detail → split overview
                     <button
                       type="button"
-                      onClick={() => {
-                        setStep("upload");
-                        setFiles([]);
-                        setUploadedReceiptData(null);
-                        setLocalImageFile(null);
-                        setDetectedMerchantLogo(null);
-                      }}
-                      className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 bg-gray-100 hover:bg-red-50 rounded-full transition-colors group"
-                      aria-label="Delete"
-                      title="Remove and start over"
+                      onClick={() => setActiveSplitIndex(null)}
+                      className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors"
                     >
-                      <Trash2
-                        size={16}
-                        className="text-red-500 group-hover:text-red-600 "
-                      />
+                      <ChevronLeft size={18} className="text-gray-700" />
                     </button>
+                  ) : showSplitScreen ? (
+                    // Back from split overview → form
+                    <button
+                      type="button"
+                      onClick={() => { setShowSplitScreen(false); setActiveSplitIndex(null); }}
+                      className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors"
+                    >
+                      <ChevronLeft size={18} className="text-gray-700" />
+                    </button>
+                  ) : (
+                    // Normal close button
+                    <button
+                      onClick={onClose}
+                      disabled={isUploading || isSaving}
+                      className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full transition-colors"
+                      style={{ backgroundColor: "#000000" }}
+                      aria-label="Close"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                      </svg>
+                    </button>
+                  )}
+                </div>
+
+                {/* Title – dynamic */}
+                <h2 className="flex-1 text-center text-sm sm:text-base md:text-lg font-bold text-gray-900">
+                  {showSplitScreen && activeSplitIndex !== null
+                    ? "Add Receipt Split"
+                    : showSplitScreen
+                    ? "Split Expense"
+                    : "Add Receipt"}
+                </h2>
+
+                {/* Right side */}
+                <div className="w-[90px] sm:w-[130px] flex items-center justify-end gap-1 sm:gap-2">
+                  {/* Split screen: SAVE button */}
+                  {showSplitScreen && activeSplitIndex === null && (
+                    <button
+                      type="button"
+                      onClick={handleSaveSplits}
+                      disabled={isSavingSplits || splits.length === 0}
+                      className="px-4 py-1.5 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isSavingSplits ? "Saving…" : "SAVE"}
+                    </button>
+                  )}
+                  {/* Split detail: SAVE button (saves current split back to list) */}
+                  {showSplitScreen && activeSplitIndex !== null && (
+                    <button
+                      type="button"
+                      onClick={() => setActiveSplitIndex(null)}
+                      className="px-4 py-1.5 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700"
+                    >
+                      SAVE
+                    </button>
+                  )}
+                  {/* Normal form: Delete icon + "..." options menu */}
+                  {step === "form" && !showSplitScreen && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStep("upload");
+                          setFiles([]);
+                          setUploadedReceiptData(null);
+                          setLocalImageFile(null);
+                          setDetectedMerchantLogo(null);
+                        }}
+                        className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 bg-gray-100 hover:bg-red-50 rounded-full transition-colors group"
+                        title="Remove and start over"
+                      >
+                        <Trash2 size={16} className="text-red-500 group-hover:text-red-600" />
+                      </button>
+
+                      {/* "..." options menu */}
+                      <div className="relative" ref={optionsMenuRef}>
+                        <button
+                          type="button"
+                          onClick={() => setShowOptionsMenu(prev => !prev)}
+                          className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 bg-blue-600 hover:bg-blue-700 rounded-full transition-colors"
+                          title="More options"
+                        >
+                          <MoreHorizontal size={16} className="text-white" />
+                        </button>
+                        {showOptionsMenu && (
+                          <div className="absolute top-full right-0 mt-2 bg-white shadow-xl border border-gray-200 rounded-xl z-[100] min-w-[160px] overflow-hidden">
+                            <button
+                              type="button"
+                              className={`w-full text-left px-4 py-3 text-sm font-medium border-b border-gray-100 transition-colors ${isDuplicated ? "text-gray-400 cursor-not-allowed" : "hover:bg-gray-50 text-gray-800"}`}
+                              onClick={() => { if (!isDuplicated) { setShowOptionsMenu(false); setShowDuplicateConfirm(true); } }}
+                              disabled={isDuplicated}
+                            >
+                              {isDuplicated ? "Duplicate (done)" : "Duplicate"}
+                            </button>
+                            <button
+                              type="button"
+                              className="w-full text-left px-4 py-3 text-sm font-medium text-gray-800 hover:bg-gray-50 transition-colors"
+                              onClick={() => { setShowOptionsMenu(false); handleOpenSplit(); }}
+                            >
+                              Split
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </>
                   )}
                 </div>
               </div>
 
               {/* Scrollable Content */}
               <div className="overflow-y-auto max-h-[calc(95vh-70px)] sm:max-h-[calc(90vh-80px)]">
-                {step === "upload" ? (
+                {showSplitScreen ? (
+                  /* ── Split Screen ──────────────────────────────────── */
+                  <div className="p-4 sm:p-6">
+                    {activeSplitIndex !== null && splits[activeSplitIndex] ? (
+                      /* ── Split Detail View ── */
+                      (() => {
+                        const split = splits[activeSplitIndex];
+                        const mainSubtotal = parseFloat(formData.subtotal) || parseFloat(formData.purchasePrice) || 0;
+                        const mainTotal = parseFloat(formData.purchasePrice) || 0;
+                        return (
+                          <div className="space-y-4">
+                            {/* Personal / Business toggle */}
+                            <div>
+                              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Expense Type</label>
+                              <div className="flex rounded-lg overflow-hidden border border-gray-200">
+                                <button
+                                  type="button"
+                                  className={`flex-1 py-2 text-sm font-medium transition-colors ${parseInt(split.receipt_category) !== 1 ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
+                                  onClick={() => updateSplitField(activeSplitIndex, "receipt_category", 0)}
+                                >Personal</button>
+                                <button
+                                  type="button"
+                                  className={`flex-1 py-2 text-sm font-medium transition-colors ${parseInt(split.receipt_category) === 1 ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
+                                  onClick={() => updateSplitField(activeSplitIndex, "receipt_category", 1)}
+                                >Business</button>
+                              </div>
+                            </div>
+                            {/* Category */}
+                            <div>
+                              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Category</label>
+                              <select
+                                className="w-full border border-blue-400 text-sm px-2 py-2 rounded-md bg-white text-gray-800"
+                                value={split.expense_type || ""}
+                                onChange={(e) => updateSplitField(activeSplitIndex, "expense_type", e.target.value)}
+                              >
+                                <option value="">Select category</option>
+                                {allExpenseCategories.map(cat => (
+                                  <option key={cat} value={cat}>{cat}</option>
+                                ))}
+                              </select>
+                            </div>
+                            {/* Subtotal */}
+                            <div>
+                              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Subtotal</label>
+                              <p className="text-xs text-gray-400 mb-1">Max: ${mainSubtotal.toFixed(2)}</p>
+                              <div className="relative">
+                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
+                                <input
+                                  type="number"
+                                  className="w-full border border-blue-400 text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800"
+                                  value={split.subtotal || ""}
+                                  onChange={(e) => updateSplitField(activeSplitIndex, "subtotal", e.target.value)}
+                                  placeholder="0.00"
+                                  min="0"
+                                  step="0.01"
+                                />
+                              </div>
+                            </div>
+                            {/* Tax fields */}
+                            {(split.receipt_tax_values || []).map((t, ti) => (
+                              <div key={ti}>
+                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">{t.tax_name} ({t.tax_rate}%)</label>
+                                <p className="text-xs text-gray-400 mb-1">Max: ${((parseFloat(t.tax_rate || 0) / 100) * mainSubtotal).toFixed(2)}</p>
+                                <div className="relative">
+                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
+                                  <input
+                                    type="number"
+                                    className="w-full border border-blue-400 text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800"
+                                    value={t.tax_amount || ""}
+                                    onChange={(e) => {
+                                      const updatedTaxes = split.receipt_tax_values.map((tv, tvi) =>
+                                        tvi === ti ? { ...tv, tax_amount: e.target.value } : tv
+                                      );
+                                      updateSplitField(activeSplitIndex, "receipt_tax_values", updatedTaxes);
+                                    }}
+                                    placeholder="0.00"
+                                    min="0"
+                                    step="0.01"
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                            {/* Total */}
+                            <div>
+                              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Total</label>
+                              <p className="text-xs text-gray-400 mb-1">Max: ${mainTotal.toFixed(2)}</p>
+                              <div className="relative">
+                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
+                                <input
+                                  type="number"
+                                  className="w-full border border-blue-400 text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800"
+                                  value={split.purchasePrice || ""}
+                                  onChange={(e) => updateSplitField(activeSplitIndex, "purchasePrice", e.target.value)}
+                                  placeholder="0.00"
+                                  min="0"
+                                  step="0.01"
+                                />
+                              </div>
+                            </div>
+                            {/* Describe Purchase */}
+                            <div>
+                              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Describe Purchase</label>
+                              <input
+                                type="text"
+                                className="w-full border border-blue-400 text-sm px-2 py-2 rounded-md bg-white text-gray-800"
+                                value={split.product_name || ""}
+                                onChange={(e) => updateSplitField(activeSplitIndex, "product_name", e.target.value)}
+                                placeholder="Enter a description"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()
+                    ) : (
+                      /* ── Split Overview ── */
+                      <div className="space-y-4">
+                        {/* Main Receipt Card */}
+                        <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Main Receipt</p>
+                          <div className="flex items-center justify-between mb-1">
+                            <p className="font-bold text-gray-900 text-sm">{formData.storeName || "—"}</p>
+                            <p className="font-bold text-gray-900 text-sm">${parseFloat(formData.purchasePrice || 0).toFixed(2)}</p>
+                          </div>
+                          {formData.subtotal && (
+                            <div className="flex items-center justify-between text-xs text-gray-500">
+                              <span>Subtotal</span>
+                              <span>${parseFloat(formData.subtotal).toFixed(2)}</span>
+                            </div>
+                          )}
+                          {(formData.receipt_tax_values || []).map((t, i) => (
+                            <div key={i} className="flex items-center justify-between text-xs text-gray-500">
+                              <span>{t.tax_name} ({t.tax_rate}%)</span>
+                              <span>${parseFloat(t.tax_amount || 0).toFixed(2)}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {/* Splits list */}
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Splits</p>
+                        <div className="space-y-3">
+                          {splits.map((split, idx) => (
+                            <div
+                              key={split._id}
+                              className="bg-white border border-blue-200 rounded-xl p-4 cursor-pointer hover:border-blue-400 transition-colors"
+                              onClick={() => setActiveSplitIndex(idx)}
+                            >
+                              <div className="flex items-center justify-between mb-1">
+                                <p className="font-semibold text-gray-800 text-sm">Split {idx + 1}</p>
+                                <div className="flex items-center gap-2">
+                                  <p className="font-bold text-blue-600 text-sm">${parseFloat(split.purchasePrice || 0).toFixed(2)}</p>
+                                  {splits.length > 2 && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); removeSplit(idx); }}
+                                      className="text-red-400 hover:text-red-600 p-1"
+                                    >
+                                      <Trash2 size={14} />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center justify-between text-xs text-gray-500">
+                                <span>Subtotal</span>
+                                <span>${parseFloat(split.subtotal || 0).toFixed(2)}</span>
+                              </div>
+                              {(split.receipt_tax_values || []).map((t, ti) => (
+                                <div key={ti} className="flex items-center justify-between text-xs text-gray-500">
+                                  <span>{t.tax_name}</span>
+                                  <span>${parseFloat(t.tax_amount || 0).toFixed(2)}</span>
+                                </div>
+                              ))}
+                              {split.expense_type && (
+                                <p className="mt-1 text-xs text-gray-400">{split.expense_type}</p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        {/* Add Split Button */}
+                        <button
+                          type="button"
+                          onClick={addSplit}
+                          className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-blue-300 rounded-xl text-blue-600 font-medium text-sm hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                        >
+                          <Plus size={18} />
+                          Add Split
+                        </button>
+                        {/* Error */}
+                        {error && (
+                          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+                            {error}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : step === "upload" ? (
                   <div className="p-6">
                     {/* Drop Zone */}
                     <div
@@ -2640,6 +3262,15 @@ const handleSelectLogo = (index) => {
                 ) : (
                   /* Form Step - Same layout as ReceiptDetail */
                   <form onSubmit={handleSaveReceipt}>
+                    {/* Duplicate mode banner */}
+                    {isDuplicateMode && (
+                      <div className="mx-3 sm:mx-6 mt-3 px-4 py-3 bg-green-50 border border-green-300 rounded-lg flex items-center gap-2 text-green-700 text-sm font-medium">
+                        <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        Your original receipt has been saved. You are now viewing your duplicate receipt.
+                      </div>
+                    )}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 p-3 sm:p-6 text-sm text-gray-800">
                       {/* Left Column - Receipt Information */}
                       {/* Left Column - Receipt Information */}
@@ -2807,9 +3438,20 @@ const handleSelectLogo = (index) => {
           setShowCategoryDropdown(!showCategoryDropdown)
         }
       />
-      {showCategoryDropdown &&
-        filteredCategories.length > 0 && (
+      {showCategoryDropdown && (
           <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
+            {/* Add Expense Category option */}
+            <div
+              className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left flex items-center gap-2 border-b border-gray-200 bg-blue-50"
+              onClick={() => {
+                setShowAddCategoryInput(true);
+                setNewCategoryName("");
+                setShowCategoryDropdown(false);
+              }}
+            >
+              <Plus size={16} className="text-blue-600" />
+              <span className="font-medium text-blue-600">Add Expense Category</span>
+            </div>
             {filteredCategories.map((category, idx) => (
               <div
                 key={idx}
@@ -2829,6 +3471,52 @@ const handleSelectLogo = (index) => {
         )}
     </div>
   </div>
+
+  {/* Inline Add Expense Category input */}
+  {showAddCategoryInput && (
+    <div className="mb-4 flex gap-2 items-center">
+      <input
+        type="text"
+        autoFocus
+        className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        value={newCategoryName}
+        onChange={(e) => setNewCategoryName(e.target.value)}
+        placeholder="Enter new category name"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && newCategoryName.trim()) {
+            addExpenseCategory(newCategoryName.trim());
+            handleFieldChange("expense_type", newCategoryName.trim());
+            setShowAddCategoryInput(false);
+            setNewCategoryName("");
+          } else if (e.key === "Escape") {
+            setShowAddCategoryInput(false);
+            setNewCategoryName("");
+          }
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => {
+          if (newCategoryName.trim()) {
+            addExpenseCategory(newCategoryName.trim());
+            handleFieldChange("expense_type", newCategoryName.trim());
+          }
+          setShowAddCategoryInput(false);
+          setNewCategoryName("");
+        }}
+        className="px-3 py-2 bg-green-600 text-white text-sm rounded-md hover:bg-green-700"
+      >
+        Add
+      </button>
+      <button
+        type="button"
+        onClick={() => { setShowAddCategoryInput(false); setNewCategoryName(""); }}
+        className="px-3 py-2 bg-gray-200 text-gray-700 text-sm rounded-md hover:bg-gray-300"
+      >
+        Cancel
+      </button>
+    </div>
+  )}
 
   {/* Payment Method with Dropdown */}
   <div className="mb-4 text-left" ref={paymentInputRef}>
@@ -3858,7 +4546,7 @@ const handleSelectLogo = (index) => {
                 {/* Card Issuer Name & Last 4 Digits - Side by Side */}
                 <div className="mb-6">
                   <label className="block text-sm font-bold text-gray-700 mb-2">
-                    Card Issuer & Card Number (Last 4 digits)
+                    Card Issuer <span className="font-normal text-gray-500">(optional)</span> & Last 4 Digits <span className="text-red-500">*</span>
                   </label>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -3923,7 +4611,7 @@ const handleSelectLogo = (index) => {
                   <button
                     type="button"
                     onClick={handleAddPaymentMethod}
-                    disabled={!newPaymentCardType}
+                    disabled={!newPaymentCardType || newLast4Digits.replace(/\D/g, "").length < 4}
                     className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     Add Payment Method
@@ -4350,6 +5038,51 @@ const handleSelectLogo = (index) => {
                       </>
                     )}
                   </div>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Duplicate Confirmation Dialog */}
+      <AnimatePresence>
+        {showDuplicateConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => setShowDuplicateConfirm(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-6">
+                <h3 className="text-lg font-bold text-gray-900 mb-3">Confirmation</h3>
+                <p className="text-sm text-gray-600 mb-6">
+                  Original receipt and related information will now be saved. A duplicate copy will open for you to edit.
+                </p>
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowDuplicateConfirm(false)}
+                    className="px-6 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDuplicateConfirm}
+                    className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    Ok
+                  </button>
                 </div>
               </div>
             </motion.div>
