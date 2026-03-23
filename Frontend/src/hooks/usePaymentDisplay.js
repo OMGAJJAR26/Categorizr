@@ -48,16 +48,15 @@ const detectCardNetwork = (str) => {
 };
 
 export const usePaymentDisplay = () => {
-  // getPaymentLogo can accept either a string (paymentType) or a receipt object
+  // getPaymentLogo accepts either a string (paymentType) or a receipt object.
+  // Always returns a logo — never undefined/null.
   const getPaymentLogo = useCallback((paymentTypeOrReceipt) => {
-    // Always return a default logo if input is invalid
     if (!paymentTypeOrReceipt) return LOGO_MAP.other;
 
-    // Check if it's a receipt object (has paymentType or paymentBrand property)
-    const isReceiptObject = typeof paymentTypeOrReceipt === "object";
+    const isObject = typeof paymentTypeOrReceipt === "object";
 
-    // If API already provides a logo URL, use it first
-    if (isReceiptObject) {
+    // Step 1: Explicit logo URL from receipt object
+    if (isObject) {
       const explicitLogo =
         paymentTypeOrReceipt.payment_logo_url ||
         paymentTypeOrReceipt.paymentLogoUrl ||
@@ -65,295 +64,83 @@ export const usePaymentDisplay = () => {
         paymentTypeOrReceipt.paymentLogo ||
         paymentTypeOrReceipt.payment_display?.logoUrl ||
         paymentTypeOrReceipt.paymentDisplay?.logoUrl;
-
-      if (isValidUrl(explicitLogo)) {
-        return explicitLogo.trim();
-      }
+      if (isValidUrl(explicitLogo)) return explicitLogo.trim();
     }
 
+    // Step 2: Extract payment fields
     let paymentType = "";
     let paymentBrand = "";
     let cardIssuerName = "";
-    let selectedCardType = "";
 
-    if (isReceiptObject) {
-      // It's a receipt object - extract all payment-related fields
-      // Handle both snake_case and camelCase formats from API
-      paymentBrand = (paymentTypeOrReceipt.paymentBrand || paymentTypeOrReceipt.payment_method_name || "").toString().trim();
+    if (isObject) {
       paymentType = (paymentTypeOrReceipt.paymentType || paymentTypeOrReceipt.payment_type || "").toString().trim();
-      selectedCardType = (
-        paymentTypeOrReceipt.selectedCardType ||
-        paymentTypeOrReceipt.selected_card_type ||
-        ""
-      ).toString().trim();
-      cardIssuerName = (
-        selectedCardType ||
-        paymentTypeOrReceipt.card_issuer_name ||
-        paymentTypeOrReceipt.cardIssuerName ||
-        ""
-      ).toString().trim();
-      
-      // IMPORTANT: If paymentType contains card network (e.g., "MasterCard *7836") but card_issuer_name is generic (like "Personal"),
-      // extract the card type from paymentType for logo detection
-      // This ensures logos show correctly even when card_issuer_name doesn't match a network
-      if (paymentType && paymentType.includes("*")) {
-        const basePaymentType = paymentType.replace(/\s*\*\d{3,4}$/, "").trim();
-        const baseLower = basePaymentType.toLowerCase();
-        // Check if basePaymentType contains a known card network
-        if (baseLower.includes("visa") || baseLower.includes("master") || baseLower.includes("paypal") || 
-            baseLower.includes("amex") || baseLower.includes("discover") || baseLower.includes("diners")) {
-          // If card_issuer_name is generic and doesn't match a network, don't use it for logo
-          // The paymentType extraction below will handle logo detection
-          const issuerLower = cardIssuerName.toLowerCase();
-          if (issuerLower === "personal" || issuerLower === "business" || issuerLower === "" || 
-              (!issuerLower.includes("visa") && !issuerLower.includes("master") && !issuerLower.includes("paypal") &&
-               !issuerLower.includes("amex") && !issuerLower.includes("discover") && !issuerLower.includes("diners"))) {
-            // card_issuer_name is generic, so paymentType will be used for logo (which is correct)
-          }
-        }
-      }
+      paymentBrand = (paymentTypeOrReceipt.paymentBrand || paymentTypeOrReceipt.payment_method_name || "").toString().trim();
+      const selectedCardType = (paymentTypeOrReceipt.selectedCardType || paymentTypeOrReceipt.selected_card_type || "").toString().trim();
+      cardIssuerName = (selectedCardType || paymentTypeOrReceipt.card_issuer_name || paymentTypeOrReceipt.cardIssuerName || "").toString().trim();
     } else {
-      // It's a string - try to extract card issuer name from payment method string
       paymentType = paymentTypeOrReceipt.toString().trim();
-      
-      // If it's a payment method string like "Visa *1234", extract "Visa" as cardIssuerName
-      if (paymentType && paymentType !== "0") {
-        const basePaymentType = paymentType.replace(/\s*\*\d{3,4}$/, "").trim();
-        const normalized = basePaymentType.toLowerCase();
-        
-        // Try to detect card network from the string
-        if (normalized.includes("visa")) cardIssuerName = "Visa";
-        else if (normalized.includes("master")) cardIssuerName = "MasterCard";
-        else if (normalized.includes("amex") || normalized.includes("american express")) cardIssuerName = "American Express";
-        else if (normalized.includes("discover")) cardIssuerName = "Discover";
-        else if (normalized.includes("diners")) cardIssuerName = "Diners Club";
-        else if (normalized.includes("paypal")) cardIssuerName = "PayPal";
-        else if (normalized.includes("debit")) cardIssuerName = "Debit Card";
-        else if (normalized.includes("cash")) cardIssuerName = "Cash";
-        else if (normalized.includes("credit")) cardIssuerName = "Credit Card";
-        // If no network detected, use the base payment type as issuer name
-        else if (basePaymentType && basePaymentType !== "0") cardIssuerName = basePaymentType;
-      }
     }
 
-    // Logo = card type (Visa, MasterCard, etc.), not display name. Prefer card type sources first.
-    // Priority 1: paymentType / selectedCardType (card type) for logo
-    if (isReceiptObject) {
-      // Try selectedCardType first (most specific)
-      if (selectedCardType && selectedCardType !== "0" && selectedCardType.trim() !== "") {
-        const baseSelected = selectedCardType.replace(/\s*\*\d{3,4}$/, "").trim();
-        const normalized = baseSelected.toLowerCase();
-        if (normalized === "other") return LOGO_MAP.other;
-        const network = detectCardNetwork(baseSelected);
-        if (network && LOGO_MAP[network]) {
-          return LOGO_MAP[network];
-        }
-      }
-      
-      // Then try paymentType (extract card type from "MasterCard *7836" format)
-      if (paymentType && paymentType !== "0" && paymentType.trim() !== "") {
-        const basePaymentType = paymentType.replace(/\s*\*\d{3,4}$/, "").trim();
-        const normalized = basePaymentType.toLowerCase();
-        if (normalized === "other") return LOGO_MAP.other;
-        const network = detectCardNetwork(basePaymentType);
-        if (network && LOGO_MAP[network]) {
-          return LOGO_MAP[network];
-        }
-      }
-      
-      // Then try paymentBrand
-      if (paymentBrand && paymentBrand !== "0" && paymentBrand.trim() !== "") {
-        const baseBrand = paymentBrand.replace(/\s*\*\d{3,4}$/, "").trim();
-        const normalized = baseBrand.toLowerCase();
-        if (normalized === "other") return LOGO_MAP.other;
-        const network = detectCardNetwork(baseBrand);
-        if (network && LOGO_MAP[network]) {
-          return LOGO_MAP[network];
-        }
-      }
-    }
+    // Helper: get network logo from a string (strips *last4 first)
+    const networkFromStr = (s) => {
+      if (!s || s === "0") return null;
+      const base = s.replace(/\s*\*\d{3,4}$/, "").trim();
+      if (!base || base === "0") return null;
+      const network = detectCardNetwork(base);
+      return network ? LOGO_MAP[network] : null;
+    };
 
-    // Priority 2: card_issuer_name (may be custom like "Chase Sapphire" - only use if it matches a network)
-    // IMPORTANT: Skip card_issuer_name if it's generic (like "Personal", "Business") and paymentType contains a network
-    // This ensures logos show correctly when card_issuer_name is generic but paymentType has the card type
-    if (cardIssuerName && cardIssuerName !== "0" && cardIssuerName.trim() !== "") {
+    // Priority 1: paymentType network detection
+    const logo1 = networkFromStr(paymentType);
+    if (logo1) return logo1;
+
+    // Priority 2: paymentBrand network detection
+    const logo2 = networkFromStr(paymentBrand);
+    if (logo2) return logo2;
+
+    // Priority 3: card_issuer_name network detection (skip generic values)
+    if (cardIssuerName && cardIssuerName !== "0") {
       const issuerLower = cardIssuerName.toLowerCase().trim();
-      // Check if card_issuer_name is generic (doesn't contain a card network)
-      const isGenericIssuer = issuerLower === "personal" || issuerLower === "business" || 
-                              (!issuerLower.includes("visa") && !issuerLower.includes("master") && 
-                               !issuerLower.includes("paypal") && !issuerLower.includes("amex") &&
-                               !issuerLower.includes("discover") && !issuerLower.includes("diners"));
-      
-      // If card_issuer_name is generic and paymentType contains a network, skip card_issuer_name
-      // and let paymentType detection handle it (which happens in Priority 3 below)
-      if (isGenericIssuer && paymentType && paymentType !== "0") {
-        const paymentTypeLower = paymentType.toLowerCase();
-        if (paymentTypeLower.includes("visa") || paymentTypeLower.includes("master") || 
-            paymentTypeLower.includes("paypal") || paymentTypeLower.includes("amex") ||
-            paymentTypeLower.includes("discover") || paymentTypeLower.includes("diners")) {
-          // Skip generic card_issuer_name, let paymentType be processed in Priority 3
-        } else {
-          // card_issuer_name is generic but paymentType doesn't have network either, try card_issuer_name
-          if (issuerLower === "other") return LOGO_MAP.other;
-          const issuerNetwork = detectCardNetwork(cardIssuerName);
-          if (issuerNetwork && LOGO_MAP[issuerNetwork]) return LOGO_MAP[issuerNetwork];
-        }
-      } else {
-        // card_issuer_name is not generic, use it for logo detection
-        if (issuerLower === "other") return LOGO_MAP.other;
-        const issuerNetwork = detectCardNetwork(cardIssuerName);
-        if (issuerNetwork && LOGO_MAP[issuerNetwork]) return LOGO_MAP[issuerNetwork];
+      const isGeneric = issuerLower === "personal" || issuerLower === "business";
+      if (!isGeneric) {
+        const logo3 = networkFromStr(cardIssuerName);
+        if (logo3) return logo3;
       }
-    }
-    
-    // Priority 3: paymentType as string (fallback when object had no card type match)
-    if (paymentType && paymentType !== "0" && paymentType.trim() !== "") {
-      const basePaymentType = paymentType.replace(/\s*\*\d{3,4}$/, "").trim();
-      const normalized = basePaymentType.toLowerCase();
-      let extractedIssuer = null;
-      if (normalized.includes("visa")) extractedIssuer = "Visa";
-      else if (normalized.includes("master")) extractedIssuer = "MasterCard";
-      else if (normalized.includes("amex") || normalized.includes("american express")) extractedIssuer = "American Express";
-      else if (normalized.includes("discover")) extractedIssuer = "Discover";
-      else if (normalized.includes("diners")) extractedIssuer = "Diners Club";
-      else if (normalized.includes("paypal")) extractedIssuer = "PayPal";
-      else if (normalized.includes("debit")) extractedIssuer = "Debit Card";
-      else if (normalized.includes("cash")) extractedIssuer = "Cash";
-      else if (normalized.includes("credit")) extractedIssuer = "Credit Card";
-      if (extractedIssuer) {
-        const issuerNetwork = detectCardNetwork(extractedIssuer);
-        if (issuerNetwork && LOGO_MAP[issuerNetwork]) return LOGO_MAP[issuerNetwork];
-      }
+      if (issuerLower === "other") return LOGO_MAP.other;
     }
 
-    // Priority 2: Check paymentType (remove last 4 digits pattern (*1234) for network detection)
-    if (paymentType && paymentType !== "0" && paymentType.trim() !== "") {
-      const basePaymentType = paymentType.replace(/\s*\*\d{3,4}$/, "").trim();
-      const normalized = basePaymentType.toLowerCase().replace(/\s+/g, "");
-      const normalizedWithSpaces = basePaymentType.toLowerCase().trim();
-      
-      // Handle "Other" explicitly BEFORE checking for networks
-      if (normalizedWithSpaces === "other") {
+    // Priority 4: "Other", gift cards, special types → credit card icon
+    const allSources = [paymentType, cardIssuerName, paymentBrand];
+    for (const src of allSources) {
+      if (!src || src === "0") continue;
+      const base = src.replace(/\s*\*\d{3,4}$/, "").toLowerCase().trim();
+      if (base === "other" || base.includes("starbucks") || base.includes("gift")) {
         return LOGO_MAP.other;
       }
-      
-      // Direct network detection on paymentType
-      // Check for exact matches first, then partial matches
-      if (normalized === "paypal" || normalized.includes("paypal")) return LOGO_MAP.paypal;
-      if (normalized === "discover" || normalized.includes("discover")) return LOGO_MAP.discover;
-      if (normalized.includes("visa")) return LOGO_MAP.visa;
-      if (normalized.includes("master")) return LOGO_MAP.mastercard;
-      if (normalized.includes("amex") || normalized.includes("americanexpress")) return LOGO_MAP.americanexpress;
-      if (normalized.includes("diners")) return LOGO_MAP.dinersclub;
-      if (normalized.includes("cash")) return LOGO_MAP.cash;
-      if (normalized.includes("debit")) return LOGO_MAP.debitcard;
-      if (normalized.includes("credit")) return LOGO_MAP.creditcard;
     }
 
-    // Priority 3: Check paymentBrand field (this is the actual card network from API)
-    if (paymentBrand && paymentBrand !== "0" && paymentBrand.trim() !== "") {
-      const brandNetwork = detectCardNetwork(paymentBrand);
-      if (brandNetwork && LOGO_MAP[brandNetwork]) {
-        return LOGO_MAP[brandNetwork];
-      }
-    }
-
-    // Priority 4: Check for known bank names - show MasterCard logo (like mobile app)
-    // Only check bank names if we haven't already detected a known network
-    // Use cardIssuerName first (highest priority), then paymentType, then paymentBrand
-    const effectivePaymentType = cardIssuerName || paymentType || paymentBrand;
-    
-    // If we have no effective payment type, return default
-    if (!effectivePaymentType || effectivePaymentType === "0" || effectivePaymentType.trim() === "") {
-      return LOGO_MAP.other;
-    }
-    
-    const basePaymentTypeForBank = effectivePaymentType.replace(/\s*\*\d{3,4}$/, "").trim();
-    const normalizedWithSpaces = basePaymentTypeForBank.toLowerCase();
-    const normalizedForNetworkCheck = basePaymentTypeForBank.toLowerCase().replace(/\s+/g, "");
-    
-    // Skip bank detection if we already detected a known network in Priority 1, 2, or 3
-    // Check all possible sources: cardIssuerName (already checked), paymentType, and paymentBrand
-    const hasKnownNetwork = 
-      (cardIssuerName && detectCardNetwork(cardIssuerName)) ||
-      (paymentType && detectCardNetwork(paymentType)) ||
-      (paymentBrand && detectCardNetwork(paymentBrand)) ||
-      normalizedForNetworkCheck.includes("visa") || 
-      normalizedForNetworkCheck.includes("master") ||
-      normalizedForNetworkCheck.includes("paypal") ||
-      normalizedForNetworkCheck.includes("amex") ||
-      normalizedForNetworkCheck.includes("americanexpress") ||
-      normalizedForNetworkCheck.includes("discover") ||
-      normalizedForNetworkCheck.includes("diners") ||
-      normalizedForNetworkCheck.includes("cash") ||
-      normalizedForNetworkCheck.includes("debit") ||
-      normalizedForNetworkCheck.includes("credit");
-    
-    // Only check for bank names if paymentType doesn't have a known network AND it's not "Other"
-    // "Other" should show credit card icon, not MasterCard
-    if (!hasKnownNetwork && basePaymentTypeForBank !== "other" && normalizedWithSpaces !== "other") {
-      if (
-        normalizedWithSpaces.includes("bank of america") ||
-        normalizedWithSpaces.includes("bank one") ||
-        normalizedWithSpaces.includes("chase") ||
-        normalizedWithSpaces.includes("wells fargo") ||
-        normalizedWithSpaces.includes("citibank") ||
-        normalizedWithSpaces.includes("citi") ||
-        normalizedWithSpaces.includes("capital one") ||
-        normalizedWithSpaces.includes("us bank") ||
-        normalizedWithSpaces.includes("pnc") ||
-        normalizedWithSpaces.includes("td bank") ||
-        normalizedWithSpaces.includes("truist") ||
-        normalizedWithSpaces.includes("regions") ||
-        normalizedWithSpaces.includes("ally") ||
-        normalizedWithSpaces.includes("synchrony") ||
-        normalizedWithSpaces.includes("barclays") ||
-        normalizedWithSpaces.includes("hsbc") ||
-        normalizedWithSpaces.includes("citizens") ||
-        normalizedWithSpaces.includes("bmo") ||
-        normalizedWithSpaces.includes("santander") ||
-        normalizedWithSpaces.includes("hdfc") ||
-        normalizedWithSpaces.includes("icici") ||
-        normalizedWithSpaces.includes("sbi") ||
-        normalizedWithSpaces.includes("axis") ||
-        normalizedWithSpaces.includes("kotak") ||
-        normalizedWithSpaces.includes("pnb") ||
-        normalizedWithSpaces.includes("canara") ||
-        normalizedWithSpaces.includes("union bank") ||
-        normalizedWithSpaces.includes("indian bank") ||
-        normalizedWithSpaces.startsWith("bm ") ||
-        normalizedWithSpaces.startsWith("bm*") ||
-        normalizedWithSpaces.includes(" bm ") ||
-        /^bm\s*\*/.test(normalizedWithSpaces)
-      ) {
+    // Priority 5: Bank name detection → MasterCard logo (like mobile app)
+    const bankNames = [
+      "bank of america", "bank one", "chase", "wells fargo", "citibank", "citi",
+      "capital one", "us bank", "pnc", "td bank", "truist", "regions", "ally",
+      "synchrony", "barclays", "hsbc", "citizens", "bmo", "santander",
+      "hdfc", "icici", "sbi", "axis", "kotak", "pnb", "canara",
+      "union bank", "indian bank",
+    ];
+    for (const src of allSources) {
+      if (!src || src === "0") continue;
+      const base = src.replace(/\s*\*\d{3,4}$/, "").toLowerCase().trim();
+      if (bankNames.some((b) => base.includes(b)) || /^bm[\s*]/.test(base)) {
         return LOGO_MAP.bank;
       }
     }
 
-    // Priority 5: Check for "Other" payment type - use credit card icon
-    // This MUST come BEFORE bank detection to prevent "Other" from showing MasterCard logo
-    const normalized = effectivePaymentType.toLowerCase().replace(/\s+/g, "");
-    const normalizedBase = effectivePaymentType.toLowerCase().replace(/\s*\*\d{3,4}$/, "").trim();
-    
-    // Check for "Other" explicitly (case-insensitive)
-    if (normalizedBase === "other" || normalizedBase.trim() === "other") {
-      return LOGO_MAP.other;
-    }
-    
-    if (
-      normalized.includes("starbucks") ||
-      normalized.includes("gift")
-    ) {
-      return LOGO_MAP.other;
+    // Priority 6: Anything with *XXXX pattern → bank logo
+    for (const src of allSources) {
+      if (src && /\*\d{3,4}$/.test(src.trim())) return LOGO_MAP.bank;
     }
 
-    // Priority 6: If it looks like a card number pattern (e.g., "Something *1234") and we haven't matched a network, show bank logo
-    // Only show bank logo if paymentType doesn't contain a known network
-    if (!hasKnownNetwork && /\*\d{3,4}$/.test(effectivePaymentType.trim())) {
-      return LOGO_MAP.bank;
-    }
-
-    // Default to credit card icon for unknown types - ALWAYS return something
+    // Default
     return LOGO_MAP.other;
   }, []);
 

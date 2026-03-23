@@ -21,6 +21,7 @@ import Toast from "../components/Toast";
 import { useData } from "../context/DataContext";
 import { useCurrency } from "../context/CurrencyContext";
 import MerchantAvatar from "../components/MerchantAvatar";
+import { usePaymentDisplay } from "../hooks/usePaymentDisplay";
 
 // Default expense categories
 const defaultExpenseCategories = [
@@ -244,6 +245,7 @@ const ReceiptDetail = ({
     addExpenseCategory,
   } = useData();
   const { formatCurrency } = useCurrency();
+  const { getPaymentLogo } = usePaymentDisplay();
 
   // Get all merchants with images - deduplicated, include locally added merchants
   const allMerchantsWithImages = React.useMemo(() => {
@@ -1916,175 +1918,6 @@ const handleDeleteTaxType = async (taxId) => {
 
   const inputClass =
     "w-full border border-blue-400 text-sm px-2 py-1 rounded-md bg-white text-gray-800 mt-2.5 mb-0  ";
-
-  const logoMap = {
-    visa: Visa,
-    mastercard: MasterCard,
-    paypal: PayPal,
-    americanexpress: AmericanExpress,
-    discover: Discover,
-    dinersclub: DinersClub,
-    cash: Cash,
-    debitcard: DebitCard,
-    creditcard: Creditdebitcardicon,
-    bank: MasterCard, // MasterCard logo for bank cards (like mobile app)
-    other: Creditdebitcardicon, // Credit card icon for Starbucks, gift cards, other
-  };
-
-  const getPaymentLogo = (typeOrReceipt) => {
-    if (!typeOrReceipt) return logoMap.other;
-
-    // Handle receipt object
-    let paymentType = "";
-    let paymentBrand = "";
-    let cardIssuerName = "";
-    let last4Digit = "";
-
-    if (typeof typeOrReceipt === "object") {
-      paymentBrand = (
-        typeOrReceipt.paymentBrand ||
-        typeOrReceipt.payment_method_name ||
-        ""
-      )
-        .toString()
-        .trim();
-      paymentType = (typeOrReceipt.paymentType || "").toString().trim();
-      cardIssuerName = (typeOrReceipt.card_issuer_name || "").toString().trim();
-      last4Digit = (typeOrReceipt.last_4_digit_card || "").toString().trim();
-    } else {
-      paymentType = typeOrReceipt.toString().trim();
-    }
-
-    // Helper to detect card network
-    const detectNetwork = (str) => {
-      if (!str) return null;
-      const raw = str.toLowerCase().replace(/\s+/g, "");
-      if (raw.includes("visa")) return logoMap.visa;
-      if (raw.includes("master")) return logoMap.mastercard;
-      if (raw.includes("paypal")) return logoMap.paypal;
-      if (raw.includes("amex") || raw.includes("americanexpress"))
-        return logoMap.americanexpress;
-      if (raw.includes("discover")) return logoMap.discover;
-      if (raw.includes("diners")) return logoMap.dinersclub;
-      if (raw.includes("cash")) return logoMap.cash;
-      if (raw.includes("debit")) return logoMap.debitcard;
-      if (raw.includes("credit")) return logoMap.creditcard;
-      return null;
-    };
-
-    // Priority 1: Check paymentType FIRST (this is the most reliable - user selected card type)
-    // Remove last 4 digits pattern (*1234) for network detection
-    if (paymentType) {
-      const basePaymentType = paymentType.replace(/\s*\*\d{3,4}$/, "").trim();
-      const normalized = basePaymentType.toLowerCase().replace(/\s+/g, "");
-
-      // Direct network detection on paymentType (highest priority)
-      if (normalized.includes("visa")) return logoMap.visa;
-      if (normalized.includes("master")) return logoMap.mastercard;
-      if (normalized.includes("paypal")) return logoMap.paypal;
-      if (normalized.includes("amex") || normalized.includes("americanexpress"))
-        return logoMap.americanexpress;
-      if (normalized.includes("discover")) return logoMap.discover;
-      if (normalized.includes("diners")) return logoMap.dinersclub;
-      if (normalized.includes("cash")) return logoMap.cash;
-      if (normalized.includes("debit")) return logoMap.debitcard;
-      if (normalized.includes("credit")) return logoMap.creditcard;
-    }
-
-    // Priority 2: Check paymentBrand field (this is the actual card network from API)
-    if (paymentBrand) {
-      const brandLogo = detectNetwork(paymentBrand);
-      if (brandLogo) return brandLogo;
-    }
-
-    // Priority 3: Check card_issuer_name for known networks first
-    if (cardIssuerName) {
-      const issuerNet = detectNetwork(cardIssuerName);
-      if (issuerNet) return issuerNet;
-    }
-
-    // Priority 4: Check for known bank names in paymentType OR card_issuer_name
-    // Remove last 4 digits pattern (*1234) for bank name detection
-    const basePaymentTypeForBank = paymentType
-      .replace(/\s*\*\d{3,4}$/, "")
-      .trim();
-    const normalizedWithSpaces = basePaymentTypeForBank.toLowerCase();
-    const normalizedIssuer = cardIssuerName.toLowerCase();
-
-    // Skip bank detection if paymentType already contains a known network
-    const hasKnownNetwork =
-      normalizedWithSpaces.includes("visa") ||
-      normalizedWithSpaces.includes("master") ||
-      normalizedWithSpaces.includes("paypal") ||
-      normalizedWithSpaces.includes("amex") ||
-      normalizedWithSpaces.includes("american express") ||
-      normalizedWithSpaces.includes("discover") ||
-      normalizedWithSpaces.includes("diners") ||
-      normalizedWithSpaces.includes("cash") ||
-      normalizedWithSpaces.includes("debit") ||
-      normalizedWithSpaces.includes("credit");
-
-    const isBankName = (s) =>
-      s.includes("bank of america") ||
-      s.includes("bank one") ||
-      s.includes("chase") ||
-      s.includes("wells fargo") ||
-      s.includes("citibank") ||
-      s.includes("citi") ||
-      s.includes("capital one") ||
-      s.includes("us bank") ||
-      s.includes("pnc") ||
-      s.includes("td bank") ||
-      s.includes("truist") ||
-      s.includes("regions") ||
-      s.includes("ally") ||
-      s.includes("synchrony") ||
-      s.includes("barclays") ||
-      s.includes("hsbc") ||
-      s.includes("citizens") ||
-      s.includes("bmo") ||
-      s.includes("santander") ||
-      s.includes("hdfc") ||
-      s.includes("icici") ||
-      s.includes("sbi") ||
-      s.includes("axis") ||
-      s.includes("kotak") ||
-      s.includes("pnb") ||
-      s.includes("canara") ||
-      s.includes("union bank") ||
-      s.includes("indian bank") ||
-      s.startsWith("bm ") ||
-      s.startsWith("bm*") ||
-      s.includes(" bm ") ||
-      /^bm\s*\*/.test(s);
-
-    if (!hasKnownNetwork && (isBankName(normalizedWithSpaces) || isBankName(normalizedIssuer))) {
-      return logoMap.bank;
-    }
-
-    // Priority 5: Check for gift cards or other special types
-    const normalizedForOther = paymentType.toLowerCase().replace(/\s+/g, "");
-    if (
-      normalizedForOther === "other" ||
-      normalizedForOther.includes("starbucks") ||
-      normalizedForOther.includes("gift")
-    ) {
-      return logoMap.other;
-    }
-
-    // Priority 6: card_issuer_name with valid last4 → bank logo (covers custom names like "hii *3333")
-    if (!hasKnownNetwork && cardIssuerName && last4Digit && /^\d{3,4}$/.test(last4Digit)) {
-      return logoMap.bank;
-    }
-
-    // Priority 7: paymentType that looks like "Something *1234" → bank logo
-    if (!hasKnownNetwork && /\*\d{3,4}$/.test(paymentType.trim())) {
-      return logoMap.bank;
-    }
-
-    // Default to credit card icon for unknown types
-    return logoMap.other;
-  };
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -3957,7 +3790,7 @@ Thank you for using our receipt management system.
                         const splitsTotal = parseFloat(splits.reduce((s, sp) => s + (parseFloat(sp.purchasePrice) || 0), 0).toFixed(2));
                         const remainder   = parseFloat((mainTotal - splitsTotal).toFixed(2));
                         const isOverBudget = remainder < -0.009;
-                        const payLogo = getPaymentLogo(editedReceipt.paymentType || selectedReceipt?.paymentType || "");
+                        const payLogo = getPaymentLogo({ ...selectedReceipt, ...editedReceipt });
                         const storeName = editedReceipt.storeName || selectedReceipt?.storeName || "—";
                         return (
                         <div className="space-y-3">
