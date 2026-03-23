@@ -4301,52 +4301,6 @@ Thank you for using our receipt management system.
                           </div>
                         </div>
 
-                        {/* Inline Add Expense Category input */}
-                        {showAddCategoryInput && (
-                          <div className="mb-4 flex gap-2 items-center">
-                            <input
-                              type="text"
-                              autoFocus
-                              className={inputClass}
-                              value={newCategoryName}
-                              onChange={(e) => setNewCategoryName(e.target.value)}
-                              placeholder="Enter new category name"
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" && newCategoryName.trim()) {
-                                  addExpenseCategory(newCategoryName.trim());
-                                  handleFieldChange("expense_type", newCategoryName.trim());
-                                  setShowAddCategoryInput(false);
-                                  setNewCategoryName("");
-                                } else if (e.key === "Escape") {
-                                  setShowAddCategoryInput(false);
-                                  setNewCategoryName("");
-                                }
-                              }}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (newCategoryName.trim()) {
-                                  addExpenseCategory(newCategoryName.trim());
-                                  handleFieldChange("expense_type", newCategoryName.trim());
-                                }
-                                setShowAddCategoryInput(false);
-                                setNewCategoryName("");
-                              }}
-                              className="px-3 py-2 bg-green-600 text-white text-sm rounded-md hover:bg-green-700"
-                            >
-                              Add
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => { setShowAddCategoryInput(false); setNewCategoryName(""); }}
-                              className="px-3 py-2 bg-gray-200 text-gray-700 text-sm rounded-md hover:bg-gray-300"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        )}
-
                         {/* Payment Method with Dropdown */}
                         <div
                           className="mb-4 text-align-left"
@@ -5906,6 +5860,78 @@ Thank you for using our receipt management system.
                       </button>
                     </>
                   )}
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Add Expense Category Modal */}
+      <AnimatePresence>
+        {showAddCategoryInput && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => { setShowAddCategoryInput(false); setNewCategoryName(""); }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative bg-white rounded-xl shadow-2xl w-full max-w-sm mx-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+                <h2 className="text-xl font-bold text-gray-900">Add Expense Category</h2>
+                <button
+                  onClick={() => { setShowAddCategoryInput(false); setNewCategoryName(""); }}
+                  className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors"
+                >
+                  <X size={20} className="text-gray-600" />
+                </button>
+              </div>
+              <div className="p-6">
+                <label className="block text-sm font-bold text-gray-700 mb-2">
+                  Category Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  autoFocus
+                  className="w-full border border-blue-400 text-sm px-3 py-2 rounded-md bg-white text-gray-800 mb-4"
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  placeholder="Enter category name"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && newCategoryName.trim()) {
+                      addExpenseCategory(newCategoryName.trim());
+                      handleFieldChange("expense_type", newCategoryName.trim());
+                      setShowAddCategoryInput(false);
+                      setNewCategoryName("");
+                    } else if (e.key === "Escape") {
+                      setShowAddCategoryInput(false);
+                      setNewCategoryName("");
+                    }
+                  }}
+                />
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    disabled={!newCategoryName.trim()}
+                    onClick={() => {
+                      if (newCategoryName.trim()) {
+                        addExpenseCategory(newCategoryName.trim());
+                        handleFieldChange("expense_type", newCategoryName.trim());
+                        setShowAddCategoryInput(false);
+                        setNewCategoryName("");
+                      }
+                    }}
+                    className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Add
+                  </button>
                 </div>
               </div>
             </motion.div>
