@@ -1396,6 +1396,18 @@ const handleDeleteTaxType = async (taxId) => {
 
   // ── Expense Category edit/delete helpers ────────────────────────────────
 
+  /** Direct API update — spreads the full receipt then overrides fields (mirrors merchant delete pattern) */
+  const putUpdateReceipt = async (payload) => {
+    const token = localStorage.getItem("token");
+    const response = await fetch("/api/receipt/updateReceiptv1", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accesstoken: token },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error(`Failed to update receipt: ${response.status}`);
+    return response.json();
+  };
+
   const handleOpenEditCategory = (category) => {
     setEditingCategory(category);
     setEditCategoryName(category);
@@ -1415,7 +1427,7 @@ const handleDeleteTaxType = async (taxId) => {
         (r) => (r.expense_type || "").toLowerCase() === oldName.toLowerCase()
       );
       for (const r of affected) {
-        await updateReceipt(r.id, { expense_type: newName });
+        await putUpdateReceipt({ ...r, expense_type: newName });
       }
       addExpenseCategory(newName);
       if ((editedReceipt.expense_type || "").toLowerCase() === oldName.toLowerCase()) {
@@ -1440,7 +1452,7 @@ const handleDeleteTaxType = async (taxId) => {
         (r) => (r.expense_type || "").toLowerCase() === deletingCategory.toLowerCase()
       );
       for (const r of affected) {
-        await updateReceipt(r.id, { expense_type: "" });
+        await putUpdateReceipt({ ...r, expense_type: "" });
       }
       if ((editedReceipt.expense_type || "").toLowerCase() === deletingCategory.toLowerCase()) {
         handleFieldChange("expense_type", "");

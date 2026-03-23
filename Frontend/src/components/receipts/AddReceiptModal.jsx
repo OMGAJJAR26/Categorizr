@@ -1333,7 +1333,7 @@ const handleFieldChange = (field, value) => {
         (r) => (r.expense_type || "").toLowerCase() === oldName.toLowerCase()
       );
       for (const r of affected) {
-        await updateReceipt(r.id, { expense_type: newName });
+        await putUpdateReceipt({ ...r, expense_type: newName });
       }
       addExpenseCategory(newName);
       if ((formData.expense_type || "").toLowerCase() === oldName.toLowerCase()) {
@@ -1358,7 +1358,7 @@ const handleFieldChange = (field, value) => {
         (r) => (r.expense_type || "").toLowerCase() === deletingCategory.toLowerCase()
       );
       for (const r of affected) {
-        await updateReceipt(r.id, { expense_type: "" });
+        await putUpdateReceipt({ ...r, expense_type: "" });
       }
       if ((formData.expense_type || "").toLowerCase() === deletingCategory.toLowerCase()) {
         handleFieldChange("expense_type", "");
