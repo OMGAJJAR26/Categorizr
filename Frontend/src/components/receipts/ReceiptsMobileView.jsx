@@ -110,25 +110,27 @@ const ReceiptsMobileView = ({
           </div>
         </div>
         
-        <div className="col-span-2 flex items-center gap-2">
-          {(() => {
-            const logo = getPaymentLogo(receipt);
-            return logo ? (
-              <img
-                src={logo}
-                alt="Payment logo"
-                className="w-5 h-5 object-contain"
-                onError={(e) => {
-                  // Fallback if image fails to load
-                  e.target.style.display = 'none';
-                }}
-              />
-            ) : null;
-          })()}
-          <div className={`text-gray-900 font-medium ${isUnread ? 'text-gray-400' : ''}`}>
-            {getPaymentDisplay(receipt)}
-          </div>
-        </div>
+        {(() => {
+          const paymentDisplay = getPaymentDisplay(receipt);
+          const hasPayment = paymentDisplay && paymentDisplay !== "-" && paymentDisplay !== "—";
+          if (!hasPayment) return null;
+          const logo = getPaymentLogo(receipt);
+          return (
+            <div className="col-span-2 flex items-center gap-2">
+              {logo && (
+                <img
+                  src={logo}
+                  alt="Payment logo"
+                  className="w-5 h-5 object-contain"
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+              )}
+              <div className={`text-gray-900 font-medium ${isUnread ? 'text-gray-400' : ''}`}>
+                {paymentDisplay}
+              </div>
+            </div>
+          );
+        })()}
       </div>
       
       {receipt.quickbooksLinked && (

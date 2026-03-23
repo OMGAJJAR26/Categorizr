@@ -5,6 +5,10 @@
       "destination": "https://categorizr.com/emailserver/api/:path*"
     },
     {
+      "source": "/imagesearch",
+      "destination": "https://categorizr.com/imagesearchv2.php"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

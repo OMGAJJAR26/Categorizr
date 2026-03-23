@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { formatTaxRate } from "../../utils/receiptFormatters";
-import { proxyImageUrl } from "../../api/Axios";
-import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus, MoreHorizontal, Minus, ChevronLeft, ChevronRight } from "lucide-react";
+import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus, MoreHorizontal, Minus, ChevronLeft, ChevronRight, Pencil } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useData } from "../../context/DataContext";
 import { usePaymentDisplay } from "../../hooks/usePaymentDisplay";
@@ -32,6 +31,8 @@ import verifiedDeselect from "../../assets/receipttags/verified_deselect.png";
 import verifiedSelect from "../../assets/receipttags/verified_select.png";
 import warrantedDeselect from "../../assets/receipttags/warrantied_deselect.png";
 import warrantedSelect from "../../assets/receipttags/warrantied_select.png";
+import lockedImg from "../../assets/receipttags/locked.png";
+import unlockedImg from "../../assets/receipttags/unlocked.png";
 
 const AddReceiptModal = ({ onClose, onReceiptAdded }) => {
   const {
@@ -98,6 +99,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const [activeSplitIndex, setActiveSplitIndex] = useState(null); // null=overview, N=editing split N
   const [splits, setSplits] = useState([]);
   const [isSavingSplits, setIsSavingSplits] = useState(false);
+  const [splitErrors, setSplitErrors] = useState({}); // { [split._id]: { amount: "msg", ... } }
 
   // Form fields state
   const [formData, setFormData] = useState({
@@ -118,6 +120,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
 
   // Tags state
   const [tags, setTags] = useState({
+    locked: false,
     starred: false,
     flagged: false,
     verified: false,
@@ -131,8 +134,9 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [showPaymentDropdown, setShowPaymentDropdown] = useState(false);
   const [showTaxDropdown, setShowTaxDropdown] = useState(null); // null, 1, or 2 for which tax field
-  const [isMerchantTyping, setIsMerchantTyping] = useState(false); // Track if user is actively typing
-  const [isPaymentTyping, setIsPaymentTyping] = useState(false); // Track if user is actively typing in payment field
+  const [isMerchantTyping, setIsMerchantTyping] = useState(false);
+  const [isPaymentTyping, setIsPaymentTyping] = useState(false);
+  const [isCategoryTyping, setIsCategoryTyping] = useState(false);
 
   // Add Expense Category inline state
   const [showAddCategoryInput, setShowAddCategoryInput] = useState(false);
@@ -150,10 +154,55 @@ const [localMerchants, setLocalMerchants] = useState([]);
   // Locally-added tax types that persist for this modal session regardless of context refreshes
   const [localTaxTypes, setLocalTaxTypes] = useState([]);
 
+  // ── Tax field validation banners ─────────────────────────────────────────
+  const TAX_NAME_MAX   = 15;
+  const TAX_RATE_MAX   = 99.999;
+  const TAX_NUMBER_MAX = 35;
+  const taxNameError   = newTaxName.length > TAX_NAME_MAX
+    ? `Tax Name cannot exceed ${TAX_NAME_MAX} characters (${newTaxName.length}/${TAX_NAME_MAX})`
+    : null;
+  const taxRateError   = newTaxRate !== "" && parseFloat(newTaxRate) > TAX_RATE_MAX
+    ? `Tax Rate cannot exceed ${TAX_RATE_MAX}%`
+    : null;
+  const taxNumberError = newTaxNumber.length > TAX_NUMBER_MAX
+    ? `Tax Number cannot exceed ${TAX_NUMBER_MAX} characters (${newTaxNumber.length}/${TAX_NUMBER_MAX})`
+    : null;
+  const taxFormHasError = !!(taxNameError || taxRateError || taxNumberError);
+
+  // ── Default Tax Types (up to 2, stored in localStorage) ──────────────────
+  const DEFAULT_TAX_STORAGE_KEY = "categorizr_defaultTaxIds";
+  const [defaultTaxIds, setDefaultTaxIdsState] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(DEFAULT_TAX_STORAGE_KEY) || "[]"); } catch { return []; }
+  });
+  const persistDefaultTaxIds = (ids) => {
+    setDefaultTaxIdsState(ids);
+    localStorage.setItem(DEFAULT_TAX_STORAGE_KEY, JSON.stringify(ids));
+  };
+  const toggleDefaultTax = (taxId) => {
+    if (defaultTaxIds.includes(taxId)) {
+      persistDefaultTaxIds(defaultTaxIds.filter(id => id !== taxId));
+    } else if (defaultTaxIds.length < 2) {
+      persistDefaultTaxIds([...defaultTaxIds, taxId]);
+    } else {
+      alert("You can only set up to 2 Default Tax Types.");
+    }
+  };
+
   const fileInputRef = useRef(null);
   const merchantInputRef = useRef(null);
   const categoryInputRef = useRef(null);
   const paymentInputRef = useRef(null);
+
+  // ── Edit / Delete Merchant ────────────────────────────────────────────────
+  const [showEditMerchantModal, setShowEditMerchantModal] = useState(false);
+  const [editingMerchant, setEditingMerchant] = useState(null); // { name, image }
+  const [editMerchantName, setEditMerchantName] = useState("");
+  const [editMerchantLogo, setEditMerchantLogo] = useState("");
+  const [editLogoOptions, setEditLogoOptions] = useState([]);
+  const [editSelectedLogoIndex, setEditSelectedLogoIndex] = useState(null);
+  const [isFetchingEditLogos, setIsFetchingEditLogos] = useState(false);
+  const [isSavingEditMerchant, setIsSavingEditMerchant] = useState(false);
+  const [editMerchantError, setEditMerchantError] = useState(null);
 
   const acceptedFileTypes = [
     "image/jpeg",
@@ -873,7 +922,18 @@ const handleFieldChange = (field, value) => {
 
     if (!newTaxName.trim() || !newTaxRate.trim()) {
       setError("Tax Name and Tax Rate are required");
-      console.log("Validation failed: Missing required fields");
+      return;
+    }
+    if (newTaxName.trim().length > TAX_NAME_MAX) {
+      setError(`Tax Name cannot exceed ${TAX_NAME_MAX} characters.`);
+      return;
+    }
+    if (parseFloat(newTaxRate) > TAX_RATE_MAX || parseFloat(newTaxRate) < 0) {
+      setError(`Tax Rate must be between 0% and ${TAX_RATE_MAX}%.`);
+      return;
+    }
+    if (newTaxNumber.trim().length > TAX_NUMBER_MAX) {
+      setError(`Tax Number cannot exceed ${TAX_NUMBER_MAX} characters.`);
       return;
     }
 
@@ -963,6 +1023,18 @@ const handleFieldChange = (field, value) => {
   const handleUpdateTax = async () => {
     if (!editingTaxId || !newTaxName.trim() || !newTaxRate.trim()) {
       setError("Tax Name and Tax Rate are required");
+      return;
+    }
+    if (newTaxName.trim().length > TAX_NAME_MAX) {
+      setError(`Tax Name cannot exceed ${TAX_NAME_MAX} characters.`);
+      return;
+    }
+    if (parseFloat(newTaxRate) > TAX_RATE_MAX || parseFloat(newTaxRate) < 0) {
+      setError(`Tax Rate must be between 0% and ${TAX_RATE_MAX}%.`);
+      return;
+    }
+    if (newTaxNumber.trim().length > TAX_NUMBER_MAX) {
+      setError(`Tax Number cannot exceed ${TAX_NUMBER_MAX} characters.`);
       return;
     }
 
@@ -1176,7 +1248,7 @@ const handleFieldChange = (field, value) => {
         parsedDate = parsedReceiptData.purchaseDate;
       }
 
-      const merchantName = parsedReceiptData?.merchantName || "";
+      const merchantName = parsedReceiptData?.merchantName || "Miscellaneous";
 
       let merchantLogo = parsedReceiptData?.merchantLogo || null;
       if (!merchantLogo && merchantName) {
@@ -1245,7 +1317,7 @@ const handleFieldChange = (field, value) => {
 
       // Convert tags to receipt_tag string format
       const receiptTag = [
-        "0", // locked is always 0 for new receipts
+        tags.locked ? "1" : "0",
         tags.starred ? "1" : "0",
         tags.flagged ? "1" : "0",
         tags.verified ? "1" : "0",
@@ -1951,7 +2023,7 @@ const handleFieldChange = (field, value) => {
     };
   };
 
-  /** Open split screen - validates required fields first */
+  /** Open split screen - validates required fields first, starts empty (no auto-splits) */
   const handleOpenSplit = () => {
     const missing = [];
     if (!formData.storeName?.trim()) missing.push("Merchant Name");
@@ -1963,112 +2035,128 @@ const handleFieldChange = (field, value) => {
       return;
     }
     setError(null);
-    // Default 2 equal splits — both get exactly half
-    const split1 = createSplit([{}]);   // frac = 1/(1+1) = 0.5
-    const split2 = createSplit([{}]);   // frac = 1/(1+1) = 0.5
-    split2._id = Date.now() + 1;        // ensure unique _id
-    setSplits([split1, split2]);
+    setSplits([]);           // user adds splits manually
+    setSplitErrors({});
     setActiveSplitIndex(null);
     setShowSplitScreen(true);
   };
 
-  /** Helper: recalculate a split's taxes + total from a given subtotal */
-  const recalcSplitFromSub = (split, sub) => {
-    const taxes = (split.receipt_tax_values || []).map(t => ({
-      ...t,
-      tax_amount: parseFloat(((parseFloat(t.tax_rate) / 100) * sub).toFixed(2)),
-    }));
-    const total = parseFloat(
-      (sub + taxes.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0)).toFixed(2)
-    );
-    return { ...split, subtotal: sub, receipt_tax_values: taxes, purchasePrice: total };
-  };
-
-  /** Update a field on a specific split.
+  /** Update a single field on a specific split.
    *
-   *  For subtotal / purchasePrice changes:
-   *    - Recalculate the edited split's taxes + total
-   *    - The "remainder slot" (split[0] unless that IS the edited split, then last split)
-   *      absorbs whatever is left from the main receipt total, so all splits always sum
-   *      exactly to the main receipt amount.
+   *  Mirrors the main receipt form's handleFieldChange logic:
+   *  - purchasePrice (Total) → back-calculates subtotal via rates, then derives each tax
+   *    Formula: subtotal = total / (1 + Σ rate/100)
+   *  - subtotal → calculates each tax via rate, then sums to get total
+   *  - individual tax_amount edit → just updates in place (user override)
+   *  - all other fields → update in place
    *
-   *  All other fields (category, expense_type, product_name, manual tax edits) just
-   *  update in place without touching any amounts. */
+   *  Amounts are capped at the main receipt's values; an alert fires if exceeded. */
   const updateSplitField = (idx, field, value) => {
+    const mainSubtotal = parseFloat(formData.subtotal) || parseFloat(formData.purchasePrice) || 0;
+    const mainTotal    = parseFloat(formData.purchasePrice) || 0;
+
+    // ── Max-amount guards ────────────────────────────────────────────────────
+    if (field === "subtotal") {
+      const sub = parseFloat(value) || 0;
+      if (mainSubtotal > 0 && sub > mainSubtotal) {
+        alert(`Subtotal cannot exceed $${mainSubtotal.toFixed(2)}`);
+        return;
+      }
+    }
+    if (field === "purchasePrice") {
+      const total = parseFloat(value) || 0;
+      if (mainTotal > 0 && total > mainTotal) {
+        alert(`Total cannot exceed $${mainTotal.toFixed(2)}`);
+        return;
+      }
+    }
+
     setSplits(prev => {
       const updated = [...prev];
+      const split   = updated[idx];
 
-      if (field === "subtotal" || field === "purchasePrice") {
-        // ── 1. Update the edited split ────────────────────────────────────────
-        if (field === "subtotal") {
-          updated[idx] = recalcSplitFromSub(updated[idx], parseFloat(value) || 0);
-        } else {
-          // purchasePrice edited directly: back-calculate subtotal via tax rates
-          const totalNum = parseFloat(value) || 0;
-          const rateSum = (updated[idx].receipt_tax_values || []).reduce(
+      if (field === "purchasePrice") {
+        // ── Same as main form: total → subtotal → taxes ───────────────────
+        const totalNum = parseFloat(value) || 0;
+        if (totalNum > 0) {
+          // subtotal = total / (1 + Σ rate/100)
+          const rateSum    = (split.receipt_tax_values || []).reduce(
             (s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0
           );
-          const sub = rateSum > 0 ? parseFloat((totalNum / (1 + rateSum)).toFixed(2)) : totalNum;
-          updated[idx] = recalcSplitFromSub({ ...updated[idx], purchasePrice: totalNum }, sub);
+          const sub = parseFloat((totalNum / (1 + rateSum)).toFixed(2));
+          const taxes = (split.receipt_tax_values || []).map(t => ({
+            ...t,
+            tax_amount: sub > 0
+              ? parseFloat(((parseFloat(t.tax_rate) / 100) * sub).toFixed(2))
+              : "",
+          }));
+          updated[idx] = { ...split, purchasePrice: value, subtotal: sub > 0 ? sub.toString() : "", receipt_tax_values: taxes };
+        } else {
+          // total cleared → clear subtotal and taxes too
+          updated[idx] = {
+            ...split,
+            purchasePrice: value,
+            subtotal: "",
+            receipt_tax_values: (split.receipt_tax_values || []).map(t => ({ ...t, tax_amount: "" })),
+          };
         }
 
-        // ── 2. Remainder slot absorbs the leftover ────────────────────────────
-        // Split[0] is the remainder unless we just edited split[0]; then last split is.
-        const remIdx = idx === 0 ? updated.length - 1 : 0;
+      } else if (field === "subtotal") {
+        // ── Same as main form: subtotal → taxes → total ───────────────────
+        const sub = parseFloat(value) || 0;
+        const taxes = (split.receipt_tax_values || []).map(t => ({
+          ...t,
+          tax_amount: sub > 0
+            ? parseFloat(((parseFloat(t.tax_rate) / 100) * sub).toFixed(2))
+            : "",
+        }));
+        const total = sub + taxes.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0);
+        updated[idx] = {
+          ...split,
+          subtotal: value,
+          receipt_tax_values: taxes,
+          purchasePrice: sub > 0 ? parseFloat(total.toFixed(2)) : "",
+        };
 
-        // Sum every split EXCEPT the remainder slot
-        const sumOthers = updated.reduce(
-          (s, sp, i) => i === remIdx ? s : s + (parseFloat(sp.purchasePrice) || 0), 0
-        );
-        const mainTotal = parseFloat(formData.purchasePrice) || 0;
-        const remTotal  = Math.max(0, parseFloat((mainTotal - sumOthers).toFixed(2)));
-
-        // Back-calculate remainder's subtotal from its total
-        const remRateSum = (updated[remIdx].receipt_tax_values || []).reduce(
-          (s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0
-        );
-        const remSub = remRateSum > 0
-          ? parseFloat((remTotal / (1 + remRateSum)).toFixed(2))
-          : remTotal;
-        updated[remIdx] = recalcSplitFromSub(updated[remIdx], remSub);
-        // Force the total to be exact (avoids floating-point drift)
-        updated[remIdx] = { ...updated[remIdx], purchasePrice: remTotal };
       } else {
-        // Non-amount field — just update in place
-        updated[idx] = { ...updated[idx], [field]: value };
+        // Non-amount field — update in place
+        updated[idx] = { ...split, [field]: value };
       }
 
       return updated;
     });
+
+    // Clear amount error once the user starts filling in a value
+    if (field === "subtotal" || field === "purchasePrice") {
+      const split = splits[idx];
+      if (split && splitErrors[split._id]?.amount) {
+        setSplitErrors(prev => {
+          const next = { ...prev };
+          delete next[split._id];
+          return next;
+        });
+      }
+    }
   };
 
-  /** Add a new split — redistribute ALL splits equally so the total stays correct */
+  /** Add a new blank split and immediately open its detail view */
   const addSplit = () => {
-    setSplits(prev => {
-      const newCount = prev.length + 1;
-      const mainSubtotal = parseFloat(formData.subtotal) || parseFloat(formData.purchasePrice) || 0;
-      const mainTotal    = parseFloat(formData.purchasePrice) || 0;
-      const eachSub   = parseFloat((mainSubtotal / newCount).toFixed(2));
-      const eachTotal = parseFloat((mainTotal    / newCount).toFixed(2));
-
-      const redistributed = prev.map(s => recalcSplitFromSub(s, eachSub));
-
-      const newSlot = {
-        _id: Date.now() + Math.random(),
-        receipt_category: formData.receipt_category || 0,
-        expense_type:     formData.expense_type || "",
-        product_name:     "",
-        subtotal:         eachSub,
-        purchasePrice:    eachTotal,
-        receipt_tax_values: (formData.receipt_tax_values || []).map(t => ({
-          ...t,
-          id: 0,
-          tax_amount: parseFloat(((parseFloat(t.tax_rate) / 100) * eachSub).toFixed(2)),
-        })),
-      };
-
-      return [...redistributed, newSlot];
-    });
+    const newSlot = {
+      _id: Date.now() + Math.random(),
+      receipt_category: formData.receipt_category || 0,
+      expense_type:     "",
+      product_name:     "",
+      subtotal:         "",
+      purchasePrice:    "",
+      receipt_tax_values: (formData.receipt_tax_values || []).map(t => ({
+        ...t,
+        id: 0,
+        tax_amount: "",
+      })),
+    };
+    const newIdx = splits.length;   // index of the slot we're about to add
+    setSplits(prev => [...prev, newSlot]);
+    setActiveSplitIndex(newIdx);    // auto-open detail for the new split
   };
 
   /** Remove a split by index */
@@ -2078,7 +2166,29 @@ const handleFieldChange = (field, value) => {
 
   /** Save all splits as separate receipts then close modal */
   const handleSaveSplits = async () => {
-    if (splits.length === 0) return;
+    if (splits.length === 0) {
+      setError("Please add at least one split before saving.");
+      return;
+    }
+
+    // ── Validate every split ─────────────────────────────────────────────────
+    const newSplitErrors = {};
+    splits.forEach((split) => {
+      const errs = {};
+      if (!parseFloat(split.purchasePrice) && !parseFloat(split.subtotal)) {
+        errs.amount = "Please enter an amount for this split.";
+      }
+      if (Object.keys(errs).length) newSplitErrors[split._id] = errs;
+    });
+
+    if (Object.keys(newSplitErrors).length) {
+      setSplitErrors(newSplitErrors);
+      // Open the first split that has errors so the user sees it
+      const firstBadIdx = splits.findIndex(s => newSplitErrors[s._id]);
+      if (firstBadIdx !== -1) setActiveSplitIndex(firstBadIdx);
+      return;
+    }
+
     setIsSavingSplits(true);
     setError(null);
     try {
@@ -2091,56 +2201,192 @@ const handleFieldChange = (field, value) => {
       if (!productDate) productDate = Math.floor(Date.now() / 1000);
       const receiptTag = ["0","0","0","0","0","0","0"].join(",");
 
+      // Helper: build a receipt payload from a set of amounts + metadata
+      const buildSplitPayload = ({ total, subtotalVal, taxVals, category, expenseType, productName }) => ({
+        id: 0,
+        storeName: formData.storeName || "",
+        product_name: productName || "",
+        emailAttachment: uploadedMediaUrls[0] || uploadedImageUrl || uploadedReceiptData?.emailAttachment || "0",
+        purchasePrice: total.toString(),
+        total_amount: total.toString(),
+        payment_category_type: parseInt(category) || 0,
+        status: 0,
+        paymentType: formData.paymentType || "",
+        last_4_digit_card: formData.last_4_digit_card || "",
+        card_issuer_name: formData.card_issuer_name || "",
+        fk_original_receipt_id: "0",
+        fk_forward_from_receipt_id: "0",
+        receipt_category: parseInt(category) || 0,
+        product_date: productDate,
+        expense_type: expenseType || formData.expense_type || "",
+        receipt_image: uploadedReceiptData?.receipt_image || uploadedImageUrl || "0",
+        store_image: getMerchantImage(formData.storeName) || detectedMerchantLogo || "",
+        notes: "",
+        receipt_forwarded: "0",
+        receipt_tag: receiptTag,
+        create_date: "",
+        receipt_tax_values: taxVals,
+      });
+
+      // Save every user-defined split
       for (const split of splits) {
         const splitSubtotal = parseFloat(split.subtotal) || 0;
         const taxValues = (split.receipt_tax_values || []).map(t => ({
-          id: 0,
-          fk_user_id: fkUserId,
-          fk_receipt_id: 0,
+          id: 0, fk_user_id: fkUserId, fk_receipt_id: 0,
           fk_tax_id: parseInt(t.fk_tax_id) || 0,
-          tax_name: t.tax_name || "",
-          tax_rate: t.tax_rate || "0",
+          tax_name: t.tax_name || "", tax_rate: t.tax_rate || "0",
           tax_amount: (parseFloat(t.tax_amount) || 0).toString(),
-          created: 0,
-          updated: 0,
+          created: 0, updated: 0,
         }));
         const splitTotal = parseFloat(split.purchasePrice) ||
-          (splitSubtotal + taxValues.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0));
+          parseFloat((splitSubtotal + taxValues.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0)).toFixed(2));
 
-        const payload = {
-          id: 0,
-          storeName: formData.storeName || "",
-          product_name: split.product_name || "",
-          emailAttachment: uploadedMediaUrls[0] || uploadedImageUrl || uploadedReceiptData?.emailAttachment || "0",
-          purchasePrice: splitTotal.toString(),
-          total_amount: splitTotal.toString(),
-          payment_category_type: parseInt(split.receipt_category) || 0,
-          status: 0,
-          paymentType: formData.paymentType || "",
-          last_4_digit_card: formData.last_4_digit_card || "",
-          card_issuer_name: formData.card_issuer_name || "",
-          fk_original_receipt_id: "0",
-          fk_forward_from_receipt_id: "0",
-          receipt_category: parseInt(split.receipt_category) || 0,
-          product_date: productDate,
-          expense_type: split.expense_type || formData.expense_type || "",
-          receipt_image: uploadedReceiptData?.receipt_image || uploadedImageUrl || "0",
-          store_image: getMerchantImage(formData.storeName) || detectedMerchantLogo || "",
-          notes: "",
-          receipt_forwarded: "0",
-          receipt_tag: receiptTag,
-          create_date: "",
-          receipt_tax_values: taxValues,
-        };
+        const payload = buildSplitPayload({
+          total: splitTotal,
+          subtotalVal: splitSubtotal,
+          taxVals: taxValues,
+          category: split.receipt_category,
+          expenseType: split.expense_type,
+          productName: split.product_name,
+        });
         await postNewReceipt(payload);
         if (onReceiptAdded) onReceiptAdded(payload);
       }
+
+      // ── Auto-save remainder receipt if splits don't cover the full total ──
+      const mainTotal   = parseFloat(formData.purchasePrice) || 0;
+      const splitsTotal = parseFloat(
+        splits.reduce((s, sp) => s + (parseFloat(sp.purchasePrice) || 0), 0).toFixed(2)
+      );
+      const remainder   = parseFloat((mainTotal - splitsTotal).toFixed(2));
+
+      if (remainder > 0.009) {   // ignore sub-cent floating-point noise
+        // Back-calculate remainder subtotal using the main receipt's tax rates
+        const mainTaxRates = formData.receipt_tax_values || [];
+        const rateSum      = mainTaxRates.reduce((s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0);
+        const remSubtotal  = parseFloat((remainder / (1 + rateSum)).toFixed(2));
+        const remTaxValues = mainTaxRates.map(t => ({
+          id: 0, fk_user_id: fkUserId, fk_receipt_id: 0,
+          fk_tax_id: parseInt(t.fk_tax_id) || 0,
+          tax_name: t.tax_name || "", tax_rate: t.tax_rate || "0",
+          tax_amount: parseFloat(((parseFloat(t.tax_rate) / 100) * remSubtotal).toFixed(2)).toString(),
+          created: 0, updated: 0,
+        }));
+
+        const remPayload = buildSplitPayload({
+          total: remainder,
+          subtotalVal: remSubtotal,
+          taxVals: remTaxValues,
+          category: formData.receipt_category || 0,
+          expenseType: formData.expense_type || "",
+          productName: "",
+        });
+        await postNewReceipt(remPayload);
+        if (onReceiptAdded) onReceiptAdded(remPayload);
+      }
+
       if (refreshData) refreshData();
       onClose();
     } catch (err) {
       setError("Failed to save splits: " + (err.message || "Unknown error"));
     } finally {
       setIsSavingSplits(false);
+    }
+  };
+
+  // ── Edit Merchant handlers ────────────────────────────────────────────────
+  const handleOpenEditMerchant = (merchant) => {
+    setEditingMerchant(merchant);
+    setEditMerchantName(merchant.name);
+    setEditMerchantLogo(merchant.image || "");
+    setEditLogoOptions([]);
+    setEditSelectedLogoIndex(null);
+    setEditMerchantError(null);
+    setShowEditMerchantModal(true);
+  };
+
+  const handleFetchEditLogos = async () => {
+    if (!editMerchantName.trim()) return;
+    setIsFetchingEditLogos(true);
+    try {
+      const logos = await fetchMerchantLogos(editMerchantName.trim());
+      setEditLogoOptions(logos);
+      setIsFetchingEditLogos(false);
+    } catch {
+      setIsFetchingEditLogos(false);
+    }
+  };
+
+  const handleSelectEditLogo = (index) => {
+    setEditSelectedLogoIndex(index);
+    setEditMerchantLogo(editLogoOptions[index]?.storeUrl || "");
+  };
+
+  /** Rename + update logo for ALL receipts using this merchant, then refresh. */
+  const handleSaveEditMerchant = async () => {
+    if (!editMerchantName.trim()) {
+      setEditMerchantError("Merchant name is required.");
+      return;
+    }
+    setIsSavingEditMerchant(true);
+    setEditMerchantError(null);
+    const oldName = editingMerchant.name;
+    const newName = editMerchantName.trim();
+    const newLogo = editMerchantLogo || editingMerchant.image || "";
+    try {
+      const affected = (receipts || []).filter(
+        (r) => (r.storeName || r.store_name || "").toLowerCase() === oldName.toLowerCase()
+      );
+      for (const r of affected) {
+        await putUpdateReceipt({ ...r, storeName: newName, store_image: newLogo });
+      }
+      // Update localMerchants so the change is visible immediately before refresh
+      setLocalMerchants((prev) =>
+        prev.map((m) =>
+          m.name.toLowerCase() === oldName.toLowerCase()
+            ? { ...m, name: newName, image: newLogo }
+            : m
+        )
+      );
+      // If the form currently has this merchant selected, update it too
+      if ((formData.storeName || "").toLowerCase() === oldName.toLowerCase()) {
+        handleFieldChange("storeName", newName);
+        setDetectedMerchantLogo(newLogo || null);
+      }
+      setShowEditMerchantModal(false);
+      setEditingMerchant(null);
+      await refreshData();
+    } catch (err) {
+      setEditMerchantError(err.message || "Failed to update merchant.");
+    } finally {
+      setIsSavingEditMerchant(false);
+    }
+  };
+
+  /** Move all receipts of this merchant to "Miscellaneous", removing it from the list. */
+  const handleDeleteMerchant = async (merchant) => {
+    if (merchant.name.toLowerCase() === "miscellaneous") return;
+    if (!window.confirm(`Delete "${merchant.name}"?\n\nAll receipts with this merchant will be changed to "Miscellaneous".`)) return;
+    setIsSavingEditMerchant(true);
+    try {
+      const affected = (receipts || []).filter(
+        (r) => (r.storeName || r.store_name || "").toLowerCase() === merchant.name.toLowerCase()
+      );
+      for (const r of affected) {
+        await putUpdateReceipt({ ...r, storeName: "Miscellaneous", store_image: "" });
+      }
+      setLocalMerchants((prev) =>
+        prev.filter((m) => m.name.toLowerCase() !== merchant.name.toLowerCase())
+      );
+      if ((formData.storeName || "").toLowerCase() === merchant.name.toLowerCase()) {
+        handleFieldChange("storeName", "");
+        setDetectedMerchantLogo(null);
+      }
+      await refreshData();
+    } catch (err) {
+      setError(err.message || "Failed to delete merchant.");
+    } finally {
+      setIsSavingEditMerchant(false);
     }
   };
 
@@ -2205,50 +2451,51 @@ const handleFieldChange = (field, value) => {
         }
       }
 
-      const logoUrls = [];
+      // Each entry: { displayUrl (thumb – direct load), storeUrl (full – stored in DB) }
+      const logoEntries = [];
+      const isValidHttpUrl = (u) => u && /^https?:\/\//i.test(u);
 
-      // Handle the specific array response format from imagesearch API
+      // Primary format: array of {fullurl, thumburl, ...}
       if (Array.isArray(data) && data.length > 0) {
         for (const item of data) {
           if (item && typeof item === "object") {
-            const url =
-              item.fullurl ||
-              item.url ||
-              item.image ||
-              item.src ||
-              item.link ||
-              item.thumburl;
-            if (url && /^https?:\/\//i.test(url)) {
-              logoUrls.push(proxyImageUrl(url));
+            const fullUrl = item.fullurl || item.url || item.image || item.src || item.link;
+            const thumbUrl = item.thumburl || fullUrl;
+            const storeUrl = fullUrl || thumbUrl;
+            if (isValidHttpUrl(storeUrl)) {
+              logoEntries.push({
+                displayUrl: isValidHttpUrl(thumbUrl) ? thumbUrl : storeUrl,
+                storeUrl,
+              });
             }
           }
         }
       }
 
-      // Handle object response
+      // Object response: {images/results/data: [...]}
       if (typeof data === "object" && !Array.isArray(data)) {
-        const arr =
-          data.images || data.results || data.data || data.items || [];
+        const arr = data.images || data.results || data.data || data.items || [];
         if (Array.isArray(arr) && arr.length > 0) {
           for (const item of arr) {
             if (item && typeof item === "object") {
-              const url =
-                item.fullurl || item.url || item.image || item.src || item.link;
-              if (url && /^https?:\/\//i.test(url)) {
-                logoUrls.push(proxyImageUrl(url));
+              const fullUrl = item.fullurl || item.url || item.image || item.src || item.link;
+              const thumbUrl = item.thumburl || fullUrl;
+              if (isValidHttpUrl(fullUrl)) {
+                logoEntries.push({
+                  displayUrl: isValidHttpUrl(thumbUrl) ? thumbUrl : fullUrl,
+                  storeUrl: fullUrl,
+                });
               }
             }
           }
         }
-
-        const directUrl =
-          data.url || data.image || data.src || data.link || data.fullurl;
-        if (directUrl && /^https?:\/\//i.test(directUrl)) {
-          logoUrls.push(proxyImageUrl(directUrl));
+        const directUrl = data.url || data.image || data.src || data.link || data.fullurl;
+        if (isValidHttpUrl(directUrl)) {
+          logoEntries.push({ displayUrl: directUrl, storeUrl: directUrl });
         }
       }
 
-      return logoUrls;
+      return logoEntries;
     } catch (error) {
       console.error(
         `Error fetching merchant logos for ${merchantName}:`,
@@ -2273,7 +2520,7 @@ const handleFieldChange = (field, value) => {
         setLogoOptions(logos);
         if (logos.length > 0) {
           setSelectedLogoIndex(0);
-          setNewMerchantLogo(logos[0]);
+          setNewMerchantLogo(logos[0].storeUrl);
         } else {
           setSelectedLogoIndex(null);
           setNewMerchantLogo("");
@@ -2284,16 +2531,42 @@ const handleFieldChange = (field, value) => {
     }
   }, [newMerchantName, showAddMerchantModal, fetchMerchantLogos]);
   
-  // Add this useEffect after your other useEffects
+  // Refresh taxes when Manage Tax Types modal closes
   useEffect(() => {
     if (!showManageTaxModal) {
-      // When the Manage Tax Types modal closes, refresh taxes
-      const refreshTaxes = async () => {
-        await fetchTaxes();
-      };
+      const refreshTaxes = async () => { await fetchTaxes(); };
       refreshTaxes();
     }
   }, [showManageTaxModal, fetchTaxes]);
+
+  // Auto-apply default tax types when entering the form step (if no taxes already set)
+  useEffect(() => {
+    if (step !== "form") return;
+    if (formData.receipt_tax_values.length > 0) return; // OCR already set taxes — don't override
+    const storedIds = (() => {
+      try { return JSON.parse(localStorage.getItem(DEFAULT_TAX_STORAGE_KEY) || "[]"); } catch { return []; }
+    })();
+    if (storedIds.length === 0 || !taxData?.length) return;
+    const toApply = storedIds
+      .map(id => taxData.find(t => t.id === id))
+      .filter(Boolean)
+      .map(t => ({
+        id: t.id || 0,
+        fk_user_id: t.fk_user_id || 0,
+        fk_receipt_id: 0,
+        fk_tax_id: t.id || 0,
+        tax_name: t.tax_name || "",
+        tax_rate: t.tax_rate || "0",
+        tax_amount: "",
+        tax_number: t.tax_number || "",
+        created: 0,
+        updated: 0,
+      }));
+    if (toApply.length > 0) {
+      setFormData(prev => ({ ...prev, receipt_tax_values: toApply }));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, taxData]);
   // Cleanup PDF preview URL on unmount
   useEffect(() => {
     return () => {
@@ -2356,7 +2629,7 @@ const handleCloseAddMerchantModal = () => {
 
 const handleSelectLogo = (index) => {
   setSelectedLogoIndex(index);
-  setNewMerchantLogo(logoOptions[index]);
+  setNewMerchantLogo(logoOptions[index]?.storeUrl || "");
 };
 
   // Handle fetching logos manually
@@ -2370,7 +2643,7 @@ const handleSelectLogo = (index) => {
     setLogoOptions(logos);
     if (logos.length > 0) {
       setSelectedLogoIndex(0);
-      setNewMerchantLogo(logos[0]);
+      setNewMerchantLogo(logos[0].storeUrl);
       setError(null);
     } else {
       setError(
@@ -2566,28 +2839,39 @@ const handleSelectLogo = (index) => {
 
   // Filter functions for dropdowns - use merchantsWithImages
   // Show all merchants when dropdown opens, only filter when user is actively typing
+  const sortMerchantsAlpha = (list) => {
+    const misc = list.filter(m => m.name?.toLowerCase().trim() === "miscellaneous");
+    const rest = list
+      .filter(m => m.name?.toLowerCase().trim() !== "miscellaneous")
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    return [...misc, ...rest];
+  };
+
   const filteredMerchants = (() => {
     if (!isMerchantTyping && !formData.storeName) {
       // Show all when dropdown opens and no value
-      return allMerchantsWithImages;
+      return sortMerchantsAlpha(allMerchantsWithImages);
     }
     if (!isMerchantTyping) {
       // Show all when dropdown opens even if there's a value (from auto-detection)
-      return allMerchantsWithImages;
+      return sortMerchantsAlpha(allMerchantsWithImages);
     }
     // Filter only when user is actively typing
     const searchTerm = (formData.storeName || "").toLowerCase();
     if (!searchTerm) {
-      return allMerchantsWithImages;
+      return sortMerchantsAlpha(allMerchantsWithImages);
     }
-    return allMerchantsWithImages.filter((m) =>
-      m.name?.toLowerCase().includes(searchTerm),
-    );
+    return sortMerchantsAlpha(allMerchantsWithImages.filter((m) =>
+      m.name?.toLowerCase().includes(searchTerm)
+    ));
   })();
 
-  const filteredCategories = allExpenseCategories.filter((c) =>
-    c.toLowerCase().includes((formData.expense_type || "").toLowerCase()),
-  );
+  // Show all categories when not typing; filter only while user is actively typing
+  const filteredCategories = isCategoryTyping
+    ? allExpenseCategories.filter((c) =>
+        c.toLowerCase().includes((formData.expense_type || "").toLowerCase())
+      )
+    : allExpenseCategories;
 
   // Payment card types with logos - matching mobile app options
   const paymentCardTypes = [
@@ -2736,7 +3020,7 @@ const handleSelectLogo = (index) => {
             variants={modalVariants}
             className="relative inline-block w-full max-w-4xl"
           >
-            <div className="bg-white rounded-xl shadow-2xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-hidden border border-gray-200 relative">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-hidden border border-gray-200 relative flex flex-col">
               {/* Loading Overlay for Tax Type Saving */}
               {isSavingTax && (
                 <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-[100] flex items-center justify-center">
@@ -2809,11 +3093,26 @@ const handleSelectLogo = (index) => {
                       {isSavingSplits ? "Saving…" : "SAVE"}
                     </button>
                   )}
-                  {/* Split detail: SAVE button (saves current split back to list) */}
+                  {/* Split detail: SAVE button — validates before going back */}
                   {showSplitScreen && activeSplitIndex !== null && (
                     <button
                       type="button"
-                      onClick={() => setActiveSplitIndex(null)}
+                      onClick={() => {
+                        const split = splits[activeSplitIndex];
+                        if (!parseFloat(split?.purchasePrice) && !parseFloat(split?.subtotal)) {
+                          setSplitErrors(prev => ({
+                            ...prev,
+                            [split._id]: { amount: "Please enter an amount for this split." },
+                          }));
+                          return;
+                        }
+                        setSplitErrors(prev => {
+                          const next = { ...prev };
+                          if (split) delete next[split._id];
+                          return next;
+                        });
+                        setActiveSplitIndex(null);
+                      }}
                       className="px-4 py-1.5 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700"
                     >
                       SAVE
@@ -2822,6 +3121,24 @@ const handleSelectLogo = (index) => {
                   {/* Normal form: Delete icon + "..." options menu */}
                   {step === "form" && !showSplitScreen && (
                     <>
+                      {/* Lock / Unlock toggle */}
+                      <button
+                        type="button"
+                        onClick={() => setTags(prev => ({ ...prev, locked: !prev.locked }))}
+                        className={`flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full transition-colors ${
+                          tags.locked
+                            ? "bg-red-100 hover:bg-red-200"
+                            : "bg-gray-100 hover:bg-gray-200"
+                        }`}
+                        title={tags.locked ? "Unlock receipt" : "Lock receipt"}
+                      >
+                        <img
+                          src={tags.locked ? lockedImg : unlockedImg}
+                          alt={tags.locked ? "Locked" : "Unlocked"}
+                          className="w-4 h-4 object-contain"
+                        />
+                      </button>
+
                       <button
                         type="button"
                         onClick={() => {
@@ -2873,7 +3190,7 @@ const handleSelectLogo = (index) => {
               </div>
 
               {/* Scrollable Content */}
-              <div className="overflow-y-auto max-h-[calc(95vh-70px)] sm:max-h-[calc(90vh-80px)]">
+              <div className="overflow-y-auto flex-1 min-h-0">
                 {showSplitScreen ? (
                   /* ── Split Screen ──────────────────────────────────── */
                   <div className="p-4 sm:p-6">
@@ -2882,7 +3199,9 @@ const handleSelectLogo = (index) => {
                       (() => {
                         const split = splits[activeSplitIndex];
                         const mainSubtotal = parseFloat(formData.subtotal) || parseFloat(formData.purchasePrice) || 0;
-                        const mainTotal = parseFloat(formData.purchasePrice) || 0;
+                        const mainTotal    = parseFloat(formData.purchasePrice) || 0;
+                        const fieldErr     = splitErrors[split._id] || {};
+                        const hasAmountErr = !!fieldErr.amount;
                         return (
                           <div className="space-y-4">
                             {/* Personal / Business toggle */}
@@ -2901,6 +3220,7 @@ const handleSelectLogo = (index) => {
                                 >Business</button>
                               </div>
                             </div>
+
                             {/* Category */}
                             <div>
                               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Category</label>
@@ -2915,64 +3235,94 @@ const handleSelectLogo = (index) => {
                                 ))}
                               </select>
                             </div>
+
                             {/* Subtotal */}
                             <div>
-                              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Subtotal</label>
-                              <p className="text-xs text-gray-400 mb-1">Max: ${mainSubtotal.toFixed(2)}</p>
+                              <div className="flex items-center justify-between mb-1">
+                                <label className={`text-xs font-bold uppercase tracking-wide ${hasAmountErr ? "text-red-500" : "text-gray-500"}`}>
+                                  Subtotal *
+                                </label>
+                                <span className="text-xs text-gray-400">Max: ${mainSubtotal.toFixed(2)}</span>
+                              </div>
                               <div className="relative">
                                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
                                 <input
                                   type="number"
-                                  className="w-full border border-blue-400 text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800"
-                                  value={split.subtotal || ""}
+                                  className={`w-full text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800 border ${hasAmountErr ? "border-red-400 ring-1 ring-red-300" : "border-blue-400"}`}
+                                  value={split.subtotal ?? ""}
                                   onChange={(e) => updateSplitField(activeSplitIndex, "subtotal", e.target.value)}
                                   placeholder="0.00"
                                   min="0"
+                                  max={mainSubtotal}
                                   step="0.01"
                                 />
                               </div>
+                              {hasAmountErr && (
+                                <p className="mt-1 text-xs text-red-500">{fieldErr.amount}</p>
+                              )}
                             </div>
+
                             {/* Tax fields */}
-                            {(split.receipt_tax_values || []).map((t, ti) => (
-                              <div key={ti}>
-                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">{t.tax_name} ({t.tax_rate}%)</label>
-                                <p className="text-xs text-gray-400 mb-1">Max: ${((parseFloat(t.tax_rate || 0) / 100) * mainSubtotal).toFixed(2)}</p>
-                                <div className="relative">
-                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
-                                  <input
-                                    type="number"
-                                    className="w-full border border-blue-400 text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800"
-                                    value={t.tax_amount || ""}
-                                    onChange={(e) => {
-                                      const updatedTaxes = split.receipt_tax_values.map((tv, tvi) =>
-                                        tvi === ti ? { ...tv, tax_amount: e.target.value } : tv
-                                      );
-                                      updateSplitField(activeSplitIndex, "receipt_tax_values", updatedTaxes);
-                                    }}
-                                    placeholder="0.00"
-                                    min="0"
-                                    step="0.01"
-                                  />
+                            {(split.receipt_tax_values || []).map((t, ti) => {
+                              const maxTax = parseFloat(((parseFloat(t.tax_rate || 0) / 100) * mainSubtotal).toFixed(2));
+                              return (
+                                <div key={ti}>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">{t.tax_name} ({t.tax_rate}%)</label>
+                                    <span className="text-xs text-gray-400">Max: ${maxTax.toFixed(2)}</span>
+                                  </div>
+                                  <div className="relative">
+                                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
+                                    <input
+                                      type="number"
+                                      className="w-full border border-blue-400 text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800"
+                                      value={t.tax_amount ?? ""}
+                                      onChange={(e) => {
+                                        const v = parseFloat(e.target.value) || 0;
+                                        if (maxTax > 0 && v > maxTax) {
+                                          alert(`${t.tax_name} cannot exceed $${maxTax.toFixed(2)}`);
+                                          return;
+                                        }
+                                        const updatedTaxes = split.receipt_tax_values.map((tv, tvi) =>
+                                          tvi === ti ? { ...tv, tax_amount: e.target.value } : tv
+                                        );
+                                        updateSplitField(activeSplitIndex, "receipt_tax_values", updatedTaxes);
+                                      }}
+                                      placeholder="0.00"
+                                      min="0"
+                                      step="0.01"
+                                    />
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
+                              );
+                            })}
+
                             {/* Total */}
                             <div>
-                              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Total</label>
-                              <p className="text-xs text-gray-400 mb-1">Max: ${mainTotal.toFixed(2)}</p>
+                              <div className="flex items-center justify-between mb-1">
+                                <label className={`text-xs font-bold uppercase tracking-wide ${hasAmountErr ? "text-red-500" : "text-gray-500"}`}>
+                                  Total *
+                                </label>
+                                <span className="text-xs text-gray-400">Max: ${mainTotal.toFixed(2)}</span>
+                              </div>
                               <div className="relative">
                                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
                                 <input
                                   type="number"
-                                  className="w-full border border-blue-400 text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800"
-                                  value={split.purchasePrice || ""}
+                                  className={`w-full text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800 border ${hasAmountErr ? "border-red-400 ring-1 ring-red-300" : "border-blue-400"}`}
+                                  value={split.purchasePrice ?? ""}
                                   onChange={(e) => updateSplitField(activeSplitIndex, "purchasePrice", e.target.value)}
                                   placeholder="0.00"
                                   min="0"
+                                  max={mainTotal}
                                   step="0.01"
                                 />
                               </div>
+                              {hasAmountErr && (
+                                <p className="mt-1 text-xs text-red-500">{fieldErr.amount}</p>
+                              )}
                             </div>
+
                             {/* Describe Purchase */}
                             <div>
                               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Describe Purchase</label>
@@ -3010,46 +3360,71 @@ const handleSelectLogo = (index) => {
                             </div>
                           ))}
                         </div>
-                        {/* Splits list */}
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Splits</p>
-                        <div className="space-y-3">
-                          {splits.map((split, idx) => (
-                            <div
-                              key={split._id}
-                              className="bg-white border border-blue-200 rounded-xl p-4 cursor-pointer hover:border-blue-400 transition-colors"
-                              onClick={() => setActiveSplitIndex(idx)}
-                            >
-                              <div className="flex items-center justify-between mb-1">
-                                <p className="font-semibold text-gray-800 text-sm">Split {idx + 1}</p>
-                                <div className="flex items-center gap-2">
-                                  <p className="font-bold text-blue-600 text-sm">${parseFloat(split.purchasePrice || 0).toFixed(2)}</p>
-                                  {splits.length > 2 && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => { e.stopPropagation(); removeSplit(idx); }}
-                                      className="text-red-400 hover:text-red-600 p-1"
-                                    >
-                                      <Trash2 size={14} />
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="flex items-center justify-between text-xs text-gray-500">
-                                <span>Subtotal</span>
-                                <span>${parseFloat(split.subtotal || 0).toFixed(2)}</span>
-                              </div>
-                              {(split.receipt_tax_values || []).map((t, ti) => (
-                                <div key={ti} className="flex items-center justify-between text-xs text-gray-500">
-                                  <span>{t.tax_name}</span>
-                                  <span>${parseFloat(t.tax_amount || 0).toFixed(2)}</span>
-                                </div>
-                              ))}
-                              {split.expense_type && (
-                                <p className="mt-1 text-xs text-gray-400">{split.expense_type}</p>
-                              )}
+
+                        {/* Splits list — or empty state */}
+                        {splits.length === 0 ? (
+                          <div className="text-center py-8 text-gray-400">
+                            <p className="text-sm font-medium">No splits yet</p>
+                            <p className="text-xs mt-1">Tap "Add Split" to create your first split.</p>
+                          </div>
+                        ) : (
+                          <>
+                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Splits</p>
+                            <div className="space-y-3">
+                              {splits.map((split, idx) => {
+                                const hasErr = !!splitErrors[split._id];
+                                return (
+                                  <div
+                                    key={split._id}
+                                    className={`bg-white border rounded-xl p-4 cursor-pointer transition-colors ${hasErr ? "border-red-400" : "border-blue-200 hover:border-blue-400"}`}
+                                    onClick={() => setActiveSplitIndex(idx)}
+                                  >
+                                    <div className="flex items-center justify-between mb-1">
+                                      <div className="flex items-center gap-2">
+                                        <p className="font-semibold text-gray-800 text-sm">Split {idx + 1}</p>
+                                        {hasErr && (
+                                          <span className="text-xs text-red-500 font-medium">• Incomplete</span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <p className={`font-bold text-sm ${parseFloat(split.purchasePrice) ? "text-blue-600" : "text-gray-400"}`}>
+                                          {parseFloat(split.purchasePrice) ? `$${parseFloat(split.purchasePrice).toFixed(2)}` : "—"}
+                                        </p>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => { e.stopPropagation(); removeSplit(idx); }}
+                                          className="text-red-400 hover:text-red-600 p-1"
+                                          title="Remove split"
+                                        >
+                                          <Trash2 size={14} />
+                                        </button>
+                                      </div>
+                                    </div>
+                                    {parseFloat(split.subtotal) > 0 && (
+                                      <div className="flex items-center justify-between text-xs text-gray-500">
+                                        <span>Subtotal</span>
+                                        <span>${parseFloat(split.subtotal).toFixed(2)}</span>
+                                      </div>
+                                    )}
+                                    {(split.receipt_tax_values || []).filter(t => parseFloat(t.tax_amount) > 0).map((t, ti) => (
+                                      <div key={ti} className="flex items-center justify-between text-xs text-gray-500">
+                                        <span>{t.tax_name}</span>
+                                        <span>${parseFloat(t.tax_amount).toFixed(2)}</span>
+                                      </div>
+                                    ))}
+                                    {split.expense_type && (
+                                      <p className="mt-1 text-xs text-gray-400">{split.expense_type}</p>
+                                    )}
+                                    {!parseFloat(split.purchasePrice) && !parseFloat(split.subtotal) && (
+                                      <p className="text-xs text-gray-400 mt-1">Tap to fill in details →</p>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
-                          ))}
-                        </div>
+                          </>
+                        )}
+
                         {/* Add Split Button */}
                         <button
                           type="button"
@@ -3213,7 +3588,7 @@ const handleSelectLogo = (index) => {
                     {showTaxDropdown === 1 && (
                       <div
                         key={`tax-dropdown-1-${taxDropdownKey}`}
-                        className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto"
+                        className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-64 overflow-y-auto"
                       >
                         {/* existing content */}
                       </div>
@@ -3221,7 +3596,7 @@ const handleSelectLogo = (index) => {
                     {showTaxDropdown === 2 && (
                       <div
                         key={`tax-dropdown-2-${taxDropdownKey}`}
-                        className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto"
+                        className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-64 overflow-y-auto"
                       >
                         {/* existing content */}
                       </div>
@@ -3261,7 +3636,7 @@ const handleSelectLogo = (index) => {
                   </div>
                 ) : (
                   /* Form Step - Same layout as ReceiptDetail */
-                  <form onSubmit={handleSaveReceipt}>
+                  <form id="add-receipt-form" onSubmit={handleSaveReceipt}>
                     {/* Duplicate mode banner */}
                     {isDuplicateMode && (
                       <div className="mx-3 sm:mx-6 mt-3 px-4 py-3 bg-green-50 border border-green-300 rounded-lg flex items-center gap-2 text-green-700 text-sm font-medium">
@@ -3374,34 +3749,56 @@ const handleSelectLogo = (index) => {
           {filteredMerchants.length > 0 && (
             <>
               {filteredMerchants.length > 0 ? (
-                filteredMerchants.map((merchant, idx) => (
-                  <div
-                    key={idx}
-                    className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left flex items-center gap-2"
-                    onClick={() => {
-                      // Clear detected logo when selecting a different merchant
-                      if (
-                        merchant.name !==
-                        uploadedReceiptData?.storeName
-                      ) {
-                        setDetectedMerchantLogo(null);
-                      }
-                      handleFieldChange(
-                        "storeName",
-                        merchant.name,
-                      );
-                      setIsMerchantTyping(false);
-                      setShowMerchantDropdown(false);
-                    }}
-                  >
-                    <MerchantAvatar
-                      name={merchant.name}
-                      explicitUrl={merchant.image}
-                      className="w-5 h-5 mt-2"
-                    />
-                    {merchant.name}
-                  </div>
-                ))
+                filteredMerchants.map((merchant, idx) => {
+                  const isMisc = merchant.name.toLowerCase().trim() === "miscellaneous";
+                  return (
+                    <div
+                      key={idx}
+                      className="group px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2"
+                    >
+                      {/* Selectable area */}
+                      <div
+                        className="flex-1 flex items-center gap-2 cursor-pointer min-w-0"
+                        onClick={() => {
+                          if (merchant.name !== uploadedReceiptData?.storeName) {
+                            setDetectedMerchantLogo(null);
+                          }
+                          handleFieldChange("storeName", merchant.name);
+                          setIsMerchantTyping(false);
+                          setShowMerchantDropdown(false);
+                        }}
+                      >
+                        <MerchantAvatar
+                          name={merchant.name}
+                          explicitUrl={merchant.image}
+                          className="w-5 h-5 mt-2 flex-shrink-0"
+                        />
+                        <span className="truncate">{merchant.name}</span>
+                      </div>
+                      {/* Edit / Delete — hidden for Miscellaneous, visible on hover */}
+                      {!isMisc && (
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleOpenEditMerchant(merchant); }}
+                            className="p-1 rounded hover:bg-blue-100 text-blue-500"
+                            title="Edit merchant"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleDeleteMerchant(merchant); }}
+                            className="p-1 rounded hover:bg-red-100 text-red-400"
+                            title="Delete merchant"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               ) : (
                 <div className="px-3 py-2 text-gray-500 text-sm text-center">
                   No merchants found
@@ -3422,24 +3819,26 @@ const handleSelectLogo = (index) => {
         className={inputClass}
         value={formData.expense_type}
         onChange={(e) => {
-          handleFieldChange(
-            "expense_type",
-            e.target.value,
-          );
+          handleFieldChange("expense_type", e.target.value);
+          setIsCategoryTyping(true);
           setShowCategoryDropdown(true);
         }}
-        onFocus={() => setShowCategoryDropdown(true)}
+        onFocus={() => {
+          setIsCategoryTyping(false); // show all on focus
+          setShowCategoryDropdown(true);
+        }}
         placeholder="e.g., Restaurants, Fuel, General Retail"
       />
       <ChevronDown
         size={16}
         className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 cursor-pointer"
-        onClick={() =>
-          setShowCategoryDropdown(!showCategoryDropdown)
-        }
+        onClick={() => {
+          setIsCategoryTyping(false); // show all when chevron clicked
+          setShowCategoryDropdown(!showCategoryDropdown);
+        }}
       />
       {showCategoryDropdown && (
-          <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
+          <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-64 overflow-y-auto">
             {/* Add Expense Category option */}
             <div
               className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left flex items-center gap-2 border-b border-gray-200 bg-blue-50"
@@ -4035,7 +4434,7 @@ const handleSelectLogo = (index) => {
                               readOnly={!formData.receipt_tax_values[0]}
                             />
                             {showTaxDropdown === 1 && (
-                              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-64 overflow-y-auto">
                                 {(() => {
                                   console.log(
                                     "=== Tax Dropdown #1 Rendered ===",
@@ -4047,72 +4446,38 @@ const handleSelectLogo = (index) => {
                                   );
                                   return null;
                                 })()}
-                                {allTaxTypes.length > 0 ? (
-                                  <>
-                                    {allTaxTypes.map((tax, idx) => {
-                                      console.log(`Rendering tax ${idx}:`, tax);
-                                      return (
-                                        <div
-                                          key={idx}
-                                          className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left text-sm"
-                                          onClick={() => {
-                                            console.log("Tax clicked:", tax);
-                                            addTaxType(tax);
-                                            setShowTaxDropdown(false);
-                                          }}
-                                        >
-                                          {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
-                                        </div>
-                                      );
-                                    })}
-                                    <div className="border-t border-gray-200 mt-1">
-                                      <div
-                                        className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left text-sm text-blue-600 font-medium"
-                                        onClick={() => {
-                                          console.log(
-                                            "=== Manage Tax Types clicked ===",
-                                          );
-                                          console.log("Current step:", step);
-                                          setShowTaxDropdown(false);
-                                          setShowManageTaxModal(true);
-                                          console.log("Modal should open now");
-                                        }}
-                                      >
-                                        <Plus
-                                          size={14}
-                                          className="inline mr-1"
-                                        />
-                                        Manage Tax Types
+                                <>
+                                    <div
+                                      className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left text-sm text-blue-600 font-medium flex items-center gap-1 border-b border-gray-200"
+                                      onClick={() => {
+                                        setShowTaxDropdown(false);
+                                        setShowManageTaxModal(true);
+                                      }}
+                                    >
+                                      <Plus size={14} className="inline" />
+                                      Manage Tax Types
+                                    </div>
+                                    {allTaxTypes.length > 0 ? (
+                                      allTaxTypes.map((tax, idx) => {
+                                        return (
+                                          <div
+                                            key={idx}
+                                            className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left text-sm"
+                                            onClick={() => {
+                                              addTaxType(tax);
+                                              setShowTaxDropdown(false);
+                                            }}
+                                          >
+                                            {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
+                                          </div>
+                                        );
+                                      })
+                                    ) : (
+                                      <div className="px-3 py-2 text-gray-500 text-sm">
+                                        No tax types available
                                       </div>
-                                    </div>
+                                    )}
                                   </>
-                                ) : (
-                                  <>
-                                    <div className="px-3 py-2 text-gray-500 text-sm">
-                                      No tax types available
-                                    </div>
-                                    <div className="border-t border-gray-200 mt-1">
-                                      <div
-                                        className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left text-sm text-blue-600 font-medium"
-                                        onClick={() => {
-                                          console.log(
-                                            "=== Manage Tax Types clicked ===",
-                                          );
-                                          console.log("Current step:", step);
-                                          setShowTaxDropdown(false);
-                                          setShowManageTaxModal(true);
-                                          console.log("Modal should open now");
-                                        }}
-                                      >
-                                        <Plus
-                                          size={14}
-                                          className="inline mr-1"
-                                        />
-                                        Manage Tax Types
-                                      </div>
-                                    </div>
-                                  </>
-                                )}
                               </div>
                             )}
                           </div>
@@ -4171,7 +4536,7 @@ const handleSelectLogo = (index) => {
                               readOnly={!formData.receipt_tax_values[1]}
                             />
                             {showTaxDropdown === 2 && (
-                              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-64 overflow-y-auto">
                                 {(() => {
                                   console.log(
                                     "=== Tax Dropdown #2 Rendered ===",
@@ -4183,72 +4548,38 @@ const handleSelectLogo = (index) => {
                                   );
                                   return null;
                                 })()}
-                                {allTaxTypes.length > 0 ? (
-                                  <>
-                                    {allTaxTypes.map((tax, idx) => {
-                                      console.log(`Rendering tax ${idx}:`, tax);
-                                      return (
-                                        <div
-                                          key={idx}
-                                          className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left text-sm"
-                                          onClick={() => {
-                                            console.log("Tax clicked:", tax);
-                                            addTaxType(tax);
-                                            setShowTaxDropdown(false);
-                                          }}
-                                        >
-                                          {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
-                                        </div>
-                                      );
-                                    })}
-                                    <div className="border-t border-gray-200 mt-1">
-                                      <div
-                                        className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left text-sm text-blue-600 font-medium"
-                                        onClick={() => {
-                                          console.log(
-                                            "=== Manage Tax Types clicked ===",
-                                          );
-                                          console.log("Current step:", step);
-                                          setShowTaxDropdown(false);
-                                          setShowManageTaxModal(true);
-                                          console.log("Modal should open now");
-                                        }}
-                                      >
-                                        <Plus
-                                          size={14}
-                                          className="inline mr-1"
-                                        />
-                                        Manage Tax Types
+                                <>
+                                    <div
+                                      className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left text-sm text-blue-600 font-medium flex items-center gap-1 border-b border-gray-200"
+                                      onClick={() => {
+                                        setShowTaxDropdown(false);
+                                        setShowManageTaxModal(true);
+                                      }}
+                                    >
+                                      <Plus size={14} className="inline" />
+                                      Manage Tax Types
+                                    </div>
+                                    {allTaxTypes.length > 0 ? (
+                                      allTaxTypes.map((tax, idx) => {
+                                        return (
+                                          <div
+                                            key={idx}
+                                            className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left text-sm"
+                                            onClick={() => {
+                                              addTaxType(tax);
+                                              setShowTaxDropdown(false);
+                                            }}
+                                          >
+                                            {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
+                                          </div>
+                                        );
+                                      })
+                                    ) : (
+                                      <div className="px-3 py-2 text-gray-500 text-sm">
+                                        No tax types available
                                       </div>
-                                    </div>
+                                    )}
                                   </>
-                                ) : (
-                                  <>
-                                    <div className="px-3 py-2 text-gray-500 text-sm">
-                                      No tax types available
-                                    </div>
-                                    <div className="border-t border-gray-200 mt-1">
-                                      <div
-                                        className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left text-sm text-blue-600 font-medium"
-                                        onClick={() => {
-                                          console.log(
-                                            "=== Manage Tax Types clicked ===",
-                                          );
-                                          console.log("Current step:", step);
-                                          setShowTaxDropdown(false);
-                                          setShowManageTaxModal(true);
-                                          console.log("Modal should open now");
-                                        }}
-                                      >
-                                        <Plus
-                                          size={14}
-                                          className="inline mr-1"
-                                        />
-                                        Manage Tax Types
-                                      </div>
-                                    </div>
-                                  </>
-                                )}
                               </div>
                             )}
                           </div>
@@ -4284,16 +4615,19 @@ const handleSelectLogo = (index) => {
                         {/* Total */}
                         <div className="mb-4 text-align-left">
                           <label className="font-bold">TOTAL</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            className={inputClass}
-                            value={formData.purchasePrice}
-                            onChange={(e) =>
-                              handleFieldChange("purchasePrice", e.target.value)
-                            }
-                            placeholder="0.00"
-                          />
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none select-none">$</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              className={`${inputClass} pl-7`}
+                              value={formData.purchasePrice}
+                              onChange={(e) =>
+                                handleFieldChange("purchasePrice", e.target.value)
+                              }
+                              placeholder="0.00"
+                            />
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -4422,20 +4756,25 @@ const handleSelectLogo = (index) => {
                         </div>
                       )}
 
-                      {/* Save Button */}
-                      <div className="mt-6 flex justify-end">
-                        <button
-                          type="submit"
-                          disabled={isSaving}
-                          className="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {isSaving ? "Saving..." : "Save Receipt"}
-                        </button>
-                      </div>
+                      {/* Save button is in the sticky footer below */}
                     </div>
                   </form>
                 )}
               </div>
+
+              {/* ── Sticky Save Bar ── only on form step */}
+              {step === "form" && !showSplitScreen && (
+                <div className="flex-shrink-0 border-t border-gray-200 bg-white px-4 sm:px-6 py-3">
+                  <button
+                    type="submit"
+                    form="add-receipt-form"
+                    disabled={isSaving}
+                    className="w-full py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                  >
+                    {isSaving ? "Saving..." : "Save Receipt"}
+                  </button>
+                </div>
+              )}
             </div>
           </motion.div>
         </div>
@@ -4623,6 +4962,194 @@ const handleSelectLogo = (index) => {
         )}
       </AnimatePresence>
 
+      {/* Edit Merchant Modal - Overlay on top of Add Receipt Modal */}
+      <AnimatePresence>
+        {showEditMerchantModal && (
+          <motion.div
+            initial="hidden"
+            animate="visible"
+            exit="hidden"
+            variants={backdropVariants}
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => { if (!isSavingEditMerchant) setShowEditMerchantModal(false); }}
+          >
+            <motion.div
+              variants={modalVariants}
+              className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Saving Overlay */}
+              {isSavingEditMerchant && (
+                <div className="absolute inset-0 z-10 bg-white/80 flex flex-col items-center justify-center rounded-xl">
+                  <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-3" />
+                  <p className="text-sm text-gray-600 font-medium">Updating all receipts…</p>
+                </div>
+              )}
+
+              {/* Modal Header */}
+              <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 bg-white">
+                <h2 className="text-xl font-bold text-gray-900">Edit Merchant</h2>
+                <button
+                  onClick={() => { if (!isSavingEditMerchant) setShowEditMerchantModal(false); }}
+                  className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors"
+                  aria-label="Close"
+                >
+                  <X size={20} className="text-gray-600" />
+                </button>
+              </div>
+
+              {/* Modal Content */}
+              <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+                {/* Merchant Name Field */}
+                <div className="mb-6">
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Merchant Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    className={`${inputClass} w-full`}
+                    value={editMerchantName}
+                    onChange={(e) => {
+                      setEditMerchantName(e.target.value);
+                      setEditLogoOptions([]);
+                      setEditSelectedLogoIndex(null);
+                    }}
+                    placeholder="Enter merchant name"
+                    autoFocus
+                    disabled={isSavingEditMerchant}
+                  />
+                </div>
+
+                {/* Merchant Logo Section */}
+                <div className="mb-6">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-bold text-gray-700">
+                      Merchant Logo
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleFetchEditLogos}
+                      disabled={!editMerchantName.trim() || isFetchingEditLogos || isSavingEditMerchant}
+                      className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isFetchingEditLogos ? "Fetching…" : "Search Logos"}
+                    </button>
+                  </div>
+
+                  {/* Currently selected / existing logo preview */}
+                  {editMerchantLogo && editSelectedLogoIndex === null && (
+                    <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center gap-3">
+                      <p className="text-sm font-medium text-gray-700 flex-shrink-0">Current:</p>
+                      <div className="p-2 border border-gray-300 rounded bg-white flex items-center justify-center min-w-[64px] min-h-[64px]">
+                        <img
+                          src={editMerchantLogo}
+                          alt="Current merchant logo"
+                          className="max-w-full max-h-16 w-auto h-auto object-contain"
+                          style={{ imageRendering: "auto" }}
+                          onError={(e) => { e.target.style.display = "none"; }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Logo Options Grid */}
+                  {isFetchingEditLogos && (
+                    <div className="text-center py-8 text-gray-500">Fetching logo options…</div>
+                  )}
+
+                  {!isFetchingEditLogos && editLogoOptions.length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-sm text-gray-600 mb-3">
+                        Select a logo ({editLogoOptions.length} options found):
+                      </p>
+                      <div className="grid grid-cols-4 sm:grid-cols-6 gap-3 max-h-64 overflow-y-auto border border-gray-200 rounded-lg p-4">
+                        {editLogoOptions.map((logo, index) => (
+                          <div
+                            key={index}
+                            className={`relative cursor-pointer border-2 rounded-lg transition-all flex items-center justify-center p-2 min-h-[80px] ${
+                              editSelectedLogoIndex === index
+                                ? "border-blue-600 ring-2 ring-blue-300"
+                                : "border-gray-200 hover:border-gray-400"
+                            }`}
+                            onClick={() => handleSelectEditLogo(index)}
+                          >
+                            <img
+                              src={logo.displayUrl}
+                              alt={`Logo option ${index + 1}`}
+                              className="max-w-full max-h-16 w-auto h-auto object-contain"
+                              style={{ imageRendering: "auto" }}
+                              onError={(e) => {
+                                if (e.target.src !== logo.storeUrl) {
+                                  e.target.src = logo.storeUrl;
+                                } else {
+                                  e.target.style.display = "none";
+                                  e.target.parentElement.innerHTML =
+                                    '<div class="w-full min-h-[80px] flex items-center justify-center text-xs text-gray-400">Failed to load</div>';
+                                }
+                              }}
+                            />
+                            {editSelectedLogoIndex === index && (
+                              <div className="absolute top-1 right-1 bg-blue-600 rounded-full p-1 z-10">
+                                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Selected Logo Preview (after picking from grid) */}
+                  {editMerchantLogo && editSelectedLogoIndex !== null && (
+                    <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center gap-3">
+                      <p className="text-sm font-medium text-gray-700 flex-shrink-0">Selected:</p>
+                      <div className="p-2 border border-gray-300 rounded bg-white flex items-center justify-center min-w-[64px] min-h-[64px]">
+                        <img
+                          src={editMerchantLogo}
+                          alt="Selected merchant logo"
+                          className="max-w-full max-h-16 w-auto h-auto object-contain"
+                          style={{ imageRendering: "auto" }}
+                          onError={(e) => { e.target.style.display = "none"; }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Error Message */}
+                {editMerchantError && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+                    {editMerchantError}
+                  </div>
+                )}
+
+                {/* Action Buttons */}
+                <div className="flex justify-end gap-3 mt-6">
+                  <button
+                    type="button"
+                    onClick={() => { if (!isSavingEditMerchant) setShowEditMerchantModal(false); }}
+                    disabled={isSavingEditMerchant}
+                    className="px-6 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveEditMerchant}
+                    disabled={!editMerchantName.trim() || isSavingEditMerchant}
+                    className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isSavingEditMerchant ? "Saving…" : "Save Changes"}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Add Merchant Modal - Overlay on top of Add Receipt Modal */}
       <AnimatePresence>
         {showAddMerchantModal && (
@@ -4704,7 +5231,7 @@ const handleSelectLogo = (index) => {
                         Select a logo ({logoOptions.length} options found):
                       </p>
                       <div className="grid grid-cols-4 sm:grid-cols-6 gap-3 max-h-64 overflow-y-auto border border-gray-200 rounded-lg p-4">
-                        {logoOptions.map((logoUrl, index) => (
+                        {logoOptions.map((logo, index) => (
                           <div
                             key={index}
                             className={`relative cursor-pointer border-2 rounded-lg transition-all flex items-center justify-center p-2 min-h-[80px] ${
@@ -4715,14 +5242,19 @@ const handleSelectLogo = (index) => {
                             onClick={() => handleSelectLogo(index)}
                           >
                             <img
-                              src={logoUrl}
+                              src={logo.displayUrl}
                               alt={`Logo option ${index + 1}`}
                               className="max-w-full max-h-16 w-auto h-auto object-contain"
                               style={{ imageRendering: "auto" }}
                               onError={(e) => {
-                                e.target.style.display = "none";
-                                e.target.parentElement.innerHTML =
-                                  '<div class="w-full min-h-[80px] flex items-center justify-center text-xs text-gray-400">Failed to load</div>';
+                                // fallback: try storeUrl if displayUrl failed
+                                if (e.target.src !== logo.storeUrl) {
+                                  e.target.src = logo.storeUrl;
+                                } else {
+                                  e.target.style.display = "none";
+                                  e.target.parentElement.innerHTML =
+                                    '<div class="w-full min-h-[80px] flex items-center justify-center text-xs text-gray-400">Failed to load</div>';
+                                }
                               }}
                             />
                             {selectedLogoIndex === index && (
@@ -4758,27 +5290,16 @@ const handleSelectLogo = (index) => {
 
                   {/* Selected Logo Preview */}
                   {newMerchantLogo && (
-                    <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                      <p className="text-sm font-medium text-gray-700 mb-2">
-                        Selected Logo:
-                      </p>
-                      <div className="flex items-center gap-3">
-                        <div className="flex-shrink-0 p-2 border border-gray-300 rounded bg-white flex items-center justify-center min-w-[80px] min-h-[80px]">
-                          <img
-                            src={newMerchantLogo}
-                            alt="Selected merchant logo"
-                            className="max-w-full max-h-20 w-auto h-auto object-contain"
-                            style={{ imageRendering: "auto" }}
-                            onError={(e) => {
-                              e.target.style.display = "none";
-                            }}
-                          />
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-xs text-gray-600 break-all">
-                            {newMerchantLogo}
-                          </p>
-                        </div>
+                    <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center gap-3">
+                      <p className="text-sm font-medium text-gray-700 flex-shrink-0">Selected:</p>
+                      <div className="p-2 border border-gray-300 rounded bg-white flex items-center justify-center min-w-[64px] min-h-[64px]">
+                        <img
+                          src={newMerchantLogo}
+                          alt="Selected merchant logo"
+                          className="max-w-full max-h-16 w-auto h-auto object-contain"
+                          style={{ imageRendering: "auto" }}
+                          onError={(e) => { e.target.style.display = "none"; }}
+                        />
                       </div>
                     </div>
                   )}
@@ -4871,52 +5392,53 @@ const handleSelectLogo = (index) => {
                 {/* Existing Taxes List */}
                 {allTaxTypes.length > 0 && (
                   <div className="mb-6">
-                    <h3 className="text-sm font-bold text-gray-700 mb-3">
-                      Existing Tax Types
-                    </h3>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-sm font-bold text-gray-700">Existing Tax Types</h3>
+                      <span className="text-xs text-gray-400">★ = Default (max 2)</span>
+                    </div>
                     <div className="space-y-2 max-h-48 overflow-y-auto">
-                      {allTaxTypes.map((tax) => (
-                        <div
-                          key={tax.id || `${tax.tax_name}-${tax.tax_rate}`}
-                          className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200"
-                        >
-                          <div className="flex-1">
-                            <div className="font-medium text-gray-900">
-                              {tax.tax_name}
+                      {allTaxTypes.map((tax) => {
+                        const isDefault = defaultTaxIds.includes(tax.id);
+                        return (
+                          <div
+                            key={tax.id || `${tax.tax_name}-${tax.tax_rate}`}
+                            className={`flex items-center justify-between p-3 rounded-lg border ${isDefault ? "bg-yellow-50 border-yellow-300" : "bg-gray-50 border-gray-200"}`}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-gray-900 flex items-center gap-1">
+                                {isDefault && <span className="text-yellow-500 text-xs">★</span>}
+                                {tax.tax_name}
+                              </div>
+                              <div className="text-sm text-gray-600">
+                                Rate: {formatTaxRate(tax.tax_rate)}%
+                                {tax.tax_number && ` | #${tax.tax_number}`}
+                              </div>
                             </div>
-                            <div className="text-sm text-gray-600">
-                              Rate: {formatTaxRate(tax.tax_rate)}%
-                              {tax.tax_number && ` | Number: ${tax.tax_number}`}
+                            <div className="flex gap-1.5 ml-2 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => toggleDefaultTax(tax.id)}
+                                title={isDefault ? "Remove as default" : "Set as default"}
+                                className={`px-2 py-1 text-xs rounded font-medium transition-colors ${isDefault ? "bg-yellow-400 text-white hover:bg-yellow-500" : "bg-gray-200 text-gray-600 hover:bg-yellow-300"}`}
+                              >
+                                {isDefault ? "★ Default" : "☆ Default"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleEditTax(tax)}
+                                disabled={isSavingTax || isDeletingTax || editingTaxId === tax.id}
+                                className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >Edit</button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteTax(tax.id || 0)}
+                                disabled={isSavingTax || isDeletingTax || editingTaxId !== null}
+                                className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >Delete</button>
                             </div>
                           </div>
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleEditTax(tax)}
-                              disabled={
-                                isSavingTax ||
-                                isDeletingTax ||
-                                editingTaxId === tax.id
-                              }
-                              className="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteTax(tax.id || 0)}
-                              disabled={
-                                isSavingTax ||
-                                isDeletingTax ||
-                                editingTaxId !== null
-                              }
-                              className="px-3 py-1 text-sm bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -4928,48 +5450,74 @@ const handleSelectLogo = (index) => {
                   </h3>
 
                   {/* Tax Name Field */}
-                  <div className="mb-6">
-                    <label className="block text-sm font-bold text-gray-700 mb-2">
-                      Tax Name <span className="text-red-500">*</span>
-                    </label>
+                  <div className="mb-4">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-sm font-bold text-gray-700">
+                        Tax Name <span className="text-red-500">*</span>
+                      </label>
+                      <span className={`text-xs ${newTaxName.length > TAX_NAME_MAX ? "text-red-500 font-semibold" : "text-gray-400"}`}>
+                        {newTaxName.length}/{TAX_NAME_MAX}
+                      </span>
+                    </div>
                     <input
                       type="text"
-                      className={`${inputClass} w-full`}
+                      className={`${inputClass} w-full ${taxNameError ? "border-red-400 focus:border-red-500" : ""}`}
                       value={newTaxName}
                       onChange={(e) => setNewTaxName(e.target.value)}
-                      placeholder="Enter Tax Name"
+                      placeholder="Enter Tax Name (max 15 chars)"
                       autoFocus
                     />
+                    {taxNameError && (
+                      <div className="mt-1 px-3 py-1.5 bg-red-50 border border-red-300 rounded text-red-600 text-xs">
+                        {taxNameError}
+                      </div>
+                    )}
                   </div>
 
                   {/* Tax Rate Field */}
-                  <div className="mb-6">
-                    <label className="block text-sm font-bold text-gray-700 mb-2">
+                  <div className="mb-4">
+                    <label className="block text-sm font-bold text-gray-700 mb-1">
                       Tax Rate (%) <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="number"
-                      step="0.01"
-                      className={`${inputClass} w-full`}
+                      step="0.001"
+                      min="0"
+                      max="99.999"
+                      className={`${inputClass} w-full ${taxRateError ? "border-red-400 focus:border-red-500" : ""}`}
                       value={newTaxRate}
                       onChange={(e) => setNewTaxRate(e.target.value)}
-                      placeholder="Enter Tax Rate (%)"
+                      placeholder="e.g. 13.000 (max 99.999%)"
                     />
+                    {taxRateError && (
+                      <div className="mt-1 px-3 py-1.5 bg-red-50 border border-red-300 rounded text-red-600 text-xs">
+                        {taxRateError}
+                      </div>
+                    )}
                   </div>
 
                   {/* Tax Number Field (Optional) */}
-                  <div className="mb-6">
-                    <label className="block text-sm font-bold text-gray-700 mb-2">
-                      Tax Number{" "}
-                      <span className="text-gray-500 text-xs">(Optional)</span>
-                    </label>
+                  <div className="mb-4">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-sm font-bold text-gray-700">
+                        Tax Number <span className="text-gray-400 text-xs font-normal">(Optional)</span>
+                      </label>
+                      <span className={`text-xs ${newTaxNumber.length > TAX_NUMBER_MAX ? "text-red-500 font-semibold" : "text-gray-400"}`}>
+                        {newTaxNumber.length}/{TAX_NUMBER_MAX}
+                      </span>
+                    </div>
                     <input
                       type="text"
-                      className={`${inputClass} w-full`}
+                      className={`${inputClass} w-full ${taxNumberError ? "border-red-400 focus:border-red-500" : ""}`}
                       value={newTaxNumber}
                       onChange={(e) => setNewTaxNumber(e.target.value)}
-                      placeholder="Enter Tax Number"
+                      placeholder="Enter Tax Number (max 35 chars)"
                     />
+                    {taxNumberError && (
+                      <div className="mt-1 px-3 py-1.5 bg-red-50 border border-red-300 rounded text-red-600 text-xs">
+                        {taxNumberError}
+                      </div>
+                    )}
                   </div>
 
                   {/* Error Message */}
@@ -4994,11 +5542,7 @@ const handleSelectLogo = (index) => {
                         <button
                           type="button"
                           onClick={handleUpdateTax}
-                          disabled={
-                            !newTaxName.trim() ||
-                            !newTaxRate.trim() ||
-                            isSavingTax
-                          }
+                          disabled={!newTaxName.trim() || !newTaxRate.trim() || isSavingTax || taxFormHasError}
                           className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
                           {isSavingTax ? "Updating..." : "Update"}
@@ -5026,11 +5570,7 @@ const handleSelectLogo = (index) => {
                         <button
                           type="button"
                           onClick={handleAddTaxType}
-                          disabled={
-                            !newTaxName.trim() ||
-                            !newTaxRate.trim() ||
-                            isSavingTax
-                          }
+                          disabled={!newTaxName.trim() || !newTaxRate.trim() || isSavingTax || taxFormHasError}
                           className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
                           {isSavingTax ? "Saving..." : "Save"}

@@ -1149,7 +1149,7 @@ export async function xeroConnect(req, res) {
 export async function xeroCallback(req, res) {
   if (!ensureEnv(["XERO_CLIENT_ID", "XERO_CLIENT_SECRET", "XERO_REDIRECT_URI"], res, "Xero")) return;
   try {
-    const client = getXeroClient();
+    const client = getXeroClient(); 
     const tokenSet = await client.apiCallback(req.url);
     await client.updateTenants();
     xeroTokenSet.tokenSet = tokenSet;
@@ -1164,7 +1164,7 @@ export async function xeroCallback(req, res) {
     }
     const redirectUrl = `${frontendUrl}/?${searchParams.toString()}`;
     return res.redirect(redirectUrl);
-  } catch (err) {
+  } catch (err) { 
     console.error("Xero callback error", err);
     const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
     return res.redirect(`${frontendUrl}/?xero=error`);

@@ -60,12 +60,19 @@ export const formatCurrencyFixed2 = (amount, currency = "USD", language = "en-US
   }
 };
 
+// Format a tax rate with up to 3 decimal places, stripping trailing zeros.
+// Examples: 9.980 → "9.98", 6.700 → "6.7", 5.000 → "5", 9.905 → "9.905"
+export const formatTaxRate = (rate) => {
+  const num = parseFloat(String(rate ?? "").replace(/%/g, ""));
+  if (isNaN(num)) return "0";
+  return parseFloat(num.toFixed(3)).toString();
+};
+
 export const toTaxLabel = (tax) => {
   const name = tax?.tax_name?.toString().trim() || "Unknown";
   if (name.toLowerCase().startsWith("tip")) return "Tip";
-  const val = tax?.tax_rate != null 
-    ? parseFloat(String(tax.tax_rate).replace(/%/g, "")) 
+  const val = tax?.tax_rate != null
+    ? parseFloat(String(tax.tax_rate).replace(/%/g, ""))
     : 0;
-  const rounded = Math.round(isNaN(val) ? 0 : val);
-  return `${name} | ${rounded}%`;
+  return `${name} | ${formatTaxRate(isNaN(val) ? 0 : val)}%`;
 };

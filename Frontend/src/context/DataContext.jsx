@@ -310,6 +310,9 @@ export const DataProvider = ({ children }) => {
         const dateTimeStamp = Date.now();
         const taxRes = await fetch(`${BASE_URL}/tax/getTax?date_time_stamp=${dateTimeStamp}`, {
           headers: {
+            // Use both header styles so the API works regardless of how the
+            // backend authenticates (Accesstoken for PHP, Bearer for Node.js)
+            Accesstoken: token,
             Authorization: `Bearer ${token}`,
           },
         });
@@ -363,14 +366,12 @@ export const DataProvider = ({ children }) => {
             })
             .filter((r) => {
               // Check if receipt has at least some meaningful data
-              const hasStoreName =
-                r.storeName &&
-                r.storeName.toString().trim() !== "" &&
-                r.storeName !== "0";
+              // Accept both camelCase (web) and snake_case (Android) field names
+              const sn = r.storeName ?? r.store_name ?? "";
+              const hasStoreName = sn && sn.toString().trim() !== "" && sn !== "0";
+              const pn = r.product_name ?? r.productName ?? "";
               const hasProductName =
-                r.product_name &&
-                r.product_name.toString().trim() !== "" &&
-                r.product_name !== "0";
+                pn && pn.toString().trim() !== "" && pn !== "0";
               const hasPurchasePrice =
                 r.purchasePrice && parseFloat(r.purchasePrice) > 0;
               const hasReceiptImage =
@@ -427,10 +428,21 @@ export const DataProvider = ({ children }) => {
               return true;
             })
             .map((r) => {
-              // Normalize payment fields from API (support both snake_case and camelCase so Vercel/production works)
+              // Normalize ALL fields from API (support both snake_case and camelCase
+              // so Android-created accounts sync correctly to the web Desktop version)
               let paymentType = r.paymentType ?? r.payment_type ?? "";
               const cardIssuerName = r.card_issuer_name ?? r.cardIssuerName ?? "";
               const last4DigitCard = r.last_4_digit_card ?? r.last4DigitCard ?? "";
+              // Normalize merchant / category / tax fields – Android may use camelCase
+              const storeName = r.storeName ?? r.store_name ?? "";
+              const storeImage = r.store_image ?? r.storeImage ?? "";
+              const expenseType = r.expense_type ?? r.expenseType ?? "";
+              const productName = r.product_name ?? r.productName ?? "";
+              // receipt_tax_values: Android may send receiptTaxValues
+              const receiptTaxValues =
+                Array.isArray(r.receipt_tax_values) ? r.receipt_tax_values
+                : Array.isArray(r.receiptTaxValues)  ? r.receiptTaxValues
+                : [];
               
               // IMPORTANT: Keep paymentType as-is from API (e.g., "MasterCard *7836")
               // The getPaymentLogo function will extract the card type from paymentType for logo detection
@@ -438,6 +450,13 @@ export const DataProvider = ({ children }) => {
               
               const normalized = {
                 ...r,
+                // Overwrite with normalised values so downstream code can use
+                // a single field name regardless of API variant (web vs Android)
+                storeName,
+                store_image: storeImage,
+                expense_type: expenseType,
+                product_name: productName,
+                receipt_tax_values: receiptTaxValues,
                 paymentType: paymentType, // Keep paymentType as-is (e.g., "MasterCard *7836") - needed for logo detection
                 card_issuer_name: cardIssuerName,
                 last_4_digit_card: last4DigitCard,
@@ -484,8 +503,12 @@ export const DataProvider = ({ children }) => {
 
 
       setMerchants([
+        "Miscellaneous", // always present — cannot be removed
         ...new Set(
-          receiptsWithIntegrations.map((r) => r.storeName).filter(Boolean)
+          receiptsWithIntegrations
+            .map((r) => r.storeName)
+            .filter(Boolean)
+            .filter((n) => n.toLowerCase().trim() !== "miscellaneous")
         ),
       ]);
       setStoreImage([
@@ -513,7 +536,16 @@ receiptsWithIntegrations.forEach((r) => {
     }
   }
 });
-setMerchantsWithImages(Array.from(merchantsWithImagesMap.values()));
+// "Miscellaneous" is always present, pinned at the top
+if (!merchantsWithImagesMap.has("miscellaneous")) {
+  merchantsWithImagesMap.set("miscellaneous", { name: "Miscellaneous", image: "" });
+}
+setMerchantsWithImages([
+  { name: "Miscellaneous", image: "" },
+  ...Array.from(merchantsWithImagesMap.values()).filter(
+    (m) => m.name.toLowerCase().trim() !== "miscellaneous"
+  ),
+]);
 
       // Extract unique payment methods from receipts
       setPaymentMethods(buildPaymentMethods(receiptsWithIntegrations));
@@ -713,7 +745,7 @@ setMerchantsWithImages(Array.from(merchantsWithImagesMap.values()));
   const clearAllData = () => {
     setUser(null);
     setReceipts([]);
-    setMerchants([]);
+    setMerchants(["Miscellaneous"]);
     setExpenseCategories([]);
     setStoreNames([]);
     setPaymentMethods([]);
@@ -726,7 +758,7 @@ setMerchantsWithImages(Array.from(merchantsWithImagesMap.values()));
     setTaxData([]);
     setStoreImage([]);
     setPurchasePrice([]);
-    setMerchantsWithImages([]);
+    setMerchantsWithImages([{ name: "Miscellaneous", image: "" }]);
     setDataContent(null);
     // Note: Don't clear taxes here - they should persist
   };

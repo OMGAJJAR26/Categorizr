@@ -336,6 +336,7 @@ const HomePage = () => {
     // Use silentRefreshData so the receipt list stays visible while re-fetching.
     // A 1.5s delay gives the server time to commit the new receipt before we re-query.
     silentRefreshData(1500);
+    setToast({ isVisible: true, message: "Saved successfully!", type: "success" });
   };
 
   const handleDeleteClick = (receipt) => {
@@ -984,6 +985,7 @@ const HomePage = () => {
                                 setSelectedIndex={setSelectedIndex}
                                 onSelectReceipt={handleReceiptClick}
                                 onClose={handleCloseReceiptDetail}
+                                onSaved={() => setToast({ isVisible: true, message: "Receipt updated!", type: "success" })}
                               />
                             </>
                           )}

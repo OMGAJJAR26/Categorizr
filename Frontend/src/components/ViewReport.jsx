@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useCurrency } from "../context/CurrencyContext";
 import { usePaymentDisplay } from "../hooks/usePaymentDisplay";
+import { formatTaxRate } from "../utils/receiptFormatters";
 
 const ViewReport = ({ receipt, onClose }) => {
   const { currency, language } = useCurrency();
@@ -100,8 +101,7 @@ const ViewReport = ({ receipt, onClose }) => {
         t?.tax_rate !== undefined && t?.tax_rate !== null
           ? parseFloat(String(t.tax_rate).replace(/%/g, ""))
           : 0;
-      const rounded = Math.round(isNaN(rateNum) ? 0 : rateNum);
-      const rateStr = `${rounded}%`;
+      const rateStr = `${formatTaxRate(isNaN(rateNum) ? 0 : rateNum)}%`;
       const amt = Number(t?.tax_amount) || 0;
       const name = (t?.tax_name || "Tax").toString();
       return `

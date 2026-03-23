@@ -90,20 +90,24 @@ const ReceiptsTable = ({
 
         <div className="flex items-center gap-2 text-gray-900 font-medium">
           {(() => {
+            const paymentDisplay = getPaymentDisplay(receipt);
+            const hasPayment = paymentDisplay && paymentDisplay !== "-" && paymentDisplay !== "—";
+            if (!hasPayment) return null;
             const logo = getPaymentLogo(receipt);
-            return logo ? (
-              <img
-                src={logo}
-                alt="Payment logo"
-                className="w-5 h-5 xl:w-6 xl:h-6 object-contain flex-shrink-0"
-                onError={(e) => {
-                  // Fallback if image fails to load
-                  e.target.style.display = 'none';
-                }}
-              />
-            ) : null;
+            return (
+              <>
+                {logo && (
+                  <img
+                    src={logo}
+                    alt="Payment logo"
+                    className="w-5 h-5 xl:w-6 xl:h-6 object-contain flex-shrink-0"
+                    onError={(e) => { e.target.style.display = 'none'; }}
+                  />
+                )}
+                <span className="text-sm xl:text-base truncate">{paymentDisplay}</span>
+              </>
+            );
           })()}
-          <span className="text-sm xl:text-base truncate">{getPaymentDisplay(receipt)}</span>
         </div>
 
         <div className={`text-right font-bold text-sm xl:text-base ${getTotalColor()}`}>
@@ -246,26 +250,28 @@ const ReceiptsTable = ({
             <span className="text-gray-500 text-xs uppercase">Category</span>
             <div className="font-medium truncate">{receipt.expense_type || "—"}</div>
           </div>
-          <div>
-            <span className="text-gray-500 text-xs uppercase">Payment</span>
-            <div className="flex items-center gap-1 font-medium">
-              {(() => {
-                const logo = getPaymentLogo(receipt);
-                return logo ? (
-                  <img
-                    src={logo}
-                    alt="Payment logo"
-                    className="w-4 h-4 object-contain"
-                    onError={(e) => {
-                      // Fallback if image fails to load
-                      e.target.style.display = 'none';
-                    }}
-                  />
-                ) : null;
-              })()}
-              <span className="truncate">{getPaymentDisplay(receipt)}</span>
-            </div>
-          </div>
+          {(() => {
+            const paymentDisplay = getPaymentDisplay(receipt);
+            const hasPayment = paymentDisplay && paymentDisplay !== "-" && paymentDisplay !== "—";
+            if (!hasPayment) return null;
+            const logo = getPaymentLogo(receipt);
+            return (
+              <div>
+                <span className="text-gray-500 text-xs uppercase">Payment</span>
+                <div className="flex items-center gap-1 font-medium">
+                  {logo && (
+                    <img
+                      src={logo}
+                      alt="Payment logo"
+                      className="w-4 h-4 object-contain"
+                      onError={(e) => { e.target.style.display = 'none'; }}
+                    />
+                  )}
+                  <span className="truncate">{paymentDisplay}</span>
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         <div className="flex justify-between items-center">

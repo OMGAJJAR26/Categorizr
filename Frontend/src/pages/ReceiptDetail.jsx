@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
-import { NODE_API_URL, proxyImageUrl } from "../api/Axios";
+import { NODE_API_URL } from "../api/Axios";
 import { formatTaxRate } from "../utils/receiptFormatters";
-import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus,} from "lucide-react";
+import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal,} from "lucide-react";
 import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationDialog";
 import "../App.css";
 import Visa from "../assets/payment/Visa.png";
@@ -106,6 +106,7 @@ import JSZip from "jszip";
 const ReceiptDetail = ({
   receipt,
   onClose,
+  onSaved,
   receiptList,
   setSelectedIndex,
   onDeleteReceipt,
@@ -140,6 +141,10 @@ const ReceiptDetail = ({
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [showPaymentDropdown, setShowPaymentDropdown] = useState(false);
   const [showTaxDropdown, setShowTaxDropdown] = useState(null);
+  // Track active typing so we can show all options on focus/click
+  const [isMerchantTyping, setIsMerchantTyping] = useState(false);
+  const [isCategoryTyping, setIsCategoryTyping] = useState(false);
+  const [isPaymentTyping, setIsPaymentTyping] = useState(false);
 
   // Add Expense Category inline state
   const [showAddCategoryInput, setShowAddCategoryInput] = useState(false);
@@ -163,6 +168,27 @@ const ReceiptDetail = ({
   const [isFetchingLogos, setIsFetchingLogos] = useState(false);
   const [localMerchants, setLocalMerchants] = useState([]);
 
+  // Edit Merchant modal state
+  const [showEditMerchantModal, setShowEditMerchantModal] = useState(false);
+  const [editingMerchant, setEditingMerchant] = useState(null);
+  const [editMerchantName, setEditMerchantName] = useState("");
+  const [editMerchantLogo, setEditMerchantLogo] = useState("");
+  const [editLogoOptions, setEditLogoOptions] = useState([]);
+  const [editSelectedLogoIndex, setEditSelectedLogoIndex] = useState(null);
+  const [isFetchingEditLogos, setIsFetchingEditLogos] = useState(false);
+  const [isSavingEditMerchant, setIsSavingEditMerchant] = useState(false);
+  const [editMerchantError, setEditMerchantError] = useState(null);
+
+  // Edit/Delete Expense Category state
+  const [showEditCategoryModal, setShowEditCategoryModal] = useState(false);
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [editCategoryName, setEditCategoryName] = useState("");
+  const [isSavingEditCategory, setIsSavingEditCategory] = useState(false);
+  const [editCategoryError, setEditCategoryError] = useState(null);
+  const [showDeleteCategoryConfirm, setShowDeleteCategoryConfirm] = useState(false);
+  const [deletingCategory, setDeletingCategory] = useState(null);
+  const [isDeletingCategory, setIsDeletingCategory] = useState(false);
+
   // Manage Tax Types modal state
   const [showManageTaxModal, setShowManageTaxModal] = useState(false);
   const [newTaxName, setNewTaxName] = useState("");
@@ -173,10 +199,20 @@ const ReceiptDetail = ({
   const [isDeletingTax, setIsDeletingTax] = useState(false);
   const [taxRefreshKey, setTaxRefreshKey] = useState(0);
 
+  // ── Split feature ─────────────────────────────────────────────────────────
+  const [showSplitScreen, setShowSplitScreen] = useState(false);
+  const [activeSplitIndex, setActiveSplitIndex] = useState(null);
+  const [splits, setSplits] = useState([]);
+  const [isSavingSplits, setIsSavingSplits] = useState(false);
+  const [splitErrors, setSplitErrors] = useState({});
+  const [splitError, setSplitError] = useState(null);
+  const [showOptionsMenu, setShowOptionsMenu] = useState(false);
+
   // Refs for dropdowns
   const merchantInputRef = useRef(null);
   const categoryInputRef = useRef(null);
   const paymentInputRef = useRef(null);
+  const optionsMenuRef = useRef(null);
 
   // Editable tags state
   const [editedTags, setEditedTags] = useState({
@@ -548,7 +584,7 @@ useEffect(() => {
         product_name: selectedReceipt.product_name || "",
         notes: selectedReceipt.notes || "",
         receipt_tax_values: nonTipTaxValues,
-        tip: tipEntry ? tipEntry.tax_amount : 0,
+        tip: tipEntry ? tipEntry.tax_amount : "0.00",
         store_image: selectedReceipt.store_image || "",
       });
 
@@ -605,7 +641,7 @@ useEffect(() => {
         setLogoOptions(logos);
         if (logos.length > 0) {
           setSelectedLogoIndex(0);
-          setNewMerchantLogo(logos[0]);
+          setNewMerchantLogo(logos[0].storeUrl);
         } else {
           setSelectedLogoIndex(null);
           setNewMerchantLogo("");
@@ -616,52 +652,50 @@ useEffect(() => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newMerchantName, showAddMerchantModal]);
 
-  // Filter functions for dropdowns - show all when empty, filter when typing
+  // Filter functions — show ALL options when dropdown is opened via focus/click (not typing).
+  // Only filter when the user is actively typing in the field.
+  const sortMerchantsAlpha = (list) => {
+    const misc = list.filter(m => m.name?.toLowerCase().trim() === "miscellaneous");
+    const rest = list
+      .filter(m => m.name?.toLowerCase().trim() !== "miscellaneous")
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    return [...misc, ...rest];
+  };
+
   const filteredMerchants = React.useMemo(() => {
+    if (!isMerchantTyping) return sortMerchantsAlpha(allMerchantsWithImages);
     const searchTerm = (editedReceipt.storeName || "").toLowerCase().trim();
-    if (!searchTerm) {
-      return allMerchantsWithImages.slice(0, 20); // Limit to first 20 when empty
-    }
-    return allMerchantsWithImages.filter((m) =>
+    if (!searchTerm) return sortMerchantsAlpha(allMerchantsWithImages);
+    return sortMerchantsAlpha(allMerchantsWithImages.filter((m) =>
       m.name?.toLowerCase().includes(searchTerm)
-    );
-  }, [allMerchantsWithImages, editedReceipt.storeName]);
+    ));
+  }, [allMerchantsWithImages, editedReceipt.storeName, isMerchantTyping]);
 
   const filteredCategories = React.useMemo(() => {
+    if (!isCategoryTyping) return allExpenseCategories; // show all on open
     const searchTerm = (editedReceipt.expense_type || "").toLowerCase().trim();
-    if (!searchTerm) {
-      return allExpenseCategories; // Show all when empty
-    }
+    if (!searchTerm) return allExpenseCategories;
     return allExpenseCategories.filter((c) =>
       c.toLowerCase().includes(searchTerm)
     );
-  }, [allExpenseCategories, editedReceipt.expense_type]);
+  }, [allExpenseCategories, editedReceipt.expense_type, isCategoryTyping]);
 
-  // Filter payment methods - show all options always, filter matches first
   const filteredPaymentMethods = React.useMemo(() => {
-    // Use card_issuer_name for filtering since paymentType is the card type for logo detection
+    if (!isPaymentTyping) return allPaymentMethods; // show all on open
     const searchTerm = (
-      editedReceipt.card_issuer_name ||
-      editedReceipt.paymentType ||
-      ""
-    )
-      .toLowerCase()
-      .trim();
-    if (!searchTerm) {
-      return allPaymentMethods; // Show all when empty
-    }
-    // Check if searchTerm contains any of the methods (e.g., "Mastercard *7110" contains "master")
-    // or if any method contains the search term
+      editedReceipt.card_issuer_name || editedReceipt.paymentType || ""
+    ).toLowerCase().trim();
+    if (!searchTerm) return allPaymentMethods;
     const matches = allPaymentMethods.filter((p) => {
       const pLower = p.toLowerCase();
       return pLower.includes(searchTerm) || searchTerm.includes(pLower);
     });
-    // If we have matches, show them; otherwise show all options
     return matches.length > 0 ? matches : allPaymentMethods;
   }, [
     allPaymentMethods,
     editedReceipt.card_issuer_name,
     editedReceipt.paymentType,
+    isPaymentTyping,
   ]);
 
   // Toggle tag
@@ -1171,15 +1205,21 @@ const handleDeleteTaxType = async (taxId) => {
           return urlMatch ? [urlMatch[1]] : [];
         }
       }
-      const logoUrls = [];
+      // Each entry: { displayUrl (thumb – direct load), storeUrl (full – stored in DB) }
+      const logoEntries = [];
+      const isValidHttpUrl = (u) => u && /^https?:\/\//i.test(u);
       // Handle array of objects (primary API format: [{fullurl, thumburl, ...}])
       if (Array.isArray(data) && data.length > 0) {
         for (const item of data) {
           if (item && typeof item === "object") {
-            const url = item.fullurl || item.url || item.image || item.src || item.link || item.thumburl;
-            if (url && /^https?:\/\//i.test(url)) logoUrls.push(proxyImageUrl(url));
-          } else if (typeof item === "string" && /^https?:\/\//i.test(item)) {
-            logoUrls.push(proxyImageUrl(item));
+            const fullUrl = item.fullurl || item.url || item.image || item.src || item.link;
+            const thumbUrl = item.thumburl || fullUrl;
+            const storeUrl = fullUrl || thumbUrl;
+            if (isValidHttpUrl(storeUrl)) {
+              logoEntries.push({ displayUrl: isValidHttpUrl(thumbUrl) ? thumbUrl : storeUrl, storeUrl });
+            }
+          } else if (typeof item === "string" && isValidHttpUrl(item)) {
+            logoEntries.push({ displayUrl: item, storeUrl: item });
           }
         }
       }
@@ -1189,15 +1229,18 @@ const handleDeleteTaxType = async (taxId) => {
         if (Array.isArray(arr)) {
           for (const item of arr) {
             if (item && typeof item === "object") {
-              const url = item.fullurl || item.url || item.image || item.src || item.link;
-              if (url && /^https?:\/\//i.test(url)) logoUrls.push(proxyImageUrl(url));
+              const fullUrl = item.fullurl || item.url || item.image || item.src || item.link;
+              const thumbUrl = item.thumburl || fullUrl;
+              if (isValidHttpUrl(fullUrl)) {
+                logoEntries.push({ displayUrl: isValidHttpUrl(thumbUrl) ? thumbUrl : fullUrl, storeUrl: fullUrl });
+              }
             }
           }
         }
         const directUrl = data.url || data.image || data.src || data.link || data.fullurl;
-        if (directUrl && /^https?:\/\//i.test(directUrl)) logoUrls.push(proxyImageUrl(directUrl));
+        if (isValidHttpUrl(directUrl)) logoEntries.push({ displayUrl: directUrl, storeUrl: directUrl });
       }
-      return logoUrls.slice(0, 12);
+      return logoEntries;
     } catch {
       return [];
     } finally {
@@ -1224,7 +1267,7 @@ const handleDeleteTaxType = async (taxId) => {
 
   const handleSelectMerchantLogo = (index) => {
     setSelectedLogoIndex(index);
-    setNewMerchantLogo(logoOptions[index]);
+    setNewMerchantLogo(logoOptions[index]?.storeUrl || "");
   };
 
   const handleFetchMerchantLogos = async () => {
@@ -1233,7 +1276,7 @@ const handleDeleteTaxType = async (taxId) => {
     setLogoOptions(logos);
     if (logos.length > 0) {
       setSelectedLogoIndex(0);
-      setNewMerchantLogo(logos[0]);
+      setNewMerchantLogo(logos[0].storeUrl);
     } else {
       setSelectedLogoIndex(null);
       setNewMerchantLogo("");
@@ -1252,6 +1295,421 @@ const handleDeleteTaxType = async (taxId) => {
     handleCloseAddMerchantModal();
     setToast({ isVisible: true, message: "Merchant added successfully!", type: "success" });
   };
+
+  // ── Edit Merchant handlers ────────────────────────────────────────────────
+  const handleOpenEditMerchant = (merchant) => {
+    setEditingMerchant(merchant);
+    setEditMerchantName(merchant.name);
+    setEditMerchantLogo(merchant.image || "");
+    setEditLogoOptions([]);
+    setEditSelectedLogoIndex(null);
+    setEditMerchantError(null);
+    setShowEditMerchantModal(true);
+  };
+
+  const handleFetchEditLogos = async () => {
+    if (!editMerchantName.trim()) return;
+    setIsFetchingEditLogos(true);
+    try {
+      const logos = await fetchMerchantLogos(editMerchantName.trim());
+      setEditLogoOptions(logos);
+    } catch {
+      // silent
+    } finally {
+      setIsFetchingEditLogos(false);
+    }
+  };
+
+  const handleSelectEditLogo = (index) => {
+    setEditSelectedLogoIndex(index);
+    setEditMerchantLogo(editLogoOptions[index]?.storeUrl || "");
+  };
+
+  /** Rename + update logo for ALL receipts using this merchant, then refresh. */
+  const handleSaveEditMerchant = async () => {
+    if (!editMerchantName.trim()) {
+      setEditMerchantError("Merchant name is required.");
+      return;
+    }
+    setIsSavingEditMerchant(true);
+    setEditMerchantError(null);
+    const oldName = editingMerchant.name;
+    const newName = editMerchantName.trim();
+    const newLogo = editMerchantLogo || editingMerchant.image || "";
+    try {
+      const affected = (receipts || []).filter(
+        (r) => (r.storeName || r.store_name || "").toLowerCase() === oldName.toLowerCase()
+      );
+      for (const r of affected) {
+        await updateReceipt(r.id, { storeName: newName, store_image: newLogo });
+      }
+      setLocalMerchants((prev) =>
+        prev.map((m) =>
+          m.name.toLowerCase() === oldName.toLowerCase()
+            ? { ...m, name: newName, image: newLogo }
+            : m
+        )
+      );
+      // Update the currently viewed receipt's store fields if affected
+      if ((editedReceipt.storeName || "").toLowerCase() === oldName.toLowerCase()) {
+        handleFieldChange("storeName", newName);
+        handleFieldChange("store_image", newLogo);
+      }
+      setShowEditMerchantModal(false);
+      setEditingMerchant(null);
+      await refreshData();
+      setToast({ isVisible: true, message: "Merchant updated successfully!", type: "success" });
+    } catch (err) {
+      setEditMerchantError(err.message || "Failed to update merchant.");
+    } finally {
+      setIsSavingEditMerchant(false);
+    }
+  };
+
+  /** Move all receipts of this merchant to "Miscellaneous". */
+  const handleDeleteMerchant = async (merchant) => {
+    if (merchant.name.toLowerCase() === "miscellaneous") return;
+    if (!window.confirm(`Delete "${merchant.name}"?\n\nAll receipts with this merchant will be changed to "Miscellaneous".`)) return;
+    setIsSavingEditMerchant(true);
+    try {
+      const affected = (receipts || []).filter(
+        (r) => (r.storeName || r.store_name || "").toLowerCase() === merchant.name.toLowerCase()
+      );
+      for (const r of affected) {
+        await updateReceipt(r.id, { storeName: "Miscellaneous", store_image: "" });
+      }
+      setLocalMerchants((prev) =>
+        prev.filter((m) => m.name.toLowerCase() !== merchant.name.toLowerCase())
+      );
+      if ((editedReceipt.storeName || "").toLowerCase() === merchant.name.toLowerCase()) {
+        handleFieldChange("storeName", "Miscellaneous");
+        handleFieldChange("store_image", "");
+      }
+      await refreshData();
+      setToast({ isVisible: true, message: "Merchant deleted successfully!", type: "success" });
+    } catch (err) {
+      setToast({ isVisible: true, message: err.message || "Failed to delete merchant.", type: "error" });
+    } finally {
+      setIsSavingEditMerchant(false);
+    }
+  };
+
+  // ── Expense Category edit/delete helpers ────────────────────────────────
+
+  const handleOpenEditCategory = (category) => {
+    setEditingCategory(category);
+    setEditCategoryName(category);
+    setEditCategoryError(null);
+    setShowEditCategoryModal(true);
+    setShowCategoryDropdown(false);
+  };
+
+  const handleSaveEditCategory = async () => {
+    const newName = editCategoryName.trim();
+    if (!newName) { setEditCategoryError("Category name is required."); return; }
+    setIsSavingEditCategory(true);
+    setEditCategoryError(null);
+    const oldName = editingCategory;
+    try {
+      const affected = (receipts || []).filter(
+        (r) => (r.expense_type || "").toLowerCase() === oldName.toLowerCase()
+      );
+      for (const r of affected) {
+        await updateReceipt(r.id, { expense_type: newName });
+      }
+      addExpenseCategory(newName);
+      if ((editedReceipt.expense_type || "").toLowerCase() === oldName.toLowerCase()) {
+        handleFieldChange("expense_type", newName);
+      }
+      setShowEditCategoryModal(false);
+      setEditingCategory(null);
+      await refreshData();
+      setToast({ isVisible: true, message: "Expense category updated successfully!", type: "success" });
+    } catch (err) {
+      setEditCategoryError(err.message || "Failed to update category.");
+    } finally {
+      setIsSavingEditCategory(false);
+    }
+  };
+
+  const handleConfirmDeleteCategory = async () => {
+    if (!deletingCategory) return;
+    setIsDeletingCategory(true);
+    try {
+      const affected = (receipts || []).filter(
+        (r) => (r.expense_type || "").toLowerCase() === deletingCategory.toLowerCase()
+      );
+      for (const r of affected) {
+        await updateReceipt(r.id, { expense_type: "" });
+      }
+      if ((editedReceipt.expense_type || "").toLowerCase() === deletingCategory.toLowerCase()) {
+        handleFieldChange("expense_type", "");
+      }
+      setShowDeleteCategoryConfirm(false);
+      setDeletingCategory(null);
+      await refreshData();
+      setToast({ isVisible: true, message: "Expense category deleted successfully!", type: "success" });
+    } catch (err) {
+      setToast({ isVisible: true, message: err.message || "Failed to delete category.", type: "error" });
+    } finally {
+      setIsDeletingCategory(false);
+    }
+  };
+
+  // ── Split helpers ─────────────────────────────────────────────────────────
+
+  /** POST a new receipt payload to addReceiptv1 */
+  const postNewReceiptForSplit = async (payload) => {
+    const token = localStorage.getItem("token");
+    const res = await fetch("/api/receipt/addReceiptv1", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accesstoken: token },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`Failed to save split receipt: ${res.status}`);
+    return res.json();
+  };
+
+  /** Create a blank split entry */
+  const createSplit = () => {
+    const mainTotal    = parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0;
+    const mainSubtotal = parseFloat(editedReceipt.subtotal) || parseFloat(selectedReceipt?.subtotal) || mainTotal;
+    const mainTaxes    = editedReceipt.receipt_tax_values || selectedReceipt?.receipt_tax_values || [];
+    return {
+      _id: Date.now() + Math.random(),
+      receipt_category: editedReceipt.receipt_category ?? selectedReceipt?.receipt_category ?? 0,
+      expense_type: editedReceipt.expense_type || selectedReceipt?.expense_type || "",
+      subtotal: "",
+      purchasePrice: "",
+      product_name: "",
+      receipt_tax_values: mainTaxes.map(t => ({ ...t, id: 0, tax_amount: "" })),
+    };
+  };
+
+  /** Open the split screen — validates required fields first */
+  const handleOpenSplit = () => {
+    const total = parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0;
+    const storeName = editedReceipt.storeName || selectedReceipt?.storeName || "";
+    const missing = [];
+    if (!storeName.trim()) missing.push("Merchant Name");
+    if (!total) missing.push("Total Amount");
+    if (missing.length) {
+      setSplitError(`Please fill in: ${missing.join(", ")} before splitting.`);
+      return;
+    }
+    setSplitError(null);
+    setSplits([]);
+    setSplitErrors({});
+    setActiveSplitIndex(null);
+    setShowSplitScreen(true);
+    setShowOptionsMenu(false);
+  };
+
+  /** Update a field on a specific split, auto-calculating tax/total like the main form */
+  const updateSplitField = (idx, field, value) => {
+    const mainSubtotal = parseFloat(editedReceipt.subtotal) || parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.subtotal) || 0;
+    const mainTotal    = parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0;
+
+    if (field === "subtotal" && mainSubtotal > 0 && (parseFloat(value) || 0) > mainSubtotal) {
+      alert(`Subtotal cannot exceed $${mainSubtotal.toFixed(2)}`);
+      return;
+    }
+    if (field === "purchasePrice" && mainTotal > 0 && (parseFloat(value) || 0) > mainTotal) {
+      alert(`Total cannot exceed $${mainTotal.toFixed(2)}`);
+      return;
+    }
+
+    setSplits(prev => {
+      const updated = [...prev];
+      const split   = updated[idx];
+      if (field === "purchasePrice") {
+        const totalNum = parseFloat(value) || 0;
+        if (totalNum > 0) {
+          const rateSum = (split.receipt_tax_values || []).reduce((s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0);
+          const sub = parseFloat((totalNum / (1 + rateSum)).toFixed(2));
+          const taxes = (split.receipt_tax_values || []).map(t => ({
+            ...t,
+            tax_amount: sub > 0 ? parseFloat(((parseFloat(t.tax_rate) / 100) * sub).toFixed(2)) : "",
+          }));
+          updated[idx] = { ...split, purchasePrice: value, subtotal: sub > 0 ? sub.toString() : "", receipt_tax_values: taxes };
+        } else {
+          updated[idx] = { ...split, purchasePrice: value, subtotal: "", receipt_tax_values: (split.receipt_tax_values || []).map(t => ({ ...t, tax_amount: "" })) };
+        }
+      } else if (field === "subtotal") {
+        const sub = parseFloat(value) || 0;
+        const taxes = (split.receipt_tax_values || []).map(t => ({
+          ...t,
+          tax_amount: sub > 0 ? parseFloat(((parseFloat(t.tax_rate) / 100) * sub).toFixed(2)) : "",
+        }));
+        const total = sub + taxes.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0);
+        updated[idx] = { ...split, subtotal: value, receipt_tax_values: taxes, purchasePrice: sub > 0 ? parseFloat(total.toFixed(2)) : "" };
+      } else {
+        updated[idx] = { ...split, [field]: value };
+      }
+      return updated;
+    });
+
+    if ((field === "subtotal" || field === "purchasePrice") && splits[idx]) {
+      const id = splits[idx]._id;
+      if (splitErrors[id]?.amount) {
+        setSplitErrors(prev => { const n = { ...prev }; delete n[id]; return n; });
+      }
+    }
+  };
+
+  /** Add a new blank split and open its detail view */
+  const addSplit = () => {
+    const newSlot = createSplit();
+    const newIdx  = splits.length;
+    setSplits(prev => [...prev, newSlot]);
+    setActiveSplitIndex(newIdx);
+  };
+
+  /** Remove a split by index */
+  const removeSplit = (idx) => setSplits(prev => prev.filter((_, i) => i !== idx));
+
+  /** Save all splits — creates new receipts, updates existing receipt to the remainder */
+  const handleSaveSplits = async () => {
+    if (splits.length === 0) {
+      setSplitError("Please add at least one split before saving.");
+      return;
+    }
+    // Validate
+    const newErrors = {};
+    splits.forEach(split => {
+      if (!parseFloat(split.purchasePrice) && !parseFloat(split.subtotal)) {
+        newErrors[split._id] = { amount: "Please enter an amount for this split." };
+      }
+    });
+    if (Object.keys(newErrors).length) {
+      setSplitErrors(newErrors);
+      const firstBad = splits.findIndex(s => newErrors[s._id]);
+      if (firstBad !== -1) setActiveSplitIndex(firstBad);
+      return;
+    }
+
+    setIsSavingSplits(true);
+    setSplitError(null);
+    try {
+      const fkUserId   = parseInt(localStorage.getItem("fk_user_id")) || 0;
+      const mainTotal  = parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0;
+      const storeName  = editedReceipt.storeName || selectedReceipt?.storeName || "";
+      const storeImage = editedReceipt.store_image || selectedReceipt?.store_image || "";
+      const paymentType = editedReceipt.paymentType || selectedReceipt?.paymentType || "";
+      const last4      = selectedReceipt?.last_4_digit_card?.toString?.().trim() || "";
+      let productDate  = 0;
+      const dateVal    = editedReceipt.product_date || selectedReceipt?.product_date;
+      if (dateVal) {
+        const d = new Date(dateVal);
+        if (!isNaN(d.getTime())) productDate = Math.floor(d.getTime() / 1000);
+      }
+      if (!productDate) productDate = Math.floor(Date.now() / 1000);
+      const receiptTag = ["0","0","0","0","0","0","0"].join(",");
+
+      // Create a new receipt for each split
+      for (const split of splits) {
+        const splitSubtotal = parseFloat(split.subtotal) || 0;
+        const taxValues = (split.receipt_tax_values || []).map(t => ({
+          id: 0, fk_user_id: fkUserId, fk_receipt_id: 0,
+          fk_tax_id: parseInt(t.fk_tax_id) || 0,
+          tax_name: t.tax_name || "", tax_rate: t.tax_rate || "0",
+          tax_amount: (parseFloat(t.tax_amount) || 0).toString(),
+          created: 0, updated: 0,
+        }));
+        const splitTotal = parseFloat(split.purchasePrice) ||
+          parseFloat((splitSubtotal + taxValues.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0)).toFixed(2));
+        await postNewReceiptForSplit({
+          id: 0,
+          storeName,
+          product_name: split.product_name || "",
+          emailAttachment: selectedReceipt?.emailAttachment || "0",
+          purchasePrice: splitTotal.toString(),
+          total_amount: splitTotal.toString(),
+          payment_category_type: parseInt(split.receipt_category) || 0,
+          status: 0,
+          paymentType,
+          last_4_digit_card: last4,
+          card_issuer_name: selectedReceipt?.card_issuer_name || "",
+          fk_original_receipt_id: "0",
+          fk_forward_from_receipt_id: "0",
+          receipt_category: parseInt(split.receipt_category) || 0,
+          product_date: productDate,
+          expense_type: split.expense_type || editedReceipt.expense_type || selectedReceipt?.expense_type || "",
+          receipt_image: selectedReceipt?.receipt_image || "0",
+          store_image: storeImage,
+          notes: "",
+          receipt_forwarded: "0",
+          receipt_tag: receiptTag,
+          create_date: "",
+          receipt_tax_values: taxValues,
+        });
+      }
+
+      // Calculate remainder and update the existing receipt
+      const splitsTotal = parseFloat(splits.reduce((s, sp) => s + (parseFloat(sp.purchasePrice) || 0), 0).toFixed(2));
+      const remainder   = parseFloat((mainTotal - splitsTotal).toFixed(2));
+
+      if (remainder >= 0) {
+        // Back-calculate remainder subtotal using existing tax rates
+        const mainTaxRates = editedReceipt.receipt_tax_values || selectedReceipt?.receipt_tax_values || [];
+        const rateSum      = mainTaxRates.reduce((s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0);
+        const remSubtotal  = rateSum > 0 ? parseFloat((remainder / (1 + rateSum)).toFixed(2)) : remainder;
+        const remTaxValues = mainTaxRates.map(t => ({
+          ...t,
+          id: parseInt(t.id) || 0,
+          fk_user_id: parseInt(t.fk_user_id) || fkUserId,
+          fk_receipt_id: selectedReceipt?.id || 0,
+          tax_amount: parseFloat(((parseFloat(t.tax_rate) / 100) * remSubtotal).toFixed(2)).toString(),
+          created: parseInt(t.created) || 0,
+          updated: parseInt(t.updated) || 0,
+        }));
+        // Build the updated existing receipt payload
+        const receiptTagStr = [
+          editedTags.locked ? "1" : "0",
+          editedTags.starred ? "1" : "0",
+          editedTags.flagged ? "1" : "0",
+          editedTags.verified ? "1" : "0",
+          editedTags.reconciled ? "1" : "0",
+          editedTags.reimbursed ? "1" : "0",
+          editedTags.warrantied ? "1" : "0",
+        ].join(",");
+        await updateReceipt(selectedReceipt.id, {
+          ...selectedReceipt,
+          ...editedReceipt,
+          purchasePrice: remainder.toString(),
+          total_amount: remainder.toString(),
+          subtotal: remSubtotal.toString(),
+          receipt_tax_values: remTaxValues,
+          receipt_tag: receiptTagStr,
+        });
+      }
+
+      await refreshData();
+      setShowSplitScreen(false);
+      setActiveSplitIndex(null);
+      setSplits([]);
+      setSplitError(null);
+      setSplitErrors({});
+      // Close modal so user can see all receipts including the new splits
+      if (onClose) onClose();
+    } catch (err) {
+      setSplitError("Failed to save splits: " + (err.message || "Unknown error"));
+    } finally {
+      setIsSavingSplits(false);
+    }
+  };
+
+  // Close options menu on outside click
+  useEffect(() => {
+    if (!showOptionsMenu) return;
+    const handler = (e) => {
+      if (optionsMenuRef.current && !optionsMenuRef.current.contains(e.target)) {
+        setShowOptionsMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showOptionsMenu]);
 
   // Save edited receipt
   const handleSave = async () => {
@@ -1363,7 +1821,8 @@ const handleDeleteTaxType = async (taxId) => {
         }));
         // Sync with server in the background (no spinner) so changes persist after reload
         silentRefreshData?.(1500);
-        // Close the popup after successful save
+        // Notify parent to show toast, then close
+        onSaved?.();
         onClose();
       }
     } catch (error) {
@@ -3200,11 +3659,31 @@ Thank you for using our receipt management system.
               {currentIndex + 1} of {sortedReceipts.length}
             </div>
 
-            <div className="bg-white rounded-xl shadow-2xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-hidden border border-gray-200 relative">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-hidden border border-gray-200 relative flex flex-col">
               {/* Modal Header */}
               <div className="receipt-modal-header flex items-center border-b border-gray-200 px-3 sm:px-4 py-2 sm:py-2.5 bg-white sticky top-0 z-20">
-                {/* Close Button - Left side (fixed width for balance) */}
+                {/* Left side (fixed width for balance) */}
                 <div className="w-[90px] sm:w-[130px] flex justify-start gap-1">
+                  {/* Split screen: back button */}
+                  {showSplitScreen ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (activeSplitIndex !== null) {
+                          setActiveSplitIndex(null);
+                        } else {
+                          setShowSplitScreen(false);
+                          setSplits([]);
+                          setSplitError(null);
+                          setSplitErrors({});
+                        }
+                      }}
+                      className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors"
+                    >
+                      <ChevronLeft size={18} className="text-gray-700" />
+                    </button>
+                  ) : (
+                    <>
                   <button
                     onClick={onClose}
                     className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full transition-colors"
@@ -3237,15 +3716,53 @@ Thank you for using our receipt management system.
                       className="text-red-500 group-hover:text-red-600"
                     />
                   </button>
+                    </>
+                  )}
                 </div>
 
                 {/* Title - Center (flex-1 to take remaining space) */}
                 <h2 className="flex-1 text-center text-sm sm:text-base md:text-lg font-bold text-gray-900">
-                  Edit Receipt
+                  {showSplitScreen && activeSplitIndex !== null
+                    ? "Add Receipt Split"
+                    : showSplitScreen
+                    ? "Split Expense"
+                    : "Edit Receipt"}
                 </h2>
 
                 {/* Right side actions (fixed width to match left for centering) */}
                 <div className="w-[90px] sm:w-[130px] flex items-center justify-end gap-1 sm:gap-2">
+                  {/* Split overview: SAVE button */}
+                  {showSplitScreen && activeSplitIndex === null && (
+                    <button
+                      type="button"
+                      onClick={handleSaveSplits}
+                      disabled={isSavingSplits || splits.length === 0}
+                      className="px-4 py-1.5 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isSavingSplits ? "Saving…" : "SAVE"}
+                    </button>
+                  )}
+                  {/* Split detail: SAVE button */}
+                  {showSplitScreen && activeSplitIndex !== null && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const split = splits[activeSplitIndex];
+                        if (!parseFloat(split?.purchasePrice) && !parseFloat(split?.subtotal)) {
+                          setSplitErrors(prev => ({ ...prev, [split._id]: { amount: "Please enter an amount." } }));
+                          return;
+                        }
+                        setSplitErrors(prev => { const n = { ...prev }; if (split) delete n[split._id]; return n; });
+                        setActiveSplitIndex(null);
+                      }}
+                      className="px-4 py-1.5 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700"
+                    >
+                      SAVE
+                    </button>
+                  )}
+                  {/* Normal view: Locked/Unlocked + "..." options menu */}
+                  {!showSplitScreen && (
+                    <>
                   {/* Locked/Unlocked Status */}
                   <div className="flex items-center gap-1 bg-gray-100 rounded-full px-1.5 sm:px-2 py-1 sm:py-1.5">
                     <img
@@ -3286,11 +3803,233 @@ Thank you for using our receipt management system.
                       />
                     )}
                   </div>
+                  {/* "..." options menu with Split */}
+                  <div className="relative" ref={optionsMenuRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowOptionsMenu(prev => !prev)}
+                      className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 bg-blue-600 hover:bg-blue-700 rounded-full transition-colors"
+                      title="More options"
+                      disabled={editedTags.locked}
+                    >
+                      <MoreHorizontal size={16} className="text-white" />
+                    </button>
+                    {showOptionsMenu && (
+                      <div className="absolute top-full right-0 mt-2 bg-white shadow-xl border border-gray-200 rounded-xl z-[100] min-w-[140px] overflow-hidden">
+                        <button
+                          type="button"
+                          className="w-full text-left px-4 py-3 text-sm font-medium text-gray-800 hover:bg-gray-50 transition-colors"
+                          onClick={handleOpenSplit}
+                        >
+                          Split
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                    </>
+                  )}
                 </div>
               </div>
 
               {/* Scrollable Content */}
-              <div className="overflow-y-auto max-h-[calc(95vh-70px)] sm:max-h-[calc(90vh-80px)]">
+              <div className="overflow-y-auto flex-1 min-h-0">
+                {/* ── Split Screen ─────────────────────────────────────────── */}
+                {showSplitScreen ? (
+                  <div className="p-4 sm:p-6">
+                    {activeSplitIndex !== null && splits[activeSplitIndex] ? (
+                      /* Split Detail View */
+                      (() => {
+                        const split = splits[activeSplitIndex];
+                        const mainSubtotal = parseFloat(editedReceipt.subtotal) || parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.subtotal) || 0;
+                        const mainTotal    = parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0;
+                        const fieldErr     = splitErrors[split._id] || {};
+                        const hasAmountErr = !!fieldErr.amount;
+                        return (
+                          <div className="space-y-4">
+                            {/* Expense Type */}
+                            <div>
+                              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Expense Type</label>
+                              <div className="flex rounded-lg overflow-hidden border border-gray-200">
+                                <button type="button"
+                                  className={`flex-1 py-2 text-sm font-medium transition-colors ${parseInt(split.receipt_category) !== 1 ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
+                                  onClick={() => updateSplitField(activeSplitIndex, "receipt_category", 0)}>Personal</button>
+                                <button type="button"
+                                  className={`flex-1 py-2 text-sm font-medium transition-colors ${parseInt(split.receipt_category) === 1 ? "bg-blue-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
+                                  onClick={() => updateSplitField(activeSplitIndex, "receipt_category", 1)}>Business</button>
+                              </div>
+                            </div>
+                            {/* Category */}
+                            <div>
+                              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Category</label>
+                              <select
+                                className="w-full border border-blue-400 text-sm px-2 py-2 rounded-md bg-white text-gray-800"
+                                value={split.expense_type || ""}
+                                onChange={(e) => updateSplitField(activeSplitIndex, "expense_type", e.target.value)}
+                              >
+                                <option value="">Select category</option>
+                                {allExpenseCategories.map(cat => (
+                                  <option key={cat} value={cat}>{cat}</option>
+                                ))}
+                              </select>
+                            </div>
+                            {/* Subtotal */}
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <label className={`text-xs font-bold uppercase tracking-wide ${hasAmountErr ? "text-red-500" : "text-gray-500"}`}>Subtotal *</label>
+                                <span className="text-xs text-gray-400">Max: ${mainSubtotal.toFixed(2)}</span>
+                              </div>
+                              <div className="relative">
+                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
+                                <input type="number"
+                                  className={`w-full text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800 border ${hasAmountErr ? "border-red-400 ring-1 ring-red-300" : "border-blue-400"}`}
+                                  value={split.subtotal ?? ""} onChange={(e) => updateSplitField(activeSplitIndex, "subtotal", e.target.value)}
+                                  placeholder="0.00" min="0" max={mainSubtotal} step="0.01" />
+                              </div>
+                              {hasAmountErr && <p className="mt-1 text-xs text-red-500">{fieldErr.amount}</p>}
+                            </div>
+                            {/* Tax fields */}
+                            {(split.receipt_tax_values || []).map((t, ti) => {
+                              const maxTax = parseFloat(((parseFloat(t.tax_rate || 0) / 100) * mainSubtotal).toFixed(2));
+                              return (
+                                <div key={ti}>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">{t.tax_name} ({t.tax_rate}%)</label>
+                                    <span className="text-xs text-gray-400">Max: ${maxTax.toFixed(2)}</span>
+                                  </div>
+                                  <div className="relative">
+                                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
+                                    <input type="number"
+                                      className="w-full border border-blue-400 text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800"
+                                      value={t.tax_amount ?? ""}
+                                      onChange={(e) => {
+                                        const v = parseFloat(e.target.value) || 0;
+                                        if (maxTax > 0 && v > maxTax) { alert(`${t.tax_name} cannot exceed $${maxTax.toFixed(2)}`); return; }
+                                        const updatedTaxes = split.receipt_tax_values.map((tv, tvi) => tvi === ti ? { ...tv, tax_amount: e.target.value } : tv);
+                                        updateSplitField(activeSplitIndex, "receipt_tax_values", updatedTaxes);
+                                      }}
+                                      placeholder="0.00" min="0" step="0.01" />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            {/* Total */}
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <label className={`text-xs font-bold uppercase tracking-wide ${hasAmountErr ? "text-red-500" : "text-gray-500"}`}>Total *</label>
+                                <span className="text-xs text-gray-400">Max: ${mainTotal.toFixed(2)}</span>
+                              </div>
+                              <div className="relative">
+                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
+                                <input type="number"
+                                  className={`w-full text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800 border ${hasAmountErr ? "border-red-400 ring-1 ring-red-300" : "border-blue-400"}`}
+                                  value={split.purchasePrice ?? ""} onChange={(e) => updateSplitField(activeSplitIndex, "purchasePrice", e.target.value)}
+                                  placeholder="0.00" min="0" max={mainTotal} step="0.01" />
+                              </div>
+                              {hasAmountErr && <p className="mt-1 text-xs text-red-500">{fieldErr.amount}</p>}
+                            </div>
+                            {/* Description */}
+                            <div>
+                              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Describe Purchase</label>
+                              <input type="text"
+                                className="w-full border border-blue-400 text-sm px-2 py-2 rounded-md bg-white text-gray-800"
+                                value={split.product_name || ""} onChange={(e) => updateSplitField(activeSplitIndex, "product_name", e.target.value)}
+                                placeholder="Enter a description" />
+                            </div>
+                          </div>
+                        );
+                      })()
+                    ) : (
+                      /* ── Split Overview ── */
+                      (() => {
+                        const mainTotal   = parseFloat(editedReceipt.purchasePrice || selectedReceipt?.purchasePrice || 0);
+                        const splitsTotal = parseFloat(splits.reduce((s, sp) => s + (parseFloat(sp.purchasePrice) || 0), 0).toFixed(2));
+                        const remainder   = parseFloat((mainTotal - splitsTotal).toFixed(2));
+                        const isOverBudget = remainder < -0.009;
+                        const payLogo = getPaymentLogo(editedReceipt.paymentType || selectedReceipt?.paymentType || "");
+                        const storeName = editedReceipt.storeName || selectedReceipt?.storeName || "—";
+                        return (
+                        <div className="space-y-3">
+                          {/* ── Existing Receipt row ── */}
+                          <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 flex items-center gap-3">
+                            {payLogo && (
+                              <img src={payLogo} alt="payment" className="w-8 h-5 object-contain flex-shrink-0" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs text-gray-500 font-medium">Existing (will update)</p>
+                              <p className="font-semibold text-gray-900 text-sm truncate">{storeName}</p>
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                              <p className="font-bold text-gray-900 text-sm">${mainTotal.toFixed(2)}</p>
+                              {splits.length > 0 && (
+                                <p className={`text-xs font-semibold mt-0.5 ${isOverBudget ? "text-red-500" : "text-blue-600"}`}>
+                                  → ${remainder.toFixed(2)}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {isOverBudget && (
+                            <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-red-600 text-xs font-medium">
+                              ⚠ Splits exceed total by ${Math.abs(remainder).toFixed(2)}
+                            </div>
+                          )}
+
+                          {/* ── Split rows ── */}
+                          {splits.length === 0 ? (
+                            <div className="text-center py-8 text-gray-400">
+                              <p className="text-sm font-medium">No splits yet</p>
+                              <p className="text-xs mt-1">Tap "Add Split" to create a new split receipt.</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">New Split Receipts</p>
+                              {splits.map((split, idx) => {
+                                const hasErr = !!splitErrors[split._id];
+                                const hasAmount = !!(parseFloat(split.purchasePrice) || parseFloat(split.subtotal));
+                                return (
+                                  <div key={split._id}
+                                    className={`bg-white border rounded-xl px-4 py-3 flex items-center gap-3 cursor-pointer transition-colors ${hasErr ? "border-red-400 bg-red-50" : "border-blue-200 hover:border-blue-400"}`}
+                                    onClick={() => setActiveSplitIndex(idx)}
+                                  >
+                                    {payLogo && (
+                                      <img src={payLogo} alt="payment" className="w-8 h-5 object-contain flex-shrink-0" />
+                                    )}
+                                    <div className="flex-1 min-w-0">
+                                      <p className="font-semibold text-gray-800 text-sm">Split {idx + 1}</p>
+                                      {split.expense_type && <p className="text-xs text-gray-400 truncate">{split.expense_type}</p>}
+                                      {!hasAmount && <p className="text-xs text-gray-400">Tap to fill in details →</p>}
+                                      {hasErr && <p className="text-xs text-red-500 font-medium">Incomplete — tap to fix</p>}
+                                    </div>
+                                    <div className="flex items-center gap-2 flex-shrink-0">
+                                      <p className={`font-bold text-sm ${hasAmount ? "text-blue-600" : "text-gray-400"}`}>
+                                        {hasAmount ? `$${parseFloat(split.purchasePrice || 0).toFixed(2)}` : "—"}
+                                      </p>
+                                      <button type="button" onClick={(e) => { e.stopPropagation(); removeSplit(idx); }}
+                                        className="text-red-400 hover:text-red-600 p-1" title="Remove split">
+                                        <Trash2 size={14} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {/* Add Split Button */}
+                          <button type="button" onClick={addSplit}
+                            className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-blue-300 rounded-xl text-blue-600 font-medium text-sm hover:border-blue-500 hover:bg-blue-50 transition-colors">
+                            <Plus size={18} /> Add Split
+                          </button>
+
+                          {splitError && (
+                            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">{splitError}</div>
+                          )}
+                        </div>
+                        );
+                      })()
+                    )}
+                  </div>
+                ) : (
                 <AnimatePresence mode="wait" custom={direction}>
                   <motion.div
                     key={selectedReceipt?.id}
@@ -3385,20 +4124,25 @@ Thank you for using our receipt management system.
                               }
                               onChange={(e) => {
                                 handleFieldChange("storeName", e.target.value);
+                                setIsMerchantTyping(true);
                                 setShowMerchantDropdown(true);
                               }}
-                              onFocus={() => setShowMerchantDropdown(true)}
+                              onFocus={() => {
+                                setIsMerchantTyping(false);
+                                setShowMerchantDropdown(true);
+                              }}
                               placeholder="Select or type merchant name"
                             />
                             <ChevronDown
                               size={16}
                               className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 cursor-pointer"
-                              onClick={() =>
-                                setShowMerchantDropdown(!showMerchantDropdown)
-                              }
+                              onClick={() => {
+                                setIsMerchantTyping(false);
+                                setShowMerchantDropdown(!showMerchantDropdown);
+                              }}
                             />
                             {showMerchantDropdown && (
-                                <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                                <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-64 overflow-y-auto">
                                   {/* Add Merchant Option */}
                                   <div
                                     className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left flex items-center gap-2 border-b border-gray-200 bg-blue-50"
@@ -3409,30 +4153,51 @@ Thank you for using our receipt management system.
                                       Add Merchant
                                     </span>
                                   </div>
-                                  {filteredMerchants.map((merchant, idx) => (
+                                  {filteredMerchants.map((merchant, idx) => {
+                                    const isMisc = merchant.name?.toLowerCase().trim() === "miscellaneous";
+                                    return (
                                     <div
                                       key={idx}
-                                      className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left flex items-center gap-2"
-                                      onClick={() => {
-                                        handleFieldChange(
-                                          "storeName",
-                                          merchant.name
-                                        );
-                                        handleFieldChange(
-                                          "store_image",
-                                          merchant.image || ""
-                                        );
-                                        setShowMerchantDropdown(false);
-                                      }}
+                                      className="group px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2"
                                     >
-                                      <MerchantAvatar
-                                        name={merchant.name}
-                                        explicitUrl={merchant.image}
-                                        className="w-5 h-5 mt-2"
-                                      />
-                                      {merchant.name}
+                                      <div
+                                        className="flex-1 flex items-center gap-2 cursor-pointer"
+                                        onClick={() => {
+                                          handleFieldChange("storeName", merchant.name);
+                                          handleFieldChange("store_image", merchant.image || "");
+                                          setShowMerchantDropdown(false);
+                                        }}
+                                      >
+                                        <MerchantAvatar
+                                          name={merchant.name}
+                                          explicitUrl={merchant.image}
+                                          className="w-5 h-5 mt-2"
+                                        />
+                                        <span className="truncate">{merchant.name}</span>
+                                      </div>
+                                      {!isMisc && (
+                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                                          <button
+                                            type="button"
+                                            onClick={(e) => { e.stopPropagation(); handleOpenEditMerchant(merchant); }}
+                                            className="p-1 rounded hover:bg-blue-100 text-gray-400 hover:text-blue-600 transition-colors"
+                                            title="Edit merchant"
+                                          >
+                                            <Pencil size={13} />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => { e.stopPropagation(); handleDeleteMerchant(merchant); }}
+                                            className="p-1 rounded hover:bg-red-100 text-gray-400 hover:text-red-600 transition-colors"
+                                            title="Delete merchant"
+                                          >
+                                            <Trash2 size={13} />
+                                          </button>
+                                        </div>
+                                      )}
                                     </div>
-                                  ))}
+                                    );
+                                  })}
                                 </div>
                               )}
                           </div>
@@ -3453,24 +4218,26 @@ Thank you for using our receipt management system.
                                 ""
                               }
                               onChange={(e) => {
-                                handleFieldChange(
-                                  "expense_type",
-                                  e.target.value
-                                );
+                                handleFieldChange("expense_type", e.target.value);
+                                setIsCategoryTyping(true);
                                 setShowCategoryDropdown(true);
                               }}
-                              onFocus={() => setShowCategoryDropdown(true)}
+                              onFocus={() => {
+                                setIsCategoryTyping(false);
+                                setShowCategoryDropdown(true);
+                              }}
                               placeholder="e.g., Restaurants, Fuel, General Retail"
                             />
                             <ChevronDown
                               size={16}
                               className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 cursor-pointer"
-                              onClick={() =>
-                                setShowCategoryDropdown(!showCategoryDropdown)
-                              }
+                              onClick={() => {
+                                setIsCategoryTyping(false);
+                                setShowCategoryDropdown(!showCategoryDropdown);
+                              }}
                             />
                             {showCategoryDropdown && (
-                                <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                                <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-64 overflow-y-auto">
                                   {/* Add Expense Category option */}
                                   <div
                                     className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left flex items-center gap-2 border-b border-gray-200 bg-blue-50"
@@ -3486,16 +4253,35 @@ Thank you for using our receipt management system.
                                   {filteredCategories.map((category, idx) => (
                                     <div
                                       key={idx}
-                                      className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left"
-                                      onClick={() => {
-                                        handleFieldChange(
-                                          "expense_type",
-                                          category
-                                        );
-                                        setShowCategoryDropdown(false);
-                                      }}
+                                      className="px-3 py-2 hover:bg-blue-50 text-left flex items-center justify-between group"
                                     >
-                                      {category}
+                                      <span
+                                        className="flex-1 cursor-pointer text-sm"
+                                        onClick={() => {
+                                          handleFieldChange("expense_type", category);
+                                          setShowCategoryDropdown(false);
+                                        }}
+                                      >
+                                        {category}
+                                      </span>
+                                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => { e.stopPropagation(); handleOpenEditCategory(category); }}
+                                          className="p-1 rounded hover:bg-blue-100 text-gray-400 hover:text-blue-600 transition-colors"
+                                          title="Edit category"
+                                        >
+                                          <Pencil size={13} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => { e.stopPropagation(); setDeletingCategory(category); setShowDeleteCategoryConfirm(true); setShowCategoryDropdown(false); }}
+                                          className="p-1 rounded hover:bg-red-100 text-gray-400 hover:text-red-600 transition-colors"
+                                          title="Delete category"
+                                        >
+                                          <Trash2 size={13} />
+                                        </button>
+                                      </div>
                                     </div>
                                   ))}
                                 </div>
@@ -3649,20 +4435,25 @@ Thank you for using our receipt management system.
                                   handleFieldChange("last_4_digit_card", "");
                                 }
 
+                                setIsPaymentTyping(true);
                                 setShowPaymentDropdown(true);
                               }}
-                              onFocus={() => setShowPaymentDropdown(true)}
+                              onFocus={() => {
+                                setIsPaymentTyping(false);
+                                setShowPaymentDropdown(true);
+                              }}
                               placeholder="Select or type payment method"
                             />
                             <ChevronDown
                               size={16}
                               className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 cursor-pointer"
-                              onClick={() =>
-                                setShowPaymentDropdown(!showPaymentDropdown)
-                              }
+                              onClick={() => {
+                                setIsPaymentTyping(false);
+                                setShowPaymentDropdown(!showPaymentDropdown);
+                              }}
                             />
                             {showPaymentDropdown && (
-                              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-64 overflow-y-auto">
                                 {/* Add Payment Method Option */}
                                 <div
                                   className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left flex items-center gap-2 border-b border-gray-200 bg-blue-50"
@@ -3996,55 +4787,44 @@ Thank you for using our receipt management system.
                                     }
                                   />
                                   {showTaxDropdown === 1 && (
-                                    <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
-                                      {allTaxTypes
-                                        .filter(
-                                          (t) =>
-                                            !currentTaxValues.some(
-                                              (ct) =>
-                                                ct.tax_name === t.tax_name &&
-                                                ct.tax_rate === t.tax_rate
-                                            )
-                                        )
-                                        .map((tax, idx) => (
-                                          <div
-                                            key={idx}
-                                            className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left text-sm"
-                                            onClick={() => {
-                                              addTaxToReceipt(tax);
-                                              setShowTaxDropdown(null);
-                                            }}
-                                          >
-                                            {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
-                                          </div>
-                                        ))}
-                                      {allTaxTypes.filter(
-                                        (t) =>
-                                          !currentTaxValues.some(
-                                            (ct) =>
-                                              ct.tax_name === t.tax_name &&
-                                              ct.tax_rate === t.tax_rate
-                                          )
-                                      ).length === 0 && (
-                                        <div className="px-3 py-2 text-gray-500 text-sm text-center">
-                                          No more tax types available
-                                        </div>
-                                      )}
+                                    <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-64 overflow-y-auto">
                                       <div
-                                        className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left flex items-center gap-2 border-t border-gray-200 bg-blue-50"
+                                        className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left flex items-center gap-1 border-b border-gray-200"
                                         onClick={() => {
                                           setShowTaxDropdown(null);
                                           setShowManageTaxModal(true);
                                         }}
                                       >
-                                        <Plus
-                                          size={14}
-                                          className="text-blue-600"
-                                        />
+                                        <Plus size={14} className="text-blue-600" />
                                         <span className="text-sm font-medium text-blue-600">
                                           Manage Tax Types
                                         </span>
                                       </div>
+                                      {(() => {
+                                        const available = allTaxTypes.filter(
+                                          (t) => !currentTaxValues.some(
+                                            (ct) => ct.tax_name === t.tax_name && ct.tax_rate === t.tax_rate
+                                          )
+                                        );
+                                        return available.length > 0 ? (
+                                          available.map((tax, idx) => (
+                                            <div
+                                              key={idx}
+                                              className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left text-sm"
+                                              onClick={() => {
+                                                addTaxToReceipt(tax);
+                                                setShowTaxDropdown(null);
+                                              }}
+                                            >
+                                              {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
+                                            </div>
+                                          ))
+                                        ) : (
+                                          <div className="px-3 py-2 text-gray-500 text-sm text-center">
+                                            No more tax types available
+                                          </div>
+                                        );
+                                      })()}
                                     </div>
                                   )}
                                 </div>
@@ -4109,55 +4889,44 @@ Thank you for using our receipt management system.
                                     }
                                   />
                                   {showTaxDropdown === 2 && (
-                                    <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
-                                      {allTaxTypes
-                                        .filter(
-                                          (t) =>
-                                            !currentTaxValues.some(
-                                              (ct) =>
-                                                ct.tax_name === t.tax_name &&
-                                                ct.tax_rate === t.tax_rate
-                                            )
-                                        )
-                                        .map((tax, idx) => (
-                                          <div
-                                            key={idx}
-                                            className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left text-sm"
-                                            onClick={() => {
-                                              addTaxToReceipt(tax);
-                                              setShowTaxDropdown(null);
-                                            }}
-                                          >
-                                            {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
-                                          </div>
-                                        ))}
-                                      {allTaxTypes.filter(
-                                        (t) =>
-                                          !currentTaxValues.some(
-                                            (ct) =>
-                                              ct.tax_name === t.tax_name &&
-                                              ct.tax_rate === t.tax_rate
-                                          )
-                                      ).length === 0 && (
-                                        <div className="px-3 py-2 text-gray-500 text-sm text-center">
-                                          No more tax types available
-                                        </div>
-                                      )}
+                                    <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-64 overflow-y-auto">
                                       <div
-                                        className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left flex items-center gap-2 border-t border-gray-200 bg-blue-50"
+                                        className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left flex items-center gap-1 border-b border-gray-200"
                                         onClick={() => {
                                           setShowTaxDropdown(null);
                                           setShowManageTaxModal(true);
                                         }}
                                       >
-                                        <Plus
-                                          size={14}
-                                          className="text-blue-600"
-                                        />
+                                        <Plus size={14} className="text-blue-600" />
                                         <span className="text-sm font-medium text-blue-600">
                                           Manage Tax Types
                                         </span>
                                       </div>
+                                      {(() => {
+                                        const available = allTaxTypes.filter(
+                                          (t) => !currentTaxValues.some(
+                                            (ct) => ct.tax_name === t.tax_name && ct.tax_rate === t.tax_rate
+                                          )
+                                        );
+                                        return available.length > 0 ? (
+                                          available.map((tax, idx) => (
+                                            <div
+                                              key={idx}
+                                              className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left text-sm"
+                                              onClick={() => {
+                                                addTaxToReceipt(tax);
+                                                setShowTaxDropdown(null);
+                                              }}
+                                            >
+                                              {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
+                                            </div>
+                                          ))
+                                        ) : (
+                                          <div className="px-3 py-2 text-gray-500 text-sm text-center">
+                                            No more tax types available
+                                          </div>
+                                        );
+                                      })()}
                                     </div>
                                   )}
                                 </div>
@@ -4213,30 +4982,33 @@ Thank you for using our receipt management system.
 
                         <div className="mb-4 text-align-left">
                           <label className="font-bold">TOTAL</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            className={`${inputClass} ${
-                              (editedReceipt.purchasePrice ||
-                                r.total ||
-                                r.purchasePrice ||
-                                0) < 0
-                                ? "text-red-500"
-                                : ""
-                            }`}
-                            value={
-                              editedReceipt.purchasePrice ??
-                              r.total ??
-                              r.purchasePrice ??
-                              0
-                            }
-                            onChange={(e) =>
-                              handleFieldChange(
-                                "purchasePrice",
-                                parseFloat(e.target.value) || 0
-                              )
-                            }
-                          />
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none select-none">$</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              className={`${inputClass} pl-7 ${
+                                (editedReceipt.purchasePrice ||
+                                  r.total ||
+                                  r.purchasePrice ||
+                                  0) < 0
+                                  ? "text-red-500"
+                                  : ""
+                              }`}
+                              value={
+                                editedReceipt.purchasePrice ??
+                                r.total ??
+                                r.purchasePrice ??
+                                0
+                              }
+                              onChange={(e) =>
+                                handleFieldChange(
+                                  "purchasePrice",
+                                  parseFloat(e.target.value) || 0
+                                )
+                              }
+                            />
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -4278,24 +5050,6 @@ Thank you for using our receipt management system.
                           className="flex gap-2 pb-2"
                           style={{ minWidth: "max-content" }}
                         >
-                          {/* Lock/Unlock button - always shown first */}
-                          <button
-                            type="button"
-                            onClick={() => toggleTag("locked")}
-                            className={`flex items-center gap-1 px-3 py-2 border rounded-full cursor-pointer transition-colors ${
-                              editedTags.locked
-                                ? "border-red-500 text-red-600 bg-red-50"
-                                : "border-gray-300 text-gray-600"
-                            }`}
-                            title={editedTags.locked ? "Receipt is Locked — click to unlock" : "Receipt is Unlocked — click to lock"}
-                          >
-                            <img
-                              src={getTagImage("locked", editedTags.locked)}
-                              alt={editedTags.locked ? "Locked" : "Unlocked"}
-                              className="w-4 h-4 object-contain"
-                            />
-                            <span className="text-xs font-medium">{editedTags.locked ? "Locked" : "Unlocked"}</span>
-                          </button>
                           {[
                             { key: "starred", label: "Starred" },
                             { key: "flagged", label: "Flagged" },
@@ -4312,7 +5066,9 @@ Thank you for using our receipt management system.
                                 onClick={() => !editedTags.locked && toggleTag(key)}
                                 className={`flex items-center gap-1 px-3 py-2 border rounded-full transition-colors ${
                                   editedTags.locked
-                                    ? "border-gray-200 text-gray-400 cursor-not-allowed opacity-50"
+                                    ? editedTags[key]
+                                      ? "border-blue-500 text-blue-600 cursor-not-allowed"
+                                      : "border-gray-200 text-gray-400 cursor-not-allowed opacity-40"
                                     : editedTags[key]
                                     ? "border-blue-500 text-blue-600 cursor-pointer"
                                     : "border-gray-300 cursor-pointer"
@@ -4440,21 +5196,26 @@ Thank you for using our receipt management system.
                           : "Not linked to Inventory"}
                       </p>
 
-                      {/* Save Button */}
-                      <div className="mt-6 flex justify-end">
-                        <button
-                          onClick={handleSave}
-                          disabled={isSaving || editedTags.locked}
-                          className="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          title={editedTags.locked ? "Unlock receipt to save changes" : ""}
-                        >
-                          {isSaving ? "Saving..." : "Save Changes"}
-                        </button>
-                      </div>
+                      {/* Save button is in the sticky footer below */}
                     </div>
                   </motion.div>
                 </AnimatePresence>
+                )}
               </div>
+
+              {/* ── Sticky Save Bar (hidden during split) ── */}
+              {!showSplitScreen && (
+              <div className="flex-shrink-0 border-t border-gray-200 bg-white px-4 sm:px-6 py-3">
+                <button
+                  onClick={handleSave}
+                  disabled={isSaving || editedTags.locked}
+                  className="w-full py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                  title={editedTags.locked ? "Unlock receipt to save changes" : ""}
+                >
+                  {isSaving ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+              )}
             </div>
           </motion.div>
         </div>
@@ -4643,6 +5404,174 @@ Thank you for using our receipt management system.
         )}
       </AnimatePresence>
 
+      {/* Edit Merchant Modal */}
+      <AnimatePresence>
+        {showEditMerchantModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => { if (!isSavingEditMerchant) setShowEditMerchantModal(false); }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Saving overlay */}
+              {isSavingEditMerchant && (
+                <div className="absolute inset-0 z-10 bg-white/80 flex flex-col items-center justify-center rounded-xl">
+                  <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-3" />
+                  <p className="text-sm text-gray-600 font-medium">Updating all receipts…</p>
+                </div>
+              )}
+
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 bg-white">
+                <h2 className="text-xl font-bold text-gray-900">Edit Merchant</h2>
+                <button
+                  onClick={() => { if (!isSavingEditMerchant) setShowEditMerchantModal(false); }}
+                  className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors"
+                  aria-label="Close"
+                >
+                  <X size={20} className="text-gray-600" />
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+                {/* Name field */}
+                <div className="mb-6">
+                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                    Merchant Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    className="w-full border border-blue-400 text-sm px-3 py-2 rounded-md bg-white text-gray-800"
+                    value={editMerchantName}
+                    onChange={(e) => {
+                      setEditMerchantName(e.target.value);
+                      setEditLogoOptions([]);
+                      setEditSelectedLogoIndex(null);
+                    }}
+                    placeholder="Enter merchant name"
+                    autoFocus
+                    disabled={isSavingEditMerchant}
+                  />
+                </div>
+
+                {/* Logo section */}
+                <div className="mb-6">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-bold text-gray-700">Merchant Logo</label>
+                    <button
+                      type="button"
+                      onClick={handleFetchEditLogos}
+                      disabled={!editMerchantName.trim() || isFetchingEditLogos || isSavingEditMerchant}
+                      className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isFetchingEditLogos ? "Fetching…" : "Search Logos"}
+                    </button>
+                  </div>
+
+                  {/* Current logo (before new one is selected) */}
+                  {editMerchantLogo && editSelectedLogoIndex === null && (
+                    <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center gap-3">
+                      <p className="text-sm font-medium text-gray-700 flex-shrink-0">Current:</p>
+                      <div className="p-2 border border-gray-300 rounded bg-white flex items-center justify-center min-w-[64px] min-h-[64px]">
+                        <img src={editMerchantLogo} alt="Current logo" className="max-w-full max-h-16 w-auto h-auto object-contain" onError={(e) => { e.target.style.display = "none"; }} />
+                      </div>
+                    </div>
+                  )}
+
+                  {isFetchingEditLogos && (
+                    <div className="text-center py-8 text-gray-500">Fetching logo options…</div>
+                  )}
+
+                  {!isFetchingEditLogos && editLogoOptions.length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-sm text-gray-600 mb-3">Select a logo ({editLogoOptions.length} options found):</p>
+                      <div className="grid grid-cols-4 sm:grid-cols-6 gap-3 max-h-64 overflow-y-auto border border-gray-200 rounded-lg p-4">
+                        {editLogoOptions.map((logo, index) => (
+                          <div
+                            key={index}
+                            className={`relative cursor-pointer border-2 rounded-lg transition-all flex items-center justify-center p-2 min-h-[80px] ${
+                              editSelectedLogoIndex === index ? "border-blue-600 ring-2 ring-blue-300" : "border-gray-200 hover:border-gray-400"
+                            }`}
+                            onClick={() => handleSelectEditLogo(index)}
+                          >
+                            <img
+                              src={logo.displayUrl}
+                              alt={`Logo ${index + 1}`}
+                              className="max-w-full max-h-16 w-auto h-auto object-contain"
+                              onError={(e) => {
+                                if (e.target.src !== logo.storeUrl) {
+                                  e.target.src = logo.storeUrl;
+                                } else {
+                                  e.target.style.display = "none";
+                                  e.target.parentElement.innerHTML = '<div class="w-full min-h-[80px] flex items-center justify-center text-xs text-gray-400">Failed to load</div>';
+                                }
+                              }}
+                            />
+                            {editSelectedLogoIndex === index && (
+                              <div className="absolute top-1 right-1 bg-blue-600 rounded-full p-1 z-10">
+                                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Selected logo preview */}
+                  {editMerchantLogo && editSelectedLogoIndex !== null && (
+                    <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center gap-3">
+                      <p className="text-sm font-medium text-gray-700 flex-shrink-0">Selected:</p>
+                      <div className="p-2 border border-gray-300 rounded bg-white flex items-center justify-center min-w-[64px] min-h-[64px]">
+                        <img src={editMerchantLogo} alt="Selected logo" className="max-w-full max-h-16 w-auto h-auto object-contain" onError={(e) => { e.target.style.display = "none"; }} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Error */}
+                {editMerchantError && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+                    {editMerchantError}
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex justify-end gap-3 mt-6">
+                  <button
+                    type="button"
+                    onClick={() => { if (!isSavingEditMerchant) setShowEditMerchantModal(false); }}
+                    disabled={isSavingEditMerchant}
+                    className="px-6 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveEditMerchant}
+                    disabled={!editMerchantName.trim() || isSavingEditMerchant}
+                    className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isSavingEditMerchant ? "Saving…" : "Save Changes"}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Add Merchant Modal */}
       <AnimatePresence>
         {showAddMerchantModal && (
@@ -4715,7 +5644,7 @@ Thank you for using our receipt management system.
                         Select a logo ({logoOptions.length} options found):
                       </p>
                       <div className="grid grid-cols-4 sm:grid-cols-6 gap-3 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-3">
-                        {logoOptions.map((logoUrl, index) => (
+                        {logoOptions.map((logo, index) => (
                           <div
                             key={index}
                             className={`relative cursor-pointer border-2 rounded-lg transition-all flex items-center justify-center p-2 min-h-[60px] ${
@@ -4726,10 +5655,16 @@ Thank you for using our receipt management system.
                             onClick={() => handleSelectMerchantLogo(index)}
                           >
                             <img
-                              src={logoUrl}
+                              src={logo.displayUrl}
                               alt={`Logo ${index + 1}`}
                               className="max-w-full max-h-12 w-auto h-auto object-contain"
-                              onError={(e) => { e.target.style.display = "none"; }}
+                              onError={(e) => {
+                                if (e.target.src !== logo.storeUrl) {
+                                  e.target.src = logo.storeUrl;
+                                } else {
+                                  e.target.style.display = "none";
+                                }
+                              }}
                             />
                             {selectedLogoIndex === index && (
                               <div className="absolute top-1 right-1 bg-blue-600 rounded-full p-0.5 z-10">
@@ -4750,13 +5685,15 @@ Thank you for using our receipt management system.
                   )}
                   {newMerchantLogo && (
                     <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center gap-3">
-                      <img
-                        src={newMerchantLogo}
-                        alt="Selected logo"
-                        className="w-12 h-12 object-contain border border-gray-200 rounded bg-white p-1"
-                        onError={(e) => { e.target.style.display = "none"; }}
-                      />
-                      <p className="text-xs text-gray-500 break-all flex-1">Selected logo ready</p>
+                      <p className="text-sm font-medium text-gray-700 flex-shrink-0">Selected:</p>
+                      <div className="p-1 border border-gray-200 rounded bg-white flex items-center justify-center min-w-[48px] min-h-[48px]">
+                        <img
+                          src={newMerchantLogo}
+                          alt="Selected logo"
+                          className="w-12 h-12 object-contain"
+                          onError={(e) => { e.target.style.display = "none"; }}
+                        />
+                      </div>
                     </div>
                   )}
                 </div>
@@ -4958,6 +5895,141 @@ Thank you for using our receipt management system.
                     </>
                   )}
                 </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit Expense Category Modal */}
+      <AnimatePresence>
+        {showEditCategoryModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => { if (!isSavingEditCategory) setShowEditCategoryModal(false); }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative bg-white rounded-xl shadow-2xl w-full max-w-md mx-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {isSavingEditCategory && (
+                <div className="absolute inset-0 z-10 bg-white/80 flex flex-col items-center justify-center rounded-xl">
+                  <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-3" />
+                  <p className="text-sm text-gray-600 font-medium">Updating all receipts…</p>
+                </div>
+              )}
+              <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+                <h2 className="text-xl font-bold text-gray-900">Edit Expense Category</h2>
+                <button
+                  onClick={() => { if (!isSavingEditCategory) setShowEditCategoryModal(false); }}
+                  className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors"
+                >
+                  <X size={20} className="text-gray-600" />
+                </button>
+              </div>
+              <div className="p-6">
+                <p className="text-sm text-gray-600 mb-4 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                  Confirmation: When editing an Expense Category all receipts associated with that Expense Category will also be updated.
+                </p>
+                <label className="block text-sm font-bold text-gray-700 mb-2">
+                  Category Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  className="w-full border border-blue-400 text-sm px-3 py-2 rounded-md bg-white text-gray-800 mb-4"
+                  value={editCategoryName}
+                  onChange={(e) => setEditCategoryName(e.target.value)}
+                  placeholder="Enter category name"
+                  autoFocus
+                  disabled={isSavingEditCategory}
+                  onKeyDown={(e) => { if (e.key === "Enter" && editCategoryName.trim()) handleSaveEditCategory(); }}
+                />
+                {editCategoryError && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+                    {editCategoryError}
+                  </div>
+                )}
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => { if (!isSavingEditCategory) setShowEditCategoryModal(false); }}
+                    disabled={isSavingEditCategory}
+                    className="px-6 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveEditCategory}
+                    disabled={!editCategoryName.trim() || isSavingEditCategory}
+                    className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isSavingEditCategory ? "Saving…" : "Okay"}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Expense Category Confirmation */}
+      <AnimatePresence>
+        {showDeleteCategoryConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => { if (!isDeletingCategory) { setShowDeleteCategoryConfirm(false); setDeletingCategory(null); } }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {isDeletingCategory && (
+                <div className="absolute inset-0 z-10 bg-white/80 flex flex-col items-center justify-center rounded-xl">
+                  <div className="w-10 h-10 border-4 border-red-600 border-t-transparent rounded-full animate-spin mb-3" />
+                  <p className="text-sm text-gray-600 font-medium">Removing from all receipts…</p>
+                </div>
+              )}
+              <div className="flex items-start gap-4 mb-6">
+                <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                  <Trash2 size={20} className="text-red-600" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900 mb-1">Are you sure you want to delete this Expense Category?</h2>
+                  <p className="text-sm text-gray-600">
+                    When deleting an Expense Category all receipts associated with that Expense Category will have that Expense Category removed.
+                  </p>
+                </div>
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => { if (!isDeletingCategory) { setShowDeleteCategoryConfirm(false); setDeletingCategory(null); } }}
+                  disabled={isDeletingCategory}
+                  className="px-6 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDeleteCategory}
+                  disabled={isDeletingCategory}
+                  className="px-6 py-2 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {isDeletingCategory ? "Deleting…" : "Delete"}
+                </button>
               </div>
             </motion.div>
           </motion.div>
