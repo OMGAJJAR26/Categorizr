@@ -3,6 +3,7 @@ import { formatTaxRate } from "../../utils/receiptFormatters";
 import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus, MoreHorizontal, Minus, ChevronLeft, ChevronRight, Pencil } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useData } from "../../context/DataContext";
+import Toast from "../Toast";
 import { usePaymentDisplay } from "../../hooks/usePaymentDisplay";
 import MerchantAvatar from "../MerchantAvatar";
 import { parseReceipt, pdfToImage, canvasToBlob } from "../../utils/receiptParser";
@@ -49,6 +50,7 @@ const AddReceiptModal = ({ onClose, onReceiptAdded }) => {
     deleteTax,
     fetchTaxes,
     addExpenseCategory,
+    updateReceipt,
   } = useData();
   const { getPaymentLogo, getPaymentDisplay } = usePaymentDisplay();
 
@@ -141,6 +143,19 @@ const [localMerchants, setLocalMerchants] = useState([]);
   // Add Expense Category inline state
   const [showAddCategoryInput, setShowAddCategoryInput] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
+
+  // Toast state
+  const [toast, setToast] = useState({ isVisible: false, message: "", type: "success" });
+
+  // Edit/Delete Expense Category state
+  const [showEditCategoryModal, setShowEditCategoryModal] = useState(false);
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [editCategoryName, setEditCategoryName] = useState("");
+  const [isSavingEditCategory, setIsSavingEditCategory] = useState(false);
+  const [editCategoryError, setEditCategoryError] = useState(null);
+  const [showDeleteCategoryConfirm, setShowDeleteCategoryConfirm] = useState(false);
+  const [deletingCategory, setDeletingCategory] = useState(null);
+  const [isDeletingCategory, setIsDeletingCategory] = useState(false);
 
   // Manage Tax Types modal state
   const [showManageTaxModal, setShowManageTaxModal] = useState(false);
@@ -1294,6 +1309,68 @@ const handleFieldChange = (field, value) => {
     } finally {
       setIsUploading(false);
       setIsParsing(false);
+    }
+  };
+
+  // ── Expense Category edit/delete helpers ────────────────────────────────
+
+  const handleOpenEditCategory = (category) => {
+    setEditingCategory(category);
+    setEditCategoryName(category);
+    setEditCategoryError(null);
+    setShowEditCategoryModal(true);
+    setShowCategoryDropdown(false);
+  };
+
+  const handleSaveEditCategory = async () => {
+    const newName = editCategoryName.trim();
+    if (!newName) { setEditCategoryError("Category name is required."); return; }
+    setIsSavingEditCategory(true);
+    setEditCategoryError(null);
+    const oldName = editingCategory;
+    try {
+      const affected = (receipts || []).filter(
+        (r) => (r.expense_type || "").toLowerCase() === oldName.toLowerCase()
+      );
+      for (const r of affected) {
+        await updateReceipt(r.id, { expense_type: newName });
+      }
+      addExpenseCategory(newName);
+      if ((formData.expense_type || "").toLowerCase() === oldName.toLowerCase()) {
+        handleFieldChange("expense_type", newName);
+      }
+      setShowEditCategoryModal(false);
+      setEditingCategory(null);
+      await refreshData();
+      setToast({ isVisible: true, message: "Expense category updated successfully!", type: "success" });
+    } catch (err) {
+      setEditCategoryError(err.message || "Failed to update category.");
+    } finally {
+      setIsSavingEditCategory(false);
+    }
+  };
+
+  const handleConfirmDeleteCategory = async () => {
+    if (!deletingCategory) return;
+    setIsDeletingCategory(true);
+    try {
+      const affected = (receipts || []).filter(
+        (r) => (r.expense_type || "").toLowerCase() === deletingCategory.toLowerCase()
+      );
+      for (const r of affected) {
+        await updateReceipt(r.id, { expense_type: "" });
+      }
+      if ((formData.expense_type || "").toLowerCase() === deletingCategory.toLowerCase()) {
+        handleFieldChange("expense_type", "");
+      }
+      setShowDeleteCategoryConfirm(false);
+      setDeletingCategory(null);
+      await refreshData();
+      setToast({ isVisible: true, message: "Expense category deleted successfully!", type: "success" });
+    } catch (err) {
+      setToast({ isVisible: true, message: err.message || "Failed to delete category.", type: "error" });
+    } finally {
+      setIsDeletingCategory(false);
     }
   };
 
@@ -3854,16 +3931,35 @@ const handleSelectLogo = (index) => {
             {filteredCategories.map((category, idx) => (
               <div
                 key={idx}
-                className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left"
-                onClick={() => {
-                  handleFieldChange(
-                    "expense_type",
-                    category,
-                  );
-                  setShowCategoryDropdown(false);
-                }}
+                className="px-3 py-2 hover:bg-blue-50 text-left flex items-center justify-between group"
               >
-                {category}
+                <span
+                  className="flex-1 cursor-pointer text-sm"
+                  onClick={() => {
+                    handleFieldChange("expense_type", category);
+                    setShowCategoryDropdown(false);
+                  }}
+                >
+                  {category}
+                </span>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleOpenEditCategory(category); }}
+                    className="p-1 rounded hover:bg-blue-100 text-gray-400 hover:text-blue-600 transition-colors"
+                    title="Edit category"
+                  >
+                    <Pencil size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setDeletingCategory(category); setShowDeleteCategoryConfirm(true); setShowCategoryDropdown(false); }}
+                    className="p-1 rounded hover:bg-red-100 text-gray-400 hover:text-red-600 transition-colors"
+                    title="Delete category"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -5629,6 +5725,148 @@ const handleSelectLogo = (index) => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Edit Expense Category Modal */}
+      <AnimatePresence>
+        {showEditCategoryModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => { if (!isSavingEditCategory) setShowEditCategoryModal(false); }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative bg-white rounded-xl shadow-2xl w-full max-w-md mx-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {isSavingEditCategory && (
+                <div className="absolute inset-0 z-10 bg-white/80 flex flex-col items-center justify-center rounded-xl">
+                  <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-3" />
+                  <p className="text-sm text-gray-600 font-medium">Updating all receipts…</p>
+                </div>
+              )}
+              <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+                <h2 className="text-xl font-bold text-gray-900">Edit Expense Category</h2>
+                <button
+                  onClick={() => { if (!isSavingEditCategory) setShowEditCategoryModal(false); }}
+                  className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors"
+                >
+                  <X size={20} className="text-gray-600" />
+                </button>
+              </div>
+              <div className="p-6">
+                <p className="text-sm text-gray-600 mb-4 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                  Confirmation: When editing an Expense Category all receipts associated with that Expense Category will also be updated.
+                </p>
+                <label className="block text-sm font-bold text-gray-700 mb-2">
+                  Category Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  className="w-full border border-blue-400 text-sm px-3 py-2 rounded-md bg-white text-gray-800 mb-4"
+                  value={editCategoryName}
+                  onChange={(e) => setEditCategoryName(e.target.value)}
+                  placeholder="Enter category name"
+                  autoFocus
+                  disabled={isSavingEditCategory}
+                  onKeyDown={(e) => { if (e.key === "Enter" && editCategoryName.trim()) handleSaveEditCategory(); }}
+                />
+                {editCategoryError && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+                    {editCategoryError}
+                  </div>
+                )}
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => { if (!isSavingEditCategory) setShowEditCategoryModal(false); }}
+                    disabled={isSavingEditCategory}
+                    className="px-6 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveEditCategory}
+                    disabled={!editCategoryName.trim() || isSavingEditCategory}
+                    className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isSavingEditCategory ? "Saving…" : "Okay"}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Expense Category Confirmation */}
+      <AnimatePresence>
+        {showDeleteCategoryConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => { if (!isDeletingCategory) { setShowDeleteCategoryConfirm(false); setDeletingCategory(null); } }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {isDeletingCategory && (
+                <div className="absolute inset-0 z-10 bg-white/80 flex flex-col items-center justify-center rounded-xl">
+                  <div className="w-10 h-10 border-4 border-red-600 border-t-transparent rounded-full animate-spin mb-3" />
+                  <p className="text-sm text-gray-600 font-medium">Removing from all receipts…</p>
+                </div>
+              )}
+              <div className="flex items-start gap-4 mb-6">
+                <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                  <Trash2 size={20} className="text-red-600" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900 mb-1">Are you sure you want to delete this Expense Category?</h2>
+                  <p className="text-sm text-gray-600">
+                    When deleting an Expense Category all receipts associated with that Expense Category will have that Expense Category removed.
+                  </p>
+                </div>
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => { if (!isDeletingCategory) { setShowDeleteCategoryConfirm(false); setDeletingCategory(null); } }}
+                  disabled={isDeletingCategory}
+                  className="px-6 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDeleteCategory}
+                  disabled={isDeletingCategory}
+                  className="px-6 py-2 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {isDeletingCategory ? "Deleting…" : "Delete"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <Toast
+        message={toast.message}
+        type={toast.type}
+        isVisible={toast.isVisible}
+        onClose={() => setToast((t) => ({ ...t, isVisible: false }))}
+      />
     </AnimatePresence>
   );
 };
