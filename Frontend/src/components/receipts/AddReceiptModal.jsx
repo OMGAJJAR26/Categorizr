@@ -4531,9 +4531,7 @@ const handleSelectLogo = (index) => {
                                 }
                                 setCurrencyInput("tax0", "");
                               }}
-                              placeholder={
-                                formData.receipt_tax_values[0] ? "$0.00" : "-"
-                              }
+                              placeholder="$0.00"
                               readOnly={!formData.receipt_tax_values[0]}
                             />
                             {showTaxDropdown === 1 && (
@@ -4648,9 +4646,7 @@ const handleSelectLogo = (index) => {
                                 }
                                 setCurrencyInput("tax1", "");
                               }}
-                              placeholder={
-                                formData.receipt_tax_values[1] ? "$0.00" : "-"
-                              }
+                              placeholder="$0.00"
                               readOnly={!formData.receipt_tax_values[1]}
                             />
                             {showTaxDropdown === 2 && (
@@ -4726,7 +4722,7 @@ const handleSelectLogo = (index) => {
                             onChange={(e) =>
                               handleFieldChange("tip", e.target.value)
                             }
-                            placeholder="0.00"
+                            placeholder="$0.00"
                           />
                         </div>
 
