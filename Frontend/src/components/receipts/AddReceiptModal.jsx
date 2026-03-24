@@ -131,6 +131,10 @@ const [localMerchants, setLocalMerchants] = useState([]);
     warrantied: false,
   });
 
+  // Currency input display state — tracks raw text while user is typing in Totals fields
+  const [currencyInputs, setCurrencyInputs] = useState({ total: "", tax0: "", tax1: "" });
+  const setCurrencyInput = (key, val) => setCurrencyInputs((prev) => ({ ...prev, [key]: val }));
+
   // Dropdown visibility states
   const [showMerchantDropdown, setShowMerchantDropdown] = useState(false);
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
@@ -797,6 +801,41 @@ const handleFieldChange = (field, value) => {
     return newData;
   });
 };
+
+  // ─── Currency input helpers ───────────────────────────────────────────────
+  // Format a raw number string as a display value: "99.78" → "$99.78", "-99.78" → "-$99.78"
+  // Returns "" (triggers $0.00 placeholder) for empty/zero values.
+  const formatCurrencyDisplay = (val) => {
+    if (!val && val !== 0) return "";
+    const num = parseFloat(val);
+    if (isNaN(num) || num === 0) return "";
+    return num < 0
+      ? `-$${Math.abs(num).toFixed(2)}`
+      : `$${num.toFixed(2)}`;
+  };
+
+  // Ensure raw text input always has "$" or "-$" prefix so it can never be fully erased.
+  const normalizeCurrencyInput = (raw) => {
+    if (!raw) return "$";
+    if (raw === "-") return "-$";
+    if (raw.startsWith("$-")) return `-$${raw.slice(2)}`; // user typed $- → flip to -$
+    if (raw.startsWith("-") && !raw.startsWith("-$")) return `-$${raw.slice(1)}`;
+    if (!raw.startsWith("$") && !raw.startsWith("-$")) {
+      // $ was deleted somehow — add it back
+      return `$${raw.replace(/[^0-9.]/g, "")}`;
+    }
+    return raw;
+  };
+
+  // Parse display string ("$9.78" / "-$9.78") back to a plain number string for formData.
+  const parseCurrencyToNumber = (display) => {
+    if (!display || display === "$" || display === "-$") return "";
+    const isNeg = display.startsWith("-");
+    const numPart = display.replace(/^-?\$/, "");
+    if (!numPart || numPart === ".") return "";
+    return isNeg ? `-${numPart}` : numPart;
+  };
+  // ─────────────────────────────────────────────────────────────────────────
 
   // Add tax type with auto-calculated amount based on current total, keep total fixed
   // Update your addTaxType function to ensure fk_tax_id is set correctly
@@ -4423,12 +4462,11 @@ const handleSelectLogo = (index) => {
                         <div className="mb-4 text-align-left">
                           <label className="font-bold">Subtotal</label>
                           <input
-                            type="number"
-                            step="0.01"
+                            type="text"
                             readOnly
-                            className={inputClass}
-                            value={formData.subtotal}
-                            placeholder="0.00"
+                            className={`${inputClass} ${parseFloat(formData.subtotal) < 0 ? "text-red-600 font-medium" : ""}`}
+                            value={formatCurrencyDisplay(formData.subtotal)}
+                            placeholder="$0.00"
                           />
                         </div>
 
@@ -4468,18 +4506,33 @@ const handleSelectLogo = (index) => {
                           </div>
                           <div className="relative">
                             <input
-                              type="number"
-                              step="0.01"
-                              className={inputClass}
+                              type="text"
+                              inputMode="decimal"
+                              className={`${inputClass} ${parseFloat(formData.receipt_tax_values[0]?.tax_amount) < 0 ? "text-red-600 font-medium" : ""}`}
                               value={
-                                formData.receipt_tax_values[0]?.tax_amount || ""
+                                currencyInputs.tax0 ||
+                                formatCurrencyDisplay(formData.receipt_tax_values[0]?.tax_amount)
                               }
-                              onChange={(e) =>
-                                formData.receipt_tax_values[0] &&
-                                updateTaxAmount(0, e.target.value)
-                              }
+                              onFocus={() => {
+                                if (!formData.receipt_tax_values[0]) return;
+                                const num = parseFloat(formData.receipt_tax_values[0]?.tax_amount);
+                                setCurrencyInput("tax0", !num || num === 0 ? "$" : formatCurrencyDisplay(num));
+                              }}
+                              onChange={(e) => {
+                                if (!formData.receipt_tax_values[0]) return;
+                                const normalized = normalizeCurrencyInput(e.target.value);
+                                setCurrencyInput("tax0", normalized);
+                                updateTaxAmount(0, parseCurrencyToNumber(normalized));
+                              }}
+                              onBlur={() => {
+                                const num = parseFloat(formData.receipt_tax_values[0]?.tax_amount);
+                                if (formData.receipt_tax_values[0]) {
+                                  updateTaxAmount(0, !num || isNaN(num) ? "" : num.toFixed(2));
+                                }
+                                setCurrencyInput("tax0", "");
+                              }}
                               placeholder={
-                                formData.receipt_tax_values[0] ? "0.00" : "-"
+                                formData.receipt_tax_values[0] ? "$0.00" : "-"
                               }
                               readOnly={!formData.receipt_tax_values[0]}
                             />
@@ -4570,18 +4623,33 @@ const handleSelectLogo = (index) => {
                           </div>
                           <div className="relative">
                             <input
-                              type="number"
-                              step="0.01"
-                              className={inputClass}
+                              type="text"
+                              inputMode="decimal"
+                              className={`${inputClass} ${parseFloat(formData.receipt_tax_values[1]?.tax_amount) < 0 ? "text-red-600 font-medium" : ""}`}
                               value={
-                                formData.receipt_tax_values[1]?.tax_amount || ""
+                                currencyInputs.tax1 ||
+                                formatCurrencyDisplay(formData.receipt_tax_values[1]?.tax_amount)
                               }
-                              onChange={(e) =>
-                                formData.receipt_tax_values[1] &&
-                                updateTaxAmount(1, e.target.value)
-                              }
+                              onFocus={() => {
+                                if (!formData.receipt_tax_values[1]) return;
+                                const num = parseFloat(formData.receipt_tax_values[1]?.tax_amount);
+                                setCurrencyInput("tax1", !num || num === 0 ? "$" : formatCurrencyDisplay(num));
+                              }}
+                              onChange={(e) => {
+                                if (!formData.receipt_tax_values[1]) return;
+                                const normalized = normalizeCurrencyInput(e.target.value);
+                                setCurrencyInput("tax1", normalized);
+                                updateTaxAmount(1, parseCurrencyToNumber(normalized));
+                              }}
+                              onBlur={() => {
+                                const num = parseFloat(formData.receipt_tax_values[1]?.tax_amount);
+                                if (formData.receipt_tax_values[1]) {
+                                  updateTaxAmount(1, !num || isNaN(num) ? "" : num.toFixed(2));
+                                }
+                                setCurrencyInput("tax1", "");
+                              }}
                               placeholder={
-                                formData.receipt_tax_values[1] ? "0.00" : "-"
+                                formData.receipt_tax_values[1] ? "$0.00" : "-"
                               }
                               readOnly={!formData.receipt_tax_values[1]}
                             />
@@ -4665,19 +4733,30 @@ const handleSelectLogo = (index) => {
                         {/* Total */}
                         <div className="mb-4 text-align-left">
                           <label className="font-bold">TOTAL</label>
-                          <div className="relative">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none select-none">$</span>
-                            <input
-                              type="number"
-                              step="0.01"
-                              className={`${inputClass} pl-7`}
-                              value={formData.purchasePrice}
-                              onChange={(e) =>
-                                handleFieldChange("purchasePrice", e.target.value)
-                              }
-                              placeholder="0.00"
-                            />
-                          </div>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            className={`${inputClass} ${parseFloat(formData.purchasePrice) < 0 ? "text-red-600 font-medium" : ""}`}
+                            value={
+                              currencyInputs.total ||
+                              formatCurrencyDisplay(formData.purchasePrice)
+                            }
+                            onFocus={() => {
+                              const num = parseFloat(formData.purchasePrice);
+                              setCurrencyInput("total", !num || num === 0 ? "$" : formatCurrencyDisplay(num));
+                            }}
+                            onChange={(e) => {
+                              const normalized = normalizeCurrencyInput(e.target.value);
+                              setCurrencyInput("total", normalized);
+                              handleFieldChange("purchasePrice", parseCurrencyToNumber(normalized));
+                            }}
+                            onBlur={() => {
+                              const num = parseFloat(formData.purchasePrice);
+                              handleFieldChange("purchasePrice", !num || isNaN(num) ? "" : num.toFixed(2));
+                              setCurrencyInput("total", "");
+                            }}
+                            placeholder="$0.00"
+                          />
                         </div>
                       </div>
                     </div>
