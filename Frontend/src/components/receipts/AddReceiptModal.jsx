@@ -4718,7 +4718,11 @@ const handleSelectLogo = (index) => {
                             type="number"
                             step="0.01"
                             className={inputClass}
-                            value={formData.tip}
+                            value={
+                              formData.tip && parseFloat(formData.tip) !== 0
+                                ? parseFloat(parseFloat(formData.tip).toFixed(2))
+                                : ""
+                            }
                             onChange={(e) =>
                               handleFieldChange("tip", e.target.value)
                             }

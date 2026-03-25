@@ -4761,7 +4761,7 @@ Thank you for using our receipt management system.
                                           step="0.01"
                                           min="0"
                                           className={`${inputClass} pl-5`}
-                                          value={tipValue}
+                                          value={tipNum > 0 ? parseFloat(tipNum.toFixed(2)) : ""}
                                           onChange={(e) =>
                                             handleFieldChange(
                                               "tip",
@@ -4794,12 +4794,12 @@ Thank you for using our receipt management system.
                                   ? "text-red-500"
                                   : ""
                               }`}
-                              value={
-                                editedReceipt.purchasePrice ??
-                                r.total ??
-                                r.purchasePrice ??
-                                0
-                              }
+                              value={parseFloat(
+                                (editedReceipt.purchasePrice ??
+                                  r.total ??
+                                  r.purchasePrice ??
+                                  0).toString()
+                              ).toFixed(2)}
                               onChange={(e) =>
                                 handleFieldChange(
                                   "purchasePrice",

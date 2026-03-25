@@ -980,7 +980,7 @@ const HomePage = () => {
                             <>
                               <ReceiptDetail
                                 receipt={selectedReceipt}
-                                receiptList={yearReceipts}
+                                receiptList={filteredReceipts}
                                 selectedIndex={selectedIndex}
                                 setSelectedIndex={setSelectedIndex}
                                 onSelectReceipt={handleReceiptClick}
