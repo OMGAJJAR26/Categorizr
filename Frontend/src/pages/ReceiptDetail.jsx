@@ -4999,8 +4999,15 @@ Thank you for using our receipt management system.
 
                       <div className="border border-dashed border-blue-400 rounded-lg p-3 flex gap-4 flex-wrap">
                         {(() => {
+                          // Prefer editedReceipt values so that annotated
+                          // images (and newly added photos) are reflected
+                          // immediately in the thumbnails without waiting for
+                          // a server round-trip.
                           const urls = [
-                            ...new Set([r.emailAttachment, r.receipt_image]),
+                            ...new Set([
+                              editedReceipt.emailAttachment ?? r.emailAttachment,
+                              editedReceipt.receipt_image ?? r.receipt_image,
+                            ]),
                           ].filter((url) => {
                             if (!url || typeof url !== "string") return false;
                             const trimmed = url.trim();

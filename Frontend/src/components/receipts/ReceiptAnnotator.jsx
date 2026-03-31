@@ -133,74 +133,128 @@ const ReceiptAnnotator = ({ imageUrl, onSave, onClose }) => {
     setHistoryLen(1);
   };
 
-  // ── Save: compose background + annotation layer via proxy fetch ───────────
+  // ── Save: compose background + annotation layer ──────────────────────────
   const handleSave = async () => {
     setIsSaving(true);
-    const annotationCanvas = canvasRef.current;
-    const { w, h } = imgNaturalSize;
+    try {
+      const annotationCanvas = canvasRef.current;
+      const { w, h } = imgNaturalSize;
 
-    const output = document.createElement("canvas");
-    output.width = w || annotationCanvas.width;
-    output.height = h || annotationCanvas.height;
-    const ctx = output.getContext("2d");
+      const output = document.createElement("canvas");
+      output.width = w || annotationCanvas.width;
+      output.height = h || annotationCanvas.height;
+      const ctx = output.getContext("2d");
 
-    // 1. Attempt to draw background via proxy (avoids canvas CORS taint)
-    let backgroundDrawn = false;
-    if (imageUrl && !imageUrl.startsWith("data:")) {
-      try {
-        // Build proxy URL — NODE_API_URL is empty in local dev (Vite rewrites it)
-        const proxyUrl = `${NODE_API_URL}/api/imageproxy?url=${encodeURIComponent(imageUrl)}`;
-        const resp = await fetch(proxyUrl);
-        if (resp.ok) {
-          const blob = await resp.blob();
-          const blobUrl = URL.createObjectURL(blob);
-          await new Promise((resolve, reject) => {
-            const bg = new Image();
-            bg.onload = () => {
-              ctx.drawImage(bg, 0, 0, output.width, output.height);
-              URL.revokeObjectURL(blobUrl);
-              backgroundDrawn = true;
-              resolve();
-            };
-            bg.onerror = reject;
-            bg.src = blobUrl;
-          });
+      // 1. Try fetching background via proxy with a 6-second timeout
+      let backgroundDrawn = false;
+      if (imageUrl && !imageUrl.startsWith("data:")) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 6000);
+          const proxyUrl = `${NODE_API_URL}/api/imageproxy?url=${encodeURIComponent(imageUrl)}`;
+          const resp = await fetch(proxyUrl, { signal: controller.signal });
+          clearTimeout(timeoutId);
+
+          if (resp.ok) {
+            const blob = await resp.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            await new Promise((resolve) => {
+              const bg = new Image();
+              bg.onload = () => {
+                ctx.drawImage(bg, 0, 0, output.width, output.height);
+                URL.revokeObjectURL(blobUrl);
+                backgroundDrawn = true;
+                resolve();
+              };
+              bg.onerror = () => {
+                URL.revokeObjectURL(blobUrl);
+                resolve(); // don't reject — fall through
+              };
+              bg.src = blobUrl;
+            });
+          }
+        } catch {
+          // timeout or network error — fall through to direct draw
         }
-      } catch {
-        // proxy fetch failed — fall through to direct approach
       }
-    }
 
-    // 2. Fallback: try drawing directly from the <img> element
-    //    (works if it's a data: URI or a same-origin URL)
-    if (!backgroundDrawn) {
-      if (imageUrl.startsWith("data:")) {
-        const bg = new Image();
+      // 2. Fallback: data URI — always safe for canvas
+      if (!backgroundDrawn && imageUrl.startsWith("data:")) {
         await new Promise((resolve) => {
+          const bg = new Image();
           bg.onload = () => {
             ctx.drawImage(bg, 0, 0, output.width, output.height);
             backgroundDrawn = true;
             resolve();
           };
-          bg.onerror = resolve; // ignore
+          bg.onerror = resolve;
           bg.src = imageUrl;
         });
-      } else {
+      }
+
+      // 3. Fallback: draw the displayed <img> directly (works if same-origin or
+      //    already loaded without crossOrigin; silently skipped if tainted)
+      if (!backgroundDrawn) {
         try {
           ctx.drawImage(imgRef.current, 0, 0, output.width, output.height);
-          backgroundDrawn = true;
         } catch {
-          // tainted — annotations-only save
+          // tainted — will save annotations-only on a white background
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, output.width, output.height);
         }
       }
+
+      // 4. Always overlay the transparent annotation layer on top
+      ctx.drawImage(annotationCanvas, 0, 0);
+
+      const dataUrl = output.toDataURL("image/png");
+
+      // 5. Upload annotated PNG to CDN so the drawing persists permanently.
+      //    Fall back to the data URL if the upload fails for any reason.
+      let finalUrl = dataUrl;
+      try {
+        const blob = await fetch(dataUrl).then((r) => r.blob());
+        const file = new File([blob], `annotation_${Date.now()}.png`, {
+          type: "image/png",
+        });
+        const formData = new FormData();
+        formData.append("file", file);
+        const token = localStorage.getItem("token");
+        const uploadController = new AbortController();
+        const uploadTimeout = setTimeout(
+          () => uploadController.abort(),
+          15000
+        );
+        const uploadResp = await fetch("/api/user/uploadmediaV1", {
+          method: "POST",
+          headers: { Accesstoken: token },
+          body: formData,
+          signal: uploadController.signal,
+        });
+        clearTimeout(uploadTimeout);
+        if (uploadResp.ok) {
+          const uploadData = await uploadResp.json();
+          const cdnUrl = Array.isArray(uploadData)
+            ? uploadData[0]?.fullImageUrl
+            : uploadData?.fullImageUrl;
+          if (cdnUrl) finalUrl = cdnUrl;
+        }
+      } catch (uploadErr) {
+        // Network error or timeout — keep the data URL so the drawing is
+        // still visible in the current session even if it won't survive a
+        // page reload.
+        console.warn(
+          "Annotation CDN upload failed, using data URL as fallback:",
+          uploadErr
+        );
+      }
+
+      onSave(finalUrl);
+    } catch (err) {
+      console.error("ReceiptAnnotator save error:", err);
+    } finally {
+      setIsSaving(false);
     }
-
-    // 3. Always overlay the annotation layer
-    ctx.drawImage(annotationCanvas, 0, 0);
-
-    const dataUrl = output.toDataURL("image/png");
-    setIsSaving(false);
-    onSave(dataUrl);
   };
 
   return (
