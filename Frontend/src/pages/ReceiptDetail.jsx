@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { NODE_API_URL } from "../api/Axios";
 import { formatTaxRate } from "../utils/receiptFormatters";
-import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal,} from "lucide-react";
+import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine,} from "lucide-react";
+import ReceiptAnnotator from "../components/receipts/ReceiptAnnotator";
 import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationDialog";
 import "../App.css";
 import Visa from "../assets/payment/Visa.png";
@@ -214,6 +215,13 @@ const ReceiptDetail = ({
   const categoryInputRef = useRef(null);
   const paymentInputRef = useRef(null);
   const optionsMenuRef = useRef(null);
+  const addPhotoInputRef = useRef(null);
+
+  // ── Add Photo / Annotation state ──────────────────────────────────────────
+  const [isAddingPhoto, setIsAddingPhoto] = useState(false);
+  const [additionalPhotoUrls, setAdditionalPhotoUrls] = useState([]);
+  const [annotatorUrl, setAnnotatorUrl] = useState(null);
+  const [annotatorSource, setAnnotatorSource] = useState(null); // { type: 'existing'|'additional', index: number }
 
   // Editable tags state
   const [editedTags, setEditedTags] = useState({
@@ -1397,6 +1405,78 @@ const handleDeleteTaxType = async (taxId) => {
   };
 
   // ── Expense Category edit/delete helpers ────────────────────────────────
+
+  // ── Add Photo helpers ─────────────────────────────────────────────────────
+
+  /** Upload a single file to /api/user/uploadmediaV1 and return the CDN URL */
+  const uploadPhotoToMedia = async (file) => {
+    const token = localStorage.getItem("token");
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await fetch("/api/user/uploadmediaV1", {
+      method: "POST",
+      headers: { Accesstoken: token },
+      body: formData,
+    });
+    if (!response.ok) throw new Error(`Upload failed: ${response.status}`);
+    const data = await response.json();
+    if (Array.isArray(data) && data[0]?.fullImageUrl) return data[0].fullImageUrl;
+    if (data?.fullImageUrl) return data.fullImageUrl;
+    throw new Error("No URL returned from upload");
+  };
+
+  const handleAddPhotoSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (addPhotoInputRef.current) addPhotoInputRef.current.value = "";
+    setIsAddingPhoto(true);
+    try {
+      let url;
+      try {
+        url = await uploadPhotoToMedia(file);
+      } catch {
+        // Fallback to local object URL
+        url = URL.createObjectURL(file);
+      }
+      setAdditionalPhotoUrls((prev) => [...prev, url]);
+      // Persist to receipt immediately: fill empty slots first
+      const r = selectedReceipt;
+      const hasImage = r?.receipt_image && !["0", "null", ""].includes(r.receipt_image.trim());
+      const hasAttachment = r?.emailAttachment && !["0", "null", ""].includes(r.emailAttachment.trim());
+      const patch = hasImage
+        ? hasAttachment ? {} : { emailAttachment: url }
+        : { receipt_image: url };
+      if (Object.keys(patch).length > 0) {
+        handleFieldChange(Object.keys(patch)[0], url);
+      }
+    } catch (err) {
+      console.error("Add photo failed:", err);
+    } finally {
+      setIsAddingPhoto(false);
+    }
+  };
+
+  const handleAnnotationSaveDetail = (dataUrl) => {
+    if (annotatorSource?.type === "additional") {
+      setAdditionalPhotoUrls((prev) =>
+        prev.map((u, i) => (i === annotatorSource.index ? dataUrl : u))
+      );
+    } else if (annotatorSource?.type === "existing") {
+      // Replace via editedReceipt fields
+      const idx = annotatorSource.index;
+      const r = selectedReceipt;
+      const existingUrls = [r?.emailAttachment, r?.receipt_image].filter(
+        (u) => u && typeof u === "string" && !["0", "null", ""].includes(u.trim())
+      );
+      if (existingUrls[idx] === r?.emailAttachment) {
+        handleFieldChange("emailAttachment", dataUrl);
+      } else {
+        handleFieldChange("receipt_image", dataUrl);
+      }
+    }
+    setAnnotatorUrl(null);
+    setAnnotatorSource(null);
+  };
 
   /** Direct API update — spreads the full receipt then overrides fields (mirrors merchant delete pattern) */
   const putUpdateReceipt = async (payload) => {
@@ -3948,22 +4028,24 @@ Thank you for using our receipt management system.
                         >
                           <label className="font-bold">Merchant</label>
                           <div className="relative w-full">
-                            <div className="absolute left-2 top-1/2 transform -translate-y-1/2 z-10">
-                              <MerchantAvatar
-                                name={
-                                  editedReceipt.storeName ||
-                                  r.storeName ||
-                                  r.merchant
-                                }
-                                explicitUrl={
-                                  getMerchantImage(editedReceipt.storeName) ||
-                                  r.store_image
-                                }
-                                className="w-5 h-5 mt-2"
-                              />
-                            </div>
+                            {(editedReceipt.storeName || r.storeName || r.merchant) ? (
+                              <div className="absolute left-2 top-1/2 transform -translate-y-1/2 z-10">
+                                <MerchantAvatar
+                                  name={
+                                    editedReceipt.storeName ||
+                                    r.storeName ||
+                                    r.merchant
+                                  }
+                                  explicitUrl={
+                                    getMerchantImage(editedReceipt.storeName) ||
+                                    r.store_image
+                                  }
+                                  className="w-5 h-5 mt-2"
+                                />
+                              </div>
+                            ) : null}
                             <input
-                              className={`${inputClass} pl-8`}
+                              className={`${inputClass} ${(editedReceipt.storeName || r.storeName || r.merchant) ? "pl-8" : "pl-3"}`}
                               value={
                                 editedReceipt.storeName ?? r.storeName ?? ""
                               }
@@ -4886,9 +4968,34 @@ Thank you for using our receipt management system.
                     </div>
 
                     <div className="px-6 pb-6 text-left">
-                      <h3 className="font-semibold mb-2 text-gray-900">
-                        RECEIPT IMAGES
-                      </h3>
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="font-semibold text-gray-900">
+                          RECEIPT IMAGES
+                        </h3>
+                        <div className="flex items-center gap-2">
+                          {/* Add Photo button */}
+                          <button
+                            type="button"
+                            onClick={() => addPhotoInputRef.current?.click()}
+                            disabled={isAddingPhoto}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors"
+                          >
+                            {isAddingPhoto ? (
+                              <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              <Camera size={13} />
+                            )}
+                            Add Photo
+                          </button>
+                          <input
+                            ref={addPhotoInputRef}
+                            type="file"
+                            accept="image/*,application/pdf"
+                            className="hidden"
+                            onChange={handleAddPhotoSelect}
+                          />
+                        </div>
+                      </div>
 
                       <div className="border border-dashed border-blue-400 rounded-lg p-3 flex gap-4 flex-wrap">
                         {(() => {
@@ -4916,14 +5023,6 @@ Thank you for using our receipt management system.
                             );
                           });
 
-                          if (urls.length === 0) {
-                            return (
-                              <div className="flex items-center justify-center w-full py-8 text-gray-500 italic">
-                                No receipt image available
-                              </div>
-                            );
-                          }
-
                           const isPdf = (u) =>
                             typeof u === "string" &&
                             (/\.pdf(\?|$)/i.test(u) ||
@@ -4943,43 +5042,76 @@ Thank you for using our receipt management system.
                             return proxy + encodeURIComponent(url);
                           };
 
-                          return urls.map((u, idx) => (
-                            <div key={idx} className="relative">
-                              {isPdf(u) ? (
-                                <a
-                                  href={getPdfUrl(u)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="block focus:outline-none"
-                                  title="Open PDF"
-                                >
-                                  <div className="w-24 h-32 bg-gray-100 border rounded overflow-hidden relative">
-                                    <iframe
-                                      src={`${getPdfUrl(
-                                        u
-                                      )}#page=1&toolbar=0&navpanes=0&scrollbar=0`}
-                                      className="w-full h-full border-none pointer-events-none"
-                                      title="PDF Preview"
-                                      loading="lazy"
-                                    />
-                                    <div className="absolute bottom-1 left-1 right-1 text-center text-[10px] font-semibold bg-white/80 rounded p-0.5">
-                                      PDF
+                          const allUrls = [...urls, ...additionalPhotoUrls];
+
+                          if (allUrls.length === 0) {
+                            return (
+                              <div className="flex flex-col items-center justify-center w-full py-6 text-gray-400 gap-2">
+                                <Camera size={28} className="opacity-40" />
+                                <span className="text-sm italic">No receipt image — tap &quot;Add Photo&quot; to upload one</span>
+                              </div>
+                            );
+                          }
+
+                          return allUrls.map((u, idx) => {
+                            const isAdditional = idx >= urls.length;
+                            return (
+                              <div key={idx} className="relative group">
+                                {isPdf(u) ? (
+                                  <a
+                                    href={getPdfUrl(u)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="block focus:outline-none"
+                                    title="Open PDF"
+                                  >
+                                    <div className="w-24 h-32 bg-gray-100 border rounded overflow-hidden relative">
+                                      <iframe
+                                        src={`${getPdfUrl(
+                                          u
+                                        )}#page=1&toolbar=0&navpanes=0&scrollbar=0`}
+                                        className="w-full h-full border-none pointer-events-none"
+                                        title="PDF Preview"
+                                        loading="lazy"
+                                      />
+                                      <div className="absolute bottom-1 left-1 right-1 text-center text-[10px] font-semibold bg-white/80 rounded p-0.5">
+                                        PDF
+                                      </div>
                                     </div>
-                                  </div>
-                                </a>
-                              ) : (
-                                <img
-                                  src={u}
-                                  alt="Receipt"
-                                  className="w-24 h-auto rounded cursor-pointer"
-                                  onClick={() => window.open(u, "_blank")}
-                                  onError={(e) =>
-                                    (e.target.style.display = "none")
-                                  }
-                                />
-                              )}
-                            </div>
-                          ));
+                                  </a>
+                                ) : (
+                                  <img
+                                    src={u}
+                                    alt="Receipt"
+                                    className="w-24 h-auto rounded cursor-pointer border border-gray-200"
+                                    onClick={() => window.open(u, "_blank")}
+                                    onError={(e) =>
+                                      (e.target.style.display = "none")
+                                    }
+                                  />
+                                )}
+                                {/* Annotate button */}
+                                {!isPdf(u) && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setAnnotatorUrl(u);
+                                      setAnnotatorSource(
+                                        isAdditional
+                                          ? { type: "additional", index: idx - urls.length }
+                                          : { type: "existing", index: idx }
+                                      );
+                                    }}
+                                    className="absolute bottom-1 right-1 bg-white/90 hover:bg-blue-600 hover:text-white text-gray-700 rounded p-1 opacity-0 group-hover:opacity-100 transition-all shadow"
+                                    title="Annotate / Write on this receipt"
+                                  >
+                                    <PenLine size={11} />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          });
                         })()}
                       </div>
 
@@ -5906,6 +6038,18 @@ Thank you for using our receipt management system.
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Receipt Annotator overlay */}
+      {annotatorUrl && (
+        <ReceiptAnnotator
+          imageUrl={annotatorUrl}
+          onSave={handleAnnotationSaveDetail}
+          onClose={() => {
+            setAnnotatorUrl(null);
+            setAnnotatorSource(null);
+          }}
+        />
+      )}
     </>
   );
 };

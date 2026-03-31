@@ -59,9 +59,28 @@ const buildClearbitUrl = (name) => {
   return domain ? `https://logo.clearbit.com/${domain}.com` : null;
 };
 
+// ─── Miscellaneous "M" badge ─────────────────────────────────────────────────
+const MiscellaneousAvatar = ({ className }) => (
+  <div
+    className={`${className} rounded flex items-center justify-center font-extrabold text-white select-none`}
+    style={{
+      background: "linear-gradient(135deg, #1e40af 0%, #3b82f6 100%)",
+      letterSpacing: "-0.5px",
+    }}
+    aria-label="Miscellaneous"
+    title="Miscellaneous"
+  >
+    <span style={{ fontSize: "0.7em", lineHeight: 1 }}>M</span>
+  </div>
+);
+
 // ─── component ──────────────────────────────────────────────────────────────
 
 const MerchantAvatar = ({ name, explicitUrl, className = "w-6 h-6" }) => {
+  // Special badge for Miscellaneous merchant
+  if (name?.toString().trim().toLowerCase() === "miscellaneous") {
+    return <MiscellaneousAvatar className={className} />;
+  }
   // Raw API-fetched URL (no proxy prefix)
   const [rawApiUrl, setRawApiUrl] = useState(null);
   const [isLoading, setIsLoading] = useState(false);

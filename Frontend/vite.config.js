@@ -238,6 +238,11 @@ export default defineConfig({
           });
         },
       },
+      // Image proxy — routes to Node server so it can add CORS headers
+      '/api/imageproxy': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
       // Existing emailserver APIs stay proxied to production backend
       '/api': {
         target: 'https://categorizr.com/emailserver',

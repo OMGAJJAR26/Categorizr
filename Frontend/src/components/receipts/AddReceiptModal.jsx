@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { formatTaxRate } from "../../utils/receiptFormatters";
-import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus, MoreHorizontal, Minus, ChevronLeft, ChevronRight, Pencil } from "lucide-react";
+import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus, MoreHorizontal, Minus, ChevronLeft, ChevronRight, Pencil, Camera, PenLine } from "lucide-react";
+import ReceiptAnnotator from "./ReceiptAnnotator";
 import { motion, AnimatePresence } from "framer-motion";
 import { useData } from "../../context/DataContext";
 import Toast from "../Toast";
@@ -208,9 +209,15 @@ const [localMerchants, setLocalMerchants] = useState([]);
   };
 
   const fileInputRef = useRef(null);
+  const addPhotoInputRef = useRef(null);
   const merchantInputRef = useRef(null);
   const categoryInputRef = useRef(null);
   const paymentInputRef = useRef(null);
+
+  // ── Add Photo / Annotation state ──────────────────────────────────────────
+  const [isAddingPhoto, setIsAddingPhoto] = useState(false);
+  const [annotatorUrl, setAnnotatorUrl] = useState(null); // URL being annotated
+  const [annotatorIndex, setAnnotatorIndex] = useState(null); // index in uploadedMediaUrls (-1 = new blank)
 
   // ── Edit / Delete Merchant ────────────────────────────────────────────────
   const [showEditMerchantModal, setShowEditMerchantModal] = useState(false);
@@ -588,6 +595,42 @@ const [localMerchants, setLocalMerchants] = useState([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+  };
+
+  // ── Add Photo handler (in the form step receipt images section) ─────────
+  const handleAddPhotoSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (addPhotoInputRef.current) addPhotoInputRef.current.value = "";
+    setIsAddingPhoto(true);
+    try {
+      const newUrls = await uploadFilesToMedia([file]);
+      if (newUrls.length > 0) {
+        setUploadedMediaUrls((prev) => [...prev, ...newUrls]);
+      }
+    } catch (err) {
+      console.error("Add photo upload failed:", err);
+      // Fallback: use local object URL
+      const localUrl = URL.createObjectURL(file);
+      setUploadedMediaUrls((prev) => [...prev, localUrl]);
+    } finally {
+      setIsAddingPhoto(false);
+    }
+  };
+
+  // ── Annotation save handler ──────────────────────────────────────────────
+  const handleAnnotationSave = (dataUrl) => {
+    if (annotatorIndex !== null && annotatorIndex >= 0) {
+      // Replace existing image
+      setUploadedMediaUrls((prev) =>
+        prev.map((url, i) => (i === annotatorIndex ? dataUrl : url))
+      );
+    } else {
+      // Add as new image
+      setUploadedMediaUrls((prev) => [...prev, dataUrl]);
+    }
+    setAnnotatorUrl(null);
+    setAnnotatorIndex(null);
   };
 
   const removeFile = (index) => {
@@ -3802,18 +3845,20 @@ const handleSelectLogo = (index) => {
   <div className="mb-4 text-left" ref={merchantInputRef}>
     <label className="font-bold">Merchant</label>
     <div className="relative w-full">
-      <div className="absolute left-2 top-1/2 transform -translate-y-1/2 z-10">
-        <MerchantAvatar
-          name={formData.storeName}
-          explicitUrl={
-            detectedMerchantLogo ||
-            getMerchantImage(formData.storeName)
-          }
-          className="w-5 h-5 mt-2"
-        />
-      </div>
+      {formData.storeName ? (
+        <div className="absolute left-2 top-1/2 transform -translate-y-1/2 z-10">
+          <MerchantAvatar
+            name={formData.storeName}
+            explicitUrl={
+              detectedMerchantLogo ||
+              getMerchantImage(formData.storeName)
+            }
+            className="w-5 h-5 mt-2"
+          />
+        </div>
+      ) : null}
       <input
-        className={`${inputClass} pl-8`}
+        className={`${inputClass} ${formData.storeName ? "pl-8" : "pl-3"}`}
         value={formData.storeName}
         onChange={(e) => {
           const newMerchantName = e.target.value;
@@ -4831,9 +4876,34 @@ const handleSelectLogo = (index) => {
 
                     {/* Receipt Image Section */}
                     <div className="px-6 pb-6 text-left">
-                      <h3 className="font-semibold mb-2 text-gray-900">
-                        RECEIPT IMAGES
-                      </h3>
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="font-semibold text-gray-900">
+                          RECEIPT IMAGES
+                        </h3>
+                        <div className="flex items-center gap-2">
+                          {/* Add Photo button */}
+                          <button
+                            type="button"
+                            onClick={() => addPhotoInputRef.current?.click()}
+                            disabled={isAddingPhoto}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors"
+                          >
+                            {isAddingPhoto ? (
+                              <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              <Camera size={13} />
+                            )}
+                            Add Photo
+                          </button>
+                          <input
+                            ref={addPhotoInputRef}
+                            type="file"
+                            accept="image/*,application/pdf"
+                            className="hidden"
+                            onChange={handleAddPhotoSelect}
+                          />
+                        </div>
+                      </div>
                       <div className="border border-dashed border-blue-400 rounded-lg p-3 flex gap-4 flex-wrap">
                         {uploadedMediaUrls.length > 0 ? (
                           // Show all uploaded media - use local preview for PDFs since CDN URLs can't render in <img>
@@ -4853,27 +4923,56 @@ const handleSelectLogo = (index) => {
                             if (!displayUrl) return null;
 
                             return (
-                              <img
-                                key={idx}
-                                src={displayUrl}
-                                alt={`Receipt ${idx + 1}`}
-                                className="w-24 h-auto rounded cursor-pointer border border-gray-200"
-                                onClick={() => window.open(url, "_blank")} // open the actual CDN URL on click
-                              />
+                              <div key={idx} className="relative group">
+                                <img
+                                  src={displayUrl}
+                                  alt={`Receipt ${idx + 1}`}
+                                  className="w-24 h-auto rounded cursor-pointer border border-gray-200"
+                                  onClick={() => window.open(url, "_blank")}
+                                />
+                                {/* Annotate button overlay */}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setAnnotatorUrl(displayUrl);
+                                    setAnnotatorIndex(idx);
+                                  }}
+                                  className="absolute bottom-1 right-1 bg-white/90 hover:bg-blue-600 hover:text-white text-gray-700 rounded p-1 opacity-0 group-hover:opacity-100 transition-all shadow"
+                                  title="Annotate / Write on this receipt"
+                                >
+                                  <PenLine size={11} />
+                                </button>
+                              </div>
                             );
                           })
                         ) : getImagePreviewUrl() ? (
-                          <img
-                            src={getImagePreviewUrl()}
-                            alt="Receipt"
-                            className="w-24 h-auto rounded cursor-pointer"
-                            onClick={() =>
-                              window.open(getImagePreviewUrl(), "_blank")
-                            }
-                          />
+                          <div className="relative group">
+                            <img
+                              src={getImagePreviewUrl()}
+                              alt="Receipt"
+                              className="w-24 h-auto rounded cursor-pointer border border-gray-200"
+                              onClick={() =>
+                                window.open(getImagePreviewUrl(), "_blank")
+                              }
+                            />
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setAnnotatorUrl(getImagePreviewUrl());
+                                setAnnotatorIndex(-1);
+                              }}
+                              className="absolute bottom-1 right-1 bg-white/90 hover:bg-blue-600 hover:text-white text-gray-700 rounded p-1 opacity-0 group-hover:opacity-100 transition-all shadow"
+                              title="Annotate / Write on this receipt"
+                            >
+                              <PenLine size={11} />
+                            </button>
+                          </div>
                         ) : (
-                          <div className="flex items-center justify-center w-full py-8 text-gray-500 italic">
-                            No receipt image available
+                          <div className="flex flex-col items-center justify-center w-full py-6 text-gray-400 gap-2">
+                            <Camera size={28} className="opacity-40" />
+                            <span className="text-sm italic">No receipt image — tap &quot;Add Photo&quot; to upload one</span>
                           </div>
                         )}
                       </div>
@@ -5972,6 +6071,18 @@ const handleSelectLogo = (index) => {
         isVisible={toast.isVisible}
         onClose={() => setToast((t) => ({ ...t, isVisible: false }))}
       />
+
+      {/* Receipt Annotator overlay */}
+      {annotatorUrl && (
+        <ReceiptAnnotator
+          imageUrl={annotatorUrl}
+          onSave={handleAnnotationSave}
+          onClose={() => {
+            setAnnotatorUrl(null);
+            setAnnotatorIndex(null);
+          }}
+        />
+      )}
     </AnimatePresence>
   );
 };
