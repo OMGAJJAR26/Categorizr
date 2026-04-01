@@ -21,7 +21,9 @@ const ReceiptAnnotator = ({ imageUrl, onSave, onClose }) => {
 
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgNaturalSize, setImgNaturalSize] = useState({ w: 0, h: 0 });
-  const [isDrawing, setIsDrawing] = useState(false);
+  // Use a ref (not state) so all callbacks always see the current value
+  // without stale-closure delays — the root cause of invisible strokes.
+  const isDrawingRef = useRef(false);
   const [isSaving, setIsSaving] = useState(false);
   const [color, setColor] = useState("#EF4444");
   const [lineWidth, setLineWidth] = useState(3);
@@ -68,14 +70,14 @@ const ReceiptAnnotator = ({ imageUrl, onSave, onClose }) => {
 
   const startDraw = useCallback((e) => {
     e.preventDefault();
-    setIsDrawing(true);
+    isDrawingRef.current = true; // synchronous — no stale-closure lag
     lastPoint.current = getPos(e);
   }, []);
 
   const draw = useCallback(
     (e) => {
       e.preventDefault();
-      if (!isDrawing || !lastPoint.current) return;
+      if (!isDrawingRef.current || !lastPoint.current) return;
       const canvas = canvasRef.current;
       const ctx = canvas.getContext("2d");
       const pos = getPos(e);
@@ -100,19 +102,19 @@ const ReceiptAnnotator = ({ imageUrl, onSave, onClose }) => {
       ctx.globalCompositeOperation = "source-over"; // reset
       lastPoint.current = pos;
     },
-    [isDrawing, tool, color, lineWidth]
+    [tool, color, lineWidth]
   );
 
   const stopDraw = useCallback(() => {
-    if (!isDrawing) return;
-    setIsDrawing(false);
+    if (!isDrawingRef.current) return;
+    isDrawingRef.current = false; // synchronous reset
     lastPoint.current = null;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     const snap = ctx.getImageData(0, 0, canvas.width, canvas.height);
     historyRef.current.push(snap);
     setHistoryLen(historyRef.current.length);
-  }, [isDrawing]);
+  }, []);
 
   // ── Undo / Clear ────────────────────────────────────────────────────────
   const undo = () => {

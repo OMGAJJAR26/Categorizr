@@ -741,6 +741,13 @@ const [localMerchants, setLocalMerchants] = useState([]);
     return subtotal > 0 ? subtotal.toFixed(2) : "0.00";
   };
 
+  // Auto-dismiss error banner after 3.5 s
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(null), 3500);
+    return () => clearTimeout(t);
+  }, [error]);
+
   // Handle form field changes with auto-calculation
 const handleFieldChange = (field, value) => {
   // Clear error banner when user changes the merchant field
@@ -3350,16 +3357,20 @@ const handleSelectLogo = (index) => {
                 </div>
               </div>
 
-              {/* Top Error Banner — sticky, always visible */}
+              {/* Top Error Banner */}
               {error && (
-                <div className="sticky top-0 z-10 flex items-center gap-2 bg-red-600 text-white text-sm font-medium px-4 py-2.5 shadow-sm">
-                  <span className="flex-shrink-0">⚠️</span>
-                  <span className="flex-1">{error}</span>
+                <div className="flex items-center gap-2 bg-yellow-50 border-b border-yellow-200 px-4 py-0.5">
+                  <span className="text-black flex-shrink-0">⚠️ Please Select Merchant </span>
+                  <span
+                    className="text-yellow-800 text-md flex-1 min-w-0 truncate"
+                    title={error}
+                  >
+                    {error}
+                  </span>
                   <button
                     type="button"
                     onClick={() => setError(null)}
-                    className="flex-shrink-0 ml-2 text-white/80 hover:text-white text-lg leading-none"
-                    aria-label="Dismiss"
+                    className="text-yellow-500 hover:text-yellow-700 text-lg leading-none flex-shrink-0 ml-1"
                   >
                     ×
                   </button>
