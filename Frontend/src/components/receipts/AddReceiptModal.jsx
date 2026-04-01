@@ -743,6 +743,8 @@ const [localMerchants, setLocalMerchants] = useState([]);
 
   // Handle form field changes with auto-calculation
 const handleFieldChange = (field, value) => {
+  // Clear error banner when user changes the merchant field
+  if (field === "storeName" && error) setError(null);
   setFormData((prev) => {
     const newData = { ...prev, [field]: value };
 
@@ -3348,6 +3350,22 @@ const handleSelectLogo = (index) => {
                 </div>
               </div>
 
+              {/* Top Error Banner — sticky, always visible */}
+              {error && (
+                <div className="sticky top-0 z-10 flex items-center gap-2 bg-red-600 text-white text-sm font-medium px-4 py-2.5 shadow-sm">
+                  <span className="flex-shrink-0">⚠️</span>
+                  <span className="flex-1">{error}</span>
+                  <button
+                    type="button"
+                    onClick={() => setError(null)}
+                    className="flex-shrink-0 ml-2 text-white/80 hover:text-white text-lg leading-none"
+                    aria-label="Dismiss"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+
               {/* Scrollable Content */}
               <div className="overflow-y-auto flex-1 min-h-0">
                 {showSplitScreen ? (
@@ -4976,13 +4994,6 @@ const handleSelectLogo = (index) => {
                           </div>
                         )}
                       </div>
-
-                      {/* Error Message */}
-                      {error && (
-                        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
-                          {error}
-                        </div>
-                      )}
 
                       {/* Save button is in the sticky footer below */}
                     </div>
