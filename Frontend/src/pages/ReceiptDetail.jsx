@@ -200,6 +200,10 @@ const ReceiptDetail = ({
   const [editingTaxId, setEditingTaxId] = useState(null);
   const [isDeletingTax, setIsDeletingTax] = useState(false);
   const [taxRefreshKey, setTaxRefreshKey] = useState(0);
+  const [taxError, setTaxError] = useState(null);
+  const [localTaxTypes, setLocalTaxTypes] = useState([]);
+  const [showDeleteTaxConfirm, setShowDeleteTaxConfirm] = useState(false);
+  const [deletingTaxId, setDeletingTaxId] = useState(null);
 
   // ── Split feature ─────────────────────────────────────────────────────────
   const [showSplitScreen, setShowSplitScreen] = useState(false);
@@ -413,8 +417,27 @@ const ReceiptDetail = ({
     });
   }
 
+  // Also include any taxes added locally this session
+  localTaxTypes.forEach((tax) => {
+    const name = (tax.tax_name || "").toString().trim();
+    const rate = (tax.tax_rate || "").toString().trim();
+    if (name && rate && !name.toLowerCase().includes("tip")) {
+      const key = `${name}|${rate}`;
+      if (!taxMap.has(key)) {
+        taxMap.set(key, {
+          tax_name: name,
+          tax_rate: rate,
+          tax_number: tax.tax_number || "",
+          id: tax.id || 0,
+          fk_user_id: tax.fk_user_id || 0,
+          is_default_tax: tax.is_default_tax || 0,
+        });
+      }
+    }
+  });
+
   return Array.from(taxMap.values());
-}, [taxData, receiptTaxValues, taxRefreshKey]); // Add taxRefreshKey as dependency
+}, [taxData, receiptTaxValues, taxRefreshKey, localTaxTypes]);
 
 // Add this useEffect to fetch taxes when component mounts
 useEffect(() => {
@@ -1041,140 +1064,112 @@ useEffect(() => {
   };
 
   // Manage Tax Types modal handlers
-  // Replace your existing handleAddTaxType with this
-const handleAddTaxType = async () => {
-  if (!newTaxName.trim() || !newTaxRate.trim()) {
-    setError("Tax Name and Tax Rate are required");
-    return;
-  }
-
-  setIsSavingTax(true);
-  setError(null);
-
-  try {
-    const fk_user_id = localStorage.getItem("fk_user_id") || "0";
-    const taxPayload = {
-      id: 0,
-      fk_user_id: parseInt(fk_user_id),
-      tax_name: newTaxName.trim(),
-      tax_rate: newTaxRate.trim(),
-      tax_number: newTaxNumber.trim() || "",
-      is_default_tax: 0,
-      is_tips: 0,
-      default_tax_order: 0,
-      created: 0,
-      udpated: 0,
-    };
-    
-    const savedTax = await addTax(taxPayload);
-    
-    if (savedTax) {
-      // Wait a bit for the backend to process
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Force refresh taxes
-      await fetchTaxes();
-      setTaxRefreshKey(prev => prev + 1);
-      
-      // Wait for state to update
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      // Auto-add the new tax to the current receipt
-      addTaxToReceipt({
-        id: savedTax.id || 0,
+  const handleAddTaxType = async () => {
+    if (!newTaxName.trim() || !newTaxRate.trim()) {
+      setTaxError("Tax Name and Tax Rate are required.");
+      return;
+    }
+    setIsSavingTax(true);
+    setTaxError(null);
+    try {
+      const fk_user_id = localStorage.getItem("fk_user_id") || "0";
+      const taxPayload = {
+        id: 0,
+        fk_user_id: parseInt(fk_user_id),
         tax_name: newTaxName.trim(),
         tax_rate: newTaxRate.trim(),
         tax_number: newTaxNumber.trim() || "",
-      });
+        is_default_tax: 0,
+        is_tips: 0,
+        default_tax_order: 0,
+        created: 0,
+        udpated: 0,
+      };
+      const savedTax = await addTax(taxPayload);
+      if (savedTax) {
+        // Add to local session list so it shows immediately
+        setLocalTaxTypes((prev) => [...prev, { ...taxPayload, id: savedTax.id || Date.now() }]);
+        await fetchTaxes();
+        setTaxRefreshKey((prev) => prev + 1);
+        addTaxToReceipt({
+          id: savedTax.id || 0,
+          tax_name: newTaxName.trim(),
+          tax_rate: newTaxRate.trim(),
+          tax_number: newTaxNumber.trim() || "",
+        });
+      }
+      setNewTaxName("");
+      setNewTaxRate("");
+      setNewTaxNumber("");
+      setShowManageTaxModal(false);
+    } catch (err) {
+      console.error("Error adding tax:", err);
+      setTaxError(err.message || "Failed to add tax type.");
+    } finally {
+      setIsSavingTax(false);
     }
-    
-    setNewTaxName("");
-    setNewTaxRate("");
-    setNewTaxNumber("");
-    setShowManageTaxModal(false);
-    setError(null);
-    
-  } catch (error) {
-    console.error("Error adding tax:", error);
-    setError(error.message || "Failed to add tax type");
-  } finally {
-    setIsSavingTax(false);
-  }
-};
-  // Replace your existing handleUpdateTaxType with this
-const handleUpdateTaxType = async () => {
-  if (!editingTaxId || !newTaxName.trim() || !newTaxRate.trim()) {
-    setError("Tax Name and Tax Rate are required");
-    return;
-  }
+  };
 
-  setIsSavingTax(true);
-  setError(null);
+  const handleUpdateTaxType = async () => {
+    if (!editingTaxId || !newTaxName.trim() || !newTaxRate.trim()) {
+      setTaxError("Tax Name and Tax Rate are required.");
+      return;
+    }
+    setIsSavingTax(true);
+    setTaxError(null);
+    try {
+      const fk_user_id = localStorage.getItem("fk_user_id") || "0";
+      const allKnown = [...(taxData || []), ...localTaxTypes];
+      const existingTax = allKnown.find((t) => t.id === editingTaxId);
+      const taxPayload = {
+        id: editingTaxId,
+        fk_user_id: parseInt(fk_user_id),
+        tax_name: newTaxName.trim(),
+        tax_rate: newTaxRate.trim(),
+        tax_number: newTaxNumber.trim() || "",
+        is_default_tax: existingTax?.is_default_tax || 0,
+        is_tips: existingTax?.is_tips || 0,
+        default_tax_order: existingTax?.default_tax_order || 0,
+        created: existingTax?.created || 0,
+        udpated: Date.now(),
+      };
+      await updateTax(taxPayload);
+      await fetchTaxes();
+      setNewTaxName("");
+      setNewTaxRate("");
+      setNewTaxNumber("");
+      setEditingTaxId(null);
+      setShowManageTaxModal(false);
+    } catch (err) {
+      console.error("Error updating tax:", err);
+      setTaxError(err.message || "Failed to update tax type.");
+    } finally {
+      setIsSavingTax(false);
+    }
+  };
 
-  try {
-    const fk_user_id = localStorage.getItem("fk_user_id") || "0";
-    const existingTax = (taxData || []).find((t) => t.id === editingTaxId);
-    
-    const taxPayload = {
-      id: editingTaxId,
-      fk_user_id: parseInt(fk_user_id),
-      tax_name: newTaxName.trim(),
-      tax_rate: newTaxRate.trim(),
-      tax_number: newTaxNumber.trim() || "",
-      is_default_tax: existingTax?.is_default_tax || 0,
-      is_tips: existingTax?.is_tips || 0,
-      default_tax_order: existingTax?.default_tax_order || 0,
-      created: existingTax?.created || 0,
-      udpated: Date.now(),
-    };
-    
-    await updateTax(taxPayload);
-    
-    // Wait for the update to process
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    // Force refresh taxes
-    await fetchTaxes();
-    
-    setNewTaxName("");
-    setNewTaxRate("");
-    setNewTaxNumber("");
-    setEditingTaxId(null);
-    setShowManageTaxModal(false);
-    setError(null);
-    
-  } catch (error) {
-    console.error("Error updating tax:", error);
-    setError(error.message || "Failed to update tax type");
-  } finally {
-    setIsSavingTax(false);
-  }
-};
+  const handleDeleteTaxType = async (taxId) => {
+    setDeletingTaxId(taxId);
+    setShowDeleteTaxConfirm(true);
+  };
 
-// Replace your existing handleDeleteTaxType with this
-const handleDeleteTaxType = async (taxId) => {
-  if (!window.confirm("Are you sure you want to delete this tax type?"))
-    return;
-  
-  setIsDeletingTax(true);
-  setError(null);
-  
-  try {
-    await deleteTax(taxId);
-    
-    // Wait for the delete to process
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    // Force refresh taxes
-    await fetchTaxes();
-    
-  } catch (error) {
-    console.error("Error deleting tax:", error);
-    setError(error.message || "Failed to delete tax type");
-  } finally {
-    setIsDeletingTax(false);
-  }
-};
+  const handleConfirmDeleteTax = async () => {
+    if (!deletingTaxId) return;
+    setIsDeletingTax(true);
+    setTaxError(null);
+    try {
+      await deleteTax(deletingTaxId);
+      setLocalTaxTypes((prev) => prev.filter((t) => t.id !== deletingTaxId));
+      await fetchTaxes();
+    } catch (err) {
+      console.error("Error deleting tax:", err);
+      setTaxError(err.message || "Failed to delete tax type.");
+    } finally {
+      setIsDeletingTax(false);
+      setShowDeleteTaxConfirm(false);
+      setDeletingTaxId(null);
+    }
+  };
 
   const handleEditTax = (tax) => {
     setEditingTaxId(tax.id);
@@ -5668,28 +5663,33 @@ Thank you for using our receipt management system.
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm"
             onClick={() => {
-              setShowManageTaxModal(false);
-              handleCancelEditTax();
+              if (!isSavingTax && !isDeletingTax) {
+                setShowManageTaxModal(false);
+                handleCancelEditTax();
+                setTaxError(null);
+              }
             }}
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="relative bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-hidden"
+              className="relative bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 max-h-[90vh] overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Modal Header */}
               <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 bg-white">
-                <h2 className="text-xl font-bold text-gray-900">
-                  Manage Tax Types
-                </h2>
+                <h2 className="text-xl font-bold text-gray-900">Manage Tax Types</h2>
                 <button
                   onClick={() => {
-                    setShowManageTaxModal(false);
-                    handleCancelEditTax();
+                    if (!isSavingTax && !isDeletingTax) {
+                      setShowManageTaxModal(false);
+                      handleCancelEditTax();
+                      setTaxError(null);
+                    }
                   }}
-                  className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors"
+                  disabled={isSavingTax || isDeletingTax}
+                  className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors disabled:opacity-50"
                 >
                   <X size={20} className="text-gray-600" />
                 </button>
@@ -5697,88 +5697,97 @@ Thank you for using our receipt management system.
 
               {/* Modal Content */}
               <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+
+                {/* Error banner */}
+                {taxError && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+                    {taxError}
+                  </div>
+                )}
+
                 {/* Existing Tax Types List */}
-                {Array.isArray(taxData) && taxData.length > 0 && (
+                {allTaxTypes.length > 0 && (
                   <div className="mb-6">
-                    <label className="block text-sm font-bold text-gray-700 mb-2">
-                      Existing Tax Types
-                    </label>
-                    <div className="space-y-2 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-3">
-                      {taxData
-                        .filter(
-                          (t) =>
-                            !(t.tax_name || "").toLowerCase().includes("tip")
-                        )
-                        .map((tax) => (
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-sm font-bold text-gray-700">Existing Tax Types</h3>
+                      <span className="text-xs text-gray-400">★ = Default (max 2)</span>
+                    </div>
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {allTaxTypes.map((tax) => {
+                        const isDefault = tax.is_default_tax === 1;
+                        return (
                           <div
                             key={tax.id}
-                            className="flex items-center justify-between bg-gray-50 rounded-md px-3 py-2"
+                            className={`flex items-center justify-between p-3 rounded-lg border ${isDefault ? "bg-yellow-50 border-yellow-300" : "bg-gray-50 border-gray-200"}`}
                           >
-                            <div className="flex-1">
-                              <span className="text-sm font-medium">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-gray-900 flex items-center gap-1 text-sm">
+                                {isDefault && <span className="text-yellow-500 text-xs">★</span>}
                                 {tax.tax_name}
-                              </span>
-                              <span className="text-sm text-gray-500 ml-2">
-                                ({formatTaxRate(tax.tax_rate)}%)
-                              </span>
-                              {tax.tax_number && (
-                                <span className="text-xs text-gray-400 ml-2">
-                                  #{tax.tax_number}
-                                </span>
-                              )}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                Rate: {formatTaxRate(tax.tax_rate)}%
+                                {tax.tax_number && ` | #${tax.tax_number}`}
+                              </div>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex gap-1.5 ml-2 flex-shrink-0">
                               <button
                                 type="button"
                                 onClick={() => handleEditTax(tax)}
-                                disabled={isSavingTax || isDeletingTax}
-                                className="text-blue-600 hover:text-blue-800 text-xs font-medium disabled:opacity-50"
-                              >
-                                Edit
-                              </button>
+                                disabled={isSavingTax || isDeletingTax || editingTaxId === tax.id}
+                                className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >Edit</button>
                               <button
                                 type="button"
                                 onClick={() => handleDeleteTaxType(tax.id)}
-                                disabled={isSavingTax || isDeletingTax}
-                                className="text-red-500 hover:text-red-700 text-xs font-medium disabled:opacity-50"
-                              >
-                                Delete
-                              </button>
+                                disabled={isSavingTax || isDeletingTax || editingTaxId !== null}
+                                className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >Delete</button>
                             </div>
                           </div>
-                        ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
 
-                {/* Add/Edit Tax Form */}
-                <div className="mb-4">
-                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                {/* Add / Edit Tax Form */}
+                <div className="border-t pt-5">
+                  <h3 className="text-sm font-bold text-gray-700 mb-3">
                     {editingTaxId ? "Edit Tax Type" : "Add New Tax Type"}
-                  </label>
+                  </h3>
                   <div className="space-y-3">
-                    <input
-                      type="text"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      value={newTaxName}
-                      onChange={(e) => setNewTaxName(e.target.value)}
-                      placeholder="Tax Name (e.g., GST, HST, VAT)"
-                    />
-                    <input
-                      type="number"
-                      step="0.01"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      value={newTaxRate}
-                      onChange={(e) => setNewTaxRate(e.target.value)}
-                      placeholder="Tax Rate (e.g., 13)"
-                    />
-                    <input
-                      type="text"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      value={newTaxNumber}
-                      onChange={(e) => setNewTaxNumber(e.target.value)}
-                      placeholder="Tax Number (optional)"
-                    />
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Tax Name *</label>
+                      <input
+                        type="text"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        value={newTaxName}
+                        onChange={(e) => { setNewTaxName(e.target.value); setTaxError(null); }}
+                        placeholder="e.g., GST, HST, VAT"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Tax Rate (%) *</label>
+                      <input
+                        type="number"
+                        step="0.001"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        value={newTaxRate}
+                        onChange={(e) => { setNewTaxRate(e.target.value); setTaxError(null); }}
+                        placeholder="e.g., 13"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Tax Number (optional)</label>
+                      <input
+                        type="text"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        value={newTaxNumber}
+                        onChange={(e) => setNewTaxNumber(e.target.value)}
+                        placeholder="e.g., RT0001"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -5789,50 +5798,73 @@ Thank you for using our receipt management system.
                       <button
                         type="button"
                         onClick={handleCancelEditTax}
-                        className="px-4 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors"
-                      >
-                        Cancel Edit
-                      </button>
+                        disabled={isSavingTax}
+                        className="px-4 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+                      >Cancel Edit</button>
                       <button
                         type="button"
                         onClick={handleUpdateTaxType}
-                        disabled={
-                          isSavingTax ||
-                          !newTaxName.trim() ||
-                          !newTaxRate.trim()
-                        }
+                        disabled={isSavingTax || !newTaxName.trim() || !newTaxRate.trim()}
                         className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      >
-                        {isSavingTax ? "Updating..." : "Update"}
-                      </button>
+                      >{isSavingTax ? "Updating..." : "Update"}</button>
                     </>
                   ) : (
                     <>
                       <button
                         type="button"
-                        onClick={() => {
-                          setShowManageTaxModal(false);
-                          handleCancelEditTax();
-                        }}
-                        className="px-4 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors"
-                      >
-                        Close
-                      </button>
+                        onClick={() => { setShowManageTaxModal(false); handleCancelEditTax(); setTaxError(null); }}
+                        disabled={isSavingTax}
+                        className="px-4 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+                      >Cancel</button>
                       <button
                         type="button"
                         onClick={handleAddTaxType}
-                        disabled={
-                          isSavingTax ||
-                          !newTaxName.trim() ||
-                          !newTaxRate.trim()
-                        }
-                        className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      >
-                        {isSavingTax ? "Saving..." : "Save Tax Type"}
-                      </button>
+                        disabled={isSavingTax || !newTaxName.trim() || !newTaxRate.trim()}
+                        className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >{isSavingTax ? "Saving..." : "Save"}</button>
                     </>
                   )}
                 </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Tax Confirmation */}
+      <AnimatePresence>
+        {showDeleteTaxConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => { setShowDeleteTaxConfirm(false); setDeletingTaxId(null); }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-xl shadow-2xl w-full max-w-sm mx-4 p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-bold text-gray-900 mb-2">Delete Tax Type?</h3>
+              <p className="text-sm text-gray-600 mb-6">
+                Are you sure you want to delete this tax type? This cannot be undone.
+              </p>
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setShowDeleteTaxConfirm(false); setDeletingTaxId(null); }}
+                  disabled={isDeletingTax}
+                  className="px-4 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+                >Cancel</button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDeleteTax}
+                  disabled={isDeletingTax}
+                  className="px-4 py-2 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
+                >{isDeletingTax ? "Deleting..." : "Delete"}</button>
               </div>
             </motion.div>
           </motion.div>
