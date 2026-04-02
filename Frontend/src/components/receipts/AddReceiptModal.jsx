@@ -3799,21 +3799,6 @@ const handleSelectLogo = (index) => {
                         Cancel
                       </button>
                       <button
-                        onClick={() => {
-                          // Skip image upload and go directly to form with empty data
-                          setFiles([]);
-                          setLocalImageFile(null);
-                          setUploadedImageUrl(null);
-                          setUploadedReceiptData(null);
-                          setParsedData(null);
-                          setStep("form");
-                        }}
-                        disabled={isUploading}
-                        className="px-6 py-2 bg-gray-500 text-white font-medium rounded-lg hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        Skip
-                      </button>
-                      <button
                         onClick={handleUpload}
                         disabled={files.length === 0 || isUploading}
                         className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
