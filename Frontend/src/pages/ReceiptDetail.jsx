@@ -220,6 +220,8 @@ const ReceiptDetail = ({
   const paymentInputRef = useRef(null);
   const optionsMenuRef = useRef(null);
   const addPhotoInputRef = useRef(null);
+  // Track which receipt ID has been initialized so taxData changes don't reset editedReceipt
+  const lastInitReceiptIdRef = useRef(null);
 
   // ── Add Photo / Annotation state ──────────────────────────────────────────
   const [isAddingPhoto, setIsAddingPhoto] = useState(false);
@@ -492,6 +494,12 @@ useEffect(() => {
   // Initialize edited receipt when selected receipt changes
   useEffect(() => {
     if (selectedReceipt) {
+      // Only re-initialize if the receipt itself changed (different ID).
+      // This prevents taxData refreshes (from fetchTaxes after adding a new tax)
+      // from resetting editedReceipt and wiping the newly added tax entry.
+      if (lastInitReceiptIdRef.current === selectedReceipt.id) return;
+      lastInitReceiptIdRef.current = selectedReceipt.id;
+
       // Enrich receipt_tax_values with tax_name and tax_rate from taxData
       // This handles cases where the API returns taxes without tax_name/tax_rate
       let enrichedTaxValues = (selectedReceipt.receipt_tax_values || []).map(
@@ -1087,16 +1095,19 @@ useEffect(() => {
       };
       const savedTax = await addTax(taxPayload);
       if (savedTax) {
-        // Add to local session list so it shows immediately
-        setLocalTaxTypes((prev) => [...prev, { ...taxPayload, id: savedTax.id || Date.now() }]);
-        await fetchTaxes();
-        setTaxRefreshKey((prev) => prev + 1);
+        // Add to receipt FIRST — must happen before any fetchTaxes/taxData update
+        // (the ref guard in the init useEffect prevents taxData changes from
+        //  resetting editedReceipt, but calling addTaxToReceipt first is safer)
         addTaxToReceipt({
           id: savedTax.id || 0,
           tax_name: newTaxName.trim(),
           tax_rate: newTaxRate.trim(),
           tax_number: newTaxNumber.trim() || "",
         });
+        // Add to local session list so dropdown shows the new tax immediately
+        setLocalTaxTypes((prev) => [...prev, { ...taxPayload, id: savedTax.id || Date.now() }]);
+        setTaxRefreshKey((prev) => prev + 1);
+        // fetchTaxes is called automatically by the modal-close useEffect
       }
       setNewTaxName("");
       setNewTaxRate("");
