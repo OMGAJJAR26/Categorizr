@@ -28,6 +28,7 @@
     "jszip": "^3.10.1",
     "lucide-react": "^0.525.0",
     "pdfjs-dist": "^5.4.296",
+    "qrcode.react": "^4.2.0",
     "react": "^19.1.0",
     "react-date-range": "^2.0.1",
     "react-datepicker": "^8.4.0",
