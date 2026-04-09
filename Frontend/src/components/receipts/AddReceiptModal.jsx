@@ -4423,10 +4423,9 @@ const handleSelectLogo = (index) => {
                         )
                           cardType = "Debit Card";
                         else {
-                          // No card network found anywhere — pass the issuer
-                          // name as paymentType so getPaymentLogo can still
-                          // apply bank-name detection (returns bank/MasterCard logo).
-                          cardType = cardIssuerName;
+                          // Check Settings-saved card type map before falling back to bank detection
+                          const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
+                          cardType = _pct[methodString] || cardIssuerName;
                         }
                       }
 
@@ -4481,12 +4480,14 @@ const handleSelectLogo = (index) => {
                           getPaymentDisplay(r) ===
                           methodString,
                       );
-                      logo = matchingReceipt
-                        ? getPaymentLogo(matchingReceipt)
-                        : getPaymentLogo({
-                            paymentType: methodString,
-                            card_issuer_name: issuerName,
-                          });
+                      if (matchingReceipt) {
+                        logo = getPaymentLogo(matchingReceipt);
+                      } else {
+                        // Check Settings-saved card type map (cat_pay_card_types)
+                        const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
+                        const _ct = _pct[methodString];
+                        logo = getPaymentLogo({ paymentType: _ct || methodString, card_issuer_name: issuerName });
+                      }
                     }
                     return logo ? (
                       <img

@@ -134,7 +134,29 @@ export const DataProvider = ({ children }) => {
   const [receiptTags, setReceiptTags] = useState([]);
   const [merchantsWithImages, setMerchantsWithImages] = useState([]);
   const [user, setUser] = useState(null);
-  
+
+  // ── Custom receipt-info items (localStorage-backed, managed via Settings → Receipt Information) ──
+  const [customMerchants, setCustomMerchants] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("cat_custom_merchants") || "[]"); } catch { return []; }
+  });
+  const [customCategories, setCustomCategories] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("cat_custom_categories") || "[]"); } catch { return []; }
+  });
+  const [customPaymentMethods, setCustomPaymentMethods] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("cat_custom_payment_methods") || "[]"); } catch { return []; }
+  });
+
+  // ── Hidden receipt-derived items — stored as arrays in localStorage, used as Sets internally ──
+  const [hiddenMerchants, setHiddenMerchants] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("cat_hidden_merchants") || "[]")); } catch { return new Set(); }
+  });
+  const [hiddenCategories, setHiddenCategories] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("cat_hidden_categories") || "[]")); } catch { return new Set(); }
+  });
+  const [hiddenPaymentMethods, setHiddenPaymentMethods] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("cat_hidden_payment_methods") || "[]")); } catch { return new Set(); }
+  });
+
   // Tax management functions
   const fetchTaxes = useCallback(async () => {
     console.log("Fetching taxes from API...");
@@ -760,6 +782,13 @@ setMerchantsWithImages([
     setPurchasePrice([]);
     setMerchantsWithImages([{ name: "Miscellaneous", image: "" }]);
     setDataContent(null);
+    // Clear custom receipt-info items on logout so next user gets a clean slate
+    setCustomMerchants([]);
+    setCustomCategories([]);
+    setCustomPaymentMethods([]);
+    setHiddenMerchants(new Set());
+    setHiddenCategories(new Set());
+    setHiddenPaymentMethods(new Set());
     // Note: Don't clear taxes here - they should persist
   };
 
@@ -839,14 +868,56 @@ setMerchantsWithImages([
 
     if (deleteSuccess) {
       // API succeeded - remove from local state immediately
-      setReceipts(prevReceipts =>
-        prevReceipts.filter(receipt => receipt.id !== receiptId)
-      );
-      
-      // Don't refresh data immediately - this can cause deleted receipts to reappear
-      // Only refresh if explicitly needed, and use a longer delay to ensure server has processed
-      // The local state update above is sufficient for immediate UI feedback
-      
+      const deletedReceipt = receipts.find(r => r.id === receiptId);
+      const updatedReceipts = receipts.filter(r => r.id !== receiptId);
+      setReceipts(updatedReceipts);
+
+      // If the deleted receipt had a merchant, remove it from the merchant lists
+      // if no other receipt shares the same merchant name.
+      if (deletedReceipt) {
+        const merchantName = (deletedReceipt.storeName || deletedReceipt.store_name || "").toString().trim();
+        if (merchantName && merchantName.toLowerCase() !== "miscellaneous") {
+          const stillExists = updatedReceipts.some(r =>
+            (r.storeName || r.store_name || "").toString().trim() === merchantName
+          );
+          if (!stillExists) {
+            setMerchants(prev => prev.filter(m => m !== merchantName));
+            setMerchantsWithImages(prev => prev.filter(m => m.name !== merchantName));
+          }
+        }
+
+        // Same for expense categories
+        const category = (deletedReceipt.expense_type || deletedReceipt.expenseType || "").toString().trim();
+        if (category && category !== "0") {
+          const catStillExists = updatedReceipts.some(r =>
+            (r.expense_type || r.expenseType || "").toString().trim() === category
+          );
+          if (!catStillExists) {
+            setExpenseCategories(prev => prev.filter(c => c !== category));
+          }
+        }
+
+        // Same for payment methods — rebuild the display string from the deleted receipt
+        const issuer = (deletedReceipt.card_issuer_name || deletedReceipt.cardIssuerName || "").toString().trim();
+        const last4  = (deletedReceipt.last_4_digit_card || deletedReceipt.last4DigitCard || "").toString().trim();
+        const payDisplay = issuer && issuer !== "0"
+          ? (last4 && last4 !== "0" ? `${issuer} *${last4}` : issuer)
+          : (deletedReceipt.paymentType || deletedReceipt.payment_type || "").toString().trim();
+        if (payDisplay && payDisplay !== "0") {
+          const payStillExists = updatedReceipts.some(r => {
+            const rIssuer = (r.card_issuer_name || r.cardIssuerName || "").toString().trim();
+            const rLast4  = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
+            const rDisp   = rIssuer && rIssuer !== "0"
+              ? (rLast4 && rLast4 !== "0" ? `${rIssuer} *${rLast4}` : rIssuer)
+              : (r.paymentType || r.payment_type || "").toString().trim();
+            return rDisp === payDisplay;
+          });
+          if (!payStillExists) {
+            setPaymentMethods(prev => prev.filter(p => p !== payDisplay));
+          }
+        }
+      }
+
       return true;
     }
 
@@ -1079,24 +1150,202 @@ setMerchantsWithImages([
     );
   };
 
+  // ── Custom Merchant CRUD ──
+  const addCustomMerchant = useCallback((name) => {
+    const trimmed = (name || "").trim();
+    if (!trimmed) return;
+    setCustomMerchants((prev) => {
+      if (prev.some((m) => m.toLowerCase() === trimmed.toLowerCase())) return prev;
+      const next = [...prev, trimmed];
+      localStorage.setItem("cat_custom_merchants", JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const editCustomMerchant = useCallback((oldName, newName) => {
+    const trimmed = (newName || "").trim();
+    if (!trimmed) return;
+    setCustomMerchants((prev) => {
+      const next = prev.map((m) => m === oldName ? trimmed : m);
+      localStorage.setItem("cat_custom_merchants", JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const deleteCustomMerchant = useCallback((name) => {
+    setCustomMerchants((prev) => {
+      const next = prev.filter((m) => m !== name);
+      localStorage.setItem("cat_custom_merchants", JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  // ── Custom Category CRUD ──
+  const addCustomCategory = useCallback((name) => {
+    const trimmed = (name || "").trim();
+    if (!trimmed) return;
+    setCustomCategories((prev) => {
+      if (prev.some((c) => c.toLowerCase() === trimmed.toLowerCase())) return prev;
+      const next = [...prev, trimmed];
+      localStorage.setItem("cat_custom_categories", JSON.stringify(next));
+      return next;
+    });
+    // Immediately surface in expenseCategories so dropdowns update without waiting for fetchData
+    setExpenseCategories((cats) => {
+      const low = trimmed.toLowerCase();
+      return cats.some((c) => c.toLowerCase() === low) ? cats : [...cats, trimmed];
+    });
+  }, []);
+
+  const editCustomCategory = useCallback((oldName, newName) => {
+    const trimmed = (newName || "").trim();
+    if (!trimmed) return;
+    setCustomCategories((prev) => {
+      const next = prev.map((c) => c === oldName ? trimmed : c);
+      localStorage.setItem("cat_custom_categories", JSON.stringify(next));
+      return next;
+    });
+    setExpenseCategories((cats) => cats.map((c) => c === oldName ? trimmed : c));
+  }, []);
+
+  const deleteCustomCategory = useCallback((name) => {
+    setCustomCategories((prev) => {
+      const next = prev.filter((c) => c !== name);
+      localStorage.setItem("cat_custom_categories", JSON.stringify(next));
+      return next;
+    });
+    // expenseCategories will naturally drop this entry on the next fetchData unless receipts still use it
+  }, []);
+
+  // ── Custom Payment Method CRUD ──
+  const addCustomPaymentMethod = useCallback((name) => {
+    const trimmed = (name || "").trim();
+    if (!trimmed) return;
+    setCustomPaymentMethods((prev) => {
+      if (prev.some((p) => p.toLowerCase() === trimmed.toLowerCase())) return prev;
+      const next = [...prev, trimmed];
+      localStorage.setItem("cat_custom_payment_methods", JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const editCustomPaymentMethod = useCallback((oldName, newName) => {
+    const trimmed = (newName || "").trim();
+    if (!trimmed) return;
+    setCustomPaymentMethods((prev) => {
+      const next = prev.map((p) => p === oldName ? trimmed : p);
+      localStorage.setItem("cat_custom_payment_methods", JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const deleteCustomPaymentMethod = useCallback((name) => {
+    setCustomPaymentMethods((prev) => {
+      const next = prev.filter((p) => p !== name);
+      localStorage.setItem("cat_custom_payment_methods", JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  // ── Hide / unhide receipt-derived items (non-destructive — items reappear from receipts but stay out of dropdowns) ──
+  const hideMerchant = useCallback((name) => {
+    setHiddenMerchants((prev) => {
+      const next = new Set([...prev, name]);
+      localStorage.setItem("cat_hidden_merchants", JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+  const unhideMerchant = useCallback((name) => {
+    setHiddenMerchants((prev) => {
+      const next = new Set([...prev].filter((m) => m !== name));
+      localStorage.setItem("cat_hidden_merchants", JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+  const hideCategory = useCallback((name) => {
+    setHiddenCategories((prev) => {
+      const next = new Set([...prev, name]);
+      localStorage.setItem("cat_hidden_categories", JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+  const unhideCategory = useCallback((name) => {
+    setHiddenCategories((prev) => {
+      const next = new Set([...prev].filter((c) => c !== name));
+      localStorage.setItem("cat_hidden_categories", JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+  const hidePaymentMethod = useCallback((name) => {
+    setHiddenPaymentMethods((prev) => {
+      const next = new Set([...prev, name]);
+      localStorage.setItem("cat_hidden_payment_methods", JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+  const unhidePaymentMethod = useCallback((name) => {
+    setHiddenPaymentMethods((prev) => {
+      const next = new Set([...prev].filter((p) => p !== name));
+      localStorage.setItem("cat_hidden_payment_methods", JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+
+  // ─── Compute merged + filtered arrays for dropdown consumers ───────────────
+  // Raw receipt-derived arrays (before any hidden filtering — exposed for the management modal)
+  const receiptMerchantsRaw   = merchants;           // string[]
+  const receiptMerchWImgRaw   = merchantsWithImages || []; // {name,image}[]
+  const receiptCategoriesRaw  = expenseCategories;   // string[]
+  const receiptPaymentsRaw    = paymentMethods;      // string[]
+
+  // Dropdown-ready: receipt-derived (minus hidden) + custom (minus hidden duplicates)
+  const _rmLower = new Set(receiptMerchantsRaw.map((m) => (m || "").toLowerCase()));
+  const mergedMerchants = [
+    ...receiptMerchantsRaw.filter((m) => !hiddenMerchants.has(m)),
+    ...customMerchants.filter((m) => !hiddenMerchants.has(m) && !_rmLower.has(m.toLowerCase())),
+  ];
+  const _miLower = new Set(receiptMerchWImgRaw.map((m) => (m.name || "").toLowerCase()));
+  const mergedMerchantsWithImages = [
+    ...receiptMerchWImgRaw.filter((m) => !hiddenMerchants.has(m.name)),
+    ...customMerchants
+      .filter((m) => !hiddenMerchants.has(m) && !_miLower.has(m.toLowerCase()))
+      .map((m) => ({ name: m, image: "" })),
+  ];
+  const _rcLower = new Set(receiptCategoriesRaw.map((c) => (c || "").toLowerCase()));
+  const mergedExpenseCategories = [
+    ...receiptCategoriesRaw.filter((c) => !hiddenCategories.has(c)),
+    ...customCategories.filter((c) => !hiddenCategories.has(c) && !_rcLower.has(c.toLowerCase())),
+  ];
+  const _rpLower = new Set(receiptPaymentsRaw.map((p) => (p || "").toLowerCase()));
+  const mergedPaymentMethods = [
+    ...receiptPaymentsRaw.filter((p) => !hiddenPaymentMethods.has(p)),
+    ...customPaymentMethods.filter((p) => !hiddenPaymentMethods.has(p) && !_rpLower.has(p.toLowerCase())),
+  ];
+
   return (
     <DataContext.Provider
       value={{
         user,
         receipts,
-        merchants,
+        // Dropdown-ready arrays (merged + hidden-filtered)
+        merchants: mergedMerchants,
+        expenseCategories: mergedExpenseCategories,
+        paymentMethods: mergedPaymentMethods,
+        merchantsWithImages: mergedMerchantsWithImages,
+        // Raw receipt-derived arrays (for the management modal — includes hidden items)
+        receiptMerchantsRaw,
+        receiptMerchWImgRaw,
+        receiptCategoriesRaw,
+        receiptPaymentsRaw,
         purchasePrice,
-        expenseCategories,
         storeNames,
         receiptCategory,
         expenseType,
-        paymentMethods,
         receiptTaxValues,
         note,
         receiptTags,
         receiptImage,
         storeImage,
-        merchantsWithImages,
         taxData,
         loading,
         error,
@@ -1116,6 +1365,29 @@ setMerchantsWithImages([
         addTax,
         updateTax,
         deleteTax,
+        // Custom receipt-info CRUD
+        customMerchants,
+        addCustomMerchant,
+        editCustomMerchant,
+        deleteCustomMerchant,
+        customCategories,
+        addCustomCategory,
+        editCustomCategory,
+        deleteCustomCategory,
+        customPaymentMethods,
+        addCustomPaymentMethod,
+        editCustomPaymentMethod,
+        deleteCustomPaymentMethod,
+        // Hide / unhide receipt-derived items
+        hiddenMerchants,
+        hideMerchant,
+        unhideMerchant,
+        hiddenCategories,
+        hideCategory,
+        unhideCategory,
+        hiddenPaymentMethods,
+        hidePaymentMethod,
+        unhidePaymentMethod,
       }}
     >
       {children}

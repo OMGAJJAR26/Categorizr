@@ -1,13 +1,15 @@
 import { useState, useRef, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import FontLogo from "../assets/categorizrFontLogo.png";
-import { UserCircle, Check } from "lucide-react";
+import { UserCircle, Check, Settings } from "lucide-react";
 import { useData } from "../context/DataContext";
 import { useCurrency } from "../context/CurrencyContext";
+// import { useTheme } from "../context/ThemeContext";
 import LogoutConfirmationDialog from "./LogoutConfirmationDialog";
 
 const Header = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -15,6 +17,8 @@ const Header = () => {
   const profileRef = useRef(null);
   const { clearAllData, user } = useData();
   const { language, setLanguage, languages, flags } = useCurrency();
+  // const { isDark, toggle: toggleTheme } = useTheme();
+  const isOnSettings = location.pathname === "/settings";
 
   const handleLogout = () => {
     setShowProfileMenu(false);
@@ -109,6 +113,39 @@ const Header = () => {
             </div>
           )}
         </div>
+
+        {/* Theme Toggle
+        <button
+          onClick={toggleTheme}
+          aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+          title={isDark ? "Light mode" : "Dark mode"}
+          className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full text-slate-300 hover:text-white hover:bg-white/10 transition-all duration-200 focus:outline-none"
+        >
+          {isDark
+            ? <Sun size={17} className="text-yellow-300" />
+            : <Moon size={17} className="text-slate-300" />}
+        </button> */}
+
+        {/* Settings Icon */}
+        <button
+          onClick={() => {
+            setShowLangMenu(false);
+            setShowProfileMenu(false);
+            navigate("/settings");
+          }}
+          aria-label="Settings"
+          title="Settings"
+          className={`flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full transition-all duration-200 focus:outline-none
+            ${isOnSettings
+              ? "bg-blue-600 text-white shadow-md shadow-blue-500/40"
+              : "text-slate-300 hover:text-white hover:bg-white/10"
+            }`}
+        >
+          <Settings
+            size={18}
+            className={`transition-transform duration-300 ${isOnSettings ? "rotate-45" : ""}`}
+          />
+        </button>
 
         {/* Profile Icon */}
         <div ref={profileRef} className="flex items-center gap-2">

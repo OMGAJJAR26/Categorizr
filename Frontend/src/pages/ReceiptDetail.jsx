@@ -4360,9 +4360,13 @@ Thank you for using our receipt management system.
                                   const matchingReceipt = receiptsToSearch.find(
                                     (r) => getPaymentDisplayName(r) === method
                                   );
+                                  // Check Settings-saved card type map (cat_pay_card_types) for correct logo
+                                  const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
                                   const logo = matchingReceipt
                                     ? getPaymentLogo(matchingReceipt)
-                                    : getPaymentLogo(method);
+                                    : _pct[method]
+                                      ? getPaymentLogo({ paymentType: _pct[method] })
+                                      : getPaymentLogo(method);
                                   return (
                                     <div
                                       key={idx}
@@ -4451,38 +4455,44 @@ Thank you for using our receipt management system.
                                           )
                                             cardType = basePaymentType;
                                         } else {
-                                          // Try to detect card type from issuer name
-                                          const issuerLower =
-                                            baseMethod.toLowerCase();
-                                          if (issuerLower.includes("paypal"))
-                                            cardType = "PayPal";
-                                          else if (issuerLower.includes("visa"))
-                                            cardType = "Visa";
-                                          else if (
-                                            issuerLower.includes("master")
-                                          )
-                                            cardType = "MasterCard";
-                                          else if (
-                                            issuerLower.includes("amex") ||
-                                            issuerLower.includes(
-                                              "american express"
+                                          // Check Settings-saved card type map first (cat_pay_card_types)
+                                          const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
+                                          if (_pct[method]) {
+                                            cardType = _pct[method];
+                                          } else {
+                                            // Try to detect card type from issuer name
+                                            const issuerLower =
+                                              baseMethod.toLowerCase();
+                                            if (issuerLower.includes("paypal"))
+                                              cardType = "PayPal";
+                                            else if (issuerLower.includes("visa"))
+                                              cardType = "Visa";
+                                            else if (
+                                              issuerLower.includes("master")
                                             )
-                                          )
-                                            cardType = "American Express";
-                                          else if (
-                                            issuerLower.includes("discover")
-                                          )
-                                            cardType = "Discover";
-                                          else if (
-                                            issuerLower.includes("diners")
-                                          )
-                                            cardType = "Diners Club";
-                                          else if (
-                                            issuerLower.includes("debit")
-                                          )
-                                            cardType = "Debit Card";
-                                          else if (issuerLower.includes("cash"))
-                                            cardType = "Cash";
+                                              cardType = "MasterCard";
+                                            else if (
+                                              issuerLower.includes("amex") ||
+                                              issuerLower.includes(
+                                                "american express"
+                                              )
+                                            )
+                                              cardType = "American Express";
+                                            else if (
+                                              issuerLower.includes("discover")
+                                            )
+                                              cardType = "Discover";
+                                            else if (
+                                              issuerLower.includes("diners")
+                                            )
+                                              cardType = "Diners Club";
+                                            else if (
+                                              issuerLower.includes("debit")
+                                            )
+                                              cardType = "Debit Card";
+                                            else if (issuerLower.includes("cash"))
+                                              cardType = "Cash";
+                                          }
                                         }
 
                                         // Update paymentType with card type (for logo detection)

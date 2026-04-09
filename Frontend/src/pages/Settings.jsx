@@ -34,14 +34,15 @@ import {
   Plus,
 } from "lucide-react";
 
-import visaLogo       from "../assets/payment/Visa.png";
-import mastercardLogo from "../assets/payment/MasterCard.png";
-import amexLogo       from "../assets/payment/AmericanExpress.webp";
-import paypalLogo     from "../assets/payment/PayPal.png";
-import cashLogo       from "../assets/payment/Cash.jpg";
-import debitLogo      from "../assets/payment/DebitCard.webp";
-import dinersLogo     from "../assets/payment/DinersClub.png";
-import discoverLogo   from "../assets/payment/discover.png";
+import visaLogo            from "../assets/payment/Visa.png";
+import mastercardLogo      from "../assets/payment/MasterCard.png";
+import amexLogo            from "../assets/payment/AmericanExpress.webp";
+import paypalLogo          from "../assets/payment/PayPal.png";
+import cashLogo            from "../assets/payment/Cash.jpg";
+import debitLogo           from "../assets/payment/DebitCard.webp";
+import dinersLogo          from "../assets/payment/DinersClub.png";
+import discoverLogo        from "../assets/payment/discover.png";
+import creditDebitCardIcon from "../assets/payment/Creditdebitcardicon.jpg";
 
 import { QRCodeSVG } from "qrcode.react";
 import Header from "../components/Header";
@@ -63,6 +64,18 @@ const getPaymentLogo = (name) => {
   if (n.includes("debit"))                               return debitLogo;
   return null;
 };
+
+const PAYMENT_CARD_TYPES = [
+  { name: "Visa",             logo: visaLogo },
+  { name: "MasterCard",       logo: mastercardLogo },
+  { name: "American Express", logo: amexLogo },
+  { name: "Discover",         logo: discoverLogo },
+  { name: "Diners Club",      logo: dinersLogo },
+  { name: "PayPal",           logo: paypalLogo },
+  { name: "Debit Card",       logo: debitLogo },
+  { name: "Cash",             logo: cashLogo },
+  { name: "Other",            logo: creditDebitCardIcon },
+];
 
 /* ─── Shared styles ────────────────────────────────────── */
 const inputCls = "w-full bg-white border border-gray-200 text-gray-900 text-sm rounded-xl px-4 py-2.5 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all";
@@ -366,6 +379,18 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
   });
   const [profileMsg, setProfileMsg] = useState(null);
 
+  // Sync profile from user once user data arrives (handles async load)
+  useEffect(() => {
+    if (user) {
+      setProfile(p => ({
+        ...p,
+        firstName:     p.firstName     || user.firstName || "",
+        lastName:      p.lastName      || user.lastName  || "",
+        recoveryEmail: p.recoveryEmail || user.email     || "",
+      }));
+    }
+  }, [user]);
+
   const [passwords, setPasswords] = useState({ newPassword: "", confirmPassword: "" });
   const [showNew, setShowNew]     = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -470,7 +495,7 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
               </motion.div>
             )}
           </AnimatePresence>
-          <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm py-2.5 rounded-xl transition-all">Update</button>
+          <button type="submit" className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl transition-all">Update</button>
         </form>
       )}
 
@@ -518,7 +543,7 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
               </motion.div>
             )}
           </AnimatePresence>
-          <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm py-2.5 rounded-xl transition-all">Reset Password</button>
+          <button type="submit" className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl transition-all">Reset Password</button>
           <button type="button" onClick={() => setShowForgotPassword(true)} className="text-xs text-blue-500 hover:text-blue-700 text-center">Forgot Password?</button>
         </form>
       )}
@@ -626,7 +651,7 @@ const MyInformationPanel = ({ user }) => {
       <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm flex flex-col sm:flex-row items-center gap-5">
         <div className="flex-shrink-0 flex flex-col items-center gap-2">
           <div className="p-3 bg-white border border-gray-200 rounded-xl shadow-sm">
-            {email ? <QRCodeSVG value={email} size={120} bgColor="#ffffff" fgColor="#1e293b" /> : (
+            {email ? <QRCodeSVG value={`mailto:${email}`} size={120} bgColor="#ffffff" fgColor="#1e293b" /> : (
               <div className="w-[120px] h-[120px] bg-gray-100 rounded-lg flex items-center justify-center"><QrCode size={40} className="text-gray-300" /></div>
             )}
           </div>
@@ -706,7 +731,7 @@ const TITLES = {
 /* ─── Main Settings Component ───────────────────────────── */
 const Settings = () => {
   const navigate = useNavigate();
-  const { clearAllData, user, merchants, expenseCategories, paymentMethods, taxData } = useData();
+  const { clearAllData, user } = useData();
 
   const [active, setActive]               = useState("myaccount");
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -831,7 +856,7 @@ const Settings = () => {
                 )}
                 {active === "mynetwork" && <MyNetworkPanel />}
                 {MANAGE_TYPES.includes(active) && (
-                  <ReceiptInfoInline type={active} merchants={merchants} expenseCategories={expenseCategories} paymentMethods={paymentMethods} taxData={taxData} />
+                  <ReceiptInfoInline type={active} />
                 )}
                 {active === "myinfo" && <MyInformationPanel user={user} />}
                 {(active === "driver" || active === "vehicle" || active === "property") && (
@@ -854,9 +879,37 @@ const Settings = () => {
   );
 };
 
+/* ─── Logo grid sub-component ───────────────────────────── */
+const LogoGrid = ({ options, selectedIndex, onSelect }) => {
+  if (!options || options.length === 0) return null;
+  return (
+    <div>
+      <p className="text-xs text-gray-400 mb-2">Select a logo (optional):</p>
+      <div className="grid grid-cols-4 gap-2">
+        {options.map((opt, i) => {
+          const url = opt.displayUrl || opt.storeUrl;
+          return (
+            <button key={i} type="button"
+              style={{ margin: 0, padding: 0, aspectRatio: "1" }}
+              onClick={() => onSelect(i === selectedIndex ? null : i)}
+              className={`relative rounded-xl border-2 overflow-hidden bg-gray-50 flex items-center justify-center transition-all ${selectedIndex === i ? "border-blue-500 ring-2 ring-blue-200" : "border-gray-200 hover:border-blue-300"}`}
+            >
+              <img src={url} alt="" style={{ width: "80%", height: "80%", objectFit: "contain" }} onError={e => { e.target.style.visibility = "hidden"; }} />
+              {selectedIndex === i && (
+                <div className="absolute bottom-0.5 right-0.5"><CheckCircle size={14} className="text-blue-600 bg-white rounded-full" /></div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 /* ─── Inline Manage (no modal, content directly in panel) ── */
-const ReceiptInfoInline = ({ type, merchants, expenseCategories, paymentMethods, taxData: taxDataProp }) => {
+const ReceiptInfoInline = ({ type }) => {
   const {
+    receipts, updateReceipt,
     receiptMerchWImgRaw, customMerchants, hideMerchant, addCustomMerchant, editCustomMerchant, deleteCustomMerchant,
     receiptCategoriesRaw, customCategories, hideCategory, addCustomCategory, editCustomCategory, deleteCustomCategory,
     receiptPaymentsRaw, customPaymentMethods, hidePaymentMethod, addCustomPaymentMethod, editCustomPaymentMethod, deleteCustomPaymentMethod,
@@ -867,223 +920,449 @@ const ReceiptInfoInline = ({ type, merchants, expenseCategories, paymentMethods,
 
   const cfg    = MODAL_CFG[type];
   const colors = COLOR_MAP[cfg.color];
-  const [search, setSearch]                 = useState("");
-  const [addVal, setAddVal]                 = useState("");
-  const [addTaxVal, setAddTaxVal]           = useState({ tax_name: "", tax_rate: "", tax_number: "" });
-  const [editKey, setEditKey]               = useState(null);
-  const [editVal, setEditVal]               = useState("");
-  const [editTaxKey, setEditTaxKey]         = useState(null);
-  const [editTaxVal, setEditTaxVal]         = useState({ tax_name: "", tax_rate: "", tax_number: "" });
-  const [editReceiptKey, setEditReceiptKey] = useState(null);
-  const [editReceiptVal, setEditReceiptVal] = useState("");
-  const [msg, setMsg]                       = useState(null);
+
+  const [search, setSearch]     = useState("");
+  const [addVal, setAddVal]     = useState("");
+  const [addTaxVal, setAddTaxVal] = useState({ tax_name: "", tax_rate: "", tax_number: "" });
+  const [msg, setMsg]           = useState(null);
+
+  // Edit state (unified for all non-tax item types)
+  const [editKey, setEditKey]             = useState(null);   // item.key being edited
+  const [editIsReceipt, setEditIsReceipt] = useState(false);  // is it a receipt-derived item?
+  const [editVal, setEditVal]             = useState("");
+  const [editOrigLogo, setEditOrigLogo]   = useState(null);   // logo before edit
+  const [editLogoOpts, setEditLogoOpts]   = useState([]);
+  const [editLogoSel, setEditLogoSel]     = useState(null);
+  const [isFetchEditLogo, setIsFetchEditLogo] = useState(false);
+
+  // Tax edit state
+  const [editTaxKey, setEditTaxKey] = useState(null);
+  const [editTaxVal, setEditTaxVal] = useState({ tax_name: "", tax_rate: "", tax_number: "" });
+
+  // Add-merchant state
+  const [newMerchantName, setNewMerchantName] = useState("");
+  const [addLogoOpts, setAddLogoOpts]         = useState([]);
+  const [addLogoSel, setAddLogoSel]           = useState(null);
+  const [isFetchAddLogo, setIsFetchAddLogo]   = useState(false);
+
+  // Add-payment state
+  const [newCardType, setNewCardType]     = useState("");
+  const [newIssuerName, setNewIssuerName] = useState("");
+  const [newLast4, setNewLast4]           = useState("");
+
+  // localStorage: merchant name → logo URL
+  const [merchLogos, setMerchLogos] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("cat_merch_logos") || "{}"); } catch { return {}; }
+  });
+  const saveMerchLogo = (name, url) => {
+    setMerchLogos(prev => {
+      const next = { ...prev, [name]: url };
+      localStorage.setItem("cat_merch_logos", JSON.stringify(next));
+      return next;
+    });
+  };
+
+  // localStorage: payment display string → card type name
+  const [payCardMap, setPayCardMap] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; }
+  });
+  const savePayCard = (payStr, cardTypeName) => {
+    setPayCardMap(prev => {
+      const next = { ...prev, [payStr]: cardTypeName };
+      localStorage.setItem("cat_pay_card_types", JSON.stringify(next));
+      return next;
+    });
+  };
+
+  // Get the correct logo for a payment string
+  const getPayLogoResolved = (payStr) => {
+    const stored = payCardMap[payStr];
+    if (stored) {
+      const found = PAYMENT_CARD_TYPES.find(c => c.name === stored);
+      if (found) return found.logo;
+    }
+    return getPaymentLogo(payStr);
+  };
 
   const toast = (t, text) => { setMsg({ type: t, text }); setTimeout(() => setMsg(null), 3000); };
 
+  // Generic logo fetch
+  const doFetch = async (keyword, setFetching, setOpts, setSel) => {
+    if (!keyword.trim()) return;
+    setFetching(true); setOpts([]); setSel(null);
+    try {
+      const res  = await fetch(`/imagesearch?searchkeyword=${encodeURIComponent(keyword.trim() + " logo")}`);
+      const data = await res.json();
+      if (Array.isArray(data)) setOpts(data.slice(0, 8));
+    } catch (e) { console.error(e); }
+    finally { setFetching(false); }
+  };
+
+  // ── Close edit helper ──
+  const closeEdit = () => {
+    setEditKey(null); setEditIsReceipt(false); setEditVal("");
+    setEditOrigLogo(null); setEditLogoOpts([]); setEditLogoSel(null);
+  };
+
+  // ── ADD ──
   const handleAdd = async () => {
     if (type === "taxes") {
       const n = addTaxVal.tax_name.trim(), r = addTaxVal.tax_rate.toString().trim();
       if (!n || !r) return toast("error", "Name and rate are required.");
       try {
-        const fk_user_id = localStorage.getItem("fk_user_id") || "";
-        await addTax({ tax_name: n, tax_rate: r, tax_number: addTaxVal.tax_number.trim(), fk_user_id });
+        await addTax({ tax_name: n, tax_rate: r, tax_number: addTaxVal.tax_number.trim(), fk_user_id: localStorage.getItem("fk_user_id") || "" });
         setAddTaxVal({ tax_name: "", tax_rate: "", tax_number: "" });
         toast("success", `"${n}" added.`);
       } catch (e) { toast("error", e.message || "Failed."); }
       return;
     }
+    if (type === "merchants") {
+      if (!newMerchantName.trim()) return;
+      const selectedUrl = addLogoSel !== null ? (addLogoOpts[addLogoSel]?.displayUrl || addLogoOpts[addLogoSel]?.storeUrl || null) : null;
+      addCustomMerchant(newMerchantName.trim());
+      if (selectedUrl) saveMerchLogo(newMerchantName.trim(), selectedUrl);
+      setNewMerchantName(""); setAddLogoOpts([]); setAddLogoSel(null);
+      return;
+    }
+    if (type === "payments") {
+      const ct     = newCardType.trim();
+      const issuer = newIssuerName.trim();
+      const last4  = newLast4.trim();
+      let payStr   = issuer ? (last4 ? `${issuer} *${last4}` : issuer) : (ct ? (last4 ? `${ct} *${last4}` : ct) : "");
+      if (!payStr) return toast("error", "Select a card type or enter issuer name.");
+      addCustomPaymentMethod(payStr);
+      if (ct) savePayCard(payStr, ct);
+      setNewCardType(""); setNewIssuerName(""); setNewLast4("");
+      return;
+    }
     if (!addVal.trim()) return;
-    if (type === "merchants")  addCustomMerchant(addVal);
-    if (type === "categories") addCustomCategory(addVal);
-    if (type === "payments")   addCustomPaymentMethod(addVal);
+    if (type === "categories") addCustomCategory(addVal.trim());
     setAddVal("");
   };
 
-  const handleEdit = async (key) => {
+  // ── SAVE EDIT ──
+  const handleSaveEdit = async (item) => {
+    const newName = editVal.trim();
+    if (!newName) return;
+    const newLogoUrl = editLogoSel !== null ? (editLogoOpts[editLogoSel]?.displayUrl || editLogoOpts[editLogoSel]?.storeUrl || null) : null;
+    const keepLogo   = newLogoUrl || editOrigLogo; // use new if picked, else keep original
+
     if (type === "taxes") {
       const n = editTaxVal.tax_name.trim(), r = editTaxVal.tax_rate.toString().trim();
       if (!n || !r) return;
-      try { await updateTax({ ...taxData.find(t => t.id === key), tax_name: n, tax_rate: r, tax_number: editTaxVal.tax_number.trim() }); setEditTaxKey(null); }
+      try { await updateTax({ ...taxData.find(t => t.id === editKey), tax_name: n, tax_rate: r, tax_number: editTaxVal.tax_number.trim() }); setEditTaxKey(null); }
       catch (e) { toast("error", e.message || "Failed."); }
       return;
     }
-    if (!editVal.trim()) return;
-    if (type === "merchants")  editCustomMerchant(key, editVal);
-    if (type === "categories") editCustomCategory(key, editVal);
-    if (type === "payments")   editCustomPaymentMethod(key, editVal);
-    setEditKey(null);
+
+    try {
+      if (item.isReceiptItem) {
+        const currentName = item.name;
+        if (type === "merchants") {
+          const matching = (receipts || []).filter(r => (r.storeName || r.store_name || "") === currentName);
+          await Promise.all(matching.map(r => updateReceipt(r.id, { storeName: newName })));
+          if (keepLogo) saveMerchLogo(newName, keepLogo);
+          hideMerchant(item.key); addCustomMerchant(newName);
+        }
+        if (type === "categories") {
+          const matching = (receipts || []).filter(r => (r.expense_type || r.expenseType || "") === currentName);
+          await Promise.all(matching.map(r => updateReceipt(r.id, { expense_type: newName })));
+          hideCategory(item.key); addCustomCategory(newName);
+        }
+        if (type === "payments") {
+          const matching = (receipts || []).filter(r => {
+            const iss  = (r.card_issuer_name || r.cardIssuerName || "").trim();
+            const l4   = (r.last_4_digit_card || r.last4DigitCard || "").trim();
+            const disp = iss ? (l4 ? `${iss} *${l4}` : iss) : (r.paymentType || r.payment_type || "");
+            return disp === currentName;
+          });
+          await Promise.all(matching.map(r => updateReceipt(r.id, { paymentType: newName })));
+          hidePaymentMethod(item.key); addCustomPaymentMethod(newName);
+        }
+        toast("success", "Updated across all receipts.");
+      } else {
+        // Custom item
+        if (type === "merchants") {
+          editCustomMerchant(item.key, newName);
+          if (keepLogo) saveMerchLogo(newName, keepLogo);
+        }
+        if (type === "categories") editCustomCategory(item.key, newName);
+        if (type === "payments")   editCustomPaymentMethod(item.key, newName);
+      }
+    } catch (e) { toast("error", e.message || "Update failed."); }
+    closeEdit();
   };
 
-  const handleDelete = async (key) => {
-    if (type === "taxes") { try { await deleteTax(key); } catch (e) { toast("error", e.message || "Failed."); } return; }
-    if (type === "merchants")  deleteCustomMerchant(key);
-    if (type === "categories") deleteCustomCategory(key);
-    if (type === "payments")   deleteCustomPaymentMethod(key);
+  // ── DELETE ──
+  const handleDelete = async (item) => {
+    if (type === "taxes") { try { await deleteTax(item.key); } catch (e) { toast("error", e.message || "Failed."); } return; }
+
+    try {
+      if (item.isReceiptItem) {
+        const name = item.name;
+        if (type === "merchants") {
+          const matching = (receipts || []).filter(r => (r.storeName || r.store_name || "") === name);
+          await Promise.all(matching.map(r => updateReceipt(r.id, { storeName: "Miscellaneous" })));
+          hideMerchant(item.key);
+        }
+        if (type === "categories") {
+          const matching = (receipts || []).filter(r => (r.expense_type || r.expenseType || "") === name);
+          await Promise.all(matching.map(r => updateReceipt(r.id, { expense_type: "Miscellaneous" })));
+          hideCategory(item.key);
+        }
+        if (type === "payments") {
+          const matching = (receipts || []).filter(r => {
+            const iss  = (r.card_issuer_name || r.cardIssuerName || "").trim();
+            const l4   = (r.last_4_digit_card || r.last4DigitCard || "").trim();
+            const disp = iss ? (l4 ? `${iss} *${l4}` : iss) : (r.paymentType || r.payment_type || "");
+            return disp === name;
+          });
+          await Promise.all(matching.map(r => updateReceipt(r.id, { paymentType: "Cash" })));
+          hidePaymentMethod(item.key);
+        }
+        toast("success", "Removed and reassigned in all receipts.");
+      } else {
+        if (type === "merchants")  deleteCustomMerchant(item.key);
+        if (type === "categories") deleteCustomCategory(item.key);
+        if (type === "payments")   deleteCustomPaymentMethod(item.key);
+      }
+    } catch (e) { toast("error", e.message || "Delete failed."); }
   };
 
-  const handleReceiptEdit = (key, currentName) => {
-    const newName = editReceiptVal.trim();
-    if (!newName || newName === currentName) { setEditReceiptKey(null); return; }
-    if (type === "merchants")  { hideMerchant(key);      addCustomMerchant(newName); }
-    if (type === "categories") { hideCategory(key);      addCustomCategory(newName); }
-    if (type === "payments")   { hidePaymentMethod(key); addCustomPaymentMethod(newName); }
-    setEditReceiptKey(null); setEditReceiptVal("");
-  };
-
-  const buildReceiptItems = () => {
-    if (type === "merchants")  return receiptMerchWImgRaw.map(m => ({ key: m.name, name: m.name, logo: m.image || null }));
-    if (type === "categories") return receiptCategoriesRaw.map(c => ({ key: c, name: c, logo: null }));
-    if (type === "payments")   return receiptPaymentsRaw.map(p => ({ key: p, name: p, logo: getPaymentLogo(p) }));
+  // Build unified list (receipt-derived + custom, no dupes, no "Custom" label)
+  const buildAllItems = () => {
+    if (type === "merchants") {
+      const rItems = receiptMerchWImgRaw.map(m => ({
+        key: m.name, name: m.name,
+        logo: merchLogos[m.name] || m.image || null,
+        isReceiptItem: true,
+      }));
+      const rKeys = new Set(receiptMerchWImgRaw.map(m => m.name.toLowerCase()));
+      const cItems = customMerchants
+        .filter(m => !rKeys.has(m.toLowerCase()))
+        .map(m => ({ key: m, name: m, logo: merchLogos[m] || null, isReceiptItem: false }));
+      return [...rItems, ...cItems];
+    }
+    if (type === "categories") {
+      const rItems = receiptCategoriesRaw.map(c => ({ key: c, name: c, logo: null, isReceiptItem: true }));
+      const rKeys  = new Set(receiptCategoriesRaw.map(c => c.toLowerCase()));
+      const cItems = customCategories
+        .filter(c => !rKeys.has(c.toLowerCase()))
+        .map(c => ({ key: c, name: c, logo: null, isReceiptItem: false }));
+      return [...rItems, ...cItems];
+    }
+    if (type === "payments") {
+      const rItems = receiptPaymentsRaw.map(p => ({ key: p, name: p, logo: getPayLogoResolved(p), isReceiptItem: true }));
+      const rKeys  = new Set(receiptPaymentsRaw.map(p => p.toLowerCase()));
+      const cItems = customPaymentMethods
+        .filter(p => !rKeys.has(p.toLowerCase()))
+        .map(p => ({ key: p, name: p, logo: getPayLogoResolved(p), isReceiptItem: false }));
+      return [...rItems, ...cItems];
+    }
     return [];
   };
-  const buildCustomItems = () => {
-    if (type === "merchants")  return customMerchants.map(m => ({ key: m, name: m, logo: null }));
-    if (type === "categories") return customCategories.map(c => ({ key: c, name: c, logo: null }));
-    if (type === "payments")   return customPaymentMethods.map(p => ({ key: p, name: p, logo: getPaymentLogo(p) }));
-    return [];
-  };
 
-  const receiptItems = buildReceiptItems().filter(i => i.name.toLowerCase().includes(search.toLowerCase()));
-  const customItems  = buildCustomItems().filter(i => i.name.toLowerCase().includes(search.toLowerCase()));
-  const taxItems     = type === "taxes" ? taxData.filter(t => (t.tax_name || "").toLowerCase().includes(search.toLowerCase())) : [];
+  const taxItems = type === "taxes"
+    ? taxData.filter(t => (t.tax_name || "").toLowerCase().includes(search.toLowerCase()))
+    : [];
+  const allItems = type !== "taxes"
+    ? buildAllItems().filter(i => i.name.toLowerCase().includes(search.toLowerCase()))
+    : [];
+
   const mInput = "flex-1 min-w-0 bg-white border border-gray-200 text-gray-900 text-sm rounded-xl px-3 py-2 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all";
-  const ab = (color, onClick, children) => (
-    <button onClick={onClick} className={`flex items-center justify-center w-7 h-7 rounded-lg text-white text-xs transition-all ${color}`}>{children}</button>
+  const Btn = ({ color, onClick, children }) => (
+    <button type="button" onClick={onClick} style={{ margin: 0, padding: 0, width: 28, height: 28, flexShrink: 0 }}
+      className={`flex items-center justify-center rounded-lg text-white text-xs transition-all ${color}`}>
+      {children}
+    </button>
   );
 
   return (
     <div className="max-w-lg flex flex-col gap-4">
-      {/* Add form */}
-      <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-        {type === "taxes" ? (
-          <div className="flex flex-col gap-2">
+
+      {/* ── Add form ── */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col gap-3">
+
+        {type === "taxes" && (
+          <>
             <div className="flex gap-2">
               <input className={mInput} placeholder="Tax name (e.g. GST)" value={addTaxVal.tax_name} onChange={e => setAddTaxVal(p => ({ ...p, tax_name: e.target.value }))} />
               <input className={`${mInput} max-w-[80px]`} placeholder="Rate %" value={addTaxVal.tax_rate} onChange={e => setAddTaxVal(p => ({ ...p, tax_rate: e.target.value }))} />
             </div>
             <div className="flex gap-2">
               <input className={mInput} placeholder="Tax number (optional)" value={addTaxVal.tax_number} onChange={e => setAddTaxVal(p => ({ ...p, tax_number: e.target.value }))} />
-              <button onClick={handleAdd} className={`px-4 py-2 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn}`}>Add</button>
+              <button type="button" onClick={handleAdd} className={`px-4 py-2 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn}`}>Add</button>
             </div>
-          </div>
-        ) : (
+          </>
+        )}
+
+        {type === "merchants" && (
+          <>
+            <div className="flex gap-2">
+              <input className={mInput} placeholder="New merchant name…" value={newMerchantName}
+                onChange={e => { setNewMerchantName(e.target.value); setAddLogoOpts([]); setAddLogoSel(null); }}
+                onKeyDown={e => e.key === "Enter" && handleAdd()} />
+              <button type="button"
+                onClick={() => doFetch(newMerchantName, setIsFetchAddLogo, setAddLogoOpts, setAddLogoSel)}
+                disabled={!newMerchantName.trim() || isFetchAddLogo}
+                className="px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm font-medium flex-shrink-0 disabled:opacity-40 transition-all flex items-center gap-1.5">
+                {isFetchAddLogo
+                  ? <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                  : <Search size={14} />} Logo
+              </button>
+              <button type="button" onClick={handleAdd}  className={`px-4 py-2 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn}`}>Add</button>
+            </div>
+            <LogoGrid options={addLogoOpts} selectedIndex={addLogoSel} onSelect={setAddLogoSel} />
+          </>
+        )}
+
+        {type === "payments" && (
+          <>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Select Card Type</p>
+            <div className="grid grid-cols-3 gap-2">
+              {PAYMENT_CARD_TYPES.map(ct => (
+                <button key={ct.name} type="button"
+                  style={{ margin: 0, padding: 0 }}
+                  onClick={() => setNewCardType(prev => prev === ct.name ? "" : ct.name)}
+                  className={`flex flex-col items-center gap-1 py-2 px-1 rounded-xl border-2 transition-all cursor-pointer ${newCardType === ct.name ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200" : "border-gray-200 bg-white hover:border-blue-300"}`}>
+                  <img src={ct.logo} alt={ct.name} style={{ height: 30, width: 52, objectFit: "contain", display: "block", margin: 0, padding: 0 }} />
+                  <span className="text-[10px] font-medium text-gray-600 text-center leading-tight block">{ct.name}</span>
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input className={mInput} placeholder="Card issuer / bank name (optional)" value={newIssuerName} onChange={e => setNewIssuerName(e.target.value)} />
+              <input className={`${mInput} max-w-[110px]`} placeholder="Last 4 digits" value={newLast4} maxLength={4}
+                onChange={e => setNewLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} />
+            </div>
+            <button type="button" onClick={handleAdd}  className={`px-4 py-2 rounded-xl text-white text-sm font-semibold self-start ${colors.btn}`}>Add Payment Method</button>
+          </>
+        )}
+
+        {type === "categories" && (
           <div className="flex gap-2">
             <input className={mInput} placeholder={cfg.addPlaceholder} value={addVal} onChange={e => setAddVal(e.target.value)} onKeyDown={e => e.key === "Enter" && handleAdd()} />
-            <button onClick={handleAdd} className={`px-4 py-2 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn}`}>Add</button>
+            <button type="button" onClick={handleAdd}  className={`px-4 py-2 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn}`}>Add</button>
           </div>
         )}
+
         <AnimatePresence>
           {msg && (
             <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-              className={`flex items-center gap-2 mt-2 text-xs px-3 py-2 rounded-xl ${msg.type === "success" ? "bg-green-50 text-green-700 border border-green-200" : "bg-red-50 text-red-600 border border-red-200"}`}>
+              className={`flex items-center gap-2 text-xs px-3 py-2 rounded-xl ${msg.type === "success" ? "bg-green-50 text-green-700 border border-green-200" : "bg-red-50 text-red-600 border border-red-200"}`}>
               {msg.type === "success" ? <CheckCircle size={13}/> : <AlertCircle size={13}/>} {msg.text}
             </motion.div>
           )}
         </AnimatePresence>
       </div>
 
-      {/* Search */}
+      {/* ── Search ── */}
       <div className="relative">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
         <input className="w-full bg-white border border-gray-200 text-sm text-gray-900 rounded-xl pl-8 pr-8 py-2.5 placeholder-gray-400 focus:outline-none focus:border-blue-400 transition-all shadow-sm"
           placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} />
-        {search && <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"><X size={13}/></button>}
+        {search && <button type="button" onClick={() => setSearch("")}  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 w-5 h-5 flex items-center justify-center"><X size={13}/></button>}
       </div>
 
-      {/* List */}
-      <div className="flex flex-col gap-2">
-        {type === "taxes" ? (
-          taxItems.length === 0 ? <p className="text-sm text-gray-400 text-center py-8">No tax types yet.</p> :
-          taxItems.map(tax => {
-            const isEd = editTaxKey === tax.id;
-            return (
-              <div key={tax.id}>
-                {isEd ? (
-                  <div className="flex flex-col gap-2 bg-blue-50 border border-blue-200 rounded-xl p-3">
-                    <div className="flex gap-2">
-                      <input className={mInput} value={editTaxVal.tax_name} onChange={e => setEditTaxVal(p => ({ ...p, tax_name: e.target.value }))} placeholder="Name" />
-                      <input className={`${mInput} max-w-[80px]`} value={editTaxVal.tax_rate} onChange={e => setEditTaxVal(p => ({ ...p, tax_rate: e.target.value }))} placeholder="Rate %" />
-                    </div>
-                    <div className="flex gap-2">
-                      <input className={mInput} value={editTaxVal.tax_number} onChange={e => setEditTaxVal(p => ({ ...p, tax_number: e.target.value }))} placeholder="Tax number (optional)" />
-                      <button onClick={() => handleEdit(tax.id)} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg">Save</button>
-                      <button onClick={() => setEditTaxKey(null)} className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-semibold rounded-lg">Cancel</button>
-                    </div>
+      {/* ── List ── */}
+      <div className="flex flex-col gap-1.5">
+
+        {/* Taxes */}
+        {type === "taxes" && (
+          taxItems.length === 0
+            ? <p className="text-sm text-gray-400 text-center py-8">No tax types yet.</p>
+            : taxItems.map(tax => {
+                const isEd = editTaxKey === tax.id;
+                return (
+                  <div key={tax.id}>
+                    {isEd ? (
+                      <div className="flex flex-col gap-2 bg-blue-50 border border-blue-200 rounded-xl p-3">
+                        <div className="flex gap-2">
+                          <input className={mInput} value={editTaxVal.tax_name} onChange={e => setEditTaxVal(p => ({ ...p, tax_name: e.target.value }))} placeholder="Name" />
+                          <input className={`${mInput} max-w-[80px]`} value={editTaxVal.tax_rate} onChange={e => setEditTaxVal(p => ({ ...p, tax_rate: e.target.value }))} placeholder="Rate %" />
+                        </div>
+                        <div className="flex gap-2">
+                          <input className={mInput} value={editTaxVal.tax_number} onChange={e => setEditTaxVal(p => ({ ...p, tax_number: e.target.value }))} placeholder="Tax number (optional)" />
+                          <button type="button" onClick={async () => {
+                            const n = editTaxVal.tax_name.trim(), r = editTaxVal.tax_rate.toString().trim();
+                            if (!n || !r) return;
+                            try { await updateTax({ ...taxData.find(t => t.id === editTaxKey), tax_name: n, tax_rate: r, tax_number: editTaxVal.tax_number.trim() }); setEditTaxKey(null); }
+                            catch (e) { toast("error", e.message || "Failed."); }
+                          }} style={{ margin: 0 }} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex-shrink-0">Save</button>
+                          <button type="button" onClick={() => setEditTaxKey(null)} style={{ margin: 0 }} className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-semibold rounded-lg flex-shrink-0">Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <ItemRow name={tax.tax_name} sublabel={tax.tax_number ? `#${tax.tax_number}` : undefined} badge={`${tax.tax_rate}%`} badgeCls={colors.badge}
+                        actions={<>
+                          <Btn color="bg-blue-500 hover:bg-blue-600" onClick={() => { setEditTaxKey(tax.id); setEditTaxVal({ tax_name: tax.tax_name, tax_rate: tax.tax_rate, tax_number: tax.tax_number || "" }); }}><Pencil size={13}/></Btn>
+                          <Btn color="bg-red-400 hover:bg-red-500" onClick={async () => { try { await deleteTax(tax.id); } catch (e) { toast("error", e.message || "Failed."); } }}><Trash2 size={13}/></Btn>
+                        </>}
+                      />
+                    )}
                   </div>
-                ) : (
-                  <ItemRow name={tax.tax_name} sublabel={tax.tax_number ? `#${tax.tax_number}` : undefined} badge={`${tax.tax_rate}%`} badgeCls={colors.badge}
-                    actions={<>
-                      {ab("bg-blue-500 hover:bg-blue-600", () => { setEditTaxKey(tax.id); setEditTaxVal({ tax_name: tax.tax_name, tax_rate: tax.tax_rate, tax_number: tax.tax_number || "" }); }, <Pencil size={13}/>)}
-                      {ab("bg-red-400 hover:bg-red-500", () => handleDelete(tax.id), <Trash2 size={13}/>)}
-                    </>}
-                  />
-                )}
-              </div>
-            );
-          })
-        ) : (
-          <>
-            {receiptItems.length > 0 && (
-              <div>
-                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">From your receipts</p>
-                <div className="flex flex-col gap-1.5">
-                  {receiptItems.map(item => {
-                    const isEd = editReceiptKey === item.key;
-                    return (
-                      <div key={item.key}>
-                        {isEd ? (
-                          <div className="flex gap-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
-                            <input className={mInput} value={editReceiptVal} onChange={e => setEditReceiptVal(e.target.value)} placeholder={item.name} />
-                            <button onClick={() => handleReceiptEdit(item.key, item.name)} className="px-3 py-1 bg-blue-600 text-white text-xs font-semibold rounded-lg">Save</button>
-                            <button onClick={() => setEditReceiptKey(null)} className="px-3 py-1 bg-gray-100 text-gray-600 text-xs font-semibold rounded-lg">Cancel</button>
-                          </div>
-                        ) : (
-                          <ItemRow logo={item.logo} name={item.name} badgeCls={colors.badge}
-                            actions={<>
-                              {ab("bg-blue-500 hover:bg-blue-600", () => { setEditReceiptKey(item.key); setEditReceiptVal(item.name); }, <Pencil size={13}/>)}
-                              {ab("bg-red-400 hover:bg-red-500", () => { if (type === "merchants") hideMerchant(item.key); if (type === "categories") hideCategory(item.key); if (type === "payments") hidePaymentMethod(item.key); }, <Trash2 size={13}/>)}
-                            </>}
-                          />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-            {customItems.length > 0 && (
-              <div>
-                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5 mt-2">Custom</p>
-                <div className="flex flex-col gap-1.5">
-                  {customItems.map(item => {
-                    const isEd = editKey === item.key;
-                    return (
-                      <div key={item.key}>
-                        {isEd ? (
-                          <div className="flex gap-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
-                            <input className={mInput} value={editVal} onChange={e => setEditVal(e.target.value)} placeholder={item.name} />
-                            <button onClick={() => handleEdit(item.key)} className="px-3 py-1 bg-blue-600 text-white text-xs font-semibold rounded-lg">Save</button>
-                            <button onClick={() => setEditKey(null)} className="px-3 py-1 bg-gray-100 text-gray-600 text-xs font-semibold rounded-lg">Cancel</button>
-                          </div>
-                        ) : (
-                          <ItemRow logo={item.logo} name={item.name} badgeCls={colors.badge}
-                            actions={<>
-                              {ab("bg-blue-500 hover:bg-blue-600", () => { setEditKey(item.key); setEditVal(item.name); }, <Pencil size={13}/>)}
-                              {ab("bg-red-400 hover:bg-red-500", () => handleDelete(item.key), <Trash2 size={13}/>)}
-                            </>}
-                          />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-            {receiptItems.length === 0 && customItems.length === 0 && (
-              <p className="text-sm text-gray-400 text-center py-8">No {cfg.label.toLowerCase()} yet.</p>
-            )}
-          </>
+                );
+              })
         )}
+
+        {/* Merchants / Categories / Payments — unified list */}
+        {type !== "taxes" && (
+          allItems.length === 0
+            ? <p className="text-sm text-gray-400 text-center py-8">No {cfg.label.toLowerCase()} yet.</p>
+            : allItems.map(item => {
+                const isEd = editKey === item.key;
+                // resolve logo shown in list: prefer merchant logo map, then item logo
+                const displayLogo = type === "merchants"
+                  ? (merchLogos[item.name] || item.logo)
+                  : item.logo;
+                return (
+                  <div key={item.key}>
+                    {isEd ? (
+                      <div className="flex flex-col gap-2 bg-blue-50 border border-blue-200 rounded-xl p-3">
+                        {/* Edit row */}
+                        <div className="flex items-center gap-2">
+                          {/* Show current/new logo preview */}
+                          {type === "merchants" && (
+                            <ItemLogo
+                              logo={editLogoSel !== null ? (editLogoOpts[editLogoSel]?.displayUrl || editLogoOpts[editLogoSel]?.storeUrl) : editOrigLogo}
+                              name={editVal || item.name}
+                            />
+                          )}
+                          <input className={mInput} value={editVal} onChange={e => setEditVal(e.target.value)} placeholder={item.name} />
+                          {/* Logo search button (merchants only) */}
+                          {type === "merchants" && (
+                            <button type="button" style={{ margin: 0 }}
+                              onClick={() => doFetch(editVal || item.name, setIsFetchEditLogo, setEditLogoOpts, setEditLogoSel)}
+                              disabled={isFetchEditLogo}
+                              className="p-2 rounded-xl bg-white border border-gray-200 text-gray-500 flex-shrink-0 disabled:opacity-40 flex items-center justify-center">
+                              {isFetchEditLogo
+                                ? <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                                : <Search size={13} />}
+                            </button>
+                          )}
+                          <button type="button" onClick={() => handleSaveEdit(item)} style={{ margin: 0 }} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex-shrink-0">Save</button>
+                          <button type="button" onClick={closeEdit} style={{ margin: 0 }} className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-semibold rounded-lg flex-shrink-0">Cancel</button>
+                        </div>
+                        {/* Logo search results (edit mode, merchants) */}
+                        {type === "merchants" && <LogoGrid options={editLogoOpts} selectedIndex={editLogoSel} onSelect={setEditLogoSel} />}
+                      </div>
+                    ) : (
+                      <ItemRow logo={displayLogo} name={item.name} badgeCls={colors.badge}
+                        actions={<>
+                          <Btn color="bg-blue-500 hover:bg-blue-600" onClick={() => {
+                            setEditKey(item.key); setEditIsReceipt(item.isReceiptItem);
+                            setEditVal(item.name); setEditOrigLogo(displayLogo);
+                            setEditLogoOpts([]); setEditLogoSel(null);
+                          }}><Pencil size={13}/></Btn>
+                          <Btn color="bg-red-400 hover:bg-red-500" onClick={() => handleDelete(item)}><Trash2 size={13}/></Btn>
+                        </>}
+                      />
+                    )}
+                  </div>
+                );
+              })
+        )}
+
       </div>
     </div>
   );

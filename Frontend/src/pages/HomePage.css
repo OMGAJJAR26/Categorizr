@@ -1,5 +1,6 @@
 /* ===== HOMEPAGE – BLUE SHADES (site colors, attractive & cohesive) ===== */
 
+/* ── Light mode (default) ── */
 .home-page {
   --hp-bg: #f0f4ff;
   --hp-card-bg: #ffffff;
@@ -22,6 +23,11 @@
   --hp-input-focus: var(--hp-accent);
   --hp-btn-primary: var(--hp-accent);
   --hp-btn-primary-hover: #1d4ed8;
+  /* Text colours for light mode */
+  --hp-text-primary: #0f172a;
+  --hp-text-muted:   #475569;
+  --hp-text-subtle:  #94a3b8;
+  --hp-divider:      rgba(37, 99, 235, 0.08);
 }
 
 /* Page – light blue tint so the card pops */
