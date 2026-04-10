@@ -1403,6 +1403,19 @@ const handleFieldChange = (field, value) => {
     }
   };
 
+  // Allow manual receipt entry without uploading an image first.
+  const handleSkipUpload = () => {
+    if (isUploading || isParsing) return;
+    setError(null);
+    setFiles([]);
+    setUploadedMediaUrls([]);
+    setUploadedImageUrl(null);
+    setUploadedReceiptData(null);
+    setLocalImageFile(null);
+    setPdfPreviewUrl(null);
+    setStep("form");
+  };
+
   // ── Expense Category edit/delete helpers ────────────────────────────────
 
   const handleOpenEditCategory = (category) => {
@@ -3797,6 +3810,13 @@ const handleSelectLogo = (index) => {
                         className="px-4 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
                       >
                         Cancel
+                      </button>
+                      <button
+                        onClick={handleSkipUpload}
+                        disabled={isUploading || isParsing}
+                        className="px-4 py-2 text-blue-700 font-medium bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Skip
                       </button>
                       <button
                         onClick={handleUpload}

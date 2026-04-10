@@ -14,7 +14,7 @@ import Creditdebitcardicon from "../../assets/payment/Creditdebitcardicon.jpg";
 
 // ✅ Final version
 const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
-  const { receipts } = useData();
+  const { receipts, paymentMethods } = useData();
   const [selectedPaymentMethods, setSelectedPaymentMethods] =
     useState(initialSelected);
 
@@ -272,10 +272,16 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
         set.add(normalizeLabel(title));
       }
     });
+    (paymentMethods || []).forEach((method) => {
+      const normalized = normalizeLabel((method || "").toString().trim());
+      if (normalized && normalized !== "-") {
+        set.add(normalized);
+      }
+    });
     const arr = Array.from(set);
     arr.sort((a, b) => a.localeCompare(b));
     return arr;
-  }, [receipts, getPaymentDisplayName]);
+  }, [receipts, paymentMethods, getPaymentDisplayName]);
 
   // ✅ Select all
   const handleSelectAll = () => {
