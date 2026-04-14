@@ -4861,6 +4861,7 @@ Thank you for using our receipt management system.
                                       <div className="relative">
                                         <span className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-500 text-sm mt-1">$</span>
                                         <input
+                                          id="edit-receipt-tip-input"
                                           type="number"
                                           step="0.01"
                                           min="0"
@@ -4913,6 +4914,93 @@ Thank you for using our receipt management system.
                             />
                           </div>
                         </div>
+
+                        {/* SELECT — horizontal tax/tip pill scroll */}
+                        {(() => {
+                          const currentTaxVals =
+                            editedReceipt.receipt_tax_values ||
+                            enrichedReceiptTaxValues.filter(
+                              (t) => !(t.tax_name || "").toLowerCase().includes("tip")
+                            ) || [];
+                          const currentTipVal =
+                            editedReceipt.tip !== undefined && editedReceipt.tip !== ""
+                              ? parseFloat(editedReceipt.tip) || 0
+                              : parseFloat(enrichedReceiptTaxValues.find(
+                                  (t) => (t.tax_name || "").toLowerCase().includes("tip")
+                                )?.tax_amount) || 0;
+
+                          return (
+                            <div className="mt-1">
+                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Select</p>
+                              <div
+                                className="flex gap-2 overflow-x-auto pb-1"
+                                style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+                              >
+                                {/* TIP pill */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (currentTipVal > 0) {
+                                      handleFieldChange("tip", "");
+                                    } else {
+                                      handleFieldChange("tip", "0");
+                                      setTimeout(() => {
+                                        document.getElementById("edit-receipt-tip-input")?.focus();
+                                      }, 50);
+                                    }
+                                  }}
+                                  className={`flex-shrink-0 px-3 py-1.5 rounded-full border text-sm font-semibold transition-all ${
+                                    currentTipVal > 0
+                                      ? "border-blue-500 text-blue-600 bg-blue-50"
+                                      : "border-gray-300 text-gray-500 bg-white hover:border-blue-300 hover:text-blue-500"
+                                  }`}
+                                >
+                                  TIP
+                                </button>
+
+                                {/* Tax type pills */}
+                                {allTaxTypes.map((tax, idx) => {
+                                  const selectedIndex = currentTaxVals.findIndex(
+                                    (t) => t.tax_name === tax.tax_name && t.tax_rate === tax.tax_rate
+                                  );
+                                  const isSelected = selectedIndex !== -1;
+                                  return (
+                                    <button
+                                      key={idx}
+                                      type="button"
+                                      onClick={() => {
+                                        if (isSelected) {
+                                          removeTaxFromReceipt(selectedIndex);
+                                        } else {
+                                          addTaxToReceipt(tax);
+                                        }
+                                      }}
+                                      className={`flex-shrink-0 px-3 py-1.5 rounded-full border text-sm font-semibold transition-all ${
+                                        isSelected
+                                          ? "border-blue-500 text-blue-600 bg-blue-50"
+                                          : "border-gray-300 text-gray-500 bg-white hover:border-blue-300 hover:text-blue-500"
+                                      }`}
+                                    >
+                                      {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
+                                    </button>
+                                  );
+                                })}
+
+                                {/* Manage Tax Types button */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowTaxDropdown(null);
+                                    setShowManageTaxModal(true);
+                                  }}
+                                  className="flex-shrink-0 px-3 py-1.5 rounded-full border border-dashed border-gray-300 text-gray-400 text-xs font-semibold hover:border-blue-400 hover:text-blue-500 transition-all flex items-center gap-1 whitespace-nowrap"
+                                >
+                                  <Plus size={11} /> Manage
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
 

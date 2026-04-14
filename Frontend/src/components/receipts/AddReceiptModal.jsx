@@ -4795,6 +4795,7 @@ const handleSelectLogo = (index) => {
                             )
                           </label>
                           <input
+                            id="add-receipt-tip-input"
                             type="number"
                             step="0.01"
                             className={inputClass}
@@ -4837,6 +4838,77 @@ const handleSelectLogo = (index) => {
                             }}
                             placeholder="$0.00"
                           />
+                        </div>
+
+                        {/* SELECT — horizontal tax/tip pill scroll */}
+                        <div className="mt-1">
+                          <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Select</p>
+                          <div
+                            className="flex gap-2 overflow-x-auto pb-1"
+                            style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+                          >
+                            {/* TIP pill */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (formData.tip && parseFloat(formData.tip) > 0) {
+                                  handleFieldChange("tip", "");
+                                } else {
+                                  handleFieldChange("tip", "0");
+                                  setTimeout(() => {
+                                    document.getElementById("add-receipt-tip-input")?.focus();
+                                  }, 50);
+                                }
+                              }}
+                              className={`flex-shrink-0 px-3 py-1.5 rounded-full border text-sm font-semibold transition-all ${
+                                formData.tip && parseFloat(formData.tip) > 0
+                                  ? "border-blue-500 text-blue-600 bg-blue-50"
+                                  : "border-gray-300 text-gray-500 bg-white hover:border-blue-300 hover:text-blue-500"
+                              }`}
+                            >
+                              TIP
+                            </button>
+
+                            {/* Tax type pills */}
+                            {allTaxTypes.map((tax, idx) => {
+                              const selectedIndex = formData.receipt_tax_values.findIndex(
+                                (t) => t.tax_name === tax.tax_name && t.tax_rate === tax.tax_rate
+                              );
+                              const isSelected = selectedIndex !== -1;
+                              return (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      removeTaxType(selectedIndex);
+                                    } else {
+                                      addTaxType(tax);
+                                    }
+                                  }}
+                                  className={`flex-shrink-0 px-3 py-1.5 rounded-full border text-sm font-semibold transition-all ${
+                                    isSelected
+                                      ? "border-blue-500 text-blue-600 bg-blue-50"
+                                      : "border-gray-300 text-gray-500 bg-white hover:border-blue-300 hover:text-blue-500"
+                                  }`}
+                                >
+                                  {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
+                                </button>
+                              );
+                            })}
+
+                            {/* Manage Tax Types button */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowTaxDropdown(false);
+                                setShowManageTaxModal(true);
+                              }}
+                              className="flex-shrink-0 px-3 py-1.5 rounded-full border border-dashed border-gray-300 text-gray-400 text-xs font-semibold hover:border-blue-400 hover:text-blue-500 transition-all flex items-center gap-1 whitespace-nowrap"
+                            >
+                              <Plus size={11} /> Manage
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
