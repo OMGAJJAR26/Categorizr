@@ -991,10 +991,64 @@ const ReceiptInfoInline = ({ type }) => {
     if (!keyword.trim()) return;
     setFetching(true); setOpts([]); setSel(null);
     try {
-      const res  = await fetch(`/imagesearch?searchkeyword=${encodeURIComponent(keyword.trim() + " logo")}`);
-      const data = await res.json();
-      if (Array.isArray(data)) setOpts(data.slice(0, 8));
-    } catch (e) { console.error(e); }
+      const query = `${keyword.trim()} logo`;
+      const res = await fetch(`/imagesearch?searchkeyword=${encodeURIComponent(query)}`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) throw new Error(`API returned ${res.status}`);
+
+      let data;
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        try { data = JSON.parse(text); }
+        catch {
+          const urlMatch = text.match(/(https?:\/\/[^\s"']+\.(jpg|jpeg|png|gif|webp))/i);
+          if (urlMatch) { setOpts([{ displayUrl: urlMatch[1], storeUrl: urlMatch[1] }]); return; }
+          throw new Error("No valid image URL found");
+        }
+      }
+
+      const isValidHttpUrl = (u) => u && /^https?:\/\//i.test(u);
+      const logoEntries = [];
+
+      // Primary format: array of {fullurl, thumburl, ...}
+      if (Array.isArray(data) && data.length > 0) {
+        for (const item of data) {
+          if (item && typeof item === "object") {
+            const fullUrl  = item.fullurl || item.url || item.image || item.src || item.link;
+            const thumbUrl = item.thumburl || fullUrl;
+            const storeUrl = fullUrl || thumbUrl;
+            if (isValidHttpUrl(storeUrl)) {
+              logoEntries.push({ displayUrl: isValidHttpUrl(thumbUrl) ? thumbUrl : storeUrl, storeUrl });
+            }
+          }
+        }
+      }
+
+      // Object response: {images/results/data: [...]}
+      if (typeof data === "object" && !Array.isArray(data)) {
+        const arr = data.images || data.results || data.data || data.items || [];
+        if (Array.isArray(arr) && arr.length > 0) {
+          for (const item of arr) {
+            if (item && typeof item === "object") {
+              const fullUrl  = item.fullurl || item.url || item.image || item.src || item.link;
+              const thumbUrl = item.thumburl || fullUrl;
+              if (isValidHttpUrl(fullUrl)) {
+                logoEntries.push({ displayUrl: isValidHttpUrl(thumbUrl) ? thumbUrl : fullUrl, storeUrl: fullUrl });
+              }
+            }
+          }
+        }
+        const directUrl = data.url || data.image || data.src || data.link || data.fullurl;
+        if (isValidHttpUrl(directUrl)) logoEntries.push({ displayUrl: directUrl, storeUrl: directUrl });
+      }
+
+      setOpts(logoEntries.slice(0, 8));
+    } catch (e) { console.error("Logo fetch error:", e); }
     finally { setFetching(false); }
   };
 
