@@ -204,6 +204,7 @@ const ReceiptDetail = ({
   const [localTaxTypes, setLocalTaxTypes] = useState([]);
   const [showDeleteTaxConfirm, setShowDeleteTaxConfirm] = useState(false);
   const [deletingTaxId, setDeletingTaxId] = useState(null);
+  const [tipVisible, setTipVisible] = useState(false); // TIP field visibility (toggled by SELECT pill)
 
   // ── Split feature ─────────────────────────────────────────────────────────
   const [showSplitScreen, setShowSplitScreen] = useState(false);
@@ -625,9 +626,11 @@ useEffect(() => {
         product_name: selectedReceipt.product_name || "",
         notes: selectedReceipt.notes || "",
         receipt_tax_values: nonTipTaxValues,
-        tip: tipEntry ? tipEntry.tax_amount : "0.00",
+        tip: tipEntry ? (tipEntry.tax_amount ?? "") : "",
         store_image: selectedReceipt.store_image || "",
       });
+      // Show TIP field if receipt already has a tip value
+      setTipVisible(!!tipEntry && parseFloat(tipEntry.tax_amount) > 0);
 
       // Initialize tags from receipt_tag
       const tags = parseReceiptTags(selectedReceipt.receipt_tag);
@@ -4835,51 +4838,41 @@ Thank you for using our receipt management system.
                                 </div>
                               </div>
 
-                              {/* Editable Tip Field */}
-                              <div className="mb-4 text-align-left">
-                                {(() => {
-                                  const tipValue =
-                                    editedReceipt.tip !== undefined && editedReceipt.tip !== ""
-                                      ? editedReceipt.tip
-                                      : currentTipTax?.tax_amount ?? 0;
-                                  const subtotal =
-                                    parseFloat(editedReceipt.subtotal) ||
-                                    parseFloat(r.subtotal) ||
-                                    parseFloat(r.purchasePrice) ||
-                                    0;
-                                  const tipNum = parseFloat(tipValue) || 0;
-                                  const tipPercentage =
-                                    subtotal > 0 && tipNum > 0
-                                      ? Math.round((tipNum / subtotal) * 100)
-                                      : 0;
-
-                                  return (
-                                    <>
-                                      <label className="font-bold">
-                                        TIP ({tipPercentage}%)
-                                      </label>
-                                      <div className="relative">
-                                        <span className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-500 text-sm mt-1">$</span>
-                                        <input
-                                          id="edit-receipt-tip-input"
-                                          type="number"
-                                          step="0.01"
-                                          min="0"
-                                          className={`${inputClass} pl-5`}
-                                          value={tipNum > 0 ? parseFloat(tipNum.toFixed(2)) : ""}
-                                          onChange={(e) =>
-                                            handleFieldChange(
-                                              "tip",
-                                              e.target.value
-                                            )
-                                          }
-                                          placeholder="0.00"
-                                        />
-                                      </div>
-                                    </>
-                                  );
-                                })()}
-                              </div>
+                              {/* Editable Tip Field — only shown when TIP pill is selected */}
+                              {tipVisible && (() => {
+                                const tipNum = parseFloat(editedReceipt.tip) || 0;
+                                const subtotal =
+                                  parseFloat(editedReceipt.subtotal) ||
+                                  parseFloat(r.subtotal) ||
+                                  parseFloat(r.purchasePrice) ||
+                                  0;
+                                const tipPercentage =
+                                  subtotal > 0 && tipNum > 0
+                                    ? Math.round((tipNum / subtotal) * 100)
+                                    : 0;
+                                return (
+                                  <div className="mb-4 text-align-left">
+                                    <label className="font-bold">
+                                      TIP ({tipPercentage}%)
+                                    </label>
+                                    <div className="relative">
+                                      <span className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-500 text-sm mt-1">$</span>
+                                      <input
+                                        id="edit-receipt-tip-input"
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        className={`${inputClass} pl-5`}
+                                        value={tipNum > 0 ? parseFloat(tipNum.toFixed(2)) : ""}
+                                        onChange={(e) =>
+                                          handleFieldChange("tip", e.target.value)
+                                        }
+                                        placeholder="0.00"
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })()}
                             </>
                           );
                         })()}
@@ -4953,9 +4946,13 @@ Thank you for using our receipt management system.
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    if (currentTipVal > 0) {
+                                    if (tipVisible) {
+                                      // Deselect — hide field and clear value
+                                      setTipVisible(false);
                                       handleFieldChange("tip", "");
                                     } else {
+                                      // Select — show field cleared to $0.00
+                                      setTipVisible(true);
                                       handleFieldChange("tip", "0");
                                       setTimeout(() => {
                                         document.getElementById("edit-receipt-tip-input")?.focus();
@@ -4963,7 +4960,7 @@ Thank you for using our receipt management system.
                                     }
                                   }}
                                   className={`px-4 py-1.5 rounded-full border text-sm font-semibold transition-all ${
-                                    currentTipVal > 0
+                                    tipVisible
                                       ? "border-blue-500 text-blue-600 bg-blue-50"
                                       : "border-gray-300 text-gray-500 bg-white hover:border-blue-300 hover:text-blue-500"
                                   }`}

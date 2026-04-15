@@ -4779,37 +4779,39 @@ const handleSelectLogo = (index) => {
                           </div>
                         </div>
 
-                        {/* TIP */}
-                        <div className="mb-4 text-align-left">
-                          <label className="font-bold">
-                            TIP (
-                            {formData.tip &&
-                            formData.subtotal &&
-                            parseFloat(formData.subtotal) > 0
-                              ? `${Math.round(
-                                  (parseFloat(formData.tip) /
-                                    parseFloat(formData.subtotal)) *
-                                    100,
-                                )}%`
-                              : "0%"}
-                            )
-                          </label>
-                          <input
-                            id="add-receipt-tip-input"
-                            type="number"
-                            step="0.01"
-                            className={inputClass}
-                            value={
-                              formData.tip && parseFloat(formData.tip) !== 0
-                                ? parseFloat(parseFloat(formData.tip).toFixed(2))
-                                : ""
-                            }
-                            onChange={(e) =>
-                              handleFieldChange("tip", e.target.value)
-                            }
-                            placeholder="$0.00"
-                          />
-                        </div>
+                        {/* TIP — only visible when TIP pill is selected */}
+                        {formData.tip !== "" && (
+                          <div className="mb-4 text-align-left">
+                            <label className="font-bold">
+                              TIP (
+                              {formData.tip !== "" &&
+                              formData.subtotal &&
+                              parseFloat(formData.subtotal) > 0
+                                ? `${Math.round(
+                                    (parseFloat(formData.tip) /
+                                      parseFloat(formData.subtotal)) *
+                                      100,
+                                  )}%`
+                                : "0%"}
+                              )
+                            </label>
+                            <input
+                              id="add-receipt-tip-input"
+                              type="number"
+                              step="0.01"
+                              className={inputClass}
+                              value={
+                                parseFloat(formData.tip) > 0
+                                  ? parseFloat(parseFloat(formData.tip).toFixed(2))
+                                  : ""
+                              }
+                              onChange={(e) =>
+                                handleFieldChange("tip", e.target.value)
+                              }
+                              placeholder="$0.00"
+                            />
+                          </div>
+                        )}
 
                         {/* Total */}
                         <div className="mb-4 text-align-left">
@@ -4849,9 +4851,11 @@ const handleSelectLogo = (index) => {
                             <button
                               type="button"
                               onClick={() => {
-                                if (formData.tip && parseFloat(formData.tip) > 0) {
+                                if (formData.tip !== "") {
+                                  // Deselect — hide field and clear value
                                   handleFieldChange("tip", "");
                                 } else {
+                                  // Select — show field cleared to $0.00
                                   handleFieldChange("tip", "0");
                                   setTimeout(() => {
                                     document.getElementById("add-receipt-tip-input")?.focus();
@@ -4859,7 +4863,7 @@ const handleSelectLogo = (index) => {
                                 }
                               }}
                               className={`px-4 py-1.5 rounded-full border text-sm font-semibold transition-all ${
-                                formData.tip && parseFloat(formData.tip) > 0
+                                formData.tip !== ""
                                   ? "border-blue-500 text-blue-600 bg-blue-50"
                                   : "border-gray-300 text-gray-500 bg-white hover:border-blue-300 hover:text-blue-500"
                               }`}
