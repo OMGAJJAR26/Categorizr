@@ -4915,7 +4915,7 @@ Thank you for using our receipt management system.
                           </div>
                         </div>
 
-                        {/* SELECT — horizontal tax/tip pill scroll */}
+                        {/* SELECT — tax/tip pill selector */}
                         {(() => {
                           const currentTaxVals =
                             editedReceipt.receipt_tax_values ||
@@ -4929,14 +4929,27 @@ Thank you for using our receipt management system.
                                   (t) => (t.tax_name || "").toLowerCase().includes("tip")
                                 )?.tax_amount) || 0;
 
+                          const sortedTaxPills = [...allTaxTypes]
+                            .map((tax) => ({
+                              ...tax,
+                              _selIdx: currentTaxVals.findIndex(
+                                (t) => t.tax_name === tax.tax_name && t.tax_rate === tax.tax_rate
+                              ),
+                            }))
+                            .sort((a, b) => {
+                              const aS = a._selIdx !== -1;
+                              const bS = b._selIdx !== -1;
+                              if (aS && !bS) return -1;
+                              if (!aS && bS) return 1;
+                              return a.tax_name.localeCompare(b.tax_name);
+                            });
+
                           return (
-                            <div className="mt-1">
+                            <div className="mt-2">
                               <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Select</p>
-                              <div
-                                className="flex gap-2 overflow-x-auto pb-1"
-                                style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
-                              >
-                                {/* TIP pill */}
+
+                              {/* Row 1: TIP — always fixed leftmost */}
+                              <div className="mb-2">
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -4949,7 +4962,7 @@ Thank you for using our receipt management system.
                                       }, 50);
                                     }
                                   }}
-                                  className={`flex-shrink-0 px-3 py-1.5 rounded-full border text-sm font-semibold transition-all ${
+                                  className={`px-4 py-1.5 rounded-full border text-sm font-semibold transition-all ${
                                     currentTipVal > 0
                                       ? "border-blue-500 text-blue-600 bg-blue-50"
                                       : "border-gray-300 text-gray-500 bg-white hover:border-blue-300 hover:text-blue-500"
@@ -4957,20 +4970,36 @@ Thank you for using our receipt management system.
                                 >
                                   TIP
                                 </button>
+                              </div>
 
-                                {/* Tax type pills */}
-                                {allTaxTypes.map((tax, idx) => {
-                                  const selectedIndex = currentTaxVals.findIndex(
-                                    (t) => t.tax_name === tax.tax_name && t.tax_rate === tax.tax_rate
-                                  );
-                                  const isSelected = selectedIndex !== -1;
+                              {/* Row 2: Manage Tax Types — blue, always visible directly below TIP */}
+                              <div className="mb-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowTaxDropdown(null);
+                                    setShowManageTaxModal(true);
+                                  }}
+                                  className="px-4 py-1.5 rounded-full border border-blue-400 text-blue-600 bg-blue-50 text-sm font-semibold flex items-center gap-1 whitespace-nowrap hover:bg-blue-100 transition-all"
+                                >
+                                  <Plus size={12} /> Manage Tax Types
+                                </button>
+                              </div>
+
+                              {/* Row 3: Scrollable tax pills — selected first (A→Z), then unselected (A→Z) */}
+                              <div
+                                className="flex gap-2 overflow-x-auto pb-1"
+                                style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+                              >
+                                {sortedTaxPills.map((tax, idx) => {
+                                  const isSelected = tax._selIdx !== -1;
                                   return (
                                     <button
                                       key={idx}
                                       type="button"
                                       onClick={() => {
                                         if (isSelected) {
-                                          removeTaxFromReceipt(selectedIndex);
+                                          removeTaxFromReceipt(tax._selIdx);
                                         } else {
                                           addTaxToReceipt(tax);
                                         }
@@ -4985,18 +5014,6 @@ Thank you for using our receipt management system.
                                     </button>
                                   );
                                 })}
-
-                                {/* Manage Tax Types button */}
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setShowTaxDropdown(null);
-                                    setShowManageTaxModal(true);
-                                  }}
-                                  className="flex-shrink-0 px-3 py-1.5 rounded-full border border-dashed border-gray-300 text-gray-400 text-xs font-semibold hover:border-blue-400 hover:text-blue-500 transition-all flex items-center gap-1 whitespace-nowrap"
-                                >
-                                  <Plus size={11} /> Manage
-                                </button>
                               </div>
                             </div>
                           );
