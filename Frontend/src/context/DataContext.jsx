@@ -394,12 +394,16 @@ export const DataProvider = ({ children }) => {
               const pn = r.product_name ?? r.productName ?? "";
               const hasProductName =
                 pn && pn.toString().trim() !== "" && pn !== "0";
+              // Support both camelCase (web) and snake_case (iOS/Android) for purchasePrice
+              const rawPurchasePrice = r.purchasePrice ?? r.purchase_price ?? "";
               const hasPurchasePrice =
-                r.purchasePrice && parseFloat(r.purchasePrice) > 0;
+                rawPurchasePrice && parseFloat(rawPurchasePrice) > 0;
+              // Support both snake_case and camelCase for receipt image
+              const rawReceiptImage = r.receipt_image ?? r.receiptImage ?? "";
               const hasReceiptImage =
-                r.receipt_image &&
-                r.receipt_image.toString().trim() !== "" &&
-                r.receipt_image !== "0";
+                rawReceiptImage &&
+                rawReceiptImage.toString().trim() !== "" &&
+                rawReceiptImage !== "0";
               const hasEmailAttachment =
                 r.emailAttachment &&
                 r.emailAttachment.toString().trim() !== "" &&
@@ -455,11 +459,15 @@ export const DataProvider = ({ children }) => {
               let paymentType = r.paymentType ?? r.payment_type ?? "";
               const cardIssuerName = r.card_issuer_name ?? r.cardIssuerName ?? "";
               const last4DigitCard = r.last_4_digit_card ?? r.last4DigitCard ?? "";
-              // Normalize merchant / category / tax fields – Android may use camelCase
+              // Normalize merchant / category / tax fields – Android/iOS may use snake_case or camelCase
               const storeName = r.storeName ?? r.store_name ?? "";
               const storeImage = r.store_image ?? r.storeImage ?? "";
               const expenseType = r.expense_type ?? r.expenseType ?? "";
               const productName = r.product_name ?? r.productName ?? "";
+              // iOS sends purchase_price (snake_case); web sends purchasePrice (camelCase)
+              const purchasePrice = r.purchasePrice ?? r.purchase_price ?? "";
+              // iOS may send receiptImage (camelCase) instead of receipt_image
+              const receiptImage = r.receipt_image ?? r.receiptImage ?? "";
               // receipt_tax_values: Android may send receiptTaxValues
               const receiptTaxValues =
                 Array.isArray(r.receipt_tax_values) ? r.receipt_tax_values
@@ -473,11 +481,13 @@ export const DataProvider = ({ children }) => {
               const normalized = {
                 ...r,
                 // Overwrite with normalised values so downstream code can use
-                // a single field name regardless of API variant (web vs Android)
+                // a single field name regardless of API variant (web vs Android/iOS)
                 storeName,
                 store_image: storeImage,
                 expense_type: expenseType,
                 product_name: productName,
+                purchasePrice: purchasePrice, // normalize snake_case purchase_price → camelCase
+                receipt_image: receiptImage,  // normalize camelCase receiptImage → snake_case
                 receipt_tax_values: receiptTaxValues,
                 paymentType: paymentType, // Keep paymentType as-is (e.g., "MasterCard *7836") - needed for logo detection
                 card_issuer_name: cardIssuerName,
