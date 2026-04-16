@@ -50,7 +50,7 @@ const HomePage = () => {
 
   const { sortConfig, updateSort, clearSort, clearAllSort } = useReceiptSorting();
 
-  const { groupedReceipts, yearTotals, sortedYears, filteredReceipts } =
+  const { draftReceipts, groupedReceipts, yearTotals, sortedYears, filteredReceipts } =
     useReceiptGrouping(receipts, filters, sortConfig, searchTerm);
 
   const {
@@ -924,6 +924,68 @@ const HomePage = () => {
             </div>
 
             <div ref={receiptsScrollRef} className="max-h-[calc(100vh-200px)] overflow-y-auto">
+
+              {/* ── Draft / To Be Verified receipts ── */}
+              {draftReceipts.length > 0 && (
+                <div className="mb-4">
+                  <div className="home-year-header bg-amber-50 border-b border-amber-200">
+                    <span className="text-amber-700 font-bold">
+                      Draft Receipts ({draftReceipts.length}{" "}
+                      {draftReceipts.length === 1 ? "Receipt" : "Receipts"})
+                    </span>
+                  </div>
+                  <div className="home-receipts-inner">
+                    {draftReceipts.map((receipt, index) => (
+                      <div key={receipt.id || index} className="mb-3">
+                        <ReceiptsTable
+                          receipt={receipt}
+                          getPaymentLogo={getPaymentLogo}
+                          getPaymentDisplay={getPaymentDisplay}
+                          onViewClick={() => handleReceiptClick(receipt, index)}
+                          onDeleteClick={handleDeleteClick}
+                          onLinkToQuickBooks={quickbooksConnected ? () => handleLinkToQuickBooks(receipt) : undefined}
+                          quickbooksConnected={quickbooksConnected}
+                          onLinkToSage={() => handleLinkToSage(receipt)}
+                          onLinkToXero={xeroConnected ? () => handleLinkToXero(receipt) : undefined}
+                          isLinking={linkingReceiptId === receipt.id}
+                          isLinkingSage={linkingSageReceiptId === receipt.id}
+                          isLinkingXero={linkingXeroReceiptId === receipt.id}
+                          formatCurrency={formatCurrency}
+                          isToBeVerified={true}
+                        />
+                        <ReceiptsMobileView
+                          receipt={receipt}
+                          getPaymentLogo={getPaymentLogo}
+                          getPaymentDisplay={getPaymentDisplay}
+                          onViewClick={() => handleReceiptClick(receipt, index)}
+                          onDeleteClick={handleDeleteClick}
+                          onLinkToQuickBooks={quickbooksConnected ? () => handleLinkToQuickBooks(receipt) : undefined}
+                          quickbooksConnected={quickbooksConnected}
+                          onLinkToSage={() => handleLinkToSage(receipt)}
+                          onLinkToXero={xeroConnected ? () => handleLinkToXero(receipt) : undefined}
+                          isLinking={linkingReceiptId === receipt.id}
+                          isLinkingSage={linkingSageReceiptId === receipt.id}
+                          isLinkingXero={linkingXeroReceiptId === receipt.id}
+                          formatCurrency={formatCurrency}
+                          isToBeVerified={true}
+                        />
+                        {selectedReceipt?.id === receipt.id && (
+                          <ReceiptDetail
+                            receipt={selectedReceipt}
+                            receiptList={draftReceipts}
+                            selectedIndex={selectedIndex}
+                            setSelectedIndex={setSelectedIndex}
+                            onSelectReceipt={handleReceiptClick}
+                            onClose={handleCloseReceiptDetail}
+                            onSaved={() => setToast({ isVisible: true, message: "Receipt updated!", type: "success" })}
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {sortedYears.map((year) => {
                 const yearReceipts = groupedReceipts[year] || [];
                 if (!yearReceipts.length) return null;

@@ -1,12 +1,17 @@
 
-const ReceiptBadges = ({ receipt }) => {
+const ReceiptBadges = ({ receipt, isToBeVerified = false }) => {
   const status = receipt.badgeStatus;
   const isQuickbooksLinked = receipt.quickbooksLinked;
 
-  if (!status && !isQuickbooksLinked) return null;
+  if (!status && !isQuickbooksLinked && !isToBeVerified) return null;
 
   return (
     <div className="flex gap-1 mb-2 flex-wrap">
+      {isToBeVerified && (
+        <span className="bg-amber-50 text-amber-600 text-xs font-bold px-2 py-1 rounded-full border border-amber-400 uppercase tracking-wide">
+          To Be Verified
+        </span>
+      )}
       {(status === "both" || status === "forwarded") && (
         <span className="bg-white text-green-500 text-xs font-semibold px-2 py-1 rounded-full border border-green-500">
           Forwarded
@@ -27,4 +32,4 @@ const ReceiptBadges = ({ receipt }) => {
   );
 };
 
-export default ReceiptBadges;                                                                                     
+export default ReceiptBadges;

@@ -409,6 +409,26 @@ export const DataProvider = ({ children }) => {
                 r.emailAttachment.toString().trim() !== "" &&
                 r.emailAttachment !== "0";
 
+              // eReceipts forwarded via email — fk_incoming_email_id is non-null/non-zero
+              const hasIncomingEmailId =
+                r.fk_incoming_email_id &&
+                r.fk_incoming_email_id !== "0" &&
+                r.fk_incoming_email_id !== 0;
+
+              // If this is an eReceipt (came via email or linked to original), always keep it —
+              // the App shows these under "Draft Receipts / TO BE VERIFIED"
+              if (hasIncomingEmailId) return true;
+
+              const rawOriginalId = r.fk_original_receipt_id;
+              const hasOriginalReceiptId =
+                rawOriginalId &&
+                rawOriginalId !== "0" &&
+                rawOriginalId !== 0;
+              if (hasOriginalReceiptId) return true;
+
+              // is_draft = "1" → draft receipt, always keep
+              if (r.is_draft === "1" || r.is_draft === 1) return true;
+
               const productDate = parseInt(r.product_date) || 0;
 
               // A "completely empty" placeholder row created by the backend
@@ -429,28 +449,17 @@ export const DataProvider = ({ children }) => {
                 return false;
               }
 
-              // Drop "upload-stub" receipts: created when a file was uploaded but the user
-              // never completed the Save step (or the old two-call flow created a duplicate
-              // stub). These have a store_image (from merchant lookup) but no real receipt
-              // data: no product name, no purchase price, no receipt image, no email.
-              const hasStoreImage =
-                r.store_image &&
-                r.store_image.toString().trim() !== "" &&
-                r.store_image !== "0";
-
               if (
                 !hasProductName &&
                 !hasPurchasePrice &&
                 !hasReceiptImage &&
                 !hasEmailAttachment
               ) {
-                // Regardless of whether storeName / store_image is present,
-                // a receipt with zero real content is noise — drop it.
+                // No real content — drop upload stubs
                 return false;
               }
 
-              // Keep everything else, including valid receipts that just
-              // happen to have product_date=0 but do contain real data
+              // Keep everything else
               return true;
             })
             .map((r) => {
@@ -492,6 +501,11 @@ export const DataProvider = ({ children }) => {
                 paymentType: paymentType, // Keep paymentType as-is (e.g., "MasterCard *7836") - needed for logo detection
                 card_issuer_name: cardIssuerName,
                 last_4_digit_card: last4DigitCard,
+                // Ensure draft/verify/email fields are always strings for easy comparison
+                is_draft: String(r.is_draft ?? "0"),
+                is_verify: String(r.is_verify ?? "0"),
+                fk_incoming_email_id: r.fk_incoming_email_id ?? null,
+                fk_original_receipt_id: r.fk_original_receipt_id ?? null,
               };
               const paymentDisplay = formatPaymentDisplayFromReceipt(normalized);
               const badgeStatus = getReceiptBadgeStatus(r);
