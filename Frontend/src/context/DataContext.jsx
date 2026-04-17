@@ -415,28 +415,29 @@ export const DataProvider = ({ children }) => {
                 r.fk_incoming_email_id !== "0" &&
                 r.fk_incoming_email_id !== 0;
 
-              // If this is an eReceipt (came via email or linked to original), always keep it —
-              // the App shows these under "Draft Receipts / TO BE VERIFIED"
+              // If this is an eReceipt (came via email), always keep — shown under "Draft Receipts"
               if (hasIncomingEmailId) return true;
-
-              const rawOriginalId = r.fk_original_receipt_id;
-              const hasOriginalReceiptId =
-                rawOriginalId &&
-                rawOriginalId !== "0" &&
-                rawOriginalId !== 0;
-              if (hasOriginalReceiptId) return true;
 
               // is_draft = "1" → draft receipt, always keep
               if (r.is_draft === "1" || r.is_draft === 1) return true;
 
+              // "Received" receipts forwarded within Categorizr Network — always keep
+              const hasForwardFromId =
+                r.fk_forward_from_receipt_id &&
+                r.fk_forward_from_receipt_id !== "0" &&
+                r.fk_forward_from_receipt_id !== 0;
+              if (hasForwardFromId) return true;
+
+              // If the receipt has a store name, it is a real receipt — never drop it.
+              // This captures iOS/Android manually-added receipts where the price field
+              // name may differ, or price was entered as 0 (e.g. free items, samples).
+              if (hasStoreName) return true;
+
               const productDate = parseInt(r.product_date) || 0;
 
-              // A "completely empty" placeholder row created by the backend
-              // typically has:
-              // - no store name / product name
-              // - 0 purchase price
-              // - no receipt image / email attachment
-              // - and an invalid date (0 or very small -> 1970)
+              // A "completely empty" placeholder row:
+              // - no store name / product name / price / image / email attachment
+              // - invalid date (0 or pre-2001)
               const isEmptyReceipt =
                 !hasStoreName &&
                 !hasProductName &&
@@ -445,7 +446,7 @@ export const DataProvider = ({ children }) => {
                 !hasEmailAttachment;
 
               if (isEmptyReceipt && (productDate === 0 || productDate < 1000000)) {
-                // Drop these placeholders so they don't show up as 1970 duplicates
+                // Drop truly empty placeholder rows
                 return false;
               }
 

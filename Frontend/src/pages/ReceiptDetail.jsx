@@ -818,6 +818,15 @@ useEffect(() => {
 
   const r = selectedReceipt;
 
+  // A receipt is in "Draft / eReceipt" mode when it came via email forwarding
+  // and has not yet been verified. In this mode:
+  //   - The black X close button is hidden (use "Keep in Draft Mode" to dismiss)
+  //   - "Keep in Draft Mode" button appears in the footer
+  //   - Saving sets is_verify = "1" so it moves to the regular receipt list
+  const isDraft =
+    (r?.fk_incoming_email_id && r.fk_incoming_email_id !== "0") ||
+    r?.is_draft === "1";
+
   const formatDate = (timestamp) => {
     if (!timestamp) return "";
     const date = new Date(Number(timestamp) * 1000);
@@ -2012,6 +2021,8 @@ useEffect(() => {
         card_issuer_name: cardIssuerName,
         paymentType: finalPaymentTypeForAPI || "", // Send WITHOUT *last4 to API
         last_4_digit_card: last4 || "", // Send separately
+        // Saving a draft receipt marks it as verified so it moves to the regular list
+        ...(isDraft ? { is_verify: "1", is_draft: "0" } : {}),
       };
 
       const success = await updateReceipt(selectedReceipt.id, updatedData);
@@ -3720,6 +3731,19 @@ Thank you for using our receipt management system.
                     >
                       <ChevronLeft size={18} className="text-gray-700" />
                     </button>
+                  ) : isDraft ? (
+                    /* Draft receipt — no X close button; user must use Save or Keep in Draft Mode */
+                    <button
+                      onClick={() => setShowDeleteConfirmation(true)}
+                      className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 hover:bg-red-50 rounded-full transition-colors group"
+                      aria-label="Delete"
+                      title="Delete receipt"
+                    >
+                      <Trash2
+                        size={16}
+                        className="text-red-500 group-hover:text-red-600"
+                      />
+                    </button>
                   ) : (
                     <>
                   <button
@@ -5371,7 +5395,7 @@ Thank you for using our receipt management system.
 
               {/* ── Sticky Save Bar (hidden during split) ── */}
               {!showSplitScreen && (
-              <div className="flex-shrink-0 border-t border-gray-200 bg-white px-4 sm:px-6 py-3">
+              <div className="flex-shrink-0 border-t border-gray-200 bg-white px-4 sm:px-6 py-3 flex flex-col gap-2">
                 <button
                   onClick={handleSave}
                   disabled={isSaving || editedTags.locked}
@@ -5380,6 +5404,15 @@ Thank you for using our receipt management system.
                 >
                   {isSaving ? "Saving..." : "Save Changes"}
                 </button>
+                {isDraft && (
+                  <button
+                    onClick={onClose}
+                    disabled={isSaving}
+                    className="w-full py-3 bg-white border border-amber-400 text-amber-600 font-semibold rounded-xl hover:bg-amber-50 transition-colors text-sm"
+                  >
+                    Keep in Draft Mode
+                  </button>
+                )}
               </div>
               )}
             </div>

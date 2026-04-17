@@ -3,24 +3,31 @@ import { filterReceipts } from "../utils/receiptFilters";
 import { sortReceipts, sortYears } from "../utils/receiptSorting";
 
 /**
- * A receipt is "to be verified" (Draft) when:
- *  - is_draft === "1"  (explicitly flagged as draft), OR
- *  - is_verify === "0" AND has fk_incoming_email_id (came via forwarded email), OR
- *  - is_verify === "0" AND has fk_original_receipt_id > 0 (linked eReceipt)
+ * A receipt is "to be verified" (Draft / eReceipt) when it was forwarded via
+ * email to the app (fk_incoming_email_id is set) and has not yet been verified.
  *
- * These are displayed in a top "Draft Receipts" section, NOT in the year groups.
+ * "Received" receipts forwarded within the Categorizr Network have
+ * fk_forward_from_receipt_id > 0 — those are NOT drafts; they go in the
+ * regular list with a blue "Received" badge.
+ *
+ * Rules:
+ *  - is_draft === "1"  → always a draft
+ *  - fk_incoming_email_id non-null/non-zero AND is_verify === "0" → eReceipt to verify
  */
 const isToBeVerified = (r) => {
   if (r.is_draft === "1") return true;
   const hasEmailId =
     r.fk_incoming_email_id &&
     r.fk_incoming_email_id !== "0" &&
-    r.fk_incoming_email_id !== 0;
-  const hasOriginalId =
-    r.fk_original_receipt_id &&
-    r.fk_original_receipt_id !== "0" &&
-    r.fk_original_receipt_id !== 0;
-  return r.is_verify === "0" && (hasEmailId || hasOriginalId);
+    r.fk_incoming_email_id !== 0 &&
+    r.fk_incoming_email_id !== null;
+  // Explicitly exclude "Received" network receipts (fk_forward_from_receipt_id set)
+  const isNetworkReceived =
+    r.fk_forward_from_receipt_id &&
+    r.fk_forward_from_receipt_id !== "0" &&
+    r.fk_forward_from_receipt_id !== 0;
+  if (isNetworkReceived) return false;
+  return hasEmailId && r.is_verify === "0";
 };
 
 export const useReceiptGrouping = (receipts, filters, sortConfig, searchTerm) => {
