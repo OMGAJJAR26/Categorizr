@@ -4834,11 +4834,13 @@ Thank you for using our receipt management system.
                                         </span>
                                       </div>
                                       {(() => {
-                                        const available = allTaxTypes.filter(
-                                          (t) => !currentTaxValues.some(
-                                            (ct) => ct.tax_name === t.tax_name && ct.tax_rate === t.tax_rate
+                                        const available = [...allTaxTypes]
+                                          .filter(
+                                            (t) => !currentTaxValues.some(
+                                              (ct) => ct.tax_name === t.tax_name && ct.tax_rate === t.tax_rate
+                                            )
                                           )
-                                        );
+                                          .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""));
                                         return available.length > 0 ? (
                                           available.map((tax, idx) => (
                                             <div
@@ -4939,11 +4941,13 @@ Thank you for using our receipt management system.
                                         </span>
                                       </div>
                                       {(() => {
-                                        const available = allTaxTypes.filter(
-                                          (t) => !currentTaxValues.some(
-                                            (ct) => ct.tax_name === t.tax_name && ct.tax_rate === t.tax_rate
+                                        const available = [...allTaxTypes]
+                                          .filter(
+                                            (t) => !currentTaxValues.some(
+                                              (ct) => ct.tax_name === t.tax_name && ct.tax_rate === t.tax_rate
+                                            )
                                           )
-                                        );
+                                          .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""));
                                         return available.length > 0 ? (
                                           available.map((tax, idx) => (
                                             <div

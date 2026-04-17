@@ -4729,7 +4729,9 @@ const handleSelectLogo = (index) => {
                                       Manage Tax Types
                                     </div>
                                     {allTaxTypes.length > 0 ? (
-                                      allTaxTypes.map((tax, idx) => {
+                                      [...allTaxTypes]
+                                        .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""))
+                                        .map((tax, idx) => {
                                         return (
                                           <div
                                             key={idx}
@@ -4844,7 +4846,9 @@ const handleSelectLogo = (index) => {
                                       Manage Tax Types
                                     </div>
                                     {allTaxTypes.length > 0 ? (
-                                      allTaxTypes.map((tax, idx) => {
+                                      [...allTaxTypes]
+                                        .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""))
+                                        .map((tax, idx) => {
                                         return (
                                           <div
                                             key={idx}
