@@ -550,9 +550,9 @@ useEffect(() => {
       const tipEntry = enrichedTaxValues.find((t) =>
         (t.tax_name || "").toLowerCase().includes("tip")
       );
-      const nonTipTaxValues = enrichedTaxValues.filter(
-        (t) => !(t.tax_name || "").toLowerCase().includes("tip")
-      );
+      const nonTipTaxValues = enrichedTaxValues
+        .filter((t) => !(t.tax_name || "").toLowerCase().includes("tip"))
+        .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""));
 
       // Clean up paymentType - preserve original paymentType if valid, otherwise use card_issuer_name
       // For display: construct "Network *last4" format
@@ -1013,7 +1013,9 @@ useEffect(() => {
         created: 0,
         updated: 0,
       };
-      const newTaxValues = [...currentTaxValues, newTaxEntry];
+      // Sort alphabetically so tax fields always render in A→Z order
+      const newTaxValues = [...currentTaxValues, newTaxEntry]
+        .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""));
 
       // Recalculate subtotal from total using combined tax rates
       const totalTaxRate = newTaxValues.reduce(

@@ -940,7 +940,9 @@ const handleFieldChange = (field, value) => {
         id: 0,
       };
 
-      const newTaxValues = [...formData.receipt_tax_values, taxToAdd];
+      // Sort alphabetically so tax fields always render in A→Z order
+      const newTaxValues = [...formData.receipt_tax_values, taxToAdd]
+        .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""));
 
       // Recompute subtotal from total using tax rates (not amounts)
       const subtotalFromTotal = calculateSubtotalFromRates(
