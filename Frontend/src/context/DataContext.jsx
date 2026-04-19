@@ -135,6 +135,9 @@ export const DataProvider = ({ children }) => {
   const [merchantsWithImages, setMerchantsWithImages] = useState([]);
   const [user, setUser] = useState(null);
 
+  // ── API-backed merchants (server-stored via /userpaymentmethod endpoints) ──
+  const [apiMerchants, setApiMerchants] = useState([]);
+
   // ── Custom receipt-info items (localStorage-backed, managed via Settings → Receipt Information) ──
   const [customMerchants, setCustomMerchants] = useState(() => {
     try { return JSON.parse(localStorage.getItem("cat_custom_merchants") || "[]"); } catch { return []; }
@@ -270,6 +273,58 @@ export const DataProvider = ({ children }) => {
       throw err;
     }
   }, [fetchTaxes]);
+
+  // ── API Merchant CRUD (via /userpaymentmethod endpoints) ──
+  const fetchApiMerchants = useCallback(async () => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    try {
+      const res = await fetch(`${BASE_URL}/userpaymentmethod/getPaymentMethodv1`, {
+        headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const merchants = Array.isArray(data) ? data.filter(m => m.card_number && m.card_type === "merchant") : [];
+        setApiMerchants(merchants);
+      }
+    } catch (e) { console.error("fetchApiMerchants error", e); }
+  }, []);
+
+  const addApiMerchant = async (name, logoUrl = "") => {
+    const token = localStorage.getItem("token");
+    if (!token || !name.trim()) return null;
+    try {
+      const res = await fetch(`${BASE_URL}/userpaymentmethod/addPaymentMethodv1`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ card_number: name.trim(), icon_image: logoUrl || "", card_type: "merchant", default_payment_category: "" }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setApiMerchants(prev => [...prev, data]);
+        return data;
+      }
+    } catch (e) { console.error("addApiMerchant error", e); }
+    return null;
+  };
+
+  const updateApiMerchant = async (id, name, logoUrl = "") => {
+    const token = localStorage.getItem("token");
+    if (!token) return false;
+    try {
+      const res = await fetch(`${BASE_URL}/userpaymentmethod/updatePaymentMethodv1`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id, card_number: name.trim(), icon_image: logoUrl || "", card_type: "merchant", default_payment_category: "" }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setApiMerchants(prev => prev.map(m => m.id === id ? data : m));
+        return true;
+      }
+    } catch (e) { console.error("updateApiMerchant error", e); }
+    return false;
+  };
 
   const clearDataContent = () => setDataContent(null);
 
@@ -549,14 +604,35 @@ export const DataProvider = ({ children }) => {
       }
 
 
+      // Fetch API merchants in parallel with building merchant lists
+      let apiMerchantsData = [];
+      try {
+        const apiMerchRes = await fetch(`${BASE_URL}/userpaymentmethod/getPaymentMethodv1`, {
+          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
+        });
+        if (apiMerchRes.ok) {
+          const apiMerchJson = await apiMerchRes.json();
+          apiMerchantsData = Array.isArray(apiMerchJson)
+            ? apiMerchJson.filter(m => m.card_number && m.card_type === "merchant")
+            : [];
+          setApiMerchants(apiMerchantsData);
+        }
+      } catch (apiMerchErr) {
+        console.error("fetchApiMerchants in fetchData error", apiMerchErr);
+      }
+
       setMerchants([
         "Miscellaneous", // always present — cannot be removed
-        ...new Set(
-          receiptsWithIntegrations
+        ...new Set([
+          ...receiptsWithIntegrations
             .map((r) => r.storeName)
             .filter(Boolean)
-            .filter((n) => n.toLowerCase().trim() !== "miscellaneous")
-        ),
+            .filter((n) => n.toLowerCase().trim() !== "miscellaneous"),
+          ...apiMerchantsData
+            .map((m) => m.card_number)
+            .filter(Boolean)
+            .filter((n) => n.toLowerCase().trim() !== "miscellaneous"),
+        ]),
       ]);
       setStoreImage([
         ...new Set(
@@ -583,6 +659,14 @@ receiptsWithIntegrations.forEach((r) => {
     }
   }
 });
+// Merge in API merchants (server-stored) if not already present from receipts
+apiMerchantsData.forEach(m => {
+  const key = (m.card_number || "").trim().toLowerCase();
+  if (key && !merchantsWithImagesMap.has(key)) {
+    merchantsWithImagesMap.set(key, { name: m.card_number, image: m.icon_image || "" });
+  }
+});
+
 // "Miscellaneous" is always present, pinned at the top
 if (!merchantsWithImagesMap.has("miscellaneous")) {
   merchantsWithImagesMap.set("miscellaneous", { name: "Miscellaneous", image: "" });
@@ -807,7 +891,8 @@ setMerchantsWithImages([
     setPurchasePrice([]);
     setMerchantsWithImages([{ name: "Miscellaneous", image: "" }]);
     setDataContent(null);
-    // Clear custom receipt-info items on logout so next user gets a clean slate
+    // Clear custom receipt-info items and API merchants on logout so next user gets a clean slate
+    setApiMerchants([]);
     setCustomMerchants([]);
     setCustomCategories([]);
     setCustomPaymentMethods([]);
@@ -1330,11 +1415,19 @@ setMerchantsWithImages([
     ...customMerchants.filter((m) => !hiddenMerchants.has(m) && !_rmLower.has(m.toLowerCase())),
   ];
   const _miLower = new Set(receiptMerchWImgRaw.map((m) => (m.name || "").toLowerCase()));
+  const _miCustomLower = new Set([
+    ..._miLower,
+    ...customMerchants.map((m) => (m || "").toLowerCase()),
+  ]);
   const mergedMerchantsWithImages = [
     ...receiptMerchWImgRaw.filter((m) => !hiddenMerchants.has(m.name)),
     ...customMerchants
       .filter((m) => !hiddenMerchants.has(m) && !_miLower.has(m.toLowerCase()))
       .map((m) => ({ name: m, image: "" })),
+    // API merchants not already present from receipts or custom list
+    ...apiMerchants
+      .filter((m) => m.card_number && !hiddenMerchants.has(m.card_number) && !_miCustomLower.has((m.card_number || "").toLowerCase()))
+      .map((m) => ({ name: m.card_number, image: m.icon_image || "" })),
   ];
   const _rcLower = new Set(receiptCategoriesRaw.map((c) => (c || "").toLowerCase()));
   const mergedExpenseCategories = [
@@ -1390,6 +1483,11 @@ setMerchantsWithImages([
         addTax,
         updateTax,
         deleteTax,
+        // API-backed merchant management
+        apiMerchants,
+        fetchApiMerchants,
+        addApiMerchant,
+        updateApiMerchant,
         // Custom receipt-info CRUD
         customMerchants,
         addCustomMerchant,

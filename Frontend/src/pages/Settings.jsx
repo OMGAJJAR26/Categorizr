@@ -914,9 +914,11 @@ const ReceiptInfoInline = ({ type }) => {
     receiptCategoriesRaw, customCategories, hideCategory, addCustomCategory, editCustomCategory, deleteCustomCategory,
     receiptPaymentsRaw, customPaymentMethods, hidePaymentMethod, addCustomPaymentMethod, editCustomPaymentMethod, deleteCustomPaymentMethod,
     taxData, addTax, updateTax, deleteTax, fetchTaxes,
+    apiMerchants, fetchApiMerchants, addApiMerchant, updateApiMerchant,
   } = useData();
 
   useEffect(() => { if (type === "taxes") fetchTaxes(); }, [type, fetchTaxes]);
+  useEffect(() => { if (type === "merchants") fetchApiMerchants(); }, [type]);
 
   const cfg    = MODAL_CFG[type];
   const colors = COLOR_MAP[cfg.color];
@@ -1075,6 +1077,8 @@ const ReceiptInfoInline = ({ type }) => {
       const selectedUrl = addLogoSel !== null ? (addLogoOpts[addLogoSel]?.displayUrl || addLogoOpts[addLogoSel]?.storeUrl || null) : null;
       addCustomMerchant(newMerchantName.trim());
       if (selectedUrl) saveMerchLogo(newMerchantName.trim(), selectedUrl);
+      // Also save to API
+      await addApiMerchant(newMerchantName.trim(), selectedUrl || "");
       setNewMerchantName(""); setAddLogoOpts([]); setAddLogoSel(null);
       return;
     }
@@ -1134,6 +1138,13 @@ const ReceiptInfoInline = ({ type }) => {
           hidePaymentMethod(item.key); addCustomPaymentMethod(newName);
         }
         toast("success", "Updated across all receipts.");
+      } else if (item.isApiItem) {
+        // API-backed merchant — update on server
+        if (type === "merchants") {
+          await updateApiMerchant(item.apiId, newName, keepLogo || "");
+          if (keepLogo) saveMerchLogo(newName, keepLogo);
+        }
+        toast("success", "Updated.");
       } else {
         // Custom item
         if (type === "merchants") {
@@ -1183,19 +1194,32 @@ const ReceiptInfoInline = ({ type }) => {
     } catch (e) { toast("error", e.message || "Delete failed."); }
   };
 
-  // Build unified list (receipt-derived + custom, no dupes, no "Custom" label)
+  // Build unified list (receipt-derived + custom + API, no dupes, no "Custom" label)
   const buildAllItems = () => {
     if (type === "merchants") {
       const rItems = receiptMerchWImgRaw.map(m => ({
         key: m.name, name: m.name,
         logo: merchLogos[m.name] || m.image || null,
         isReceiptItem: true,
+        isApiItem: false,
       }));
       const rKeys = new Set(receiptMerchWImgRaw.map(m => m.name.toLowerCase()));
       const cItems = customMerchants
         .filter(m => !rKeys.has(m.toLowerCase()))
-        .map(m => ({ key: m, name: m, logo: merchLogos[m] || null, isReceiptItem: false }));
-      return [...rItems, ...cItems];
+        .map(m => ({ key: m, name: m, logo: merchLogos[m] || null, isReceiptItem: false, isApiItem: false }));
+      // API merchants (server-stored, shown below receipt-derived and custom)
+      const allExistingKeys = new Set([...rItems.map(m => m.name.toLowerCase()), ...cItems.map(m => m.name.toLowerCase())]);
+      const apiItems = (apiMerchants || [])
+        .filter(m => m.card_number && !allExistingKeys.has((m.card_number || "").toLowerCase()))
+        .map(m => ({
+          key: `api_${m.id}`,
+          name: m.card_number,
+          logo: m.icon_image || null,
+          isReceiptItem: false,
+          apiId: m.id,
+          isApiItem: true,
+        }));
+      return [...rItems, ...cItems, ...apiItems];
     }
     if (type === "categories") {
       const rItems = receiptCategoriesRaw.map(c => ({ key: c, name: c, logo: null, isReceiptItem: true }));
