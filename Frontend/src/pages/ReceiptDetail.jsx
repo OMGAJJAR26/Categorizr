@@ -823,9 +823,18 @@ useEffect(() => {
   //   - The black X close button is hidden (use "Keep in Draft Mode" to dismiss)
   //   - "Keep in Draft Mode" button appears in the footer
   //   - Saving sets is_verify = "1" so it moves to the regular receipt list
+  // isDraft mirrors isToBeVerified() in useReceiptGrouping:
+  //   - is_draft === "1"  → always draft
+  //   - has email ID + is_verify !== "1" + not a network-received receipt → draft
+  //   - Once saved (is_verify = "1"), isDraft becomes false → "Keep in Draft Mode" disappears
   const isDraft =
-    (r?.fk_incoming_email_id && r.fk_incoming_email_id !== "0") ||
-    r?.is_draft === "1";
+    r?.is_draft === "1" ||
+    (
+      r?.fk_incoming_email_id &&
+      r.fk_incoming_email_id !== "0" &&
+      String(r?.is_verify ?? "0") !== "1" &&
+      !r?.fk_forward_from_receipt_id
+    );
 
   const formatDate = (timestamp) => {
     if (!timestamp) return "";

@@ -244,7 +244,10 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
 
     // PRIORITY 1: Always use card_issuer_name if available
     if (issuer && issuer !== "0") {
-      return `${issuer}${last4 ? ` *${last4}` : ""}`;
+      // Guard: iOS may store "Mastercard *7836" in issuer AND "7836" in last_4_digit_card.
+      // Only append *last4 if the issuer doesn't already contain it.
+      const alreadyHasLast4 = last4 && issuer.includes(`*${last4}`);
+      return `${issuer}${last4 && !alreadyHasLast4 ? ` *${last4}` : ""}`;
     }
     
     // PRIORITY 2: Use paymentType if no issuer

@@ -187,7 +187,10 @@ export const usePaymentDisplay = () => {
 
     // PRIORITY 1: If cardIssuerName exists, ALWAYS use it (this is what user wants)
     if (issuer && issuer !== "0" && issuer.trim() !== "") {
-      return `${issuer}${last4 ? ` *${last4}` : ""}`;
+      // Guard: iOS may store "Mastercard *7836" in issuer AND "7836" in last_4_digit_card.
+      // Only append *last4 if the issuer doesn't already contain it.
+      const alreadyHasLast4 = last4 && issuer.includes(`*${last4}`);
+      return `${issuer}${last4 && !alreadyHasLast4 ? ` *${last4}` : ""}`;
     }
 
     // PRIORITY 2: Only if cardIssuerName is missing, try to extract from paymentType
@@ -244,9 +247,13 @@ export const usePaymentDisplay = () => {
           basePaymentType.length > cardIssuerName.length
             ? basePaymentType
             : cardIssuerName;
-        return `${finalName} *${last4DigitCard}`;
+        // Guard: don't append *last4 if finalName already contains it
+        const alreadyHasLast4a = finalName.includes(`*${last4DigitCard}`);
+        return alreadyHasLast4a ? finalName : `${finalName} *${last4DigitCard}`;
       } else {
-        return `${basePaymentType} ${cardIssuerName} *${last4DigitCard}`;
+        // basePaymentType already has *digits stripped; cardIssuerName may still contain it
+        const cleanIssuer = cardIssuerName.replace(/\s*\*\d+$/, "").trim();
+        return `${basePaymentType} ${cleanIssuer} *${last4DigitCard}`;
       }
     }
 
@@ -260,7 +267,9 @@ export const usePaymentDisplay = () => {
     }
 
     if (cardIssuerName && last4DigitCard) {
-      return `${cardIssuerName} *${last4DigitCard}`;
+      // Guard: iOS may embed *last4 in cardIssuerName already
+      const alreadyHasLast4b = cardIssuerName.includes(`*${last4DigitCard}`);
+      return alreadyHasLast4b ? cardIssuerName : `${cardIssuerName} *${last4DigitCard}`;
     }
 
     return "—";

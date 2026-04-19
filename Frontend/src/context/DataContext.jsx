@@ -20,7 +20,10 @@ const buildPaymentMethods = (receiptList) => {
     const issuer = (r.card_issuer_name ?? r.cardIssuerName)?.toString().trim();
     const last4 = (r.last_4_digit_card ?? r.last4DigitCard)?.toString().trim();
     if (issuer && issuer !== "0") {
-      addPayment(last4 && last4 !== "0" ? `${issuer} *${last4}` : issuer);
+      // Guard against double-appending: iOS sometimes stores "Mastercard *7836" in
+      // card_issuer_name AND "7836" in last_4_digit_card — only append if not already present.
+      const alreadyHasLast4 = last4 && last4 !== "0" && issuer.includes(`*${last4}`);
+      addPayment(last4 && last4 !== "0" && !alreadyHasLast4 ? `${issuer} *${last4}` : issuer);
     } else {
       const paymentType = r.paymentType ?? r.payment_type;
       if (paymentType) addPayment(paymentType);
