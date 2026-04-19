@@ -137,6 +137,8 @@ export const DataProvider = ({ children }) => {
 
   // ── API-backed merchants (server-stored via /userpaymentmethod endpoints) ──
   const [apiMerchants, setApiMerchants] = useState([]);
+  // ── API-backed payment methods (server-stored via /userpaymentmethod endpoints) ──
+  const [apiPaymentMethods, setApiPaymentMethods] = useState([]);
 
   // ── Custom receipt-info items (localStorage-backed, managed via Settings → Receipt Information) ──
   const [customMerchants, setCustomMerchants] = useState(() => {
@@ -324,6 +326,64 @@ export const DataProvider = ({ children }) => {
       }
     } catch (e) { console.error("updateApiMerchant error", e); }
     return false;
+  };
+
+  // ── API Payment Method CRUD (via /userpaymentmethod endpoints, card_type="payment") ──
+  const fetchApiPaymentMethods = useCallback(async () => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    try {
+      const res = await fetch(`${BASE_URL}/userpaymentmethod/getPaymentMethodv1`, {
+        headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const payments = Array.isArray(data)
+          ? data.filter(m => m.card_number && m.card_type === "payment")
+          : [];
+        setApiPaymentMethods(payments);
+      }
+    } catch (e) { console.error("fetchApiPaymentMethods error", e); }
+  }, []);
+
+  const addApiPaymentMethod = async (name, logoUrl = "") => {
+    const token = localStorage.getItem("token");
+    if (!token || !name.trim()) return null;
+    try {
+      const res = await fetch(`${BASE_URL}/userpaymentmethod/addPaymentMethodv1`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ card_number: name.trim(), icon_image: logoUrl || "", card_type: "payment", default_payment_category: "" }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setApiPaymentMethods(prev => [...prev, data]);
+        return data;
+      }
+    } catch (e) { console.error("addApiPaymentMethod error", e); }
+    return null;
+  };
+
+  const updateApiPaymentMethod = async (id, name, logoUrl = "") => {
+    const token = localStorage.getItem("token");
+    if (!token) return false;
+    try {
+      const res = await fetch(`${BASE_URL}/userpaymentmethod/updatePaymentMethodv1`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id, card_number: name.trim(), icon_image: logoUrl || "", card_type: "payment", default_payment_category: "" }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setApiPaymentMethods(prev => prev.map(m => m.id === id ? data : m));
+        return true;
+      }
+    } catch (e) { console.error("updateApiPaymentMethod error", e); }
+    return false;
+  };
+
+  const deleteApiPaymentMethod = (id) => {
+    setApiPaymentMethods(prev => prev.filter(m => m.id !== id));
   };
 
   const clearDataContent = () => setDataContent(null);
@@ -604,21 +664,23 @@ export const DataProvider = ({ children }) => {
       }
 
 
-      // Fetch API merchants in parallel with building merchant lists
+      // Fetch API merchants & payment methods in one call, split by card_type
       let apiMerchantsData = [];
+      let apiPaymentMethodsData = [];
       try {
-        const apiMerchRes = await fetch(`${BASE_URL}/userpaymentmethod/getPaymentMethodv1`, {
+        const apiPayRes = await fetch(`${BASE_URL}/userpaymentmethod/getPaymentMethodv1`, {
           headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
         });
-        if (apiMerchRes.ok) {
-          const apiMerchJson = await apiMerchRes.json();
-          apiMerchantsData = Array.isArray(apiMerchJson)
-            ? apiMerchJson.filter(m => m.card_number && m.card_type === "merchant")
-            : [];
+        if (apiPayRes.ok) {
+          const apiPayJson = await apiPayRes.json();
+          const allItems = Array.isArray(apiPayJson) ? apiPayJson : [];
+          apiMerchantsData = allItems.filter(m => m.card_number && m.card_type === "merchant");
+          apiPaymentMethodsData = allItems.filter(m => m.card_number && m.card_type === "payment");
           setApiMerchants(apiMerchantsData);
+          setApiPaymentMethods(apiPaymentMethodsData);
         }
-      } catch (apiMerchErr) {
-        console.error("fetchApiMerchants in fetchData error", apiMerchErr);
+      } catch (apiPayErr) {
+        console.error("fetchApiPaymentMethods in fetchData error", apiPayErr);
       }
 
       setMerchants([
@@ -891,8 +953,9 @@ setMerchantsWithImages([
     setPurchasePrice([]);
     setMerchantsWithImages([{ name: "Miscellaneous", image: "" }]);
     setDataContent(null);
-    // Clear custom receipt-info items and API merchants on logout so next user gets a clean slate
+    // Clear custom receipt-info items and API merchants/payments on logout so next user gets a clean slate
     setApiMerchants([]);
+    setApiPaymentMethods([]);
     setCustomMerchants([]);
     setCustomCategories([]);
     setCustomPaymentMethods([]);
@@ -1435,9 +1498,17 @@ setMerchantsWithImages([
     ...customCategories.filter((c) => !hiddenCategories.has(c) && !_rcLower.has(c.toLowerCase())),
   ];
   const _rpLower = new Set(receiptPaymentsRaw.map((p) => (p || "").toLowerCase()));
+  const _rpCustomLower = new Set([
+    ..._rpLower,
+    ...customPaymentMethods.map((p) => (p || "").toLowerCase()),
+  ]);
   const mergedPaymentMethods = [
     ...receiptPaymentsRaw.filter((p) => !hiddenPaymentMethods.has(p)),
     ...customPaymentMethods.filter((p) => !hiddenPaymentMethods.has(p) && !_rpLower.has(p.toLowerCase())),
+    // API payment methods not already present from receipts or custom list
+    ...apiPaymentMethods
+      .filter((m) => m.card_number && !hiddenPaymentMethods.has(m.card_number) && !_rpCustomLower.has((m.card_number || "").toLowerCase()))
+      .map((m) => m.card_number),
   ];
 
   return (
@@ -1488,6 +1559,12 @@ setMerchantsWithImages([
         fetchApiMerchants,
         addApiMerchant,
         updateApiMerchant,
+        // API-backed payment method management
+        apiPaymentMethods,
+        fetchApiPaymentMethods,
+        addApiPaymentMethod,
+        updateApiPaymentMethod,
+        deleteApiPaymentMethod,
         // Custom receipt-info CRUD
         customMerchants,
         addCustomMerchant,

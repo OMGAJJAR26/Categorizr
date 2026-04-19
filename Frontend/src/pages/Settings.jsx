@@ -915,10 +915,12 @@ const ReceiptInfoInline = ({ type }) => {
     receiptPaymentsRaw, customPaymentMethods, hidePaymentMethod, addCustomPaymentMethod, editCustomPaymentMethod, deleteCustomPaymentMethod,
     taxData, addTax, updateTax, deleteTax, fetchTaxes,
     apiMerchants, fetchApiMerchants, addApiMerchant, updateApiMerchant,
+    apiPaymentMethods, fetchApiPaymentMethods, addApiPaymentMethod, updateApiPaymentMethod, deleteApiPaymentMethod,
   } = useData();
 
   useEffect(() => { if (type === "taxes") fetchTaxes(); }, [type, fetchTaxes]);
   useEffect(() => { if (type === "merchants") fetchApiMerchants(); }, [type]);
+  useEffect(() => { if (type === "payments") fetchApiPaymentMethods(); }, [type]);
 
   const cfg    = MODAL_CFG[type];
   const colors = COLOR_MAP[cfg.color];
@@ -1090,7 +1092,10 @@ const ReceiptInfoInline = ({ type }) => {
       if (!payStr) return toast("error", "Select a card type or enter issuer name.");
       addCustomPaymentMethod(payStr);
       if (ct) savePayCard(payStr, ct);
+      // Also persist to API
+      await addApiPaymentMethod(payStr, "");
       setNewCardType(""); setNewIssuerName(""); setNewLast4("");
+      toast("success", `"${payStr}" added.`);
       return;
     }
     if (!addVal.trim()) return;
@@ -1139,10 +1144,14 @@ const ReceiptInfoInline = ({ type }) => {
         }
         toast("success", "Updated across all receipts.");
       } else if (item.isApiItem) {
-        // API-backed merchant — update on server
+        // API-backed item — update on server
         if (type === "merchants") {
           await updateApiMerchant(item.apiId, newName, keepLogo || "");
           if (keepLogo) saveMerchLogo(newName, keepLogo);
+        }
+        if (type === "payments") {
+          await updateApiPaymentMethod(item.apiId, newName, "");
+          if (newCardType) savePayCard(newName, newCardType);
         }
         toast("success", "Updated.");
       } else {
@@ -1186,6 +1195,9 @@ const ReceiptInfoInline = ({ type }) => {
           hidePaymentMethod(item.key);
         }
         toast("success", "Removed and reassigned in all receipts.");
+      } else if (item.isApiItem) {
+        // API-backed item — remove from local state (no server delete endpoint)
+        if (type === "payments") deleteApiPaymentMethod(item.apiId);
       } else {
         if (type === "merchants")  deleteCustomMerchant(item.key);
         if (type === "categories") deleteCustomCategory(item.key);
@@ -1230,12 +1242,24 @@ const ReceiptInfoInline = ({ type }) => {
       return [...rItems, ...cItems];
     }
     if (type === "payments") {
-      const rItems = receiptPaymentsRaw.map(p => ({ key: p, name: p, logo: getPayLogoResolved(p), isReceiptItem: true }));
+      const rItems = receiptPaymentsRaw.map(p => ({ key: p, name: p, logo: getPayLogoResolved(p), isReceiptItem: true, isApiItem: false }));
       const rKeys  = new Set(receiptPaymentsRaw.map(p => p.toLowerCase()));
       const cItems = customPaymentMethods
         .filter(p => !rKeys.has(p.toLowerCase()))
-        .map(p => ({ key: p, name: p, logo: getPayLogoResolved(p), isReceiptItem: false }));
-      return [...rItems, ...cItems];
+        .map(p => ({ key: p, name: p, logo: getPayLogoResolved(p), isReceiptItem: false, isApiItem: false }));
+      // API payment methods not already in receipt-derived or custom lists
+      const allExistingPayKeys = new Set([...rItems.map(p => p.name.toLowerCase()), ...cItems.map(p => p.name.toLowerCase())]);
+      const apiItems = (apiPaymentMethods || [])
+        .filter(m => m.card_number && !allExistingPayKeys.has((m.card_number || "").toLowerCase()))
+        .map(m => ({
+          key: `api_${m.id}`,
+          name: m.card_number,
+          logo: getPayLogoResolved(m.card_number),
+          isReceiptItem: false,
+          isApiItem: true,
+          apiId: m.id,
+        }));
+      return [...rItems, ...cItems, ...apiItems];
     }
     return [];
   };
