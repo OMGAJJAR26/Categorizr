@@ -338,8 +338,9 @@ export const DataProvider = ({ children }) => {
       });
       if (res.ok) {
         const data = await res.json();
+        // Payment methods: everything with a card_number that isn't a merchant
         const payments = Array.isArray(data)
-          ? data.filter(m => m.card_number && m.card_type === "payment")
+          ? data.filter(m => m.card_number && m.card_type !== "merchant")
           : [];
         setApiPaymentMethods(payments);
       }
@@ -674,8 +675,10 @@ export const DataProvider = ({ children }) => {
         if (apiPayRes.ok) {
           const apiPayJson = await apiPayRes.json();
           const allItems = Array.isArray(apiPayJson) ? apiPayJson : [];
+          // Merchants: explicitly marked card_type === "merchant"
           apiMerchantsData = allItems.filter(m => m.card_number && m.card_type === "merchant");
-          apiPaymentMethodsData = allItems.filter(m => m.card_number && m.card_type === "payment");
+          // Payment methods: everything else with a card_number (any card_type that isn't "merchant")
+          apiPaymentMethodsData = allItems.filter(m => m.card_number && m.card_type !== "merchant");
           setApiMerchants(apiMerchantsData);
           setApiPaymentMethods(apiPaymentMethodsData);
         }
