@@ -916,11 +916,13 @@ const ReceiptInfoInline = ({ type }) => {
     taxData, addTax, updateTax, deleteTax, fetchTaxes,
     apiMerchants, fetchApiMerchants, addApiMerchant, updateApiMerchant,
     apiPaymentMethods, fetchApiPaymentMethods, addApiPaymentMethod, updateApiPaymentMethod, deleteApiPaymentMethod,
+    apiExpenseCategories, fetchApiExpenseCategories, addApiExpenseCategory, updateApiExpenseCategory, deleteApiExpenseCategory,
   } = useData();
 
   useEffect(() => { if (type === "taxes") fetchTaxes(); }, [type, fetchTaxes]);
   useEffect(() => { if (type === "merchants") fetchApiMerchants(); }, [type]);
   useEffect(() => { if (type === "payments") fetchApiPaymentMethods(); }, [type]);
+  useEffect(() => { if (type === "categories") fetchApiExpenseCategories(); }, [type]);
 
   const cfg    = MODAL_CFG[type];
   const colors = COLOR_MAP[cfg.color];
@@ -1098,8 +1100,16 @@ const ReceiptInfoInline = ({ type }) => {
       toast("success", `"${payStr}" added.`);
       return;
     }
+    if (type === "categories") {
+      if (!addVal.trim()) return;
+      const catName = addVal.trim();
+      addCustomCategory(catName);
+      await addApiExpenseCategory(catName);
+      setAddVal("");
+      toast("success", `"${catName}" added.`);
+      return;
+    }
     if (!addVal.trim()) return;
-    if (type === "categories") addCustomCategory(addVal.trim());
     setAddVal("");
   };
 
@@ -1153,6 +1163,9 @@ const ReceiptInfoInline = ({ type }) => {
           await updateApiPaymentMethod(item.apiId, newName, "");
           if (newCardType) savePayCard(newName, newCardType);
         }
+        if (type === "categories") {
+          await updateApiExpenseCategory(item.apiId, newName);
+        }
         toast("success", "Updated.");
       } else {
         // Custom item
@@ -1197,7 +1210,8 @@ const ReceiptInfoInline = ({ type }) => {
         toast("success", "Removed and reassigned in all receipts.");
       } else if (item.isApiItem) {
         // API-backed item — remove from local state (no server delete endpoint)
-        if (type === "payments") deleteApiPaymentMethod(item.apiId);
+        if (type === "payments")    deleteApiPaymentMethod(item.apiId);
+        if (type === "categories")  deleteApiExpenseCategory(item.apiId);
       } else {
         if (type === "merchants")  deleteCustomMerchant(item.key);
         if (type === "categories") deleteCustomCategory(item.key);
@@ -1234,12 +1248,24 @@ const ReceiptInfoInline = ({ type }) => {
       return [...rItems, ...cItems, ...apiItems];
     }
     if (type === "categories") {
-      const rItems = receiptCategoriesRaw.map(c => ({ key: c, name: c, logo: null, isReceiptItem: true }));
+      const rItems = receiptCategoriesRaw.map(c => ({ key: c, name: c, logo: null, isReceiptItem: true, isApiItem: false }));
       const rKeys  = new Set(receiptCategoriesRaw.map(c => c.toLowerCase()));
       const cItems = customCategories
         .filter(c => !rKeys.has(c.toLowerCase()))
-        .map(c => ({ key: c, name: c, logo: null, isReceiptItem: false }));
-      return [...rItems, ...cItems];
+        .map(c => ({ key: c, name: c, logo: null, isReceiptItem: false, isApiItem: false }));
+      // API expense categories not already present from receipts or custom
+      const allExistingCatKeys = new Set([...rItems.map(c => c.name.toLowerCase()), ...cItems.map(c => c.name.toLowerCase())]);
+      const apiItems = (apiExpenseCategories || [])
+        .filter(c => c.expense_category_name && !allExistingCatKeys.has((c.expense_category_name || "").toLowerCase()))
+        .map(c => ({
+          key: `api_${c.id}`,
+          name: c.expense_category_name,
+          logo: null,
+          isReceiptItem: false,
+          isApiItem: true,
+          apiId: c.id,
+        }));
+      return [...rItems, ...cItems, ...apiItems];
     }
     if (type === "payments") {
       const rItems = receiptPaymentsRaw.map(p => ({ key: p, name: p, logo: getPayLogoResolved(p), isReceiptItem: true, isApiItem: false }));

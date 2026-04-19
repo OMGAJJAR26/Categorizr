@@ -141,6 +141,8 @@ export const DataProvider = ({ children }) => {
   // ── API-backed merchants (server-stored via /userpaymentmethod endpoints) ──
   const [apiMerchants, setApiMerchants] = useState([]);
   // ── API-backed payment methods (server-stored via /userpaymentmethod endpoints) ──
+  // ── API-backed expense categories (server-stored via /userexpensecategory endpoints) ──
+  const [apiExpenseCategories, setApiExpenseCategories] = useState([]);
   const [apiPaymentMethods, setApiPaymentMethods] = useState([]);
 
   // ── Custom receipt-info items (localStorage-backed, managed via Settings → Receipt Information) ──
@@ -388,6 +390,62 @@ export const DataProvider = ({ children }) => {
 
   const deleteApiPaymentMethod = (id) => {
     setApiPaymentMethods(prev => prev.filter(m => m.id !== id));
+  };
+
+  // ── API Expense Category CRUD (via /userexpensecategory endpoints) ──
+  const fetchApiExpenseCategories = useCallback(async () => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    try {
+      const res = await fetch(`${BASE_URL}/userexpensecategory/getExpenseCategoryv1`, {
+        headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const cats = Array.isArray(data) ? data.filter(c => c.expense_category_name) : [];
+        setApiExpenseCategories(cats);
+      }
+    } catch (e) { console.error("fetchApiExpenseCategories error", e); }
+  }, []);
+
+  const addApiExpenseCategory = async (name) => {
+    const token = localStorage.getItem("token");
+    if (!token || !name.trim()) return null;
+    try {
+      const res = await fetch(`${BASE_URL}/userexpensecategory/addExpenseCategoryv1`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ expense_category_name: name.trim() }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setApiExpenseCategories(prev => [...prev, data]);
+        return data;
+      }
+    } catch (e) { console.error("addApiExpenseCategory error", e); }
+    return null;
+  };
+
+  const updateApiExpenseCategory = async (id, name) => {
+    const token = localStorage.getItem("token");
+    if (!token) return false;
+    try {
+      const res = await fetch(`${BASE_URL}/userexpensecategory/updateExpenseCategoryv1`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id, expense_category_name: name.trim() }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setApiExpenseCategories(prev => prev.map(c => c.id === id ? data : c));
+        return true;
+      }
+    } catch (e) { console.error("updateApiExpenseCategory error", e); }
+    return false;
+  };
+
+  const deleteApiExpenseCategory = (id) => {
+    setApiExpenseCategories(prev => prev.filter(c => c.id !== id));
   };
 
   const clearDataContent = () => setDataContent(null);
@@ -903,6 +961,23 @@ setMerchantsWithImages([
         ),
       ]);
 
+      // Fetch API expense categories and merge with receipt-derived categories
+      let apiExpenseCategoriesData = [];
+      try {
+        const apiCatRes = await fetch(`${BASE_URL}/userexpensecategory/getExpenseCategoryv1`, {
+          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
+        });
+        if (apiCatRes.ok) {
+          const apiCatJson = await apiCatRes.json();
+          apiExpenseCategoriesData = Array.isArray(apiCatJson)
+            ? apiCatJson.filter(c => c.expense_category_name)
+            : [];
+          setApiExpenseCategories(apiExpenseCategoriesData);
+        }
+      } catch (apiCatErr) {
+        console.error("fetchApiExpenseCategories in fetchData error", apiCatErr);
+      }
+
       // Populate expenseCategories from the expense_type field of all receipts.
       // This ensures custom categories entered by the user appear in the Filter → Expense Category list.
       setExpenseCategories([
@@ -959,9 +1034,10 @@ setMerchantsWithImages([
     setPurchasePrice([]);
     setMerchantsWithImages([{ name: "Miscellaneous", image: "" }]);
     setDataContent(null);
-    // Clear custom receipt-info items and API merchants/payments on logout so next user gets a clean slate
+    // Clear custom receipt-info items and API merchants/payments/categories on logout so next user gets a clean slate
     setApiMerchants([]);
     setApiPaymentMethods([]);
+    setApiExpenseCategories([]);
     setCustomMerchants([]);
     setCustomCategories([]);
     setCustomPaymentMethods([]);
@@ -1499,9 +1575,19 @@ setMerchantsWithImages([
       .map((m) => ({ name: m.card_number, image: m.icon_image || "" })),
   ];
   const _rcLower = new Set(receiptCategoriesRaw.map((c) => (c || "").toLowerCase()));
+  const _rcCustomLower = new Set([
+    ..._rcLower,
+    ...customCategories.map((c) => (c || "").toLowerCase()),
+  ]);
   const mergedExpenseCategories = [
     ...receiptCategoriesRaw.filter((c) => !hiddenCategories.has(c)),
     ...customCategories.filter((c) => !hiddenCategories.has(c) && !_rcLower.has(c.toLowerCase())),
+    // API expense categories not already present from receipts or custom list
+    ...apiExpenseCategories
+      .filter((c) => c.expense_category_name &&
+        !hiddenCategories.has(c.expense_category_name) &&
+        !_rcCustomLower.has((c.expense_category_name || "").toLowerCase()))
+      .map((c) => c.expense_category_name),
   ];
   const _rpLower = new Set(receiptPaymentsRaw.map((p) => (p || "").toLowerCase()));
   const _rpCustomLower = new Set([
@@ -1571,6 +1657,12 @@ setMerchantsWithImages([
         addApiPaymentMethod,
         updateApiPaymentMethod,
         deleteApiPaymentMethod,
+        // API-backed expense category management
+        apiExpenseCategories,
+        fetchApiExpenseCategories,
+        addApiExpenseCategory,
+        updateApiExpenseCategory,
+        deleteApiExpenseCategory,
         // Custom receipt-info CRUD
         customMerchants,
         addCustomMerchant,
