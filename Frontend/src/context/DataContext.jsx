@@ -281,17 +281,17 @@ export const DataProvider = ({ children }) => {
     }
   }, [fetchTaxes]);
 
-  // ── API Merchant CRUD (via /userpaymentmethod endpoints) ──
+  // ── API Merchant CRUD (via /userstore endpoints) ──
   const fetchApiMerchants = useCallback(async () => {
     const token = localStorage.getItem("token");
     if (!token) return;
     try {
-      const res = await fetch(`${BASE_URL}/userpaymentmethod/getPaymentMethodv1`, {
+      const res = await fetch(`${BASE_URL}/userstore/getStorev1`, {
         headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         const data = await res.json();
-        const merchants = Array.isArray(data) ? data.filter(m => m.card_number && m.card_type === "merchant") : [];
+        const merchants = Array.isArray(data) ? data.filter(m => m.store_name) : [];
         setApiMerchants(merchants);
       }
     } catch (e) { console.error("fetchApiMerchants error", e); }
@@ -301,10 +301,10 @@ export const DataProvider = ({ children }) => {
     const token = localStorage.getItem("token");
     if (!token || !name.trim()) return null;
     try {
-      const res = await fetch(`${BASE_URL}/userpaymentmethod/addPaymentMethodv1`, {
+      const res = await fetch(`${BASE_URL}/userstore/addStorev1`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ card_number: name.trim(), icon_image: logoUrl || "", card_type: "merchant", default_payment_category: "" }),
+        body: JSON.stringify({ store_name: name.trim(), store_image_url: logoUrl || "" }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -319,10 +319,10 @@ export const DataProvider = ({ children }) => {
     const token = localStorage.getItem("token");
     if (!token) return false;
     try {
-      const res = await fetch(`${BASE_URL}/userpaymentmethod/updatePaymentMethodv1`, {
+      const res = await fetch(`${BASE_URL}/userstore/updateStorev1`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ id, card_number: name.trim(), icon_image: logoUrl || "", card_type: "merchant", default_payment_category: "" }),
+        body: JSON.stringify({ id, store_name: name.trim(), store_image_url: logoUrl || "" }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -333,8 +333,21 @@ export const DataProvider = ({ children }) => {
     return false;
   };
 
-  const deleteApiMerchant = (id) => {
-    setApiMerchants(prev => prev.filter(m => m.id !== id));
+  const deleteApiMerchant = async (id) => {
+    const token = localStorage.getItem("token");
+    if (!token) return false;
+    try {
+      const res = await fetch(`${BASE_URL}/userstore/deleteStorev1`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id }),
+      });
+      if (res.ok) {
+        setApiMerchants(prev => prev.filter(m => m.id !== id));
+        return true;
+      }
+    } catch (e) { console.error("deleteApiMerchant error", e); }
+    return false;
   };
 
   // ── API Payment Method CRUD (via /userpaymentmethod endpoints, card_type="payment") ──
@@ -730,8 +743,22 @@ export const DataProvider = ({ children }) => {
       }
 
 
-      // Fetch API merchants & payment methods in one call, split by card_type
+      // Fetch API merchants from /userstore/getStorev1
       let apiMerchantsData = [];
+      try {
+        const apiStoreRes = await fetch(`${BASE_URL}/userstore/getStorev1`, {
+          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
+        });
+        if (apiStoreRes.ok) {
+          const apiStoreJson = await apiStoreRes.json();
+          apiMerchantsData = Array.isArray(apiStoreJson) ? apiStoreJson.filter(m => m.store_name) : [];
+          setApiMerchants(apiMerchantsData);
+        }
+      } catch (apiStoreErr) {
+        console.error("fetchApiMerchants in fetchData error", apiStoreErr);
+      }
+
+      // Fetch API payment methods from /userpaymentmethod/getPaymentMethodv1
       let apiPaymentMethodsData = [];
       try {
         const apiPayRes = await fetch(`${BASE_URL}/userpaymentmethod/getPaymentMethodv1`, {
@@ -739,12 +766,8 @@ export const DataProvider = ({ children }) => {
         });
         if (apiPayRes.ok) {
           const apiPayJson = await apiPayRes.json();
-          const allItems = Array.isArray(apiPayJson) ? apiPayJson : [];
-          // Merchants: explicitly marked card_type === "merchant"
-          apiMerchantsData = allItems.filter(m => m.card_number && m.card_type === "merchant");
-          // Payment methods: everything else with a card_number (any card_type that isn't "merchant")
-          apiPaymentMethodsData = allItems.filter(m => m.card_number && m.card_type !== "merchant");
-          setApiMerchants(apiMerchantsData);
+          const allPayItems = Array.isArray(apiPayJson) ? apiPayJson : [];
+          apiPaymentMethodsData = allPayItems.filter(m => m.card_number && m.card_type !== "merchant");
           setApiPaymentMethods(apiPaymentMethodsData);
         }
       } catch (apiPayErr) {
@@ -759,7 +782,7 @@ export const DataProvider = ({ children }) => {
             .filter(Boolean)
             .filter((n) => n.toLowerCase().trim() !== "miscellaneous"),
           ...apiMerchantsData
-            .map((m) => m.card_number)
+            .map((m) => m.store_name)
             .filter(Boolean)
             .filter((n) => n.toLowerCase().trim() !== "miscellaneous"),
         ]),
@@ -791,9 +814,9 @@ receiptsWithIntegrations.forEach((r) => {
 });
 // Merge in API merchants (server-stored) if not already present from receipts
 apiMerchantsData.forEach(m => {
-  const key = (m.card_number || "").trim().toLowerCase();
+  const key = (m.store_name || "").trim().toLowerCase();
   if (key && !merchantsWithImagesMap.has(key)) {
-    merchantsWithImagesMap.set(key, { name: m.card_number, image: m.icon_image || "" });
+    merchantsWithImagesMap.set(key, { name: m.store_name, image: m.store_image_url || "" });
   }
 });
 
@@ -956,7 +979,42 @@ setMerchantsWithImages([
       }
       setReceiptTaxValues(Array.from(uniqueTaxMap.values()));
       
-      // Update receipts with enriched tax data
+      // Enrich receipts with custom payment method logos if they are missing
+      const customLogoMap = new Map();
+      // Use only payment methods for logo matching (merchants now use separate /userstore schema)
+      const allApiItems = [...(apiPaymentMethodsData || [])];
+      allApiItems.forEach(p => {
+         const key = (p.card_number || "").trim().toLowerCase();
+         if (key && p.icon_image) {
+            customLogoMap.set(key, p.icon_image);
+         }
+      });
+      
+      receiptsWithIntegrations = receiptsWithIntegrations.map(r => {
+         if (!r.payment_logo_url && !r.paymentLogoUrl) {
+            const issuer = (r.card_issuer_name || r.cardIssuerName || "").toString().trim();
+            const last4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
+            const type = (r.paymentType || r.payment_type || "").toString().trim();
+            
+            let matchedLogo = null;
+            if (issuer && last4 && last4 !== "0") {
+               matchedLogo = customLogoMap.get(`${issuer.toLowerCase()} *${last4}`);
+            }
+            if (!matchedLogo && issuer && issuer !== "0") {
+               matchedLogo = customLogoMap.get(issuer.toLowerCase());
+            }
+            if (!matchedLogo && type && type !== "0") {
+               matchedLogo = customLogoMap.get(type.toLowerCase());
+            }
+            
+            if (matchedLogo) {
+               return { ...r, payment_logo_url: matchedLogo };
+            }
+         }
+         return r;
+      });
+
+      // Update receipts with enriched tax data and logos
       setReceipts(receiptsWithIntegrations);
 
       setExpenseType([
@@ -1439,6 +1497,16 @@ setMerchantsWithImages([
     });
   }, []);
 
+  // ── Merchant logo persistence (localStorage) ──
+  const saveMerchLogo = useCallback((name, url) => {
+    if (!name || !url) return;
+    try {
+      const logos = JSON.parse(localStorage.getItem("cat_merch_logos") || "{}");
+      logos[name] = url;
+      localStorage.setItem("cat_merch_logos", JSON.stringify(logos));
+    } catch (e) { console.error("saveMerchLogo error", e); }
+  }, []);
+
   // ── Custom Category CRUD ──
   const addCustomCategory = useCallback((name) => {
     const trimmed = (name || "").trim();
@@ -1575,8 +1643,8 @@ setMerchantsWithImages([
       .map((m) => ({ name: m, image: "" })),
     // API merchants not already present from receipts or custom list
     ...apiMerchants
-      .filter((m) => m.card_number && !hiddenMerchants.has(m.card_number) && !_miCustomLower.has((m.card_number || "").toLowerCase()))
-      .map((m) => ({ name: m.card_number, image: m.icon_image || "" })),
+      .filter((m) => m.store_name && !hiddenMerchants.has(m.store_name) && !_miCustomLower.has((m.store_name || "").toLowerCase()))
+      .map((m) => ({ name: m.store_name, image: m.store_image_url || "" })),
   ];
   const _rcLower = new Set(receiptCategoriesRaw.map((c) => (c || "").toLowerCase()));
   const _rcCustomLower = new Set([
@@ -1673,6 +1741,7 @@ setMerchantsWithImages([
         addCustomMerchant,
         editCustomMerchant,
         deleteCustomMerchant,
+        saveMerchLogo,
         customCategories,
         addCustomCategory,
         editCustomCategory,

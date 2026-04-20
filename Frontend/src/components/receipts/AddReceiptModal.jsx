@@ -52,6 +52,9 @@ const AddReceiptModal = ({ onClose, onReceiptAdded }) => {
     fetchTaxes,
     addExpenseCategory,
     updateReceipt,
+    addCustomMerchant,
+    addApiMerchant,
+    saveMerchLogo,
   } = useData();
   const { getPaymentLogo, getPaymentDisplay } = usePaymentDisplay();
 
@@ -2931,57 +2934,55 @@ const handleSelectLogo = (index) => {
   };
 
   // Handle adding new merchant
-  // Replace your existing handleAddMerchant with this
   const handleAddMerchant = async () => {
-    if (!newMerchantName || newMerchantName.trim().length === 0) {
-      setError("Merchant name is required");
+    const name = (newMerchantName || "").trim();
+
+    // 1. Empty name check
+    if (!name) {
+      setError("Please enter Merchant Name");
       return;
     }
 
-    if (!newMerchantLogo || newMerchantLogo.trim().length === 0) {
-      setError(
-        "Merchant logo is required. Please select a logo from the options.",
-      );
-      return;
-    }
-
-    // Check if merchant already exists in global merchants
-    const normalizedName = newMerchantName.trim().toLowerCase();
+    // 2. Duplicate check (case-insensitive, against global list)
+    const normalizedName = name.toLowerCase();
     const exists = allMerchantsWithImages.some(
-      (m) => m.name?.toLowerCase() === normalizedName,
+      (m) => (m.name || "").toLowerCase() === normalizedName,
     );
-
     if (exists) {
-      setError("This merchant already exists");
+      setError("Merchant already exists");
       return;
     }
 
-    // Add merchant to local list only — the logo will be saved as part of the
-    // actual receipt when the user clicks "Save Receipt". No separate DB receipt
-    // should be created here, as that causes a blank duplicate receipt.
-    const newMerchant = {
-      name: newMerchantName.trim(),
-      image: newMerchantLogo.trim(),
-    };
+    // 3. Get selected logo (optional)
+    const selectedLogoUrl =
+      selectedLogoIndex !== null
+        ? logoOptions[selectedLogoIndex]?.storeUrl || ""
+        : newMerchantLogo || "";
 
-    setLocalMerchants((prev) => [...prev, newMerchant]);
+    // 4. Persist to API
+    await addApiMerchant(name, selectedLogoUrl);
 
-    // Select the new merchant in the form
-    handleFieldChange("storeName", newMerchant.name);
-    setDetectedMerchantLogo(null);
+    // 5. Update local DataContext state
+    addCustomMerchant(name);
+    if (selectedLogoUrl) saveMerchLogo(name, selectedLogoUrl);
 
-    // Reset form and close modal
+    // 6. Select the new merchant in the form
+    handleFieldChange("storeName", name);
+    setDetectedMerchantLogo(selectedLogoUrl || null);
+
+    // 7. Reset and close
     setNewMerchantName("");
     setNewMerchantLogo("");
     setLogoOptions([]);
     setSelectedLogoIndex(null);
     setShowAddMerchantModal(false);
     setShowMerchantDropdown(false);
+    setError(null);
 
-    // Show success message
+    // 8. Show success
     setToast?.({
       isVisible: true,
-      message: "Merchant added successfully!",
+      message: "Merchant Added",
       type: "success",
     });
   };
@@ -5653,7 +5654,7 @@ const handleSelectLogo = (index) => {
                 <div className="mb-6">
                   <div className="flex items-center justify-between mb-2">
                     <label className="block text-sm font-bold text-gray-700">
-                      Merchant Logo <span className="text-red-500">*</span>
+                      Merchant Logo <span className="text-gray-400 font-normal">(optional)</span>
                     </label>
                     <button
                       type="button"
@@ -5772,7 +5773,7 @@ const handleSelectLogo = (index) => {
                     type="button"
                     onClick={handleAddMerchant}
                     disabled={
-                      !newMerchantName || !newMerchantLogo || isFetchingLogos
+                      !newMerchantName || isFetchingLogos
                     }
                     className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >

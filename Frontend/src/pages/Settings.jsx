@@ -126,6 +126,7 @@ const ManageModal = ({ type, onClose }) => {
     receiptCategoriesRaw, customCategories, hideCategory, addCustomCategory, editCustomCategory, deleteCustomCategory,
     receiptPaymentsRaw, customPaymentMethods, hidePaymentMethod, addCustomPaymentMethod, editCustomPaymentMethod, deleteCustomPaymentMethod,
     taxData, addTax, updateTax, deleteTax, fetchTaxes,
+    hiddenMerchants, hiddenCategories, hiddenPaymentMethods,
   } = useData();
 
   useEffect(() => { if (type === "taxes") fetchTaxes(); }, [type, fetchTaxes]);
@@ -195,15 +196,15 @@ const ManageModal = ({ type, onClose }) => {
   };
 
   const buildReceiptItems = () => {
-    if (type === "merchants")  return receiptMerchWImgRaw.map(m => ({ key: m.name, name: m.name, logo: m.image || null }));
-    if (type === "categories") return receiptCategoriesRaw.map(c => ({ key: c, name: c, logo: null }));
-    if (type === "payments")   return receiptPaymentsRaw.map(p => ({ key: p, name: p, logo: getPaymentLogo(p) }));
+    if (type === "merchants")  return receiptMerchWImgRaw.filter(m => !hiddenMerchants.has(m.name)).map(m => ({ key: m.name, name: m.name, logo: m.image || null }));
+    if (type === "categories") return receiptCategoriesRaw.filter(c => !hiddenCategories.has(c)).map(c => ({ key: c, name: c, logo: null }));
+    if (type === "payments")   return receiptPaymentsRaw.filter(p => !hiddenPaymentMethods.has(p)).map(p => ({ key: p, name: p, logo: getPaymentLogo(p) }));
     return [];
   };
   const buildCustomItems = () => {
-    if (type === "merchants")  return customMerchants.map(m => ({ key: m, name: m, logo: null }));
-    if (type === "categories") return customCategories.map(c => ({ key: c, name: c, logo: null }));
-    if (type === "payments")   return customPaymentMethods.map(p => ({ key: p, name: p, logo: getPaymentLogo(p) }));
+    if (type === "merchants")  return customMerchants.filter(m => !hiddenMerchants.has(m)).map(m => ({ key: m, name: m, logo: null }));
+    if (type === "categories") return customCategories.filter(c => !hiddenCategories.has(c)).map(c => ({ key: c, name: c, logo: null }));
+    if (type === "payments")   return customPaymentMethods.filter(p => !hiddenPaymentMethods.has(p)).map(p => ({ key: p, name: p, logo: getPaymentLogo(p) }));
     return [];
   };
 
@@ -1188,7 +1189,7 @@ const ReceiptInfoInline = ({ type }) => {
         await Promise.all(matching.map(r => updateReceipt(r.id, { storeName: "Miscellaneous" })));
         hideMerchant(item.key);
       } else if (item.isApiItem) {
-        deleteApiMerchant(item.apiId);
+        await deleteApiMerchant(item.apiId);
       } else {
         deleteCustomMerchant(item.key);
       }
@@ -1342,11 +1343,11 @@ const ReceiptInfoInline = ({ type }) => {
       // API merchants (server-stored, shown below receipt-derived and custom)
       const allExistingKeys = new Set([...rItems.map(m => m.name.toLowerCase()), ...cItems.map(m => m.name.toLowerCase())]);
       const apiItems = (apiMerchants || [])
-        .filter(m => m.card_number && !allExistingKeys.has((m.card_number || "").toLowerCase()))
+        .filter(m => m.store_name && !allExistingKeys.has((m.store_name || "").toLowerCase()))
         .map(m => ({
           key: `api_${m.id}`,
-          name: m.card_number,
-          logo: m.icon_image || null,
+          name: m.store_name,
+          logo: m.store_image_url || null,
           isReceiptItem: false,
           apiId: m.id,
           isApiItem: true,
