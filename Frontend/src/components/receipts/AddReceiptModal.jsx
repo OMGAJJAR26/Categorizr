@@ -630,6 +630,10 @@ const [localMerchants, setLocalMerchants] = useState([]);
       const newUrls = await uploadFilesToMedia([file]);
       if (newUrls.length > 0) {
         setUploadedMediaUrls((prev) => [...prev, ...newUrls]);
+      } else {
+        // Fallback: upload returned empty — use local blob URL for display
+        const localUrl = URL.createObjectURL(file);
+        setUploadedMediaUrls((prev) => [...prev, localUrl]);
       }
     } catch (err) {
       console.error("Add photo upload failed:", err);
@@ -1897,6 +1901,7 @@ const handleFieldChange = (field, value) => {
           uploadedReceiptData?.receipt_image ||
           uploadedReceiptData?.emailAttachment ||
           uploadedImageUrl ||
+          uploadedMediaUrls[0] ||
           "0",
         store_image:
           getMerchantImage(formData.storeName) ||
@@ -3906,7 +3911,7 @@ const handleSelectLogo = (index) => {
                         disabled={isUploading || isParsing}
                         className="px-4 py-2 text-blue-700 font-medium bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        Skip
+                        Enter Manually
                       </button>
                       <button
                         onClick={handleUpload}

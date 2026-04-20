@@ -914,7 +914,7 @@ const ReceiptInfoInline = ({ type }) => {
     receiptCategoriesRaw, customCategories, hideCategory, addCustomCategory, editCustomCategory, deleteCustomCategory,
     receiptPaymentsRaw, customPaymentMethods, hidePaymentMethod, addCustomPaymentMethod, editCustomPaymentMethod, deleteCustomPaymentMethod,
     taxData, addTax, updateTax, deleteTax, fetchTaxes,
-    apiMerchants, fetchApiMerchants, addApiMerchant, updateApiMerchant,
+    apiMerchants, fetchApiMerchants, addApiMerchant, updateApiMerchant, deleteApiMerchant,
     apiPaymentMethods, fetchApiPaymentMethods, addApiPaymentMethod, updateApiPaymentMethod, deleteApiPaymentMethod,
     apiExpenseCategories, fetchApiExpenseCategories, addApiExpenseCategory, updateApiExpenseCategory, deleteApiExpenseCategory,
   } = useData();
@@ -944,6 +944,12 @@ const ReceiptInfoInline = ({ type }) => {
   // Tax edit state
   const [editTaxKey, setEditTaxKey] = useState(null);
   const [editTaxVal, setEditTaxVal] = useState({ tax_name: "", tax_rate: "", tax_number: "" });
+
+  // Merchant confirmation dialog state
+  const [showMerchantEditConfirm, setShowMerchantEditConfirm] = useState(false);
+  const [pendingMerchantEdit, setPendingMerchantEdit] = useState(null); // { item, newName, keepLogo }
+  const [showMerchantDeleteConfirm, setShowMerchantDeleteConfirm] = useState(false);
+  const [pendingMerchantDelete, setPendingMerchantDelete] = useState(null); // item
 
   // Add-merchant state
   const [newMerchantName, setNewMerchantName] = useState("");
@@ -1077,13 +1083,19 @@ const ReceiptInfoInline = ({ type }) => {
       return;
     }
     if (type === "merchants") {
-      if (!newMerchantName.trim()) return;
+      const name = newMerchantName.trim();
+      if (!name) return toast("error", "Please enter Merchant Name");
+      // Duplicate check (case-insensitive across all existing items)
+      const allExisting = buildAllItems();
+      if (allExisting.some(i => i.name.toLowerCase() === name.toLowerCase())) {
+        return toast("error", "Merchant already exists");
+      }
       const selectedUrl = addLogoSel !== null ? (addLogoOpts[addLogoSel]?.displayUrl || addLogoOpts[addLogoSel]?.storeUrl || null) : null;
-      addCustomMerchant(newMerchantName.trim());
-      if (selectedUrl) saveMerchLogo(newMerchantName.trim(), selectedUrl);
-      // Also save to API
-      await addApiMerchant(newMerchantName.trim(), selectedUrl || "");
+      addCustomMerchant(name);
+      if (selectedUrl) saveMerchLogo(name, selectedUrl);
+      await addApiMerchant(name, selectedUrl || "");
       setNewMerchantName(""); setAddLogoOpts([]); setAddLogoSel(null);
+      toast("success", "Merchant Added");
       return;
     }
     if (type === "payments") {
@@ -1113,6 +1125,50 @@ const ReceiptInfoInline = ({ type }) => {
     setAddVal("");
   };
 
+  // ── Merchant edit confirmed ──
+  const doConfirmMerchantEdit = async () => {
+    setShowMerchantEditConfirm(false);
+    if (!pendingMerchantEdit) return;
+    const { item, newName, keepLogo } = pendingMerchantEdit;
+    try {
+      if (item.isReceiptItem) {
+        const matching = (receipts || []).filter(r => (r.storeName || r.store_name || "") === item.name);
+        await Promise.all(matching.map(r => updateReceipt(r.id, { storeName: newName })));
+        if (keepLogo) saveMerchLogo(newName, keepLogo);
+        hideMerchant(item.key); addCustomMerchant(newName);
+      } else if (item.isApiItem) {
+        await updateApiMerchant(item.apiId, newName, keepLogo || "");
+        if (keepLogo) saveMerchLogo(newName, keepLogo);
+      } else {
+        editCustomMerchant(item.key, newName);
+        if (keepLogo) saveMerchLogo(newName, keepLogo);
+      }
+      toast("success", "Merchant Updated");
+    } catch (e) { toast("error", e.message || "Update failed."); }
+    closeEdit();
+    setPendingMerchantEdit(null);
+  };
+
+  // ── Merchant delete confirmed ──
+  const doConfirmMerchantDelete = async () => {
+    setShowMerchantDeleteConfirm(false);
+    if (!pendingMerchantDelete) return;
+    const item = pendingMerchantDelete;
+    try {
+      if (item.isReceiptItem) {
+        const matching = (receipts || []).filter(r => (r.storeName || r.store_name || "") === item.name);
+        await Promise.all(matching.map(r => updateReceipt(r.id, { storeName: "Miscellaneous" })));
+        hideMerchant(item.key);
+      } else if (item.isApiItem) {
+        deleteApiMerchant(item.apiId);
+      } else {
+        deleteCustomMerchant(item.key);
+      }
+      toast("success", "Merchant deleted. Receipts updated to Miscellaneous.");
+    } catch (e) { toast("error", e.message || "Delete failed."); }
+    setPendingMerchantDelete(null);
+  };
+
   // ── SAVE EDIT ──
   const handleSaveEdit = async (item) => {
     const newName = editVal.trim();
@@ -1125,6 +1181,17 @@ const ReceiptInfoInline = ({ type }) => {
       if (!n || !r) return;
       try { await updateTax({ ...taxData.find(t => t.id === editKey), tax_name: n, tax_rate: r, tax_number: editTaxVal.tax_number.trim() }); setEditTaxKey(null); }
       catch (e) { toast("error", e.message || "Failed."); }
+      return;
+    }
+
+    // Merchants always require duplicate check + confirmation popup
+    if (type === "merchants") {
+      const allExisting = buildAllItems();
+      if (allExisting.some(i => i.name.toLowerCase() === newName.toLowerCase() && i.key !== item.key)) {
+        return toast("error", "Merchant already exists");
+      }
+      setPendingMerchantEdit({ item, newName, keepLogo });
+      setShowMerchantEditConfirm(true);
       return;
     }
 
@@ -1183,6 +1250,17 @@ const ReceiptInfoInline = ({ type }) => {
   // ── DELETE ──
   const handleDelete = async (item) => {
     if (type === "taxes") { try { await deleteTax(item.key); } catch (e) { toast("error", e.message || "Failed."); } return; }
+
+    // Merchants: block Miscellaneous deletion + require confirmation
+    if (type === "merchants") {
+      if ((item.name || "").toLowerCase() === "miscellaneous") {
+        toast("error", '"Miscellaneous" cannot be deleted.');
+        return;
+      }
+      setPendingMerchantDelete(item);
+      setShowMerchantDeleteConfirm(true);
+      return;
+    }
 
     try {
       if (item.isReceiptItem) {
@@ -1306,6 +1384,7 @@ const ReceiptInfoInline = ({ type }) => {
   );
 
   return (
+    <>
     <div className="max-w-lg flex flex-col gap-4">
 
       {/* ── Add form ── */}
@@ -1493,6 +1572,65 @@ const ReceiptInfoInline = ({ type }) => {
 
       </div>
     </div>
+
+    {/* Merchant Edit Confirmation Popup */}
+    <AnimatePresence>
+      {showMerchantEditConfirm && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
+            className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center">
+            <p className="text-sm font-medium text-gray-800 leading-relaxed mb-5">
+              When editing a Merchant<br />
+              all receipts associated with that<br />
+              Merchant will also be updated.
+            </p>
+            <div className="flex gap-3">
+              <button type="button"
+                onClick={() => { setShowMerchantEditConfirm(false); setPendingMerchantEdit(null); }}
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 rounded-xl text-gray-700 font-semibold text-sm transition-colors">
+                Cancel
+              </button>
+              <button type="button" onClick={doConfirmMerchantEdit}
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 rounded-xl text-white font-semibold text-sm transition-colors">
+                Okay
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* Merchant Delete Confirmation Popup */}
+    <AnimatePresence>
+      {showMerchantDeleteConfirm && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
+            className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center">
+            <p className="text-sm font-medium text-gray-800 leading-relaxed mb-5">
+              Are you sure you want to delete this<br />
+              Merchant? If so, then all Receipts<br />
+              associated with this Merchant will<br />
+              now be associated with the<br />
+              &quot;Miscellaneous&quot; Merchant.
+            </p>
+            <div className="flex gap-3">
+              <button type="button"
+                onClick={() => { setShowMerchantDeleteConfirm(false); setPendingMerchantDelete(null); }}
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 rounded-xl text-gray-700 font-semibold text-sm transition-colors">
+                Cancel
+              </button>
+              <button type="button" onClick={doConfirmMerchantDelete}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 rounded-xl text-white font-semibold text-sm transition-colors">
+                Delete
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+    </>
   );
 };
 

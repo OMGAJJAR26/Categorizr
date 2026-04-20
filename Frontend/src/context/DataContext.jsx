@@ -333,6 +333,10 @@ export const DataProvider = ({ children }) => {
     return false;
   };
 
+  const deleteApiMerchant = (id) => {
+    setApiMerchants(prev => prev.filter(m => m.id !== id));
+  };
+
   // ── API Payment Method CRUD (via /userpaymentmethod endpoints, card_type="payment") ──
   const fetchApiPaymentMethods = useCallback(async () => {
     const token = localStorage.getItem("token");
@@ -1651,6 +1655,7 @@ setMerchantsWithImages([
         fetchApiMerchants,
         addApiMerchant,
         updateApiMerchant,
+        deleteApiMerchant,
         // API-backed payment method management
         apiPaymentMethods,
         fetchApiPaymentMethods,
