@@ -986,14 +986,42 @@ const ReceiptInfoInline = ({ type }) => {
     });
   };
 
+  // Build a map: display string (e.g. "My Card *4567") → card brand (e.g. "Diners Club")
+  // derived from all receipts. This lets us resolve logos for custom-named payment methods
+  // that were added via the Add/Edit Receipt modal (where the brand is in paymentType but
+  // the display name is in card_issuer_name).
+  const receiptDisplayToCardType = (() => {
+    const map = {};
+    (receipts || []).forEach(r => {
+      const issuer = (r.card_issuer_name || r.cardIssuerName || "").toString().trim();
+      const last4  = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
+      const brand  = (r.paymentType || r.payment_type || "").toString().trim();
+      if (!issuer || issuer === "0" || !brand || brand === "0") return;
+      const alreadyHasLast4 = last4 && last4 !== "0" && issuer.includes(`*${last4}`);
+      const displayKey = (last4 && last4 !== "0" && !alreadyHasLast4)
+        ? `${issuer} *${last4}`
+        : issuer;
+      if (!map[displayKey.toLowerCase()]) map[displayKey.toLowerCase()] = brand;
+    });
+    return map;
+  })();
+
   // Get the correct logo for a payment string
   const getPayLogoResolved = (payStr) => {
+    // Priority 1: localStorage mapping (saved when added via Settings)
     const stored = payCardMap[payStr];
     if (stored) {
       const found = PAYMENT_CARD_TYPES.find(c => c.name === stored);
       if (found) return found.logo;
     }
-    return getPaymentLogo(payStr);
+    // Priority 2: keyword detection on the display string itself
+    const logo = getPaymentLogo(payStr);
+    if (logo) return logo;
+    // Priority 3: look up the card brand from receipts (covers custom-named payment methods
+    // added via Add/Edit Receipt modal where brand is stored in paymentType, not display name)
+    const brand = receiptDisplayToCardType[(payStr || "").toLowerCase()];
+    if (brand) return getPaymentLogo(brand);
+    return null;
   };
 
   const toast = (t, text) => { setMsg({ type: t, text }); setTimeout(() => setMsg(null), 3000); };
