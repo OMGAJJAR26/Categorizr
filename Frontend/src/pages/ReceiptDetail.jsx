@@ -209,6 +209,7 @@ const ReceiptDetail = ({
   const [showDeleteTaxConfirm, setShowDeleteTaxConfirm] = useState(false);
   const [deletingTaxId, setDeletingTaxId] = useState(null);
   const [tipVisible, setTipVisible] = useState(false); // TIP field visibility (toggled by SELECT pill)
+  const [currencyInputs, setCurrencyInputs] = useState({}); // Raw text while user is typing in currency fields
 
   // ── Split feature ─────────────────────────────────────────────────────────
   const [showSplitScreen, setShowSplitScreen] = useState(false);
@@ -841,6 +842,7 @@ useEffect(() => {
     if (!timestamp) return "";
     const date = new Date(Number(timestamp) * 1000);
     return date.toLocaleDateString("en-US", {
+      timeZone: "UTC",
       month: "long",
       day: "numeric",
       year: "numeric",
@@ -2588,6 +2590,7 @@ useEffect(() => {
         if (!timestamp) return "";
         const date = new Date(Number(timestamp) * 1000);
         return date.toLocaleDateString("en-US", {
+          timeZone: "UTC",
           month: "long",
           day: "numeric",
           year: "numeric",
@@ -3103,6 +3106,7 @@ Thank you for using our receipt management system.
         if (!timestamp) return "";
         const date = new Date(Number(timestamp) * 1000);
         return date.toLocaleDateString("en-US", {
+          timeZone: "UTC",
           month: "long",
           day: "numeric",
           year: "numeric",
@@ -4155,13 +4159,13 @@ Thank you for using our receipt management system.
                             value={(() => {
                               if (!editedReceipt.product_date) return "";
                               const d = new Date(Number(editedReceipt.product_date) * 1000);
-                              return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                              return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
                             })()}
                             onChange={(e) => {
                               if (!e.target.value) return;
                               const [yr, mo, dy] = e.target.value.split("-").map(Number);
-                              const localMidnight = new Date(yr, mo - 1, dy, 0, 0, 0, 0);
-                              handleFieldChange("product_date", Math.floor(localMidnight.getTime() / 1000));
+                              const utcMidnight = new Date(Date.UTC(yr, mo - 1, dy));
+                              handleFieldChange("product_date", Math.floor(utcMidnight.getTime() / 1000));
                             }}
                           />
                         </div>
@@ -4445,7 +4449,8 @@ Thank you for using our receipt management system.
                                 handleFieldChange("paymentBrand", "");
 
                                 // Always update card_issuer_name (including empty) so user can clear the field
-                                handleFieldChange("card_issuer_name", baseName);
+                                const safeBaseName = baseName.replace(/\s*\*\d{3,4}$/, "").trim();
+                                handleFieldChange("card_issuer_name", safeBaseName);
 
                                 // Update last_4_digit_card if present
                                 if (
@@ -4690,13 +4695,10 @@ Thank you for using our receipt management system.
 
                         <div className="mb-4 text-align-left">
                           <label className="font-bold">Subtotal</label>
-                          <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none select-none">$</span>
                           <input
-                            type="number"
-                            step="0.01"
+                            type="text"
                             readOnly
-                            className={`${inputClass} pl-6 ${(() => {
+                            className={`${inputClass} ${(() => {
                               const total =
                                 parseFloat(editedReceipt.purchasePrice) ||
                                 parseFloat(r.total) ||
@@ -4740,12 +4742,9 @@ Thank you for using our receipt management system.
                               );
                               const calculatedSubtotal =
                                 total - totalTaxes - tipAmount;
-                              return calculatedSubtotal > 0
-                                ? calculatedSubtotal.toFixed(2)
-                                : "0.00";
+                              return `$${calculatedSubtotal > 0 ? calculatedSubtotal.toFixed(2) : "0.00"}`;
                             })()}
                           />
-                          </div>
                         </div>
 
                         {/* Tax Type Selection Dropdowns */}
@@ -4759,228 +4758,90 @@ Thank you for using our receipt management system.
                                   .includes("tip")
                             ) ||
                             [];
-                          const currentTipTax = enrichedReceiptTaxValues.find(
-                            (t) =>
-                              (t.tax_name || "").toLowerCase().includes("tip")
-                          );
 
                           return (
                             <>
                               {/* Tax Type #1 */}
-                              {currentTaxValues[0] && (
+                              {currentTaxValues[0] ? (
                               <div className="mb-4 text-align-left">
                                 <div className="flex items-center justify-between">
                                   <label className="font-bold">
-                                    {currentTaxValues[0]
-                                      ? `${currentTaxValues[0].tax_name} (${formatTaxRate(currentTaxValues[0].tax_rate)}%)`
-                                      : "Tax Type #1 (0%)"}
+                                    {`${currentTaxValues[0].tax_name} (${formatTaxRate(currentTaxValues[0].tax_rate)}%)`}
                                   </label>
                                   <div className="flex items-center gap-1">
-                                    {currentTaxValues[0] && (
-                                      <button
-                                        type="button"
-                                        onClick={() => removeTaxFromReceipt(0)}
-                                        className="text-red-500 hover:text-red-700 text-xs font-medium"
-                                      >
-                                        Remove
-                                      </button>
-                                    )}
-                                    {!currentTaxValues[0] && (
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setShowTaxDropdown(
-                                            showTaxDropdown === 1 ? null : 1
-                                          )
-                                        }
-                                        className="text-blue-600 hover:text-blue-800 text-xs font-medium flex items-center gap-1 m-0 p-0"
-                                      >
-                                        <Plus size={12} /> Add
-                                      </button>
-                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => removeTaxFromReceipt(0)}
+                                      className="text-red-500 hover:text-red-700 text-xs font-medium"
+                                    >
+                                      Remove
+                                    </button>
                                   </div>
                                 </div>
-                                <div className="relative">
-                                  <input
-                                    readOnly
-                                    className={`${inputClass} cursor-pointer ${
-                                      currentTaxValues[0] &&
-                                      (currentTaxValues[0].tax_amount || 0) < 0
-                                        ? "text-red-500"
-                                        : ""
-                                    }`}
-                                    value={
-                                      currentTaxValues[0]
-                                        ? formatCurrencyFixed2(
-                                            currentTaxValues[0].tax_amount || 0
-                                          )
-                                        : "-"
-                                    }
-                                    onClick={() =>
-                                      !currentTaxValues[0] &&
-                                      setShowTaxDropdown(
-                                        showTaxDropdown === 1 ? null : 1
-                                      )
-                                    }
-                                  />
-                                  {showTaxDropdown === 1 && (
-                                    <div
-                                      className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-64 overflow-y-auto"
-                                      onMouseDown={(e) => e.stopPropagation()}
-                                    >
-                                      <div
-                                        className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left flex items-center gap-1 border-b border-gray-200"
-                                        onClick={() => {
-                                          setShowTaxDropdown(null);
-                                          setShowManageTaxModal(true);
-                                        }}
-                                      >
-                                        <Plus size={14} className="text-blue-600" />
-                                        <span className="text-sm font-medium text-blue-600">
-                                          Manage Tax Types
-                                        </span>
-                                      </div>
-                                      {(() => {
-                                        const available = [...allTaxTypes]
-                                          .filter(
-                                            (t) => !currentTaxValues.some(
-                                              (ct) => ct.tax_name === t.tax_name && ct.tax_rate === t.tax_rate
-                                            )
-                                          )
-                                          .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""));
-                                        return available.length > 0 ? (
-                                          available.map((tax, idx) => (
-                                            <div
-                                              key={idx}
-                                              className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left text-sm"
-                                              onClick={() => {
-                                                addTaxToReceipt(tax);
-                                                setShowTaxDropdown(null);
-                                              }}
-                                            >
-                                              {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
-                                            </div>
-                                          ))
-                                        ) : (
-                                          <div className="px-3 py-2 text-gray-500 text-sm text-center">
-                                            No more tax types available
-                                          </div>
-                                        );
-                                      })()}
-                                    </div>
-                                  )}
-                                </div>
+                                <input
+                                  type="text"
+                                  className={`${inputClass} ${parseFloat(currentTaxValues[0].tax_amount) < 0 ? "text-red-600 font-medium" : ""}`}
+                                  value={
+                                    currencyInputs.tax0 !== undefined
+                                      ? currencyInputs.tax0
+                                      : `$${parseFloat(currentTaxValues[0].tax_amount || 0).toFixed(2)}`
+                                  }
+                                  onFocus={() => {
+                                    const num = parseFloat(currentTaxValues[0].tax_amount);
+                                    setCurrencyInputs(p => ({ ...p, tax0: `$${num ? num.toFixed(2) : "0.00"}` }));
+                                  }}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setCurrencyInputs(p => ({ ...p, tax0: val }));
+                                    const parsed = parseFloat(val.replace(/[^0-9.-]/g, ""));
+                                    if (!isNaN(parsed)) handleTaxChange(0, parsed);
+                                  }}
+                                  onBlur={() => setCurrencyInputs(p => ({ ...p, tax0: undefined }))}
+                                  placeholder="$0.00"
+                                />
                               </div>
-                              )}
+                              ) : null}
 
-                              {/* Tax Type #2 - Only show if Tax #1 exists */}
-                              {currentTaxValues[1] && (
+                              {/* Tax Type #2 - Only show if Tax #2 exists */}
+                              {currentTaxValues[1] ? (
                               <div className="mb-4 text-align-left">
                                 <div className="flex items-center justify-between">
                                   <label className="font-bold">
-                                    {currentTaxValues[1]
-                                      ? `${currentTaxValues[1].tax_name} (${formatTaxRate(currentTaxValues[1].tax_rate)}%)`
-                                      : "Tax Type #2 (0%)"}
+                                    {`${currentTaxValues[1].tax_name} (${formatTaxRate(currentTaxValues[1].tax_rate)}%)`}
                                   </label>
                                   <div className="flex items-center gap-1">
-                                    {currentTaxValues[1] && (
-                                      <button
-                                        type="button"
-                                        onClick={() => removeTaxFromReceipt(1)}
-                                        className="text-red-500 hover:text-red-700 text-xs font-medium"
-                                      >
-                                        Remove
-                                      </button>
-                                    )}
-                                    {!currentTaxValues[1] &&
-                                      currentTaxValues[0] && (
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setShowTaxDropdown(
-                                              showTaxDropdown === 2 ? null : 2
-                                            )
-                                          }
-                                          className="text-blue-600 hover:text-blue-800 text-xs font-medium flex items-center gap-1"
-                                        >
-                                          <Plus size={12} /> Add
-                                        </button>
-                                      )}
+                                    <button
+                                      type="button"
+                                      onClick={() => removeTaxFromReceipt(1)}
+                                      className="text-red-500 hover:text-red-700 text-xs font-medium"
+                                    >
+                                      Remove
+                                    </button>
                                   </div>
                                 </div>
-                                <div className="relative">
-                                  <input
-                                    readOnly
-                                    className={`${inputClass} cursor-pointer ${
-                                      currentTaxValues[1] &&
-                                      (currentTaxValues[1].tax_amount || 0) < 0
-                                        ? "text-red-500"
-                                        : ""
-                                    }`}
-                                    value={
-                                      currentTaxValues[1]
-                                        ? formatCurrencyFixed2(
-                                            currentTaxValues[1].tax_amount || 0
-                                          )
-                                        : "-"
-                                    }
-                                    onClick={() =>
-                                      currentTaxValues[0] &&
-                                      !currentTaxValues[1] &&
-                                      setShowTaxDropdown(
-                                        showTaxDropdown === 2 ? null : 2
-                                      )
-                                    }
-                                  />
-                                  {showTaxDropdown === 2 && (
-                                    <div
-                                      className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-64 overflow-y-auto"
-                                      onMouseDown={(e) => e.stopPropagation()}
-                                    >
-                                      <div
-                                        className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left flex items-center gap-1 border-b border-gray-200"
-                                        onClick={() => {
-                                          setShowTaxDropdown(null);
-                                          setShowManageTaxModal(true);
-                                        }}
-                                      >
-                                        <Plus size={14} className="text-blue-600" />
-                                        <span className="text-sm font-medium text-blue-600">
-                                          Manage Tax Types
-                                        </span>
-                                      </div>
-                                      {(() => {
-                                        const available = [...allTaxTypes]
-                                          .filter(
-                                            (t) => !currentTaxValues.some(
-                                              (ct) => ct.tax_name === t.tax_name && ct.tax_rate === t.tax_rate
-                                            )
-                                          )
-                                          .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""));
-                                        return available.length > 0 ? (
-                                          available.map((tax, idx) => (
-                                            <div
-                                              key={idx}
-                                              className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left text-sm"
-                                              onClick={() => {
-                                                addTaxToReceipt(tax);
-                                                setShowTaxDropdown(null);
-                                              }}
-                                            >
-                                              {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
-                                            </div>
-                                          ))
-                                        ) : (
-                                          <div className="px-3 py-2 text-gray-500 text-sm text-center">
-                                            No more tax types available
-                                          </div>
-                                        );
-                                      })()}
-                                    </div>
-                                  )}
-                                </div>
+                                <input
+                                  type="text"
+                                  className={`${inputClass} ${parseFloat(currentTaxValues[1].tax_amount) < 0 ? "text-red-600 font-medium" : ""}`}
+                                  value={
+                                    currencyInputs.tax1 !== undefined
+                                      ? currencyInputs.tax1
+                                      : `$${parseFloat(currentTaxValues[1].tax_amount || 0).toFixed(2)}`
+                                  }
+                                  onFocus={() => {
+                                    const num = parseFloat(currentTaxValues[1].tax_amount);
+                                    setCurrencyInputs(p => ({ ...p, tax1: `$${num ? num.toFixed(2) : "0.00"}` }));
+                                  }}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setCurrencyInputs(p => ({ ...p, tax1: val }));
+                                    const parsed = parseFloat(val.replace(/[^0-9.-]/g, ""));
+                                    if (!isNaN(parsed)) handleTaxChange(1, parsed);
+                                  }}
+                                  onBlur={() => setCurrencyInputs(p => ({ ...p, tax1: undefined }))}
+                                  placeholder="$0.00"
+                                />
                               </div>
-                              )}
+                              ) : null}
 
                               {/* Editable Tip Field — only shown when TIP pill is selected */}
                               {tipVisible && (() => {
@@ -4999,21 +4860,35 @@ Thank you for using our receipt management system.
                                     <label className="font-bold">
                                       TIP ({tipPercentage}%)
                                     </label>
-                                    <div className="relative">
-                                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none select-none">$</span>
-                                      <input
-                                        id="edit-receipt-tip-input"
-                                        type="number"
-                                        step="0.01"
-                                        min="0"
-                                        className={`${inputClass} pl-6`}
-                                        value={tipNum > 0 ? parseFloat(tipNum.toFixed(2)) : ""}
-                                        onChange={(e) =>
-                                          handleFieldChange("tip", e.target.value)
-                                        }
-                                        placeholder="0.00"
-                                      />
-                                    </div>
+                                    <input
+                                      id="edit-receipt-tip-input"
+                                      type="text"
+                                      inputMode="decimal"
+                                      className={`${inputClass}`}
+                                      value={
+                                        currencyInputs.tip !== undefined
+                                          ? currencyInputs.tip
+                                          : tipNum > 0
+                                            ? `$${tipNum.toFixed(2)}`
+                                            : ""
+                                      }
+                                      onFocus={() =>
+                                        setCurrencyInputs((p) => ({
+                                          ...p,
+                                          tip: tipNum > 0 ? `$${tipNum.toFixed(2)}` : "$",
+                                        }))
+                                      }
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        setCurrencyInputs((p) => ({ ...p, tip: val }));
+                                        const parsed = parseFloat(val.replace(/[^0-9.-]/g, ""));
+                                        if (!isNaN(parsed)) handleFieldChange("tip", parsed);
+                                      }}
+                                      onBlur={() =>
+                                        setCurrencyInputs((p) => ({ ...p, tip: undefined }))
+                                      }
+                                      placeholder="$0.00"
+                                    />
                                   </div>
                                 );
                               })()}
@@ -5023,33 +4898,43 @@ Thank you for using our receipt management system.
 
                         <div className="mb-4 text-align-left">
                           <label className="font-bold">TOTAL</label>
-                          <div className="relative">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none select-none">$</span>
-                            <input
-                              type="number"
-                              step="0.01"
-                              className={`${inputClass} pl-6 ${
-                                (editedReceipt.purchasePrice ||
-                                  r.total ||
-                                  r.purchasePrice ||
-                                  0) < 0
-                                  ? "text-red-500"
-                                  : ""
-                              }`}
-                              value={parseFloat(
-                                (editedReceipt.purchasePrice ??
-                                  r.total ??
-                                  r.purchasePrice ??
-                                  0).toString()
-                              ).toFixed(2)}
-                              onChange={(e) =>
-                                handleFieldChange(
-                                  "purchasePrice",
-                                  parseFloat(e.target.value) || 0
-                                )
-                              }
-                            />
-                          </div>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            className={`${inputClass} ${
+                              (parseFloat(editedReceipt.purchasePrice) ||
+                                parseFloat(r.total) ||
+                                parseFloat(r.purchasePrice) ||
+                                0) < 0
+                                ? "text-red-500"
+                                : ""
+                            }`}
+                            value={(() => {
+                              if (currencyInputs.total !== undefined) return currencyInputs.total;
+                              const num = parseFloat(
+                                editedReceipt.purchasePrice ?? r.total ?? r.purchasePrice ?? 0
+                              );
+                              return `$${isNaN(num) ? "0.00" : num.toFixed(2)}`;
+                            })()}
+                            onFocus={() => {
+                              const num = parseFloat(
+                                editedReceipt.purchasePrice ?? r.total ?? r.purchasePrice ?? 0
+                              );
+                              setCurrencyInputs((p) => ({
+                                ...p,
+                                total: `$${isNaN(num) ? "0.00" : num.toFixed(2)}`,
+                              }));
+                            }}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setCurrencyInputs((p) => ({ ...p, total: val }));
+                              const parsed = parseFloat(val.replace(/[^0-9.-]/g, ""));
+                              if (!isNaN(parsed)) handleFieldChange("purchasePrice", parsed);
+                            }}
+                            onBlur={() =>
+                              setCurrencyInputs((p) => ({ ...p, total: undefined }))
+                            }
+                          />
                         </div>
 
                         {/* SELECT — tax/tip pill selector */}
@@ -5059,12 +4944,6 @@ Thank you for using our receipt management system.
                             enrichedReceiptTaxValues.filter(
                               (t) => !(t.tax_name || "").toLowerCase().includes("tip")
                             ) || [];
-                          const currentTipVal =
-                            editedReceipt.tip !== undefined && editedReceipt.tip !== ""
-                              ? parseFloat(editedReceipt.tip) || 0
-                              : parseFloat(enrichedReceiptTaxValues.find(
-                                  (t) => (t.tax_name || "").toLowerCase().includes("tip")
-                                )?.tax_amount) || 0;
 
                           const sortedTaxPills = [...allTaxTypes]
                             .map((tax) => ({
