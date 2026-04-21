@@ -13,8 +13,6 @@ const CsvExportModal = ({ data, onClose }) => {
         "Purchase Date": receipt.purchaseDate,
         "Store Name": receipt.storeName,
         "Expense Type": receipt.receipt_category === "0" ? "Personal" : receipt.receipt_category === "1" ? "Business" : "—",
-        "Expense Type":
-          receipt.receipt_category === "0" ? "Personal" : "Business",
         Category: receipt.expense_type,
         "Payment Method": receipt.paymentType,
         Subtotal: receipt.subtotal,

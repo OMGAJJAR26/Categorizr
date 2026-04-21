@@ -61,17 +61,13 @@ const buildClearbitUrl = (name) => {
 
 // ─── Miscellaneous "M" badge ─────────────────────────────────────────────────
 const MiscellaneousAvatar = ({ className }) => (
-  <div
-    className={`${className} rounded flex items-center justify-center font-extrabold text-white select-none`}
-    style={{
-      background: "linear-gradient(135deg, #1e40af 0%, #3b82f6 100%)",
-      letterSpacing: "-0.5px",
-    }}
+  <img
+    src="/miscellaneous-logo.png"
+    alt="Miscellaneous logo"
+    className={`${className} rounded object-contain`}
     aria-label="Miscellaneous"
     title="Miscellaneous"
-  >
-    <span style={{ fontSize: "0.7em", lineHeight: 1 }}>M</span>
-  </div>
+  />
 );
 
 // ─── component ──────────────────────────────────────────────────────────────

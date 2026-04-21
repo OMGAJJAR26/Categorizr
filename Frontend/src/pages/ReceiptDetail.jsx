@@ -345,8 +345,11 @@ const ReceiptDetail = ({
 
     // PRIORITY 1: Always use card_issuer_name if available
     if (issuer && issuer !== "0") {
+      // Strip any accidentally embedded *digits from issuer before displaying
+      const cleanIssuer = issuer.replace(/\s*\*\d{3,4}/g, "").trim();
       const alreadyHasLast4 = last4 && issuer.includes(`*${last4}`);
-      return `${issuer}${last4 && !alreadyHasLast4 ? ` *${last4}` : ""}`;
+      if (alreadyHasLast4) return issuer; // issuer already has *last4 embedded, use as-is
+      return `${cleanIssuer}${last4 ? ` *${last4}` : ""}`;
     }
 
     // PRIORITY 2: Use paymentType if no issuer
@@ -566,8 +569,9 @@ useEffect(() => {
         const last4 =
           selectedReceipt.last_4_digit_card?.toString?.().trim?.() || "";
 
-        // Extract base type (remove *last4 if present, as API might return it either way)
-        const baseType = type.replace(/\s*\*\d{3,4}$/, "").trim();
+        // Extract base type — strip ALL *digits occurrences (not just the last one)
+        // This handles corrupted values like "Visa *0700 *0700" → "Visa"
+        const baseType = type.replace(/\s*\*\d{3,4}/g, "").trim();
 
         // Filter out invalid values like "0", "0*0", "0*123"
         if (
@@ -580,8 +584,10 @@ useEffect(() => {
           // Use card_issuer_name if available
           if (issuer && issuer !== "0") {
             // Normalize known payment networks to proper format
-            const issuerLower = issuer.toLowerCase();
-            let normalizedIssuer = issuer;
+            // Also strip any accidentally embedded *digits from issuer
+            const cleanIssuer = issuer.replace(/\s*\*\d{3,4}/g, "").trim();
+            const issuerLower = cleanIssuer.toLowerCase();
+            let normalizedIssuer = cleanIssuer;
             if (issuerLower.includes("diners")) {
               normalizedIssuer = "Diners Club";
             } else if (issuerLower.includes("visa")) {
@@ -829,13 +835,23 @@ useEffect(() => {
   //   - is_draft === "1"  → always draft
   //   - has email ID + is_verify !== "1" + not a network-received receipt → draft
   //   - Once saved (is_verify = "1"), isDraft becomes false → "Keep in Draft Mode" disappears
+  // isDraft must mirror isToBeVerified() in useReceiptGrouping exactly so that
+  // "Save Changes" sends is_verify:"1" for the same receipts shown as drafts.
+  // Bug fix: !r?.fk_forward_from_receipt_id evaluates to false when value is "0"
+  // (a non-empty string is truthy). Must explicitly compare against "0" and 0.
+  const isNetworkReceived =
+    r?.fk_forward_from_receipt_id &&
+    r.fk_forward_from_receipt_id !== "0" &&
+    r.fk_forward_from_receipt_id !== 0;
   const isDraft =
     r?.is_draft === "1" ||
     (
       r?.fk_incoming_email_id &&
       r.fk_incoming_email_id !== "0" &&
+      r.fk_incoming_email_id !== 0 &&
+      r.fk_incoming_email_id !== null &&
       String(r?.is_verify ?? "0") !== "1" &&
-      !r?.fk_forward_from_receipt_id
+      !isNetworkReceived
     );
 
   const formatDate = (timestamp) => {
@@ -2004,19 +2020,21 @@ useEffect(() => {
       const paymentType = editedReceipt.paymentType || "";
 
       // Extract last4 from paymentType if present (e.g. "Diners Club *9999" → "9999")
+      // Use last occurrence to handle corrupted values like "Visa *0700 *0700"
       if (paymentType && paymentType.includes("*")) {
-        const match = paymentType.match(/\*(\d{3,4})$/);
-        if (match) last4 = match[1];
+        const allMatches = [...paymentType.matchAll(/\*(\d{3,4})/g)];
+        if (allMatches.length > 0) last4 = allMatches[allMatches.length - 1][1];
       }
 
-      // Strip *last4 to get the clean network name for the API
-      const basePaymentType = paymentType.replace(/\s*\*\d{3,4}$/, "").trim();
+      // Strip ALL *digits to get the clean network name for the API
+      const basePaymentType = paymentType.replace(/\s*\*\d{3,4}/g, "").trim();
 
       // Always derive cardIssuerName from the clean base payment type so we always
       // get the full correct name (e.g. "Diners Club", never "Club").
       // Only keep a user-entered custom name if it differs from the resolved brand.
       const derivedIssuer = resolveIssuerName(basePaymentType || paymentType);
-      const formIssuer = (editedReceipt.card_issuer_name || "").trim();
+      // Also strip any embedded *digits from the user-entered issuer name
+      const formIssuer = (editedReceipt.card_issuer_name || "").replace(/\s*\*\d{3,4}/g, "").trim();
       const cardIssuerName =
         formIssuer && formIssuer.toLowerCase() !== derivedIssuer.toLowerCase()
           ? formIssuer
@@ -2261,17 +2279,19 @@ useEffect(() => {
     const paymentType = editedReceipt.paymentType || "";
 
     // Extract last4 from paymentType if present
+    // Use last occurrence to handle corrupted values like "Visa *0700 *0700"
     if (paymentType && paymentType.includes("*")) {
-      const match = paymentType.match(/\*(\d{3,4})$/);
-      if (match) last4 = match[1];
+      const allMatches = [...paymentType.matchAll(/\*(\d{3,4})/g)];
+      if (allMatches.length > 0) last4 = allMatches[allMatches.length - 1][1];
     }
 
-    // Strip *last4 to get the clean network name for the API
-    const basePaymentType = paymentType.replace(/\s*\*\d{3,4}$/, "").trim();
+    // Strip ALL *digits to get the clean network name for the API
+    const basePaymentType = paymentType.replace(/\s*\*\d{3,4}/g, "").trim();
 
     // Always derive cardIssuerName from the clean base payment type
     const derivedIssuer2 = resolveIssuerName(basePaymentType || paymentType);
-    const formIssuer2 = (editedReceipt.card_issuer_name || "").trim();
+    // Also strip any embedded *digits from the user-entered issuer name
+    const formIssuer2 = (editedReceipt.card_issuer_name || "").replace(/\s*\*\d{3,4}/g, "").trim();
     const cardIssuerName =
       formIssuer2 && formIssuer2.toLowerCase() !== derivedIssuer2.toLowerCase()
         ? formIssuer2
@@ -2289,6 +2309,8 @@ useEffect(() => {
       card_issuer_name: cardIssuerName,
       paymentType: finalPaymentTypeForAPI || "",
       last_4_digit_card: last4 || "",
+      // Keep draft transition behavior consistent with main Save Changes flow
+      ...(isDraft ? { is_verify: "1", is_draft: "0" } : {}),
     };
 
     const success = await updateReceipt(selectedReceipt.id, updatedData);

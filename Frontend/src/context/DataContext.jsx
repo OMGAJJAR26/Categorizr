@@ -286,67 +286,85 @@ export const DataProvider = ({ children }) => {
     const token = localStorage.getItem("token");
     if (!token) return;
     try {
+      console.log("%c[Merchants] GET /userstore/getStorev1", "color:#6366f1;font-weight:bold");
       const res = await fetch(`${BASE_URL}/userstore/getStorev1`, {
         headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         const data = await res.json();
         const merchants = Array.isArray(data) ? data.filter(m => m.store_name) : [];
+        console.log("%c[Merchants] fetchApiMerchants response:", "color:#6366f1;font-weight:bold", merchants);
         setApiMerchants(merchants);
       }
-    } catch (e) { console.error("fetchApiMerchants error", e); }
+    } catch (e) { console.error("[Merchants] fetchApiMerchants error", e); }
   }, []);
 
   const addApiMerchant = async (name, logoUrl = "") => {
     const token = localStorage.getItem("token");
     if (!token || !name.trim()) return null;
+    const payload = { store_name: name.trim(), store_image_url: logoUrl || "" };
+    console.log("%c[Merchants] POST /userstore/addStorev1 →", "color:#22c55e;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userstore/addStorev1`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ store_name: name.trim(), store_image_url: logoUrl || "" }),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         const data = await res.json();
+        console.log("%c[Merchants] addApiMerchant response:", "color:#22c55e;font-weight:bold", data);
         setApiMerchants(prev => [...prev, data]);
         return data;
+      } else {
+        console.warn("[Merchants] addApiMerchant failed, status:", res.status);
       }
-    } catch (e) { console.error("addApiMerchant error", e); }
+    } catch (e) { console.error("[Merchants] addApiMerchant error", e); }
     return null;
   };
 
   const updateApiMerchant = async (id, name, logoUrl = "") => {
     const token = localStorage.getItem("token");
     if (!token) return false;
+    const payload = { id, store_name: name.trim(), store_image_url: logoUrl || "" };
+    console.log("%c[Merchants] POST /userstore/updateStorev1 →", "color:#f59e0b;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userstore/updateStorev1`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ id, store_name: name.trim(), store_image_url: logoUrl || "" }),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         const data = await res.json();
+        console.log("%c[Merchants] updateApiMerchant response:", "color:#f59e0b;font-weight:bold", data);
         setApiMerchants(prev => prev.map(m => m.id === id ? data : m));
         return true;
+      } else {
+        console.warn("[Merchants] updateApiMerchant failed, status:", res.status);
       }
-    } catch (e) { console.error("updateApiMerchant error", e); }
+    } catch (e) { console.error("[Merchants] updateApiMerchant error", e); }
     return false;
   };
 
   const deleteApiMerchant = async (id) => {
     const token = localStorage.getItem("token");
     if (!token) return false;
+    const payload = { id };
+    console.log("%c[Merchants] POST /userstore/deleteStorev1 →", "color:#ef4444;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userstore/deleteStorev1`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
+        const data = await res.json();
+        console.log("%c[Merchants] deleteApiMerchant response:", "color:#ef4444;font-weight:bold", data);
         setApiMerchants(prev => prev.filter(m => m.id !== id));
         return true;
+      } else {
+        console.warn("[Merchants] deleteApiMerchant failed, status:", res.status);
       }
-    } catch (e) { console.error("deleteApiMerchant error", e); }
+    } catch (e) { console.error("[Merchants] deleteApiMerchant error", e); }
     return false;
   };
 
@@ -355,6 +373,7 @@ export const DataProvider = ({ children }) => {
     const token = localStorage.getItem("token");
     if (!token) return;
     try {
+      console.log("%c[PaymentMethods] GET /userpaymentmethod/getPaymentMethodv1", "color:#8b5cf6;font-weight:bold");
       const res = await fetch(`${BASE_URL}/userpaymentmethod/getPaymentMethodv1`, {
         headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
       });
@@ -364,48 +383,60 @@ export const DataProvider = ({ children }) => {
         const payments = Array.isArray(data)
           ? data.filter(m => m.card_number && m.card_type !== "merchant")
           : [];
+        console.log("%c[PaymentMethods] fetchApiPaymentMethods response:", "color:#8b5cf6;font-weight:bold", payments);
         setApiPaymentMethods(payments);
       }
-    } catch (e) { console.error("fetchApiPaymentMethods error", e); }
+    } catch (e) { console.error("[PaymentMethods] fetchApiPaymentMethods error", e); }
   }, []);
 
   const addApiPaymentMethod = async (name, logoUrl = "") => {
     const token = localStorage.getItem("token");
     if (!token || !name.trim()) return null;
+    const payload = { card_number: name.trim(), icon_image: logoUrl || "", card_type: "payment", default_payment_category: "" };
+    console.log("%c[PaymentMethods] POST /userpaymentmethod/addPaymentMethodv1 →", "color:#06b6d4;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userpaymentmethod/addPaymentMethodv1`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ card_number: name.trim(), icon_image: logoUrl || "", card_type: "payment", default_payment_category: "" }),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         const data = await res.json();
+        console.log("%c[PaymentMethods] addApiPaymentMethod response:", "color:#06b6d4;font-weight:bold", data);
         setApiPaymentMethods(prev => [...prev, data]);
         return data;
+      } else {
+        console.warn("[PaymentMethods] addApiPaymentMethod failed, status:", res.status);
       }
-    } catch (e) { console.error("addApiPaymentMethod error", e); }
+    } catch (e) { console.error("[PaymentMethods] addApiPaymentMethod error", e); }
     return null;
   };
 
   const updateApiPaymentMethod = async (id, name, logoUrl = "") => {
     const token = localStorage.getItem("token");
     if (!token) return false;
+    const payload = { id, card_number: name.trim(), icon_image: logoUrl || "", card_type: "payment", default_payment_category: "" };
+    console.log("%c[PaymentMethods] POST /userpaymentmethod/updatePaymentMethodv1 →", "color:#f59e0b;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userpaymentmethod/updatePaymentMethodv1`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ id, card_number: name.trim(), icon_image: logoUrl || "", card_type: "payment", default_payment_category: "" }),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         const data = await res.json();
+        console.log("%c[PaymentMethods] updateApiPaymentMethod response:", "color:#f59e0b;font-weight:bold", data);
         setApiPaymentMethods(prev => prev.map(m => m.id === id ? data : m));
         return true;
+      } else {
+        console.warn("[PaymentMethods] updateApiPaymentMethod failed, status:", res.status);
       }
-    } catch (e) { console.error("updateApiPaymentMethod error", e); }
+    } catch (e) { console.error("[PaymentMethods] updateApiPaymentMethod error", e); }
     return false;
   };
 
   const deleteApiPaymentMethod = (id) => {
+    console.log("%c[PaymentMethods] deleteApiPaymentMethod (local only) id:", "color:#ef4444;font-weight:bold", id);
     setApiPaymentMethods(prev => prev.filter(m => m.id !== id));
   };
 
@@ -746,21 +777,24 @@ export const DataProvider = ({ children }) => {
       // Fetch API merchants from /userstore/getStorev1
       let apiMerchantsData = [];
       try {
+        console.log("%c[fetchData] GET /userstore/getStorev1", "color:#6366f1;font-weight:bold");
         const apiStoreRes = await fetch(`${BASE_URL}/userstore/getStorev1`, {
           headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
         });
         if (apiStoreRes.ok) {
           const apiStoreJson = await apiStoreRes.json();
           apiMerchantsData = Array.isArray(apiStoreJson) ? apiStoreJson.filter(m => m.store_name) : [];
+          console.log("%c[fetchData] Merchants from API:", "color:#6366f1;font-weight:bold", apiMerchantsData);
           setApiMerchants(apiMerchantsData);
         }
       } catch (apiStoreErr) {
-        console.error("fetchApiMerchants in fetchData error", apiStoreErr);
+        console.error("[fetchData] fetchApiMerchants error", apiStoreErr);
       }
 
       // Fetch API payment methods from /userpaymentmethod/getPaymentMethodv1
       let apiPaymentMethodsData = [];
       try {
+        console.log("%c[fetchData] GET /userpaymentmethod/getPaymentMethodv1", "color:#8b5cf6;font-weight:bold");
         const apiPayRes = await fetch(`${BASE_URL}/userpaymentmethod/getPaymentMethodv1`, {
           headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
         });
@@ -768,10 +802,12 @@ export const DataProvider = ({ children }) => {
           const apiPayJson = await apiPayRes.json();
           const allPayItems = Array.isArray(apiPayJson) ? apiPayJson : [];
           apiPaymentMethodsData = allPayItems.filter(m => m.card_number && m.card_type !== "merchant");
+          console.log("%c[fetchData] Payment methods from API (raw all):", "color:#8b5cf6;font-weight:bold", allPayItems);
+          console.log("%c[fetchData] Payment methods filtered (non-merchant):", "color:#8b5cf6;font-weight:bold", apiPaymentMethodsData);
           setApiPaymentMethods(apiPaymentMethodsData);
         }
       } catch (apiPayErr) {
-        console.error("fetchApiPaymentMethods in fetchData error", apiPayErr);
+        console.error("[fetchData] fetchApiPaymentMethods error", apiPayErr);
       }
 
       setMerchants([
@@ -1371,6 +1407,17 @@ setMerchantsWithImages([
         notes: getValue("notes", ""),
         receipt_forwarded: getValue("receipt_forwarded", "0"),
         receipt_tag: getValue("receipt_tag", ""),
+        // Persist draft/verify transitions (e.g. draft -> regular receipt after save)
+        is_draft: (() => {
+          const val = getValue("is_draft");
+          if (val === null || val === undefined) return parseInt(existingReceipt?.is_draft ?? 0) || 0;
+          return parseInt(val) || 0;
+        })(),
+        is_verify: (() => {
+          const val = getValue("is_verify");
+          if (val === null || val === undefined) return parseInt(existingReceipt?.is_verify ?? 0) || 0;
+          return parseInt(val) || 0;
+        })(),
         create_date: getValue("create_date", ""),
         receipt_tax_values: getValue("receipt_tax_values", []),
       };

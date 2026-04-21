@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react-swc'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import https from 'https'
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -248,12 +249,21 @@ export default defineConfig({
         target: 'https://categorizr.com/emailserver',
         changeOrigin: true,
         secure: false,
+        agent: new https.Agent({ keepAlive: false }),
         configure: (proxy) => {
+          proxy.on('error', (err, req, res) => {
+            console.warn('Proxy error for /api:', err.message);
+            if (res && !res.headersSent) {
+              res.writeHead(502, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Proxy Error', detail: err.message }));
+            }
+          });
           proxy.on('proxyReq', (proxyReq, req) => {
             const accessToken = req.headers['accesstoken'];
             if (accessToken) {
               proxyReq.setHeader('Accesstoken', accessToken);
             }
+            proxyReq.setHeader('Connection', 'close');
           });
         },
       },

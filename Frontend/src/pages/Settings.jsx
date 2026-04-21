@@ -84,8 +84,14 @@ const labelCls = "block text-xs font-semibold text-gray-500 uppercase tracking-w
 /* ─── ItemLogo ─────────────────────────────────────────── */
 const ItemLogo = ({ logo, name }) => {
   const [err, setErr] = useState(false);
+  
+  if (name?.toString().trim().toLowerCase() === "miscellaneous") {
+    return <img src="/miscellaneous-logo.png" alt="Miscellaneous logo" className="w-9 h-9 rounded-lg object-contain flex-shrink-0" />;
+  }
+
   if (logo && !err)
     return <img src={logo} alt={name} onError={() => setErr(true)} className="w-9 h-9 rounded-lg object-contain bg-gray-100 p-1 flex-shrink-0" />;
+    
   return (
     <div className="w-9 h-9 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-xs font-bold text-blue-600 flex-shrink-0">
       {(name || "?")[0].toUpperCase()}
@@ -1398,7 +1404,12 @@ const ReceiptInfoInline = ({ type }) => {
   };
 
   const taxItems = type === "taxes"
-    ? taxData.filter(t => (t.tax_name || "").toLowerCase().includes(search.toLowerCase()))
+    ? taxData
+        .filter(t => {
+          const name = (t.tax_name || "").toLowerCase();
+          return name !== "tip" && name.includes(search.toLowerCase());
+        })
+        .sort((a, b) => (a.tax_name || "").toLowerCase().localeCompare((b.tax_name || "").toLowerCase()))
     : [];
   const allItems = type !== "taxes"
     ? buildAllItems().filter(i => i.name.toLowerCase().includes(search.toLowerCase()))
@@ -1529,9 +1540,9 @@ const ReceiptInfoInline = ({ type }) => {
                         </div>
                       </div>
                     ) : (
-                      <ItemRow name={tax.tax_name} sublabel={tax.tax_number ? `#${tax.tax_number}` : undefined} badge={`${tax.tax_rate}%`} badgeCls={colors.badge}
+                      <ItemRow name={tax.tax_name} sublabel={tax.tax_number ? `#${tax.tax_number}` : undefined} badge={`${parseFloat(parseFloat(tax.tax_rate).toFixed(3))}%`} badgeCls={colors.badge}
                         actions={<>
-                          <Btn color="bg-blue-500 hover:bg-blue-600" onClick={() => { setEditTaxKey(tax.id); setEditTaxVal({ tax_name: tax.tax_name, tax_rate: tax.tax_rate, tax_number: tax.tax_number || "" }); }}><Pencil size={13}/></Btn>
+                          <Btn color="bg-blue-500 hover:bg-blue-600" onClick={() => { setEditTaxKey(tax.id); setEditTaxVal({ tax_name: tax.tax_name, tax_rate: parseFloat(parseFloat(tax.tax_rate).toFixed(3)).toString(), tax_number: tax.tax_number || "" }); }}><Pencil size={13}/></Btn>
                           <Btn color="bg-red-400 hover:bg-red-500" onClick={async () => { try { await deleteTax(tax.id); } catch (e) { toast("error", e.message || "Failed."); } }}><Trash2 size={13}/></Btn>
                         </>}
                       />
