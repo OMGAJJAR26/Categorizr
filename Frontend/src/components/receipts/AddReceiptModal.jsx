@@ -115,7 +115,10 @@ const [localMerchants, setLocalMerchants] = useState([]);
     paymentType: "",
     card_issuer_name: "", // Card issuer name for display (e.g., "Omi")
     last_4_digit_card: "", // Last 4 digits for display
-    product_date: new Date().toISOString().split("T")[0],
+    product_date: (() => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    })(),
     subtotal: "",
     purchasePrice: "",
     product_name: "",
@@ -136,7 +139,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
   });
 
   // Currency input display state — tracks raw text while user is typing in Totals fields
-  const [currencyInputs, setCurrencyInputs] = useState({ total: "", tax0: "", tax1: "" });
+  const [currencyInputs, setCurrencyInputs] = useState({ total: "", tax0: "", tax1: "", tip: "" });
   const setCurrencyInput = (key, val) => setCurrencyInputs((prev) => ({ ...prev, [key]: val }));
 
   // Dropdown visibility states
@@ -1445,7 +1448,10 @@ const handleFieldChange = (field, value) => {
       setUploadProgress(100);
 
       // ─── STEP 5: Pre-fill form with OCR + parsed data ─────────────────────
-      let parsedDate = new Date().toISOString().split("T")[0];
+      let parsedDate = (() => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      })();
 
       if (parsedReceiptData?.purchaseDate) {
         parsedDate = parsedReceiptData.purchaseDate;
@@ -1608,8 +1614,9 @@ const handleFieldChange = (field, value) => {
       // Validate date - ensure it's valid and not empty
       let productDate = 0;
       if (formData.product_date) {
-        const dateObj = new Date(formData.product_date);
-        if (!isNaN(dateObj.getTime()) && dateObj.getFullYear() >= 2000) {
+        const [yr, mo, dy] = formData.product_date.split("-").map(Number);
+        const dateObj = new Date(Date.UTC(yr, mo - 1, dy));
+        if (!isNaN(dateObj.getTime())) {
           productDate = Math.floor(dateObj.getTime() / 1000);
         }
       }
@@ -2169,7 +2176,8 @@ const handleFieldChange = (field, value) => {
   const buildQuickPayload = (overrideId = null) => {
     let productDate = 0;
     if (formData.product_date) {
-      const d = new Date(formData.product_date);
+      const [yr, mo, dy] = formData.product_date.split("-").map(Number);
+      const d = new Date(Date.UTC(yr, mo - 1, dy));
       if (!isNaN(d.getTime())) productDate = Math.floor(d.getTime() / 1000);
     }
     if (!productDate) productDate = Math.floor(Date.now() / 1000);
@@ -4227,7 +4235,8 @@ const handleSelectLogo = (index) => {
             formData.card_issuer_name || "";
           const last4 = formData.last_4_digit_card || "";
           if (issuerName && last4) {
-            return `${issuerName} *${last4}`;
+            const alreadyHasLast4 = issuerName.includes(`*${last4}`);
+            return alreadyHasLast4 ? issuerName : `${issuerName} *${last4}`;
           } else if (issuerName) {
             return issuerName;
           }
@@ -4303,9 +4312,10 @@ const handleSelectLogo = (index) => {
           handleFieldChange("paymentType", cardType);
 
           // Always update card_issuer_name (including empty) so user can clear the field
+          const safeIssuerName = cardIssuerName.replace(/\s*\*\d{3,4}$/, "").trim();
           handleFieldChange(
             "card_issuer_name",
-            cardIssuerName,
+            safeIssuerName,
           );
 
           // Update last_4_digit_card
@@ -4401,8 +4411,9 @@ const handleSelectLogo = (index) => {
               }
 
               // Format display: issuer name *last4 (or just issuer name if no last4)
+              const alreadyHasLast4 = last4 && issuerName.includes(`*${last4}`);
               const displayText = issuerName
-                ? last4
+                ? last4 && !alreadyHasLast4
                   ? `${issuerName} *${last4}`
                   : issuerName
                 : methodString; // Fallback to original if no issuer name
@@ -4647,37 +4658,21 @@ const handleSelectLogo = (index) => {
                         </div>
 
                         {/* Tax Type #1 with Add button */}
+                        {formData.receipt_tax_values[0] ? (
                         <div className="mb-4 text-align-left">
                           <div className="flex items-center justify-between">
                             <label className="font-bold">
-                              {formData.receipt_tax_values[0]
-                                ? `${formData.receipt_tax_values[0].tax_name} (${formatTaxRate(formData.receipt_tax_values[0].tax_rate)}%)`
-                                : "Tax Type #1 (0%)"}
+                              {`${formData.receipt_tax_values[0].tax_name} (${formatTaxRate(formData.receipt_tax_values[0].tax_rate)}%)`}
                             </label>
                             <div className="flex items-center gap-2">
-                              {formData.receipt_tax_values[0] && (
-                                <button
-                                  type="button"
-                                  onClick={() => removeTaxType(0)}
-                                  className="text-red-600 hover:text-red-800 p-1"
-                                  title="Remove tax type"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              )}
-                              {!formData.receipt_tax_values[0] && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setShowTaxDropdown(
-                                      showTaxDropdown === 1 ? false : 1,
-                                    )
-                                  }
-                                  className="text-blue-600 text-xs font-medium flex items-center gap-1 hover:text-blue-800 mt-0 mb-0"
-                                >
-                                  <Plus size={12} /> Add Tax
-                                </button>
-                              )}
+                              <button
+                                type="button"
+                                onClick={() => removeTaxType(0)}
+                                className="text-red-600 hover:text-red-800 p-1"
+                                title="Remove tax type"
+                              >
+                                <Trash2 size={14} />
+                              </button>
                             </div>
                           </div>
                           <div className="relative">
@@ -4690,26 +4685,24 @@ const handleSelectLogo = (index) => {
                                 formatCurrencyDisplay(formData.receipt_tax_values[0]?.tax_amount)
                               }
                               onFocus={() => {
-                                if (!formData.receipt_tax_values[0]) return;
                                 const num = parseFloat(formData.receipt_tax_values[0]?.tax_amount);
                                 setCurrencyInput("tax0", !num || num === 0 ? "$" : formatCurrencyDisplay(num));
                               }}
                               onChange={(e) => {
-                                if (!formData.receipt_tax_values[0]) return;
                                 const normalized = normalizeCurrencyInput(e.target.value);
                                 setCurrencyInput("tax0", normalized);
                                 updateTaxAmount(0, parseCurrencyToNumber(normalized));
                               }}
                               onBlur={() => {
                                 const num = parseFloat(formData.receipt_tax_values[0]?.tax_amount);
-                                if (formData.receipt_tax_values[0]) {
-                                  updateTaxAmount(0, !num || isNaN(num) ? "" : num.toFixed(2));
-                                }
+                                updateTaxAmount(0, !num || isNaN(num) ? "" : num.toFixed(2));
                                 setCurrencyInput("tax0", "");
                               }}
                               placeholder="$0.00"
-                              readOnly={!formData.receipt_tax_values[0]}
                             />
+                          </div>
+                        </div>
+                        ) : null}
                             {showTaxDropdown === 1 && (
                               <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-64 overflow-y-auto">
                                 {(() => {
@@ -4759,42 +4752,23 @@ const handleSelectLogo = (index) => {
                                   </>
                               </div>
                             )}
-                          </div>
-                        </div>
 
                         {/* Tax Type #2 with Add button */}
+                        {formData.receipt_tax_values[1] ? (
                         <div className="mb-4 text-align-left">
                           <div className="flex items-center justify-between">
                             <label className="font-bold">
-                              {formData.receipt_tax_values[1]
-                                ? `${formData.receipt_tax_values[1].tax_name} (${formatTaxRate(formData.receipt_tax_values[1].tax_rate)}%)`
-                                : "Tax Type #2 (0%)"}
+                              {`${formData.receipt_tax_values[1].tax_name} (${formatTaxRate(formData.receipt_tax_values[1].tax_rate)}%)`}
                             </label>
                             <div className="flex items-center gap-2">
-                              {formData.receipt_tax_values[1] && (
-                                <button
-                                  type="button"
-                                  onClick={() => removeTaxType(1)}
-                                  className="text-red-600 hover:text-red-800 p-1"
-                                  title="Remove tax type"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              )}
-                              {formData.receipt_tax_values[0] &&
-                                !formData.receipt_tax_values[1] && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setShowTaxDropdown(
-                                        showTaxDropdown === 2 ? false : 2,
-                                      )
-                                    }
-                                    className="text-blue-600 text-xs font-medium flex items-center gap-1 hover:text-blue-800"
-                                  >
-                                    <Plus size={12} /> Add Tax
-                                  </button>
-                                )}
+                              <button
+                                type="button"
+                                onClick={() => removeTaxType(1)}
+                                className="text-red-600 hover:text-red-800 p-1"
+                                title="Remove tax type"
+                              >
+                                <Trash2 size={14} />
+                              </button>
                             </div>
                           </div>
                           <div className="relative">
@@ -4807,26 +4781,24 @@ const handleSelectLogo = (index) => {
                                 formatCurrencyDisplay(formData.receipt_tax_values[1]?.tax_amount)
                               }
                               onFocus={() => {
-                                if (!formData.receipt_tax_values[1]) return;
                                 const num = parseFloat(formData.receipt_tax_values[1]?.tax_amount);
                                 setCurrencyInput("tax1", !num || num === 0 ? "$" : formatCurrencyDisplay(num));
                               }}
                               onChange={(e) => {
-                                if (!formData.receipt_tax_values[1]) return;
                                 const normalized = normalizeCurrencyInput(e.target.value);
                                 setCurrencyInput("tax1", normalized);
                                 updateTaxAmount(1, parseCurrencyToNumber(normalized));
                               }}
                               onBlur={() => {
                                 const num = parseFloat(formData.receipt_tax_values[1]?.tax_amount);
-                                if (formData.receipt_tax_values[1]) {
-                                  updateTaxAmount(1, !num || isNaN(num) ? "" : num.toFixed(2));
-                                }
+                                updateTaxAmount(1, !num || isNaN(num) ? "" : num.toFixed(2));
                                 setCurrencyInput("tax1", "");
                               }}
                               placeholder="$0.00"
-                              readOnly={!formData.receipt_tax_values[1]}
                             />
+                          </div>
+                        </div>
+                        ) : null}
                             {showTaxDropdown === 2 && (
                               <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-64 overflow-y-auto">
                                 {(() => {
@@ -4876,8 +4848,6 @@ const handleSelectLogo = (index) => {
                                   </>
                               </div>
                             )}
-                          </div>
-                        </div>
 
                         {/* TIP — only visible when TIP pill is selected */}
                         {formData.tip !== "" && (
@@ -4897,17 +4867,27 @@ const handleSelectLogo = (index) => {
                             </label>
                             <input
                               id="add-receipt-tip-input"
-                              type="number"
-                              step="0.01"
+                              type="text"
+                              inputMode="decimal"
                               className={inputClass}
                               value={
-                                parseFloat(formData.tip) > 0
-                                  ? parseFloat(parseFloat(formData.tip).toFixed(2))
-                                  : ""
+                                currencyInputs.tip ||
+                                formatCurrencyDisplay(formData.tip)
                               }
-                              onChange={(e) =>
-                                handleFieldChange("tip", e.target.value)
-                              }
+                              onFocus={() => {
+                                const num = parseFloat(formData.tip);
+                                setCurrencyInput("tip", !num || num === 0 ? "$" : formatCurrencyDisplay(num));
+                              }}
+                              onChange={(e) => {
+                                const normalized = normalizeCurrencyInput(e.target.value);
+                                setCurrencyInput("tip", normalized);
+                                handleFieldChange("tip", parseCurrencyToNumber(normalized));
+                              }}
+                              onBlur={() => {
+                                const num = parseFloat(formData.tip);
+                                handleFieldChange("tip", !num || isNaN(num) ? "" : num.toFixed(2));
+                                setCurrencyInput("tip", "");
+                              }}
                               placeholder="$0.00"
                             />
                           </div>
@@ -4946,16 +4926,24 @@ const handleSelectLogo = (index) => {
                         <div className="mt-2">
                           <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Select</p>
 
-                          {/* Row 1: TIP — always fixed leftmost */}
-                          <div className="mb-2">
+                          {/* Row 1: Manage Tax Types + TIP on same line */}
+                          <div className="mb-2 flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowTaxDropdown(false);
+                                setShowManageTaxModal(true);
+                              }}
+                              className="px-4 py-1.5 rounded-full border border-blue-400 text-blue-600 bg-blue-50 text-sm font-semibold flex items-center gap-1 whitespace-nowrap hover:bg-blue-100 transition-all"
+                            >
+                              <Plus size={12} /> Manage Tax Types
+                            </button>
                             <button
                               type="button"
                               onClick={() => {
                                 if (formData.tip !== "") {
-                                  // Deselect — hide field and clear value
                                   handleFieldChange("tip", "");
                                 } else {
-                                  // Select — show field cleared to $0.00
                                   handleFieldChange("tip", "0");
                                   setTimeout(() => {
                                     document.getElementById("add-receipt-tip-input")?.focus();
@@ -4969,20 +4957,6 @@ const handleSelectLogo = (index) => {
                               }`}
                             >
                               TIP
-                            </button>
-                          </div>
-
-                          {/* Row 2: Manage Tax Types — always visible directly below TIP */}
-                          <div className="mb-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowTaxDropdown(false);
-                                setShowManageTaxModal(true);
-                              }}
-                              className="px-4 py-1.5 rounded-full border border-blue-400 text-blue-600 bg-blue-50 text-sm font-semibold flex items-center gap-1 whitespace-nowrap hover:bg-blue-100 transition-all"
-                            >
-                              <Plus size={12} /> Manage Tax Types
                             </button>
                           </div>
 
