@@ -344,7 +344,8 @@ const ReceiptDetail = ({
 
     // PRIORITY 1: Always use card_issuer_name if available
     if (issuer && issuer !== "0") {
-      return `${issuer}${last4 ? ` *${last4}` : ""}`;
+      const alreadyHasLast4 = last4 && issuer.includes(`*${last4}`);
+      return `${issuer}${last4 && !alreadyHasLast4 ? ` *${last4}` : ""}`;
     }
 
     // PRIORITY 2: Use paymentType if no issuer
@@ -4151,20 +4152,16 @@ Thank you for using our receipt management system.
                           <input
                             type="date"
                             className={inputClass}
-                            value={
-                              editedReceipt.product_date
-                                ? new Date(
-                                    Number(editedReceipt.product_date) * 1000
-                                  )
-                                    .toISOString()
-                                    .split("T")[0]
-                                : ""
-                            }
+                            value={(() => {
+                              if (!editedReceipt.product_date) return "";
+                              const d = new Date(Number(editedReceipt.product_date) * 1000);
+                              return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                            })()}
                             onChange={(e) => {
-                              const timestamp = Math.floor(
-                                new Date(e.target.value).getTime() / 1000
-                              );
-                              handleFieldChange("product_date", timestamp);
+                              if (!e.target.value) return;
+                              const [yr, mo, dy] = e.target.value.split("-").map(Number);
+                              const localMidnight = new Date(yr, mo - 1, dy, 0, 0, 0, 0);
+                              handleFieldChange("product_date", Math.floor(localMidnight.getTime() / 1000));
                             }}
                           />
                         </div>
@@ -4694,12 +4691,12 @@ Thank you for using our receipt management system.
                         <div className="mb-4 text-align-left">
                           <label className="font-bold">Subtotal</label>
                           <div className="relative">
-                          <span className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-500 text-sm mt-1">$</span>
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none select-none">$</span>
                           <input
                             type="number"
                             step="0.01"
                             readOnly
-                            className={`${inputClass} pl-5 ${(() => {
+                            className={`${inputClass} pl-6 ${(() => {
                               const total =
                                 parseFloat(editedReceipt.purchasePrice) ||
                                 parseFloat(r.total) ||
@@ -4770,6 +4767,7 @@ Thank you for using our receipt management system.
                           return (
                             <>
                               {/* Tax Type #1 */}
+                              {currentTaxValues[0] && (
                               <div className="mb-4 text-align-left">
                                 <div className="flex items-center justify-between">
                                   <label className="font-bold">
@@ -4873,8 +4871,10 @@ Thank you for using our receipt management system.
                                   )}
                                 </div>
                               </div>
+                              )}
 
                               {/* Tax Type #2 - Only show if Tax #1 exists */}
+                              {currentTaxValues[1] && (
                               <div className="mb-4 text-align-left">
                                 <div className="flex items-center justify-between">
                                   <label className="font-bold">
@@ -4980,6 +4980,7 @@ Thank you for using our receipt management system.
                                   )}
                                 </div>
                               </div>
+                              )}
 
                               {/* Editable Tip Field — only shown when TIP pill is selected */}
                               {tipVisible && (() => {
@@ -4999,13 +5000,13 @@ Thank you for using our receipt management system.
                                       TIP ({tipPercentage}%)
                                     </label>
                                     <div className="relative">
-                                      <span className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-500 text-sm mt-1">$</span>
+                                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none select-none">$</span>
                                       <input
                                         id="edit-receipt-tip-input"
                                         type="number"
                                         step="0.01"
                                         min="0"
-                                        className={`${inputClass} pl-5`}
+                                        className={`${inputClass} pl-6`}
                                         value={tipNum > 0 ? parseFloat(tipNum.toFixed(2)) : ""}
                                         onChange={(e) =>
                                           handleFieldChange("tip", e.target.value)
@@ -5027,7 +5028,7 @@ Thank you for using our receipt management system.
                             <input
                               type="number"
                               step="0.01"
-                              className={`${inputClass} pl-7 ${
+                              className={`${inputClass} pl-6 ${
                                 (editedReceipt.purchasePrice ||
                                   r.total ||
                                   r.purchasePrice ||
@@ -5084,17 +5085,25 @@ Thank you for using our receipt management system.
                             <div className="mt-2">
                               <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Select</p>
 
-                              {/* Row 1: TIP — always fixed leftmost */}
-                              <div className="mb-2">
+                              {/* Row 1: Manage Tax Types + TIP on same line */}
+                              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowTaxDropdown(null);
+                                    setShowManageTaxModal(true);
+                                  }}
+                                  className="px-4 py-1.5 rounded-full border border-blue-400 text-blue-600 bg-blue-50 text-sm font-semibold flex items-center gap-1 whitespace-nowrap hover:bg-blue-100 transition-all"
+                                >
+                                  <Plus size={12} /> Manage Tax Types
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => {
                                     if (tipVisible) {
-                                      // Deselect — hide field and clear value
                                       setTipVisible(false);
                                       handleFieldChange("tip", "");
                                     } else {
-                                      // Select — show field cleared to $0.00
                                       setTipVisible(true);
                                       handleFieldChange("tip", "0");
                                       setTimeout(() => {
@@ -5109,20 +5118,6 @@ Thank you for using our receipt management system.
                                   }`}
                                 >
                                   TIP
-                                </button>
-                              </div>
-
-                              {/* Row 2: Manage Tax Types — blue, always visible directly below TIP */}
-                              <div className="mb-2">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setShowTaxDropdown(null);
-                                    setShowManageTaxModal(true);
-                                  }}
-                                  className="px-4 py-1.5 rounded-full border border-blue-400 text-blue-600 bg-blue-50 text-sm font-semibold flex items-center gap-1 whitespace-nowrap hover:bg-blue-100 transition-all"
-                                >
-                                  <Plus size={12} /> Manage Tax Types
                                 </button>
                               </div>
 

@@ -928,10 +928,15 @@ const HomePage = () => {
               {/* ── Draft / To Be Verified receipts ── */}
               {draftReceipts.length > 0 && (
                 <div className="mb-4">
-                  <div className="home-year-header bg-amber-50 border-b border-amber-200">
+                  <div className="home-year-header bg-amber-50 border-b border-amber-200 flex items-center justify-between">
                     <span className="text-amber-700 font-bold">
                       Draft Receipts ({draftReceipts.length}{" "}
                       {draftReceipts.length === 1 ? "Receipt" : "Receipts"})
+                    </span>
+                    <span className="text-amber-700 font-bold">
+                      {formatCurrency(
+                        draftReceipts.reduce((sum, r) => sum + (parseFloat(r.purchasePrice) || 0), 0)
+                      )}
                     </span>
                   </div>
                   <div className="home-receipts-inner">
