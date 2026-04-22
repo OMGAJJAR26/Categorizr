@@ -354,8 +354,9 @@ const ReceiptDetail = ({
 
     // PRIORITY 2: Use paymentType if no issuer
     if (type) {
-      // Clean up type - remove invalid *0 parts
-      const cleanType = type.replace(/\*\s*0$/, "").trim();
+      // Strip ALL embedded *digits from type before re-appending last4
+      // (prevents "Visa *0700 *0700" when paymentType already has *last4 embedded)
+      const cleanType = type.replace(/\s*\*\d{3,4}/g, "").trim();
       if (cleanType && cleanType !== "0") {
         return last4 ? `${cleanType} *${last4}` : cleanType;
       }
@@ -617,10 +618,11 @@ useEffect(() => {
           }
           return "";
         }
-        // Return the base type with *last4 appended for display (if last4 is available and valid)
-        if (last4 && last4 !== "0") {
-          return `${baseType} *${last4}`;
-        }
+        // Return just the base network name (no *last4 embedded).
+        // last4 is stored separately in last_4_digit_card; getPaymentDisplayName
+        // will combine them. Embedding *last4 here caused "Visa *0700 *0700" when
+        // card_issuer_name was empty and getPaymentDisplayName's priority-2 path
+        // re-appended last4 onto an already-suffixed paymentType.
         return baseType;
       })();
 
