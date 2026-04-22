@@ -78,8 +78,9 @@ const PAYMENT_CARD_TYPES = [
 ];
 
 /* ─── Shared styles ────────────────────────────────────── */
-const inputCls = "w-full bg-white border border-gray-200 text-gray-900 text-sm rounded-xl px-4 py-2.5 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all";
-const labelCls = "block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5";
+const inputCls = "w-full bg-white/95 border border-slate-200 text-slate-900 text-sm rounded-xl px-4 py-2.5 placeholder-slate-400 shadow-sm focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all";
+const labelCls = "block text-[11px] font-semibold text-slate-500 uppercase tracking-[0.08em] mb-1.5";
+const sectionCardCls = "bg-white border border-slate-200/80 rounded-2xl shadow-sm";
 
 /* ─── ItemLogo ─────────────────────────────────────────── */
 const ItemLogo = ({ logo, name }) => {
@@ -101,11 +102,11 @@ const ItemLogo = ({ logo, name }) => {
 
 /* ─── ItemRow ──────────────────────────────────────────── */
 const ItemRow = ({ logo, name, sublabel, badge, badgeCls, actions }) => (
-  <div className="flex items-center gap-3 bg-gray-50 rounded-xl px-3 py-2.5 border border-gray-100">
+  <div className="flex items-center gap-3 bg-white rounded-xl px-3 py-2.5 border border-slate-200/80 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:shadow-[0_4px_14px_rgba(15,23,42,0.08)] transition-all">
     <ItemLogo logo={logo} name={name} />
     <div className="flex-1 min-w-0">
-      <p className="text-sm font-medium text-gray-900 truncate">{name}</p>
-      {sublabel && <p className="text-xs text-gray-400 truncate">{sublabel}</p>}
+      <p className="text-sm font-semibold text-slate-900 truncate">{name}</p>
+      {sublabel && <p className="text-xs text-slate-400 truncate">{sublabel}</p>}
     </div>
     {badge && <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md border flex-shrink-0 ${badgeCls}`}>{badge}</span>}
     <div className="flex items-center gap-1 flex-shrink-0">{actions}</div>
@@ -218,7 +219,7 @@ const ManageModal = ({ type, onClose }) => {
   const customItems  = buildCustomItems().filter(i => i.name.toLowerCase().includes(search.toLowerCase()));
   const taxItems     = type === "taxes" ? taxData.filter(t => (t.tax_name || "").toLowerCase().includes(search.toLowerCase())) : [];
   const Icon = cfg.icon;
-  const mInput = "flex-1 min-w-0 bg-white border border-gray-200 text-gray-900 text-sm rounded-xl px-3 py-2 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all";
+  const mInput = "flex-1 min-w-0 bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all";
   const ab = (color, onClick, children) => (
     <button onClick={onClick} className={`flex items-center justify-center w-7 h-7 rounded-lg text-white text-xs transition-all ${color}`}>{children}</button>
   );
@@ -433,7 +434,7 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
     <>
       {/* Sub-view back button */}
       {view !== "menu" && (
-        <button onClick={() => setView("menu")} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-5 transition-colors">
+        <button onClick={() => setView("menu")} className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 mb-5 transition-colors bg-slate-100 hover:bg-slate-200 rounded-lg px-2.5 py-1.5">
           <ArrowLeft size={15} /> Back
         </button>
       )}
@@ -444,16 +445,16 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
           {menuItems.map(({ icon: Icon, label, sub, view: target, color, bg }) => (
             <button key={target}
               onClick={() => target === "logoff" ? onLogoutRequest() : setView(target)}
-              className="flex items-center gap-4 bg-white border border-gray-200 rounded-xl px-4 py-3.5 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm text-left group"
+              className="flex items-center gap-4 bg-gradient-to-r from-white to-slate-50/70 border border-slate-200 rounded-2xl px-4 py-3.5 hover:from-white hover:to-blue-50/50 hover:border-slate-300 transition-all shadow-sm text-left group"
             >
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${bg}`}>
                 <Icon size={18} className={color} />
               </div>
               <div className="flex-1 min-w-0">
-                <p className={`text-sm font-semibold ${target === "deleteConfirm" ? "text-red-500" : "text-gray-900"}`}>{label}</p>
-                <p className="text-xs text-gray-400 mt-0.5">{sub}</p>
+                <p className={`text-sm font-semibold ${target === "deleteConfirm" ? "text-red-500" : "text-slate-900"}`}>{label}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{sub}</p>
               </div>
-              <ChevronRight size={16} className="text-gray-300 group-hover:text-gray-500 transition-colors flex-shrink-0" />
+              <ChevronRight size={16} className="text-slate-300 group-hover:text-slate-500 transition-colors flex-shrink-0" />
             </button>
           ))}
         </div>
@@ -461,7 +462,7 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
 
       {/* ── Edit Profile ── */}
       {view === "editProfile" && (
-        <form onSubmit={handleProfileUpdate} className="flex flex-col gap-4 max-w-md">
+        <form onSubmit={handleProfileUpdate} className="flex flex-col gap-4 max-w-md bg-slate-50/50 border border-slate-200 rounded-2xl p-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>First Name</label>
@@ -483,16 +484,16 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
                 <span className="normal-case font-normal text-blue-500 ml-1">(Recommended)</span>
               </label>
               <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                <span className="text-[11px] text-gray-400">Same as recovery</span>
+                <span className="text-[11px] text-slate-400">Same as recovery</span>
                 <div onClick={() => setProfile(p => ({ ...p, sameAsRecovery: !p.sameAsRecovery, receiptEmail: !p.sameAsRecovery ? p.recoveryEmail : p.receiptEmail }))}
-                  className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${profile.sameAsRecovery ? "bg-blue-500" : "bg-gray-200"}`}>
+                  className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${profile.sameAsRecovery ? "bg-blue-500" : "bg-slate-200"}`}>
                   <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${profile.sameAsRecovery ? "left-4" : "left-0.5"}`} />
                 </div>
               </label>
             </div>
             <input className={inputCls} type="email" value={profile.sameAsRecovery ? profile.recoveryEmail : profile.receiptEmail} disabled={profile.sameAsRecovery}
               onChange={e => setProfile(p => ({ ...p, receiptEmail: e.target.value }))} placeholder="receipts@email.com" />
-            <p className="text-[11px] text-gray-400 mt-1.5">Note: Categorizr will send you a duplicate copy of your eReceipt to this email address.</p>
+            <p className="text-[11px] text-slate-500 mt-1.5">Note: Categorizr will send you a duplicate copy of your eReceipt to this email address.</p>
           </div>
           <AnimatePresence>
             {profileMsg && (
@@ -502,28 +503,28 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
               </motion.div>
             )}
           </AnimatePresence>
-          <button type="submit" className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl transition-all">Update</button>
+          <button type="submit" className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl transition-all shadow-sm hover:shadow">Update</button>
         </form>
       )}
 
       {/* ── Change Password ── */}
       {view === "changePassword" && (
-        <form onSubmit={handlePasswordReset} className="flex flex-col gap-4 max-w-md">
+        <form onSubmit={handlePasswordReset} className="flex flex-col gap-4 max-w-md bg-slate-50/50 border border-slate-200 rounded-2xl p-4">
           <div>
             <label className={labelCls}>New Password</label>
             <div className="relative">
               <input className={`${inputCls} pr-10`} type={showNew ? "text" : "password"} value={passwords.newPassword}
                 onChange={e => setPasswords(p => ({ ...p, newPassword: e.target.value }))} placeholder="Enter new password" />
-              <button type="button" onClick={() => setShowNew(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+              <button type="button" onClick={() => setShowNew(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
                 {showNew ? <EyeOff size={16}/> : <Eye size={16}/>}
               </button>
             </div>
             {strengthLevel && (
               <div className="mt-2 flex items-center gap-2">
-                <div className="flex-1 h-1 rounded-full bg-gray-200 overflow-hidden">
+                <div className="flex-1 h-1 rounded-full bg-slate-200 overflow-hidden">
                   <div className={`h-full rounded-full transition-all duration-300 ${strengthColor} ${strengthWidth}`} />
                 </div>
-                <span className="text-xs text-gray-400 capitalize">{strengthLevel}</span>
+                <span className="text-xs text-slate-500 capitalize">{strengthLevel}</span>
               </div>
             )}
           </div>
@@ -532,7 +533,7 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
             <div className="relative">
               <input className={`${inputCls} pr-10`} type={showConfirm ? "text" : "password"} value={passwords.confirmPassword}
                 onChange={e => setPasswords(p => ({ ...p, confirmPassword: e.target.value }))} placeholder="Re-enter new password" />
-              <button type="button" onClick={() => setShowConfirm(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+              <button type="button" onClick={() => setShowConfirm(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
                 {showConfirm ? <EyeOff size={16}/> : <Eye size={16}/>}
               </button>
             </div>
@@ -550,23 +551,23 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
               </motion.div>
             )}
           </AnimatePresence>
-          <button type="submit" className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl transition-all">Reset Password</button>
+          <button type="submit" className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl transition-all shadow-sm hover:shadow">Reset Password</button>
           <button type="button" onClick={() => setShowForgotPassword(true)} className="text-xs text-blue-500 hover:text-blue-700 text-center">Forgot Password?</button>
         </form>
       )}
 
       {/* ── Delete Confirm ── */}
       {view === "deleteConfirm" && (
-        <div className="max-w-md flex flex-col items-center gap-4 text-center py-4">
+        <div className="max-w-md flex flex-col items-center gap-4 text-center py-4 bg-red-50/50 border border-red-100 rounded-2xl">
           <div className="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center">
             <Trash size={28} className="text-red-500" />
           </div>
           <div>
-            <p className="text-lg font-bold text-gray-900">Are you sure?</p>
-            <p className="text-sm text-gray-500 mt-1 max-w-xs">This will permanently delete your account and all data. This cannot be undone.</p>
+            <p className="text-lg font-bold text-slate-900">Are you sure?</p>
+            <p className="text-sm text-slate-500 mt-1 max-w-xs">This will permanently delete your account and all data. This cannot be undone.</p>
           </div>
           <div className="flex gap-3 w-full max-w-xs">
-            <button onClick={() => setView("menu")} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-700 text-sm font-semibold hover:bg-gray-50 transition-all">No, Keep It</button>
+            <button onClick={() => setView("menu")} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-sm font-semibold hover:bg-slate-50 transition-all">No, Keep It</button>
             <button className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition-all">Yes, Delete</button>
           </div>
         </div>
@@ -587,27 +588,27 @@ const MyNetworkPanel = () => {
   return (
     <div className="max-w-md flex flex-col gap-4">
       <div className="relative">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-        <input className="w-full bg-white border border-gray-200 text-sm text-gray-900 rounded-xl pl-8 pr-8 py-2.5 placeholder-gray-400 focus:outline-none focus:border-blue-400 transition-all shadow-sm"
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+        <input className="w-full bg-white border border-slate-200 text-sm text-slate-900 rounded-xl pl-8 pr-8 py-2.5 placeholder-slate-400 focus:outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-500/10 transition-all shadow-sm"
           placeholder="Search network…" value={search} onChange={e => setSearch(e.target.value)} />
-        {search && <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"><X size={13}/></button>}
+        {search && <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X size={13}/></button>}
       </div>
       {filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
-          <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center">
-            <Network size={24} className="text-gray-300" />
+        <div className="flex flex-col items-center justify-center gap-3 py-14 text-center bg-slate-50 border border-slate-200 rounded-2xl">
+          <div className="w-14 h-14 rounded-full bg-white border border-slate-200 flex items-center justify-center shadow-sm">
+            <Network size={24} className="text-slate-300" />
           </div>
-          <p className="text-sm font-medium text-gray-500">{search ? "No users found." : "You don't have a network"}</p>
-          {!search && <p className="text-xs text-gray-400">Please search for network</p>}
+          <p className="text-sm font-medium text-slate-600">{search ? "No users found." : "You don't have a network"}</p>
+          {!search && <p className="text-xs text-slate-400">Please search for network</p>}
         </div>
       ) : (
         <div className="flex flex-col gap-2">
           {filtered.map(u => (
-            <div key={u.id} className="flex items-center gap-3 bg-white border border-gray-100 rounded-xl px-3 py-2.5 shadow-sm">
+            <div key={u.id} className="flex items-center gap-3 bg-white border border-slate-200/80 rounded-xl px-3 py-2.5 shadow-sm">
               <div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">{(u.username || "?")[0].toUpperCase()}</div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-gray-900 truncate">{u.username}</p>
-                <p className="text-xs text-gray-400 truncate">{u.status || "Connected"}</p>
+                <p className="text-sm font-semibold text-slate-900 truncate">{u.username}</p>
+                <p className="text-xs text-slate-400 truncate">{u.status || "Connected"}</p>
               </div>
             </div>
           ))}
@@ -634,14 +635,14 @@ const ReceiptInfoPanel = ({ type, merchants, expenseCategories, paymentMethods, 
 
   return (
     <div className="flex flex-col gap-2 max-w-lg">
-      <p className="text-xs text-gray-400 mb-2">Deleting a merchant linked to existing receipts will reassign them to Miscellaneous.</p>
+      <p className="text-xs text-slate-500 mb-2">Deleting a merchant linked to existing receipts will reassign them to Miscellaneous.</p>
       {items.map(({ type: t, icon: Icon, label, count, iconBg, iconColor, countBg }) => (
         <button key={t} onClick={() => onOpen(t)}
-          className="w-full flex items-center gap-4 bg-white border border-gray-200 rounded-xl px-4 py-3.5 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm text-left group">
+          className="w-full flex items-center gap-4 bg-white border border-slate-200 rounded-2xl px-4 py-3.5 hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm text-left group">
           <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${iconBg}`}><Icon size={18} className={iconColor} /></div>
-          <span className="flex-1 text-sm font-semibold text-gray-900">{label}</span>
+          <span className="flex-1 text-sm font-semibold text-slate-900">{label}</span>
           <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border flex-shrink-0 ${countBg}`}>{count}</span>
-          <ChevronRight size={16} className="text-gray-300 group-hover:text-gray-500 flex-shrink-0 transition-colors" />
+          <ChevronRight size={16} className="text-slate-300 group-hover:text-slate-500 flex-shrink-0 transition-colors" />
         </button>
       ))}
     </div>
@@ -655,21 +656,21 @@ const MyInformationPanel = ({ user }) => {
   return (
     <div className="flex flex-col gap-6 max-w-lg">
       {/* Profile card + QR */}
-      <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm flex flex-col sm:flex-row items-center gap-5">
+      <div className="bg-gradient-to-br from-white to-slate-50 border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col sm:flex-row items-center gap-5">
         <div className="flex-shrink-0 flex flex-col items-center gap-2">
-          <div className="p-3 bg-white border border-gray-200 rounded-xl shadow-sm">
+          <div className="p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
             {email ? <QRCodeSVG value={`mailto:${email}`} size={120} bgColor="#ffffff" fgColor="#1e293b" /> : (
-              <div className="w-[120px] h-[120px] bg-gray-100 rounded-lg flex items-center justify-center"><QrCode size={40} className="text-gray-300" /></div>
+              <div className="w-[120px] h-[120px] bg-slate-100 rounded-lg flex items-center justify-center"><QrCode size={40} className="text-slate-300" /></div>
             )}
           </div>
-          <p className="text-[11px] text-gray-400">Scan to see email</p>
+          <p className="text-[11px] text-slate-500">Scan to see email</p>
         </div>
         <div className="flex-1 min-w-0 text-center sm:text-left">
           <div className="w-14 h-14 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white text-xl font-bold mx-auto sm:mx-0 mb-3">
             {displayName[0].toUpperCase()}
           </div>
-          <p className="text-base font-bold text-gray-900 truncate">{displayName}</p>
-          {email && <p className="text-sm text-gray-500 truncate mt-0.5">{email}</p>}
+          <p className="text-base font-bold text-slate-900 truncate">{displayName}</p>
+          {email && <p className="text-sm text-slate-500 truncate mt-0.5">{email}</p>}
         </div>
       </div>
       {/* Coming soon cards */}
@@ -678,11 +679,11 @@ const MyInformationPanel = ({ user }) => {
         { icon: Truck, label: "Vehicle Information",  sub: "Vehicle details and registration" },
         { icon: Home,  label: "Property Information", sub: "Property records and details" },
       ].map(({ icon: Icon, label, sub }) => (
-        <div key={label} className="flex items-center gap-4 bg-white border border-gray-200 rounded-xl px-4 py-3.5 opacity-60 cursor-not-allowed shadow-sm">
-          <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0"><Icon size={18} className="text-gray-400" /></div>
+        <div key={label} className="flex items-center gap-4 bg-white border border-slate-200 rounded-xl px-4 py-3.5 opacity-70 cursor-not-allowed shadow-sm">
+          <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0"><Icon size={18} className="text-slate-400" /></div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-500">{label}</p>
-            <p className="text-xs text-gray-400 mt-0.5">{sub}</p>
+            <p className="text-sm font-semibold text-slate-600">{label}</p>
+            <p className="text-xs text-slate-500 mt-0.5">{sub}</p>
           </div>
           <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-yellow-50 text-yellow-600 border border-yellow-200 flex-shrink-0">Coming Soon</span>
         </div>
@@ -761,11 +762,11 @@ const Settings = () => {
 
   /* Sidebar */
   const Sidebar = () => (
-    <aside className="flex flex-col h-full bg-white border-r border-gray-200 w-64 flex-shrink-0">
+    <aside className="flex flex-col h-full bg-white/95 backdrop-blur-md border-r border-slate-200/80 w-72 flex-shrink-0">
       {/* Sidebar header */}
-      <div className="px-4 py-5 border-b border-gray-100">
+      <div className="px-4 py-5 border-b border-slate-200/80">
         <button onClick={() => navigate("/homepage")}
-          className="flex items-center gap-2 text-sm font-semibold text-gray-600 hover:text-gray-900 transition-colors mb-4">
+          className="flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-900 transition-colors mb-4">
           <ArrowLeft size={16} /> Settings
         </button>
       </div>
@@ -773,17 +774,17 @@ const Settings = () => {
       <nav className="flex-1 overflow-y-auto px-3 py-4 flex flex-col gap-5">
         {NAV.map(({ group, items }) => (
           <div key={group}>
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-2 mb-1.5">{group}</p>
-            <div className="flex flex-col gap-0.5">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.12em] px-2 mb-2">{group}</p>
+            <div className="flex flex-col gap-1">
               {items.map(({ id, icon: Icon, label, soon }) => {
                 const isActive = active === id;
                 return (
                   <button key={id} onClick={() => handleNavClick(id, soon)}
                     disabled={soon}
-                    className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all text-left w-full
-                      ${soon ? "opacity-40 cursor-not-allowed text-gray-500" : ""}
-                      ${!soon && isActive ? "bg-blue-50 text-blue-700" : ""}
-                      ${!soon && !isActive ? "text-gray-600 hover:bg-gray-50 hover:text-gray-900" : ""}`}
+                    className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all text-left w-full border
+                      ${soon ? "opacity-40 cursor-not-allowed text-slate-500 border-transparent" : ""}
+                      ${!soon && isActive ? "bg-blue-50/80 text-blue-700 border-blue-100 shadow-sm" : ""}
+                      ${!soon && !isActive ? "text-slate-600 border-transparent hover:bg-slate-50 hover:border-slate-200 hover:text-slate-900" : ""}`}
                   >
                     <Icon size={15} className={isActive && !soon ? "text-blue-600" : ""} />
                     <span className="flex-1">{label}</span>
@@ -796,9 +797,9 @@ const Settings = () => {
         ))}
       </nav>
       {/* Logout at bottom of sidebar */}
-      <div className="px-3 py-4 border-t border-gray-100">
+      <div className="px-3 py-4 border-t border-slate-200/80">
         <button onClick={() => setShowLogoutConfirm(true)}
-          className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium text-red-500 hover:bg-red-50 transition-all w-full">
+          className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium text-red-500 hover:bg-red-50 border border-transparent hover:border-red-100 transition-all w-full">
           <LogOut size={15} /> Log out
         </button>
       </div>
@@ -806,7 +807,7 @@ const Settings = () => {
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 via-slate-50 to-blue-50/30 flex flex-col">
       <Header />
 
       {/* Page body */}
@@ -834,30 +835,33 @@ const Settings = () => {
         {/* ── Main content ── */}
         <main className="flex-1 overflow-y-auto">
           {/* Top bar */}
-          <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-3 sticky top-0 z-10">
+          <div className="bg-white/90 backdrop-blur-md border-b border-slate-200 px-6 py-4 flex items-center gap-3 sticky top-0 z-10">
             {/* Mobile menu button */}
-            <button onClick={() => setSidebarOpen(true)} className="lg:hidden flex items-center justify-center w-8 h-8 rounded-lg hover:bg-gray-100 transition-colors text-gray-500">
+            <button onClick={() => setSidebarOpen(true)} className="lg:hidden flex items-center justify-center w-8 h-8 rounded-lg hover:bg-slate-100 transition-colors text-slate-500">
               <SettingsIcon size={16} />
             </button>
             {/* Breadcrumb */}
-            <nav className="flex items-center gap-1.5 text-sm text-gray-400">
-              <button onClick={() => navigate("/homepage")} className="hover:text-gray-700 transition-colors flex items-center gap-1">
+            <nav className="flex items-center gap-1.5 text-sm text-slate-400">
+              <button onClick={() => navigate("/homepage")} className="hover:text-slate-700 transition-colors flex items-center gap-1">
                 <Home size={13} /> Home
               </button>
               <ChevronRight size={12} />
-              <span className="text-gray-400">Settings</span>
+              <span className="text-slate-400">Settings</span>
               <ChevronRight size={12} />
-              <span className="text-gray-900 font-semibold">{crumbLabel}</span>
+              <span className="text-slate-900 font-semibold">{crumbLabel}</span>
             </nav>
           </div>
 
           {/* Panel content */}
-          <div className="px-6 py-7">
-            <h1 className="text-xl font-bold text-gray-900 mb-1">{crumbLabel}</h1>
-            <div className="w-10 h-0.5 bg-blue-500 rounded-full mb-6" />
+          <div className="px-4 sm:px-6 py-7">
+            <div className="mb-5">
+              <p className="text-xs uppercase tracking-[0.14em] text-slate-400 font-semibold">Workspace Settings</p>
+              <h1 className="text-2xl font-bold text-slate-900 mt-1">{crumbLabel}</h1>
+              <div className="w-12 h-0.5 bg-blue-500 rounded-full mt-3" />
+            </div>
 
             <AnimatePresence mode="wait">
-              <motion.div key={active} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.18 }}>
+              <motion.div key={active} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.18 }} className={`${sectionCardCls} p-4 sm:p-6`}>
                 {active === "myaccount" && (
                   <MyAccountPanel user={user} onLogoutRequest={() => setShowLogoutConfirm(true)} />
                 )}
@@ -1444,7 +1448,7 @@ const ReceiptInfoInline = ({ type }) => {
           onClick={() => setShowAddForm((prev) => !prev)}
           className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-semibold transition-all ${
             showAddForm
-              ? "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              ? "bg-slate-100 text-slate-700 hover:bg-slate-200"
               : `${colors.btn} text-white`
           }`}
         >
@@ -1455,7 +1459,7 @@ const ReceiptInfoInline = ({ type }) => {
 
       {/* ── Add form ── */}
       {showAddForm && (
-      <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col gap-3">
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-3">
 
         {type === "taxes" && (
           <>
@@ -1492,15 +1496,15 @@ const ReceiptInfoInline = ({ type }) => {
 
         {type === "payments" && (
           <>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Select Card Type</p>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Select Card Type</p>
             <div className="grid grid-cols-3 gap-2">
               {PAYMENT_CARD_TYPES.map(ct => (
                 <button key={ct.name} type="button"
                   style={{ margin: 0, padding: 0 }}
                   onClick={() => setNewCardType(prev => prev === ct.name ? "" : ct.name)}
-                  className={`flex flex-col items-center gap-1 py-2 px-1 rounded-xl border-2 transition-all cursor-pointer ${newCardType === ct.name ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200" : "border-gray-200 bg-white hover:border-blue-300"}`}>
+                  className={`flex flex-col items-center gap-1 py-2 px-1 rounded-xl border-2 transition-all cursor-pointer ${newCardType === ct.name ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200" : "border-slate-200 bg-white hover:border-blue-300"}`}>
                   <img src={ct.logo} alt={ct.name} style={{ height: 30, width: 52, objectFit: "contain", display: "block", margin: 0, padding: 0 }} />
-                  <span className="text-[10px] font-medium text-gray-600 text-center leading-tight block">{ct.name}</span>
+                  <span className="text-[10px] font-medium text-slate-600 text-center leading-tight block">{ct.name}</span>
                 </button>
               ))}
             </div>
@@ -1533,10 +1537,10 @@ const ReceiptInfoInline = ({ type }) => {
 
       {/* ── Search ── */}
       <div className="relative">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-        <input className="w-full bg-white border border-gray-200 text-sm text-gray-900 rounded-xl pl-8 pr-8 py-2.5 placeholder-gray-400 focus:outline-none focus:border-blue-400 transition-all shadow-sm"
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+        <input className="w-full bg-white border border-slate-200 text-sm text-slate-900 rounded-xl pl-8 pr-8 py-2.5 placeholder-slate-400 focus:outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-500/10 transition-all shadow-sm"
           placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} />
-        {search && <button type="button" onClick={() => setSearch("")}  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 w-5 h-5 flex items-center justify-center"><X size={13}/></button>}
+        {search && <button type="button" onClick={() => setSearch("")}  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 w-5 h-5 flex items-center justify-center"><X size={13}/></button>}
       </div>
 
       {/* ── List ── */}
@@ -1545,7 +1549,7 @@ const ReceiptInfoInline = ({ type }) => {
         {/* Taxes */}
         {type === "taxes" && (
           taxItems.length === 0
-            ? <p className="text-sm text-gray-400 text-center py-8">No tax types yet.</p>
+            ? <p className="text-sm text-slate-400 text-center py-8">No tax types yet.</p>
             : taxItems.map(tax => {
                 const isEd = editTaxKey === tax.id;
                 return (
@@ -1564,7 +1568,7 @@ const ReceiptInfoInline = ({ type }) => {
                             try { await updateTax({ ...taxData.find(t => t.id === editTaxKey), tax_name: n, tax_rate: r, tax_number: editTaxVal.tax_number.trim() }); setEditTaxKey(null); }
                             catch (e) { toast("error", e.message || "Failed."); }
                           }} style={{ margin: 0 }} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex-shrink-0">Save</button>
-                          <button type="button" onClick={() => setEditTaxKey(null)} style={{ margin: 0 }} className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-semibold rounded-lg flex-shrink-0">Cancel</button>
+                          <button type="button" onClick={() => setEditTaxKey(null)} style={{ margin: 0 }} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex-shrink-0">Cancel</button>
                         </div>
                       </div>
                     ) : (
@@ -1583,7 +1587,7 @@ const ReceiptInfoInline = ({ type }) => {
         {/* Merchants / Categories / Payments — unified list */}
         {type !== "taxes" && (
           allItems.length === 0
-            ? <p className="text-sm text-gray-400 text-center py-8">No {cfg.label.toLowerCase()} yet.</p>
+            ? <p className="text-sm text-slate-400 text-center py-8">No {cfg.label.toLowerCase()} yet.</p>
             : allItems.map(item => {
                 const isEd = editKey === item.key;
                 // resolve logo shown in list: prefer merchant logo map, then item logo
@@ -1609,14 +1613,14 @@ const ReceiptInfoInline = ({ type }) => {
                             <button type="button" style={{ margin: 0 }}
                               onClick={() => doFetch(editVal || item.name, setIsFetchEditLogo, setEditLogoOpts, setEditLogoSel)}
                               disabled={isFetchEditLogo}
-                              className="p-2 rounded-xl bg-white border border-gray-200 text-gray-500 flex-shrink-0 disabled:opacity-40 flex items-center justify-center">
+                              className="p-2 rounded-xl bg-white border border-slate-200 text-slate-500 flex-shrink-0 disabled:opacity-40 flex items-center justify-center">
                               {isFetchEditLogo
                                 ? <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
                                 : <Search size={13} />}
                             </button>
                           )}
                           <button type="button" onClick={() => handleSaveEdit(item)} style={{ margin: 0 }} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex-shrink-0">Save</button>
-                          <button type="button" onClick={closeEdit} style={{ margin: 0 }} className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-semibold rounded-lg flex-shrink-0">Cancel</button>
+                          <button type="button" onClick={closeEdit} style={{ margin: 0 }} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex-shrink-0">Cancel</button>
                         </div>
                         {/* Logo search results (edit mode, merchants) */}
                         {type === "merchants" && <LogoGrid options={editLogoOpts} selectedIndex={editLogoSel} onSelect={setEditLogoSel} />}
@@ -1647,8 +1651,8 @@ const ReceiptInfoInline = ({ type }) => {
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
           className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
-            className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center">
-            <p className="text-sm font-medium text-gray-800 leading-relaxed mb-5">
+            className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center border border-slate-200">
+            <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
               When editing a Merchant<br />
               all receipts associated with that<br />
               Merchant will also be updated.
@@ -1656,7 +1660,7 @@ const ReceiptInfoInline = ({ type }) => {
             <div className="flex gap-3">
               <button type="button"
                 onClick={() => { setShowMerchantEditConfirm(false); setPendingMerchantEdit(null); }}
-                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 rounded-xl text-gray-700 font-semibold text-sm transition-colors">
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
                 Cancel
               </button>
               <button type="button" onClick={doConfirmMerchantEdit}
@@ -1675,8 +1679,8 @@ const ReceiptInfoInline = ({ type }) => {
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
           className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
-            className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center">
-            <p className="text-sm font-medium text-gray-800 leading-relaxed mb-5">
+            className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center border border-slate-200">
+            <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
               Are you sure you want to delete this<br />
               Merchant? If so, then all Receipts<br />
               associated with this Merchant will<br />
@@ -1686,7 +1690,7 @@ const ReceiptInfoInline = ({ type }) => {
             <div className="flex gap-3">
               <button type="button"
                 onClick={() => { setShowMerchantDeleteConfirm(false); setPendingMerchantDelete(null); }}
-                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 rounded-xl text-gray-700 font-semibold text-sm transition-colors">
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
                 Cancel
               </button>
               <button type="button" onClick={doConfirmMerchantDelete}
