@@ -930,11 +930,13 @@ const ReceiptInfoInline = ({ type }) => {
   useEffect(() => { if (type === "merchants") fetchApiMerchants(); }, [type]);
   useEffect(() => { if (type === "payments") fetchApiPaymentMethods(); }, [type]);
   useEffect(() => { if (type === "categories") fetchApiExpenseCategories(); }, [type]);
+  useEffect(() => { setShowAddForm(false); }, [type]);
 
   const cfg    = MODAL_CFG[type];
   const colors = COLOR_MAP[cfg.color];
 
   const [search, setSearch]     = useState("");
+  const [showAddForm, setShowAddForm] = useState(false);
   const [addVal, setAddVal]     = useState("");
   const [addTaxVal, setAddTaxVal] = useState({ tax_name: "", tax_rate: "", tax_number: "" });
   const [msg, setMsg]           = useState(null);
@@ -1113,6 +1115,7 @@ const ReceiptInfoInline = ({ type }) => {
       try {
         await addTax({ tax_name: n, tax_rate: r, tax_number: addTaxVal.tax_number.trim(), fk_user_id: localStorage.getItem("fk_user_id") || "" });
         setAddTaxVal({ tax_name: "", tax_rate: "", tax_number: "" });
+        setShowAddForm(false);
         toast("success", `"${n}" added.`);
       } catch (e) { toast("error", e.message || "Failed."); }
       return;
@@ -1130,6 +1133,7 @@ const ReceiptInfoInline = ({ type }) => {
       if (selectedUrl) saveMerchLogo(name, selectedUrl);
       await addApiMerchant(name, selectedUrl || "");
       setNewMerchantName(""); setAddLogoOpts([]); setAddLogoSel(null);
+      setShowAddForm(false);
       toast("success", "Merchant Added");
       return;
     }
@@ -1144,6 +1148,7 @@ const ReceiptInfoInline = ({ type }) => {
       // Also persist to API
       await addApiPaymentMethod(payStr, "");
       setNewCardType(""); setNewIssuerName(""); setNewLast4("");
+      setShowAddForm(false);
       toast("success", `"${payStr}" added.`);
       return;
     }
@@ -1153,6 +1158,7 @@ const ReceiptInfoInline = ({ type }) => {
       addCustomCategory(catName);
       await addApiExpenseCategory(catName);
       setAddVal("");
+      setShowAddForm(false);
       toast("success", `"${catName}" added.`);
       return;
     }
@@ -1412,7 +1418,11 @@ const ReceiptInfoInline = ({ type }) => {
         .sort((a, b) => (a.tax_name || "").toLowerCase().localeCompare((b.tax_name || "").toLowerCase()))
     : [];
   const allItems = type !== "taxes"
-    ? buildAllItems().filter(i => i.name.toLowerCase().includes(search.toLowerCase()))
+    ? buildAllItems()
+        .filter(i => i.name.toLowerCase().includes(search.toLowerCase()))
+        .sort((a, b) =>
+          (a.name || "").toLowerCase().localeCompare((b.name || "").toLowerCase())
+        )
     : [];
 
   const mInput = "flex-1 min-w-0 bg-white border border-gray-200 text-gray-900 text-sm rounded-xl px-3 py-2 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all";
@@ -1427,7 +1437,24 @@ const ReceiptInfoInline = ({ type }) => {
     <>
     <div className="max-w-lg flex flex-col gap-4">
 
+      {/* ── Add action (top-right) ── */}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => setShowAddForm((prev) => !prev)}
+          className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-semibold transition-all ${
+            showAddForm
+              ? "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              : `${colors.btn} text-white`
+          }`}
+        >
+          <Plus size={14} />
+          {showAddForm ? "Close" : "Add"}
+        </button>
+      </div>
+
       {/* ── Add form ── */}
+      {showAddForm && (
       <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col gap-3">
 
         {type === "taxes" && (
@@ -1502,6 +1529,7 @@ const ReceiptInfoInline = ({ type }) => {
           )}
         </AnimatePresence>
       </div>
+      )}
 
       {/* ── Search ── */}
       <div className="relative">

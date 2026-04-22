@@ -810,19 +810,17 @@ export const DataProvider = ({ children }) => {
         console.error("[fetchData] fetchApiPaymentMethods error", apiPayErr);
       }
 
-      setMerchants([
-        "Miscellaneous", // always present — cannot be removed
-        ...new Set([
-          ...receiptsWithIntegrations
-            .map((r) => r.storeName)
-            .filter(Boolean)
-            .filter((n) => n.toLowerCase().trim() !== "miscellaneous"),
-          ...apiMerchantsData
-            .map((m) => m.store_name)
-            .filter(Boolean)
-            .filter((n) => n.toLowerCase().trim() !== "miscellaneous"),
-        ]),
-      ]);
+      setMerchants(
+        Array.from(
+          new Set([
+            "Miscellaneous", // always present — cannot be removed
+            ...receiptsWithIntegrations.map((r) => r.storeName).filter(Boolean),
+            ...apiMerchantsData.map((m) => m.store_name).filter(Boolean),
+          ])
+        ).sort((a, b) =>
+          (a || "").toString().toLowerCase().localeCompare((b || "").toString().toLowerCase())
+        )
+      );
       setStoreImage([
         ...new Set(
           receiptsWithIntegrations.map((r) => r.store_image).filter(Boolean)
@@ -856,16 +854,15 @@ apiMerchantsData.forEach(m => {
   }
 });
 
-// "Miscellaneous" is always present, pinned at the top
+// "Miscellaneous" is always present
 if (!merchantsWithImagesMap.has("miscellaneous")) {
   merchantsWithImagesMap.set("miscellaneous", { name: "Miscellaneous", image: "" });
 }
-setMerchantsWithImages([
-  { name: "Miscellaneous", image: "" },
-  ...Array.from(merchantsWithImagesMap.values()).filter(
-    (m) => m.name.toLowerCase().trim() !== "miscellaneous"
-  ),
-]);
+setMerchantsWithImages(
+  Array.from(merchantsWithImagesMap.values()).sort((a, b) =>
+    (a?.name || "").toString().toLowerCase().localeCompare((b?.name || "").toString().toLowerCase())
+  )
+);
 
       // Extract unique payment methods from receipts
       setPaymentMethods(buildPaymentMethods(receiptsWithIntegrations));
@@ -1677,7 +1674,9 @@ setMerchantsWithImages([
   const mergedMerchants = [
     ...receiptMerchantsRaw.filter((m) => !hiddenMerchants.has(m)),
     ...customMerchants.filter((m) => !hiddenMerchants.has(m) && !_rmLower.has(m.toLowerCase())),
-  ];
+  ].sort((a, b) =>
+    (a || "").toString().toLowerCase().localeCompare((b || "").toString().toLowerCase())
+  );
   const _miLower = new Set(receiptMerchWImgRaw.map((m) => (m.name || "").toLowerCase()));
   const _miCustomLower = new Set([
     ..._miLower,
@@ -1692,7 +1691,9 @@ setMerchantsWithImages([
     ...apiMerchants
       .filter((m) => m.store_name && !hiddenMerchants.has(m.store_name) && !_miCustomLower.has((m.store_name || "").toLowerCase()))
       .map((m) => ({ name: m.store_name, image: m.store_image_url || "" })),
-  ];
+  ].sort((a, b) =>
+    (a?.name || "").toString().toLowerCase().localeCompare((b?.name || "").toString().toLowerCase())
+  );
   const _rcLower = new Set(receiptCategoriesRaw.map((c) => (c || "").toLowerCase()));
   const _rcCustomLower = new Set([
     ..._rcLower,

@@ -380,19 +380,24 @@ const [localMerchants, setLocalMerchants] = useState([]);
   // Include locally added merchants
   const allMerchantsWithImages = (() => {
     const uniqueMap = new Map();
+    const mergeMerchant = (merchant) => {
+      const normalizedName = (merchant?.name || "").toString().trim().toLowerCase();
+      if (!normalizedName) return;
+      const existing = uniqueMap.get(normalizedName);
+      // Prefer the incoming merchant if it has an image and existing one does not.
+      if (!existing) {
+        uniqueMap.set(normalizedName, merchant);
+      } else if (!existing.image && merchant?.image) {
+        uniqueMap.set(normalizedName, { ...existing, ...merchant });
+      }
+    };
     // Add merchants from API
     (merchantsWithImages || []).forEach((m) => {
-      const normalizedName = (m.name || "").toString().trim().toLowerCase();
-      if (normalizedName && !uniqueMap.has(normalizedName)) {
-        uniqueMap.set(normalizedName, m);
-      }
+      mergeMerchant(m);
     });
     // Add locally added merchants
     localMerchants.forEach((m) => {
-      const normalizedName = (m.name || "").toString().trim().toLowerCase();
-      if (normalizedName && !uniqueMap.has(normalizedName)) {
-        uniqueMap.set(normalizedName, m);
-      }
+      mergeMerchant(m);
     });
     return Array.from(uniqueMap.values());
   })();
@@ -414,6 +419,15 @@ const [localMerchants, setLocalMerchants] = useState([]);
       (m) => m.name?.toString().trim().toLowerCase() === normalizedName,
     );
     if (contextMerchant?.image) return contextMerchant.image;
+
+    // Fallback to persisted merchant logos.
+    try {
+      const savedLogos = JSON.parse(localStorage.getItem("cat_merch_logos") || "{}");
+      const exactKey = Object.keys(savedLogos).find(
+        (k) => k.toString().trim().toLowerCase() === normalizedName,
+      );
+      if (exactKey && savedLogos[exactKey]) return savedLogos[exactKey];
+    } catch {}
 
     return null;
   };
@@ -2635,6 +2649,7 @@ const handleFieldChange = (field, value) => {
             : m
         )
       );
+      if (newLogo) saveMerchLogo(newName, newLogo);
       // If the form currently has this merchant selected, update it too
       if ((formData.storeName || "").toLowerCase() === oldName.toLowerCase()) {
         handleFieldChange("storeName", newName);
@@ -2973,6 +2988,21 @@ const handleSelectLogo = (index) => {
     // 5. Update local DataContext state
     addCustomMerchant(name);
     if (selectedLogoUrl) saveMerchLogo(name, selectedLogoUrl);
+    setLocalMerchants((prev) => {
+      const existingIndex = prev.findIndex(
+        (m) => (m.name || "").toString().trim().toLowerCase() === normalizedName,
+      );
+      if (existingIndex >= 0) {
+        const next = [...prev];
+        next[existingIndex] = {
+          ...next[existingIndex],
+          name,
+          image: selectedLogoUrl || next[existingIndex].image || "",
+        };
+        return next;
+      }
+      return [...prev, { name, image: selectedLogoUrl || "" }];
+    });
 
     // 6. Select the new merchant in the form
     handleFieldChange("storeName", name);
@@ -3125,11 +3155,9 @@ const handleSelectLogo = (index) => {
   // Filter functions for dropdowns - use merchantsWithImages
   // Show all merchants when dropdown opens, only filter when user is actively typing
   const sortMerchantsAlpha = (list) => {
-    const misc = list.filter(m => m.name?.toLowerCase().trim() === "miscellaneous");
-    const rest = list
-      .filter(m => m.name?.toLowerCase().trim() !== "miscellaneous")
-      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-    return [...misc, ...rest];
+    return [...list].sort((a, b) =>
+      (a?.name || "").toString().toLowerCase().localeCompare((b?.name || "").toString().toLowerCase())
+    );
   };
 
   const filteredMerchants = (() => {

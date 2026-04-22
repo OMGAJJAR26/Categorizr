@@ -711,11 +711,9 @@ useEffect(() => {
   // Filter functions — show ALL options when dropdown is opened via focus/click (not typing).
   // Only filter when the user is actively typing in the field.
   const sortMerchantsAlpha = (list) => {
-    const misc = list.filter(m => m.name?.toLowerCase().trim() === "miscellaneous");
-    const rest = list
-      .filter(m => m.name?.toLowerCase().trim() !== "miscellaneous")
-      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-    return [...misc, ...rest];
+    return [...list].sort((a, b) =>
+      (a?.name || "").toString().toLowerCase().localeCompare((b?.name || "").toString().toLowerCase())
+    );
   };
 
   const filteredMerchants = React.useMemo(() => {
