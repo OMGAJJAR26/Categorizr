@@ -934,7 +934,7 @@ const HomePage = () => {
                       {draftReceipts.length === 1 ? "Receipt" : "Receipts"})
                     </span>
                     <span className="text-amber-700 font-bold">
-                      {formatCurrency(
+                      TOTAL: {formatCurrency(
                         draftReceipts.reduce((sum, r) => sum + (parseFloat(r.purchasePrice) || 0), 0)
                       )}
                     </span>
