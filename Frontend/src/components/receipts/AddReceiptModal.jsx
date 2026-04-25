@@ -1554,7 +1554,13 @@ const handleFieldChange = (field, value) => {
         purchasePrice: cleanNumericValue(parsedReceiptData?.total || parsedReceiptData?.subtotal),
         product_name: cleanTextValue(parsedReceiptData?.productName || ""),
         notes: "",
-        receipt_tax_values: [],
+        receipt_tax_values: defaultTaxIds.map(id => {
+          const taxType = taxData?.find(t => t.id === id);
+          if (taxType) {
+            return { fk_tax_id: taxType.id, tax_name: taxType.tax_name, tax_rate: taxType.tax_rate, tax_amount: "" };
+          }
+          return null;
+        }).filter(Boolean),
         tip: cleanNumericValue(parsedReceiptData?.tip),
       }));
 
@@ -1578,6 +1584,26 @@ const handleFieldChange = (field, value) => {
     setUploadedReceiptData(null);
     setLocalImageFile(null);
     setPdfPreviewUrl(null);
+
+    // Apply default taxes
+    const defaultTaxes = defaultTaxIds.map(id => {
+      const taxType = taxData?.find(t => t.id === id);
+      if (taxType) {
+        return {
+          fk_tax_id: taxType.id,
+          tax_name: taxType.tax_name,
+          tax_rate: taxType.tax_rate,
+          tax_amount: "",
+        };
+      }
+      return null;
+    }).filter(Boolean);
+
+    setFormData(prev => ({
+      ...prev,
+      receipt_tax_values: defaultTaxes
+    }));
+
     setStep("form");
   };
 
@@ -6074,6 +6100,7 @@ const handleSelectLogo = (index) => {
                         value={newTaxName}
                         onChange={e => setNewTaxName(e.target.value)}
                         placeholder="Enter Tax Name (e.g. GST, HST, VAT)"
+                        maxLength={TAX_NAME_MAX}
                         autoFocus
                       />
                       {taxNameError && (
@@ -6110,7 +6137,7 @@ const handleSelectLogo = (index) => {
                     {/* Tax Number */}
                     <div className="mb-5">
                       <label className="block text-sm font-semibold text-blue-600 mb-1.5">
-                        Tax Number <span className="text-gray-400 text-xs font-normal">(optional)</span>
+                        Tax Number
                       </label>
                       <input
                         type="text"
@@ -6120,6 +6147,7 @@ const handleSelectLogo = (index) => {
                         value={newTaxNumber}
                         onChange={e => setNewTaxNumber(e.target.value)}
                         placeholder="Enter Tax Number"
+                        maxLength={TAX_NUMBER_MAX}
                       />
                       <p className="mt-1.5 text-xs text-gray-400">* Required</p>
                       {taxNumberError && (

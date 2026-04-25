@@ -1239,7 +1239,7 @@ const ReceiptInfoInline = ({ type }) => {
   const [pendingPaymentEdit, setPendingPaymentEdit] = useState(null); // { item, newName }
   const [showPaymentDeleteConfirm, setShowPaymentDeleteConfirm] = useState(false);
   const [pendingPaymentDelete, setPendingPaymentDelete] = useState(null); // item
-  const [showTaxRateDecisionConfirm, setShowTaxRateDecisionConfirm] = useState(false);
+  const [showTaxRateChangeWarning, setShowTaxRateChangeWarning] = useState(false);
   const [pendingTaxRateEdit, setPendingTaxRateEdit] = useState(null); // { tax, nextName, nextRate, nextNumber }
   const [showTaxDeleteBlockedMsg, setShowTaxDeleteBlockedMsg] = useState(false);
   const [showTaxDeleteConfirm, setShowTaxDeleteConfirm] = useState(false);
@@ -1449,7 +1449,15 @@ const ReceiptInfoInline = ({ type }) => {
     );
 
   const toast = (t, text) => { setMsg({ type: t, text }); setTimeout(() => setMsg(null), 3000); };
-  const TAX_RATE_MAX = 99.999;
+  const TAX_NAME_MAX = 15;
+const TAX_RATE_MAX = 99.999;
+const TAX_NUMBER_MAX = 35;
+
+const hasMoreThan3Decimals = (val) => {
+  const str = String(val).replace(/%/g, "").trim();
+  const dot = str.indexOf(".");
+  return dot !== -1 && str.length - dot - 1 > 3;
+};
 
   const expenseCategoryExists = (name, excludeKey = null) => {
     const normalized = (name || "").trim().toLowerCase();
@@ -1534,12 +1542,17 @@ const ReceiptInfoInline = ({ type }) => {
   // ── ADD ──
   const handleAdd = async () => {
     if (type === "taxes") {
-      const n = addTaxVal.tax_name.trim(), r = addTaxVal.tax_rate.toString().trim();
+      const n = addTaxVal.tax_name.trim(), r = addTaxVal.tax_rate.toString().trim(), num = addTaxVal.tax_number.trim();
       if (!n) return toast("error", "Please enter Tax Name");
+      if (n.length > TAX_NAME_MAX) return toast("error", `Tax Name cannot exceed ${TAX_NAME_MAX} characters`);
       if (!r) return toast("error", "Please enter Tax Rate");
       if (parseFloat(r) > TAX_RATE_MAX || parseFloat(r) < 0) {
         return toast("error", `Tax Rate must be between 0 and ${TAX_RATE_MAX}`);
       }
+      if (hasMoreThan3Decimals(r)) {
+        return toast("error", "Tax Rate can have a maximum of 3 decimal places (e.g. 10.894%)");
+      }
+      if (num.length > TAX_NUMBER_MAX) return toast("error", `Tax Number cannot exceed ${TAX_NUMBER_MAX} characters`);
       const duplicateTaxName = (taxData || []).some(
         (tax) => (tax.tax_name || "").toLowerCase() === n.toLowerCase()
       );
@@ -1654,7 +1667,10 @@ const ReceiptInfoInline = ({ type }) => {
           // No API entry yet — create one so it's persisted on the server.
           await addApiMerchant(newName, keepLogo || "");
         }
-        hideMerchant(item.key); addCustomMerchant(newName);
+        if (normalizeMatchKey(newName) !== normalizeMatchKey(item.name)) {
+          hideMerchant(item.key); 
+          addCustomMerchant(newName);
+        }
       } else if (item.isApiItem) {
         const updateMerchantResult = await updateApiMerchant(item.apiId, newName, keepLogo || "");
         if (!updateMerchantResult?.ok) throw new Error(updateMerchantResult?.error || "Failed to update merchant");
@@ -1938,12 +1954,17 @@ const ReceiptInfoInline = ({ type }) => {
     const keepLogo   = newLogoUrl || editOrigLogo; // use new if picked, else keep original
 
     if (type === "taxes") {
-      const n = editTaxVal.tax_name.trim(), r = editTaxVal.tax_rate.toString().trim();
+      const n = editTaxVal.tax_name.trim(), r = editTaxVal.tax_rate.toString().trim(), num = editTaxVal.tax_number.trim();
       if (!n) return toast("error", "Please enter Tax Name");
+      if (n.length > TAX_NAME_MAX) return toast("error", `Tax Name cannot exceed ${TAX_NAME_MAX} characters`);
       if (!r) return toast("error", "Please enter Tax Rate");
       if (parseFloat(r) > TAX_RATE_MAX || parseFloat(r) < 0) {
         return toast("error", `Tax Rate must be between 0 and ${TAX_RATE_MAX}`);
       }
+      if (hasMoreThan3Decimals(r)) {
+        return toast("error", "Tax Rate can have a maximum of 3 decimal places (e.g. 10.894%)");
+      }
+      if (num.length > TAX_NUMBER_MAX) return toast("error", `Tax Number cannot exceed ${TAX_NUMBER_MAX} characters`);
       const originalTax = (taxData || []).find((t) => t.id === editKey);
       const duplicateTaxName = (taxData || []).some(
         (tax) => tax.id !== editKey && (tax.tax_name || "").toLowerCase() === n.toLowerCase()
@@ -1990,23 +2011,6 @@ const ReceiptInfoInline = ({ type }) => {
       setShowPaymentEditConfirm(true);
       return;
     }
-    try {
-      if (item.isReceiptItem) {
-        const currentName = item.name;
-        const matching = (receipts || []).filter(r => (r.storeName || r.store_name || "") === currentName);
-        await Promise.all(matching.map(r => updateReceipt(r.id, { storeName: newName, store_image: keepLogo || r.store_image || "" })));
-        if (keepLogo) saveMerchLogo(newName, keepLogo);
-        hideMerchant(item.key); addCustomMerchant(newName);
-      } else if (item.isApiItem) {
-        const updateMerchantResult = await updateApiMerchant(item.apiId, newName, keepLogo || "");
-        if (!updateMerchantResult?.ok) throw new Error(updateMerchantResult?.error || "Failed to update merchant");
-        if (keepLogo) saveMerchLogo(newName, keepLogo);
-      } else {
-        editCustomMerchant(item.key, newName);
-        if (keepLogo) saveMerchLogo(newName, keepLogo);
-      }
-    } catch (e) { toast("error", e.message || "Update failed."); }
-    closeEdit();
   };
 
   // ── DELETE ──
@@ -2060,22 +2064,7 @@ const ReceiptInfoInline = ({ type }) => {
     } catch (e) { toast("error", e.message || "Delete failed."); }
   };
 
-  const handleTaxRateDecisionAddNew = () => {
-    if (!pendingTaxRateEdit) return;
-    const base = pendingTaxRateEdit.nextName || "Tax";
-    const candidate = `${base} (1)`;
-    setShowTaxRateDecisionConfirm(false);
-    setPendingTaxRateEdit(null);
-    setEditTaxKey(null);
-    setShowAddForm(true);
-    setAddTaxVal({
-      tax_name: candidate,
-      tax_rate: pendingTaxRateEdit.nextRate,
-      tax_number: pendingTaxRateEdit.nextNumber || "",
-    });
-  };
-
-  const handleTaxRateDecisionUpdateCurrent = async () => {
+  const confirmTaxRateChange = async () => {
     if (!pendingTaxRateEdit?.tax) return;
     const targetTax = pendingTaxRateEdit.tax;
     try {
@@ -2085,31 +2074,12 @@ const ReceiptInfoInline = ({ type }) => {
         tax_rate: pendingTaxRateEdit.nextRate,
         tax_number: pendingTaxRateEdit.nextNumber || "",
       });
-      const impactedReceipts = (receipts || []).filter((r) =>
-        (Array.isArray(r.receipt_tax_values) ? r.receipt_tax_values : []).some((t) =>
-          String(t?.fk_tax_id || "") === String(targetTax.id)
-        )
-      );
-      await Promise.all(
-        impactedReceipts.map((r) => {
-          const patchedTaxes = (Array.isArray(r.receipt_tax_values) ? r.receipt_tax_values : []).map((t) => {
-            if (String(t?.fk_tax_id || "") !== String(targetTax.id)) return t;
-            return {
-              ...t,
-              fk_tax_id: 0,
-              tax_name: pendingTaxRateEdit.nextName,
-              tax_rate: pendingTaxRateEdit.nextRate,
-            };
-          });
-          return updateReceipt(r.id, { receipt_tax_values: patchedTaxes });
-        })
-      );
       toast("success", "Tax Type Updated");
       setEditTaxKey(null);
     } catch (e) {
       toast("error", e.message || "Failed.");
     } finally {
-      setShowTaxRateDecisionConfirm(false);
+      setShowTaxRateChangeWarning(false);
       setPendingTaxRateEdit(null);
     }
   };
@@ -2265,12 +2235,18 @@ const ReceiptInfoInline = ({ type }) => {
         {type === "taxes" && (
           <>
             <div className="flex gap-2">
-              <input className={mInput} placeholder="Tax name (e.g. GST)" value={addTaxVal.tax_name} onChange={e => setAddTaxVal(p => ({ ...p, tax_name: e.target.value }))} />
-              <input className={`${mInput} max-w-[80px]`} placeholder="Rate %" value={addTaxVal.tax_rate} onChange={e => setAddTaxVal(p => ({ ...p, tax_rate: e.target.value }))} />
+              <input className={mInput} placeholder="Enter Tax Name (e.g. GST, HST, VAT)" value={addTaxVal.tax_name} onChange={e => setAddTaxVal(p => ({ ...p, tax_name: e.target.value }))} maxLength={TAX_NAME_MAX} />
+              <div className="relative max-w-[100px]">
+                <input className={`${mInput} pr-6`} placeholder="Rate" value={addTaxVal.tax_rate} onChange={e => setAddTaxVal(p => ({ ...p, tax_rate: e.target.value.replace(/%/g, "") }))} />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-medium">%</span>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <input className={mInput} placeholder="Tax number (optional)" value={addTaxVal.tax_number} onChange={e => setAddTaxVal(p => ({ ...p, tax_number: e.target.value }))} />
-              <button type="button" onClick={handleAdd} className={`px-4 py-2 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn}`}>Add</button>
+            <div className="flex gap-2 items-start">
+              <div className="flex-1">
+                <input className={mInput} placeholder="Tax Number" value={addTaxVal.tax_number} onChange={e => setAddTaxVal(p => ({ ...p, tax_number: e.target.value }))} maxLength={TAX_NUMBER_MAX} />
+                <p className="mt-1 text-xs text-slate-400">* Required</p>
+              </div>
+              <button type="button" onClick={handleAdd} className={`px-4 py-2.5 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn}`}>Add</button>
             </div>
           </>
         )}
@@ -2373,53 +2349,82 @@ const ReceiptInfoInline = ({ type }) => {
         {type === "taxes" && (
           taxItems.length === 0
             ? <p className="text-sm text-slate-400 text-center py-8">No tax types yet.</p>
-            : taxItems.map(tax => {
+            : [...taxItems].sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || "")).map(tax => {
                 const isEd = editTaxKey === tax.id;
                 return (
-                  <div key={tax.id}>
+                  <div key={tax.id} className="flex items-center justify-between px-4 py-3 bg-white border border-slate-200/80 rounded-xl shadow-sm hover:shadow-md transition-all">
                     {isEd ? (
-                      <div className="flex flex-col gap-2 bg-blue-50 border border-blue-200 rounded-xl p-3">
+                      <div className="flex flex-col gap-2 w-full">
                         <div className="flex gap-2">
-                          <input className={mInput} value={editTaxVal.tax_name} onChange={e => setEditTaxVal(p => ({ ...p, tax_name: e.target.value }))} placeholder="Name" />
-                          <input className={`${mInput} max-w-[80px]`} value={editTaxVal.tax_rate} onChange={e => setEditTaxVal(p => ({ ...p, tax_rate: e.target.value }))} placeholder="Rate %" />
+                          <input className={mInput} value={editTaxVal.tax_name} onChange={e => setEditTaxVal(p => ({ ...p, tax_name: e.target.value }))} placeholder="Tax Name (e.g. GST)" maxLength={TAX_NAME_MAX} />
+                          <div className="relative max-w-[100px]">
+                            <input className={`${mInput} pr-6`} value={editTaxVal.tax_rate} onChange={e => setEditTaxVal(p => ({ ...p, tax_rate: e.target.value.replace(/%/g, "") }))} placeholder="Rate" />
+                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-medium">%</span>
+                          </div>
                         </div>
-                        <div className="flex gap-2">
-                          <input className={mInput} value={editTaxVal.tax_number} onChange={e => setEditTaxVal(p => ({ ...p, tax_number: e.target.value }))} placeholder="Tax number (optional)" />
+                        <div className="flex gap-2 items-start">
+                          <div className="flex-1">
+                            <input className={mInput} value={editTaxVal.tax_number} onChange={e => setEditTaxVal(p => ({ ...p, tax_number: e.target.value }))} placeholder="Tax Number" maxLength={TAX_NUMBER_MAX} />
+                            <p className="mt-1 text-xs text-slate-400">* Required</p>
+                          </div>
                           <button type="button" onClick={async () => {
-                            const n = editTaxVal.tax_name.trim(), r = editTaxVal.tax_rate.toString().trim();
+                            const n = editTaxVal.tax_name.trim(), r = editTaxVal.tax_rate.toString().trim(), num = editTaxVal.tax_number.trim();
                             if (!n) return toast("error", "Please enter Tax Name");
+                            if (n.length > TAX_NAME_MAX) return toast("error", `Tax Name cannot exceed ${TAX_NAME_MAX} characters`);
                             if (!r) return toast("error", "Please enter Tax Rate");
                             if (parseFloat(r) > TAX_RATE_MAX || parseFloat(r) < 0) {
                               return toast("error", `Tax Rate must be between 0 and ${TAX_RATE_MAX}`);
                             }
+                            if (hasMoreThan3Decimals(r)) {
+                              return toast("error", "Tax Rate can have a maximum of 3 decimal places (e.g. 10.894%)");
+                            }
+                            if (num.length > TAX_NUMBER_MAX) return toast("error", `Tax Number cannot exceed ${TAX_NUMBER_MAX} characters`);
                             const duplicateTaxName = (taxData || []).some(
-                              (tax) => tax.id !== editTaxKey && (tax.tax_name || "").toLowerCase() === n.toLowerCase()
+                              (t) => t.id !== editTaxKey && (t.tax_name || "").toLowerCase() === n.toLowerCase()
                             );
                             if (duplicateTaxName) return toast("error", "Tax Type already exists");
+                            const originalTax = (taxData || []).find((t) => t.id === editTaxKey);
+                            const rateChanged = String(originalTax?.tax_rate ?? "") !== String(r);
+                            if (rateChanged) {
+                              setPendingTaxRateEdit({
+                                tax: originalTax,
+                                nextName: n,
+                                nextRate: r,
+                                nextNumber: num,
+                              });
+                              setShowTaxRateChangeWarning(true);
+                              return;
+                            }
                             try {
-                              await updateTax({ ...taxData.find(t => t.id === editTaxKey), tax_name: n, tax_rate: r, tax_number: editTaxVal.tax_number.trim() });
+                              await updateTax({ ...originalTax, tax_name: n, tax_rate: r, tax_number: num });
                               toast("success", "Tax Type Updated");
                               setEditTaxKey(null);
-                            }
-                            catch (e) { toast("error", e.message || "Failed."); }
-                          }} style={{ margin: 0 }} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex-shrink-0">Save</button>
-                          <button type="button" onClick={() => setEditTaxKey(null)} style={{ margin: 0 }} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex-shrink-0">Cancel</button>
+                            } catch (e) { toast("error", e.message || "Failed."); }
+                          }} className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex-shrink-0">Save</button>
+                          <button type="button" onClick={() => setEditTaxKey(null)} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex-shrink-0">Cancel</button>
                         </div>
                       </div>
                     ) : (
-                      <ItemRow name={tax.tax_name} sublabel={tax.tax_number ? `#${tax.tax_number}` : undefined} badge={`${parseFloat(parseFloat(tax.tax_rate).toFixed(3))}%`} badgeCls={colors.badge}
-                        actions={<>
+                      <>
+                        <div className="flex-1 min-w-0 mr-2">
+                          <div className="font-semibold text-blue-600 text-sm leading-tight">
+                            {tax.tax_name} ({parseFloat(parseFloat(tax.tax_rate).toFixed(3))}%)
+                          </div>
+                          <div className="text-xs text-slate-400 mt-0.5">
+                            Tax No. {tax.tax_number || "N/A"}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
                           <button type="button"
                             onClick={() => toggleDefaultTax(tax.id)}
                             title={defaultTaxIds.includes(tax.id) ? "Remove as default" : "Set as default (auto-applied to new receipts)"}
-                            style={{ margin: 0, padding: 0, width: 28, height: 28, flexShrink: 0 }}
-                            className={`flex items-center justify-center rounded-lg text-xs transition-all border ${defaultTaxIds.includes(tax.id) ? "bg-yellow-50 border-yellow-400 text-yellow-600" : "bg-white border-slate-200 text-slate-400 hover:border-yellow-400 hover:text-yellow-500"}`}>
-                            <Star size={13} fill={defaultTaxIds.includes(tax.id) ? "currentColor" : "none"} />
+                            className={`px-2.5 py-1 text-xs rounded-lg border font-medium transition-colors ${defaultTaxIds.includes(tax.id) ? "bg-yellow-50 border-yellow-400 text-yellow-600" : "bg-white border-slate-200 text-slate-400 hover:border-yellow-400 hover:text-yellow-500"}`}>
+                            {defaultTaxIds.includes(tax.id) ? "★ Default" : "Default"}
                           </button>
                           <Btn color="bg-blue-500 hover:bg-blue-600" onClick={() => { setEditTaxKey(tax.id); setEditTaxVal({ tax_name: tax.tax_name, tax_rate: parseFloat(parseFloat(tax.tax_rate).toFixed(3)).toString(), tax_number: tax.tax_number || "" }); }}><Pencil size={13}/></Btn>
                           <Btn color="bg-red-400 hover:bg-red-500" onClick={() => handleDelete({ key: tax.id, name: tax.tax_name })}><Trash2 size={13}/></Btn>
-                        </>}
-                      />
+                        </div>
+                      </>
                     )}
                   </div>
                 );
@@ -2665,29 +2670,27 @@ const ReceiptInfoInline = ({ type }) => {
 
     {/* Tax Rate Change Decision Popup */}
     <AnimatePresence>
-      {showTaxRateDecisionConfirm && (
+      {showTaxRateChangeWarning && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
           className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
-            className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl text-center border border-slate-200">
-            <p className="text-base font-bold text-slate-900 mb-1">Important</p>
-            <p className="text-sm font-medium text-slate-600 leading-relaxed mb-5">
-              You have changed the Tax Rate.<br />
-              How would you like to proceed?
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Change Tax Rate?</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Receipts that already use this tax type will keep their current tax amount as a fixed dollar value — the % will not auto-recalculate.
             </p>
-            <div className="flex flex-col gap-2">
+            <p className="text-sm text-gray-600 mb-6">
+              To apply the new rate to a receipt, open that receipt, deselect this tax type in the SELECT bar, then reselect it.
+            </p>
+            <div className="flex justify-end gap-3">
               <button type="button"
-                onClick={() => { setShowTaxRateDecisionConfirm(false); setPendingTaxRateEdit(null); }}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
-                Go Back
+                onClick={() => { setShowTaxRateChangeWarning(false); setPendingTaxRateEdit(null); }}
+                className="px-5 py-2 text-sm text-gray-600 font-medium hover:bg-gray-100 rounded-xl transition-colors">
+                Cancel
               </button>
-              <button type="button" onClick={handleTaxRateDecisionAddNew}
-                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 rounded-xl text-white font-semibold text-sm transition-colors">
-                Add New Tax Types
-              </button>
-              <button type="button" onClick={handleTaxRateDecisionUpdateCurrent}
-                className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 rounded-xl text-white font-semibold text-sm transition-colors">
-                Update Current Rate
+              <button type="button" onClick={confirmTaxRateChange}
+                className="px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition-colors">
+                Confirm Change
               </button>
             </div>
           </motion.div>
