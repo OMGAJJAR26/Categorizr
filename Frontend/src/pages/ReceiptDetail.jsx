@@ -136,6 +136,8 @@ const ReceiptDetail = ({
   const [isSaving, setIsSaving] = useState(false);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showImageDeleteConfirm, setShowImageDeleteConfirm] = useState(false);
+  const [pendingImageDelete, setPendingImageDelete] = useState(null); // { type: "additional"|"existing", index?: number, field?: string, clearBoth?: boolean }
   const containerRef = useRef(null);
   const dropdownRef = useRef();
   const [showPDFPreview, setShowPDFPreview] = useState(false);
@@ -267,6 +269,10 @@ const ReceiptDetail = ({
     deleteTax,
     fetchTaxes,
     addExpenseCategory,
+    apiMerchants,
+    deleteApiMerchant,
+    apiExpenseCategories,
+    deleteApiExpenseCategory,
   } = useData();
   const { formatCurrency } = useCurrency();
   const { getPaymentLogo } = usePaymentDisplay();
@@ -911,6 +917,11 @@ useEffect(() => {
       return raw;
     }
   };
+  const normalizeMatchKey = (value) =>
+    String(value || "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLowerCase();
 
   // Function to parse receipt tags
   const parseReceiptTags = (receiptTagString) => {
@@ -1637,6 +1648,15 @@ useEffect(() => {
       setLocalMerchants((prev) =>
         prev.filter((m) => m.name.toLowerCase() !== merchant.name.toLowerCase())
       );
+      const apiMerchantMatch = (apiMerchants || []).find(
+        (m) => normalizeMatchKey(m.store_name) === normalizeMatchKey(merchant.name)
+      );
+      if (apiMerchantMatch?.id) {
+        const deleteMerchantResult = await deleteApiMerchant(apiMerchantMatch.id);
+        if (!deleteMerchantResult?.ok) {
+          throw new Error(deleteMerchantResult?.error || "Failed to delete merchant");
+        }
+      }
       if ((editedReceipt.storeName || "").toLowerCase() === merchant.name.toLowerCase()) {
         handleFieldChange("storeName", "Miscellaneous");
         handleFieldChange("store_image", "");
@@ -1807,6 +1827,15 @@ useEffect(() => {
       }
       if ((editedReceipt.expense_type || "").toLowerCase() === deletingCategory.toLowerCase()) {
         handleFieldChange("expense_type", "");
+      }
+      const apiCategoryMatch = (apiExpenseCategories || []).find(
+        (c) => normalizeMatchKey(c.expense_category_name) === normalizeMatchKey(deletingCategory)
+      );
+      if (apiCategoryMatch?.id) {
+        const deleteCategoryResult = await deleteApiExpenseCategory(apiCategoryMatch.id);
+        if (!deleteCategoryResult?.ok) {
+          throw new Error(deleteCategoryResult?.error || "Failed to delete category");
+        }
       }
       setShowDeleteCategoryConfirm(false);
       setDeletingCategory(null);
@@ -2225,6 +2254,39 @@ useEffect(() => {
       alert("Error deleting receipt. Please try again.");
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleConfirmImageDelete = async () => {
+    if (!pendingImageDelete) return;
+    try {
+      if (pendingImageDelete.type === "additional") {
+        setAdditionalPhotoUrls((prev) =>
+          prev.filter((_, i) => i !== pendingImageDelete.index)
+        );
+      } else if (pendingImageDelete.type === "existing") {
+        const updates = pendingImageDelete.clearBoth
+          ? { emailAttachment: "0", receipt_image: "0" }
+          : { [pendingImageDelete.field]: "0" };
+        const success = await updateReceipt(selectedReceipt.id, updates);
+        if (!success) throw new Error("Failed to delete image from receipt");
+        if (updates.emailAttachment !== undefined) {
+          handleFieldChange("emailAttachment", updates.emailAttachment);
+        }
+        if (updates.receipt_image !== undefined) {
+          handleFieldChange("receipt_image", updates.receipt_image);
+        }
+      }
+    } catch (error) {
+      console.error("Image delete error:", error);
+      setToast({
+        isVisible: true,
+        message: "Failed to delete receipt image",
+        type: "error",
+      });
+    } finally {
+      setShowImageDeleteConfirm(false);
+      setPendingImageDelete(null);
     }
   };
 
@@ -5400,16 +5462,29 @@ Thank you for using our receipt management system.
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     if (isAdditional) {
-                                      setAdditionalPhotoUrls((prev) =>
-                                        prev.filter((_, i) => i !== idx - urls.length)
-                                      );
+                                      setPendingImageDelete({
+                                        type: "additional",
+                                        index: idx - urls.length,
+                                      });
+                                      setShowImageDeleteConfirm(true);
                                       return;
                                     }
-                                    if (idx === 0) {
-                                      handleFieldChange("emailAttachment", "0");
-                                    } else if (idx === 1) {
-                                      handleFieldChange("receipt_image", "0");
-                                    }
+                                    const currentEmail = normalizeMediaUrl(
+                                      editedReceipt.emailAttachment ?? r.emailAttachment
+                                    );
+                                    const currentReceiptImage = normalizeMediaUrl(
+                                      editedReceipt.receipt_image ?? r.receipt_image
+                                    );
+                                    const currentUrl = normalizeMediaUrl(u);
+                                    const isEmail = !!currentUrl && currentUrl === currentEmail;
+                                    const isReceiptImage =
+                                      !!currentUrl && currentUrl === currentReceiptImage;
+                                    setPendingImageDelete({
+                                      type: "existing",
+                                      field: isEmail ? "emailAttachment" : "receipt_image",
+                                      clearBoth: isEmail && isReceiptImage,
+                                    });
+                                    setShowImageDeleteConfirm(true);
                                   }}
                                   className="absolute top-1 right-1 bg-white/90 hover:bg-red-600 hover:text-white text-red-600 rounded p-1 opacity-0 group-hover:opacity-100 transition-all shadow"
                                   title="Delete file"
@@ -5509,6 +5584,50 @@ Thank you for using our receipt management system.
         onConfirm={handleDelete}
         isDeleting={isDeleting}
       />
+
+      <AnimatePresence>
+        {showImageDeleteConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/50 p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.96, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.96, y: 10 }}
+              className="bg-white rounded-2xl w-full max-w-sm p-5 shadow-xl border border-gray-200"
+            >
+              <h3 className="text-base font-bold text-gray-900 mb-2">
+                Delete Image
+              </h3>
+              <p className="text-sm text-gray-600 mb-5">
+                Are you sure you want to delete this image?
+              </p>
+              <div className="flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowImageDeleteConfirm(false);
+                    setPendingImageDelete(null);
+                  }}
+                  className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmImageDelete}
+                  className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700"
+                >
+                  Delete
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Toast for Link to QuickBooks */}
       <Toast

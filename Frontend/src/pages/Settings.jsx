@@ -91,6 +91,15 @@ const SETTINGS_DEFAULT_PAYMENT_METHODS = [
   "Bank of America",
   "Citibank",
 ];
+const SETTINGS_DEFAULT_MERCHANTS_WITH_LOGOS = [
+  { name: "Costco", image: "https://logo.clearbit.com/costco.com" },
+  { name: "Home Depot", image: "https://logo.clearbit.com/homedepot.com" },
+  { name: "Lowe's", image: "https://logo.clearbit.com/lowes.com" },
+  { name: "Miscellaneous", image: "/miscellaneous-logo.png" },
+  { name: "Nordstrom", image: "https://logo.clearbit.com/nordstrom.com" },
+  { name: "Target", image: "https://logo.clearbit.com/target.com" },
+  { name: "Walmart", image: "https://logo.clearbit.com/walmart.com" },
+];
 
 /* ─── Shared styles ────────────────────────────────────── */
 const inputCls = "w-full bg-white/95 border border-slate-200 text-slate-900 text-sm rounded-xl px-4 py-2.5 placeholder-slate-400 shadow-sm focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all";
@@ -149,9 +158,13 @@ const ManageModal = ({ type, onClose }) => {
     receiptPaymentsRaw, customPaymentMethods, hidePaymentMethod, addCustomPaymentMethod, editCustomPaymentMethod, deleteCustomPaymentMethod,
     taxData, addTax, updateTax, deleteTax, fetchTaxes,
     hiddenMerchants, hiddenCategories, hiddenPaymentMethods,
+    apiMerchants, fetchApiMerchants, deleteApiMerchant,
+    apiPaymentMethods, fetchApiPaymentMethods, deleteApiPaymentMethod,
   } = useData();
 
   useEffect(() => { if (type === "taxes") fetchTaxes(); }, [type, fetchTaxes]);
+  useEffect(() => { if (type === "merchants") fetchApiMerchants(); }, [type, fetchApiMerchants]);
+  useEffect(() => { if (type === "payments") fetchApiPaymentMethods(); }, [type, fetchApiPaymentMethods]);
 
   const cfg = MODAL_CFG[type]; const colors = COLOR_MAP[cfg.color];
   const [search, setSearch]                     = useState("");
@@ -201,11 +214,106 @@ const ManageModal = ({ type, onClose }) => {
     setEditKey(null);
   };
 
-  const handleDelete = async (key) => {
-    if (type === "taxes") { try { await deleteTax(key); } catch (e) { toast("error", e.message || "Failed."); } return; }
-    if (type === "merchants")  deleteCustomMerchant(key);
-    if (type === "categories") deleteCustomCategory(key);
-    if (type === "payments")   deleteCustomPaymentMethod(key);
+  const normalizeMatchKey = (value) =>
+    String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+  const getApiPaymentId = (obj) =>
+    obj?.id ?? obj?.payment_method_id ?? obj?.fk_payment_method_id ?? null;
+  const getApiMerchantId = (obj) =>
+    obj?.id ?? obj?.store_id ?? obj?.fk_store_id ?? null;
+  const parsePaymentDisplay = (value) => {
+    const raw = (value || "").toString().trim();
+    const match = raw.match(/^(.*?)(?:\s*\*(\d{3,4}))?$/);
+    return {
+      issuer: (match?.[1] || raw).trim(),
+      last4: (match?.[2] || "").trim(),
+    };
+  };
+
+  const handleDelete = async (itemOrKey) => {
+    const item = typeof itemOrKey === "object" && itemOrKey !== null
+      ? itemOrKey
+      : { key: itemOrKey, name: String(itemOrKey || "") };
+    if (type === "taxes") {
+      try { await deleteTax(item.key); } catch (e) { toast("error", e.message || "Failed."); }
+      return;
+    }
+    if (type === "merchants") {
+      try {
+        const directMerchantId = getApiMerchantId(item);
+        if (directMerchantId !== null) {
+          const result = await deleteApiMerchant(directMerchantId);
+          if (!result?.ok) throw new Error(result?.error || "Failed to delete merchant");
+        } else {
+          const apiMatch = (apiMerchants || []).find(
+            (m) => normalizeMatchKey(m?.store_name) === normalizeMatchKey(item?.name)
+          );
+          const apiId = getApiMerchantId(apiMatch);
+          if (apiId !== null) {
+            const result = await deleteApiMerchant(apiId);
+            if (!result?.ok) throw new Error(result?.error || "Failed to delete merchant");
+          }
+        }
+        hideMerchant(item.key || item.name);
+        deleteCustomMerchant(item.key || item.name);
+        await fetchApiMerchants();
+        toast("success", "Merchant Deleted");
+      } catch (e) {
+        toast("error", e.message || "Failed.");
+      }
+      return;
+    }
+    if (type === "categories") {
+      deleteCustomCategory(item.key);
+      return;
+    }
+    if (type === "payments") {
+      try {
+        if (item?.apiId !== undefined && item?.apiId !== null) {
+          const directResult = await deleteApiPaymentMethod(item.apiId);
+          if (!directResult?.ok) throw new Error(directResult?.error || "Failed to delete payment method");
+          hidePaymentMethod(item.key || item.name);
+          deleteCustomPaymentMethod(item.key || item.name);
+          await fetchApiPaymentMethods();
+          toast("success", "Payment Method Deleted");
+          return;
+        }
+        const itemNameKey = normalizeMatchKey(item.name);
+        const itemParsed = parsePaymentDisplay(item.name);
+        const apiMatches = (apiPaymentMethods || []).filter((p) => {
+          const apiName = p?.card_number || "";
+          if (normalizeMatchKey(apiName) === itemNameKey) return true;
+          const apiParsed = parsePaymentDisplay(apiName);
+          return (
+            normalizeMatchKey(apiParsed.issuer) === normalizeMatchKey(itemParsed.issuer) &&
+            (!itemParsed.last4 || !apiParsed.last4 || apiParsed.last4 === itemParsed.last4)
+          );
+        });
+        for (const match of apiMatches) {
+          const apiId = getApiPaymentId(match);
+          if (apiId !== null) {
+            const result = await deleteApiPaymentMethod(apiId);
+            if (!result?.ok) throw new Error(result?.error || "Failed to delete payment method");
+          }
+        }
+        if (apiMatches.length === 0) {
+          const fallback = (apiPaymentMethods || []).find((p) => {
+            const apiName = normalizeMatchKey(p?.card_number || "");
+            return apiName && (itemNameKey.includes(apiName) || apiName.includes(itemNameKey));
+          });
+          const fallbackId = getApiPaymentId(fallback);
+          if (fallbackId !== null) {
+            const result = await deleteApiPaymentMethod(fallbackId);
+            if (!result?.ok) throw new Error(result?.error || "Failed to delete payment method");
+          }
+        }
+        hidePaymentMethod(item.key || item.name);
+        deleteCustomPaymentMethod(item.key || item.name);
+        await fetchApiPaymentMethods();
+        toast("success", "Payment Method Deleted");
+      } catch (e) {
+        toast("error", e.message || "Failed.");
+      }
+    }
   };
 
   const handleReceiptEdit = (key, currentName) => {
@@ -224,9 +332,55 @@ const ManageModal = ({ type, onClose }) => {
     return [];
   };
   const buildCustomItems = () => {
-    if (type === "merchants")  return customMerchants.filter(m => !hiddenMerchants.has(m)).map(m => ({ key: m, name: m, logo: null }));
+    if (type === "merchants") {
+      const customItems = customMerchants
+        .filter(m => !hiddenMerchants.has(m))
+        .map(m => ({ key: m, name: m, logo: null }));
+      const existingNames = new Set([
+        ...receiptMerchWImgRaw.map((m) => normalizeMatchKey(m?.name)),
+        ...customItems.map((m) => normalizeMatchKey(m?.name)),
+      ]);
+      const apiItems = (apiMerchants || [])
+        .map((m) => {
+          const apiId = getApiMerchantId(m);
+          const name = (m?.store_name || "").toString().trim();
+          if (!name || apiId === null) return null;
+          return {
+            key: `api_${apiId}`,
+            name,
+            logo: m?.store_image_url || null,
+            apiId,
+          };
+        })
+        .filter(Boolean)
+        .filter((m) => !existingNames.has(normalizeMatchKey(m.name)));
+      return [...customItems, ...apiItems];
+    }
     if (type === "categories") return customCategories.filter(c => !hiddenCategories.has(c)).map(c => ({ key: c, name: c, logo: null }));
-    if (type === "payments")   return customPaymentMethods.filter(p => !hiddenPaymentMethods.has(p)).map(p => ({ key: p, name: p, logo: getPaymentLogo(p) }));
+    if (type === "payments") {
+      const customItems = customPaymentMethods
+        .filter(p => !hiddenPaymentMethods.has(p))
+        .map(p => ({ key: p, name: p, logo: getPaymentLogo(p) }));
+      const existingNames = new Set([
+        ...receiptPaymentsRaw.map((p) => normalizeMatchKey(p)),
+        ...customItems.map((p) => normalizeMatchKey(p.name)),
+      ]);
+      const apiItems = (apiPaymentMethods || [])
+        .map((p) => {
+          const apiId = getApiPaymentId(p);
+          const cardName = (p?.card_number || "").toString().trim();
+          if (!cardName || apiId === null) return null;
+          return {
+            key: `api_${apiId}`,
+            name: cardName,
+            logo: getPaymentLogo(cardName),
+            apiId,
+          };
+        })
+        .filter(Boolean)
+        .filter((p) => !existingNames.has(normalizeMatchKey(p.name)));
+      return [...customItems, ...apiItems];
+    }
     return [];
   };
 
@@ -313,7 +467,7 @@ const ManageModal = ({ type, onClose }) => {
                     <ItemRow name={tax.tax_name} sublabel={tax.tax_number ? `#${tax.tax_number}` : undefined} badge={`${tax.tax_rate}%`} badgeCls={colors.badge}
                       actions={<>
                         {ab("bg-blue-500 hover:bg-blue-600", () => { setEditTaxKey(tax.id); setEditTaxVal({ tax_name: tax.tax_name, tax_rate: tax.tax_rate, tax_number: tax.tax_number || "" }); }, <Pencil size={13}/>)}
-                        {ab("bg-red-400 hover:bg-red-500", () => handleDelete(tax.id), <Trash2 size={13}/>)}
+                        {ab("bg-red-400 hover:bg-red-500", () => handleDelete({ key: tax.id, name: tax.tax_name }), <Trash2 size={13}/>)}
                       </>}
                     />
                   )}
@@ -340,7 +494,7 @@ const ManageModal = ({ type, onClose }) => {
                             <ItemRow logo={item.logo} name={item.name} badgeCls={colors.badge}
                               actions={<>
                                 {ab("bg-blue-500 hover:bg-blue-600", () => { setEditReceiptKey(item.key); setEditReceiptVal(item.name); }, <Pencil size={13}/>)}
-                                {ab("bg-red-400 hover:bg-red-500", () => { if (type === "merchants") hideMerchant(item.key); if (type === "categories") hideCategory(item.key); if (type === "payments") hidePaymentMethod(item.key); }, <Trash2 size={13}/>)}
+                                {ab("bg-red-400 hover:bg-red-500", () => handleDelete(item), <Trash2 size={13}/>)}
                               </>}
                             />
                           )}
@@ -368,7 +522,7 @@ const ManageModal = ({ type, onClose }) => {
                             <ItemRow logo={item.logo} name={item.name} badgeCls={colors.badge}
                               actions={<>
                                 {ab("bg-blue-500 hover:bg-blue-600", () => { setEditKey(item.key); setEditVal(item.name); }, <Pencil size={13}/>)}
-                                {ab("bg-red-400 hover:bg-red-500", () => handleDelete(item.key), <Trash2 size={13}/>)}
+                                {ab("bg-red-400 hover:bg-red-500", () => handleDelete(item), <Trash2 size={13}/>)}
                               </>}
                             />
                           )}
@@ -943,6 +1097,7 @@ const ReceiptInfoInline = ({ type }) => {
     apiMerchants, fetchApiMerchants, addApiMerchant, updateApiMerchant, deleteApiMerchant,
     apiPaymentMethods, fetchApiPaymentMethods, addApiPaymentMethod, updateApiPaymentMethod, deleteApiPaymentMethod,
     apiExpenseCategories, fetchApiExpenseCategories, addApiExpenseCategory, updateApiExpenseCategory, deleteApiExpenseCategory,
+    refreshData,
   } = useData();
 
   useEffect(() => { if (type === "taxes") fetchTaxes(); }, [type, fetchTaxes]);
@@ -1012,6 +1167,7 @@ const ReceiptInfoInline = ({ type }) => {
   const [showTaxDeleteBlockedMsg, setShowTaxDeleteBlockedMsg] = useState(false);
   const [showTaxDeleteConfirm, setShowTaxDeleteConfirm] = useState(false);
   const [pendingTaxDeleteId, setPendingTaxDeleteId] = useState(null);
+  const [isDeleteSyncing, setIsDeleteSyncing] = useState(false);
 
   // Add-merchant state
   const [newMerchantName, setNewMerchantName] = useState("");
@@ -1143,6 +1299,42 @@ const ReceiptInfoInline = ({ type }) => {
     const normalizedLast4 = (last4 || "").toString().trim();
     if (!normalizedBrand || !normalizedLast4) return "";
     return `${normalizedBrand}|${normalizedLast4}`;
+  };
+  const normalizeMatchKey = (value) =>
+    String(value || "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLowerCase();
+  const getApiEntityId = (obj) =>
+    obj?.id ?? obj?.payment_method_id ?? obj?.fk_payment_method_id ?? null;
+  const resolvePaymentApiMatches = (item) => {
+    const itemName = item?.name || "";
+    const itemKey = normalizeMatchKey(itemName);
+    const { issuer: itemIssuer, last4: itemLast4 } = parsePaymentDisplay(itemName);
+    const itemIssuerKey = normalizeMatchKey(itemIssuer);
+    const itemBrand = normalizeMatchKey(getPaymentBrand(itemName, inferCardTypeFromPayment(itemName)));
+    const matches = (apiPaymentMethods || []).filter((p) => {
+      const apiName = p?.card_number || "";
+      const apiNameKey = normalizeMatchKey(apiName);
+      if (!apiNameKey) return false;
+      if (apiNameKey === itemKey) return true;
+      const { issuer: apiIssuer, last4: apiLast4 } = parsePaymentDisplay(apiName);
+      const apiIssuerKey = normalizeMatchKey(apiIssuer);
+      if (itemLast4 && apiLast4 && itemLast4 === apiLast4 && itemIssuerKey === apiIssuerKey) return true;
+      if (itemIssuerKey && apiIssuerKey === itemIssuerKey) return true;
+      const apiBrand = normalizeMatchKey(getPaymentBrand(apiName, inferCardTypeFromPayment(apiName)));
+      if (itemBrand && apiBrand && itemBrand === apiBrand) return true;
+      return false;
+    });
+    if (item?.isApiItem && item?.apiId) {
+      const direct = (apiPaymentMethods || []).find(
+        (p) => String(getApiEntityId(p)) === String(item.apiId)
+      );
+      if (direct && !matches.some((m) => String(getApiEntityId(m)) === String(getApiEntityId(direct)))) {
+        matches.unshift(direct);
+      }
+    }
+    return matches.filter((m) => getApiEntityId(m) !== null);
   };
 
   const isCashMethod = (name) => {
@@ -1324,8 +1516,10 @@ const ReceiptInfoInline = ({ type }) => {
       addCustomPaymentMethod(payStr);
       if (ct) savePayCard(payStr, ct);
       savePayExpenseType(payStr, newExpenseType);
+      const selectedCard = PAYMENT_CARD_TYPES.find((c) => c.name === ct);
+      const selectedLogoUrl = selectedCard?.logo || "";
       // Also persist to API
-      const addPaymentResult = await addApiPaymentMethod(payStr, "");
+      const addPaymentResult = await addApiPaymentMethod(payStr, selectedLogoUrl);
       if (!addPaymentResult?.ok) throw new Error(addPaymentResult?.error || "Failed to add payment method");
       setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
       setShowAddForm(false);
@@ -1393,6 +1587,9 @@ const ReceiptInfoInline = ({ type }) => {
     if (!pendingMerchantDelete) return;
     const item = pendingMerchantDelete;
     try {
+      const apiMerchantMatch = (apiMerchants || []).find(
+        (m) => normalizeMatchKey(m.store_name) === normalizeMatchKey(item.name)
+      );
       const matching = getReceiptsByMerchant(item.name);
       if (matching.length > 0) {
         await Promise.all(
@@ -1404,11 +1601,20 @@ const ReceiptInfoInline = ({ type }) => {
       } else if (item.isApiItem) {
         const deleteMerchantResult = await deleteApiMerchant(item.apiId);
         if (!deleteMerchantResult?.ok) throw new Error(deleteMerchantResult?.error || "Failed to delete merchant");
+      } else if (item.isDefaultItem) {
+        hideMerchant(item.name);
       } else {
         deleteCustomMerchant(item.key);
       }
+      if (!item.isApiItem && apiMerchantMatch?.id) {
+        const deleteMerchantResult = await deleteApiMerchant(apiMerchantMatch.id);
+        if (!deleteMerchantResult?.ok) throw new Error(deleteMerchantResult?.error || "Failed to delete merchant");
+      }
+      setIsDeleteSyncing(true);
+      await Promise.all([refreshData(), fetchApiMerchants()]);
       toast("success", "Merchant Deleted");
     } catch (e) { toast("error", e.message || "Delete failed."); }
+    finally { setIsDeleteSyncing(false); }
     setPendingMerchantDelete(null);
   };
 
@@ -1486,10 +1692,19 @@ const ReceiptInfoInline = ({ type }) => {
   };
 
   const applyCategoryDelete = async (item) => {
+    const apiCategoryMatch = (apiExpenseCategories || []).find(
+      (c) => normalizeMatchKey(c.expense_category_name) === normalizeMatchKey(item.name)
+    );
     if (item.isReceiptItem) {
       const matching = getReceiptsByCategory(item.name || "");
       await Promise.all(matching.map(r => updateReceipt(r.id, { expense_type: "" })));
       hideCategory(item.key);
+      if (apiCategoryMatch?.id) {
+        const deleteCategoryResult = await deleteApiExpenseCategory(apiCategoryMatch.id);
+        if (!deleteCategoryResult?.ok) throw new Error(deleteCategoryResult?.error || "Failed to delete expense category");
+      }
+      setIsDeleteSyncing(true);
+      await Promise.all([refreshData(), fetchApiExpenseCategories()]);
       toast("success", "Expense Category Deleted");
       return;
     }
@@ -1500,6 +1715,8 @@ const ReceiptInfoInline = ({ type }) => {
       }
       const deleteCategoryResult = await deleteApiExpenseCategory(item.apiId);
       if (!deleteCategoryResult?.ok) throw new Error(deleteCategoryResult?.error || "Failed to delete expense category");
+      setIsDeleteSyncing(true);
+      await Promise.all([refreshData(), fetchApiExpenseCategories()]);
       toast("success", "Expense Category Deleted");
       return;
     }
@@ -1508,6 +1725,12 @@ const ReceiptInfoInline = ({ type }) => {
       await Promise.all(matching.map((r) => updateReceipt(r.id, { expense_type: "" })));
     }
     deleteCustomCategory(item.key);
+    if (apiCategoryMatch?.id) {
+      const deleteCategoryResult = await deleteApiExpenseCategory(apiCategoryMatch.id);
+      if (!deleteCategoryResult?.ok) throw new Error(deleteCategoryResult?.error || "Failed to delete expense category");
+    }
+    setIsDeleteSyncing(true);
+    await Promise.all([refreshData(), fetchApiExpenseCategories()]);
     toast("success", "Expense Category Deleted");
   };
 
@@ -1526,27 +1749,45 @@ const ReceiptInfoInline = ({ type }) => {
         })
       )
     );
+    const apiMatches = resolvePaymentApiMatches(item);
     if (item.isReceiptItem) {
       hidePaymentMethod(item.key);
       deleteCustomPaymentMethod(item.name);
-      const apiMatch = (apiPaymentMethods || []).find((p) => (p.card_number || "").toLowerCase() === (item.name || "").toLowerCase());
-      if (apiMatch?.id) {
-        const deletePaymentResult = await deleteApiPaymentMethod(apiMatch.id);
+      for (const apiMatch of apiMatches) {
+        const apiId = getApiEntityId(apiMatch);
+        const deletePaymentResult = await deleteApiPaymentMethod(apiId);
         if (!deletePaymentResult?.ok) throw new Error(deletePaymentResult?.error || "Failed to delete payment method");
       }
+      setIsDeleteSyncing(true);
+      await Promise.all([refreshData(), fetchApiPaymentMethods()]);
       toast("success", "Payment Method Deleted");
       return;
     }
     if (item.isApiItem) {
       hidePaymentMethod(item.name);
       deleteCustomPaymentMethod(item.name);
-      const deletePaymentResult = await deleteApiPaymentMethod(item.apiId);
-      if (!deletePaymentResult?.ok) throw new Error(deletePaymentResult?.error || "Failed to delete payment method");
+      const targetApiId =
+        item.apiId ||
+        getApiEntityId(apiMatches[0]) ||
+        null;
+      if (targetApiId !== null) {
+        const deletePaymentResult = await deleteApiPaymentMethod(targetApiId);
+        if (!deletePaymentResult?.ok) throw new Error(deletePaymentResult?.error || "Failed to delete payment method");
+      }
+      setIsDeleteSyncing(true);
+      await Promise.all([refreshData(), fetchApiPaymentMethods()]);
       toast("success", "Payment Method Deleted");
       return;
     }
     hidePaymentMethod(item.name);
     deleteCustomPaymentMethod(item.key);
+    for (const apiMatch of apiMatches) {
+      const apiId = getApiEntityId(apiMatch);
+      const deletePaymentResult = await deleteApiPaymentMethod(apiId);
+      if (!deletePaymentResult?.ok) throw new Error(deletePaymentResult?.error || "Failed to delete payment method");
+    }
+    setIsDeleteSyncing(true);
+    await Promise.all([refreshData(), fetchApiPaymentMethods()]);
     toast("success", "Payment Method Deleted");
   };
 
@@ -1559,6 +1800,7 @@ const ReceiptInfoInline = ({ type }) => {
       toast("error", e.message || "Delete failed.");
     } finally {
       setPendingCategoryDelete(null);
+      setIsDeleteSyncing(false);
     }
   };
 
@@ -1571,6 +1813,7 @@ const ReceiptInfoInline = ({ type }) => {
       toast("error", e.message || "Delete failed.");
     } finally {
       setPendingPaymentDelete(null);
+      setIsDeleteSyncing(false);
     }
   };
 
@@ -1807,7 +2050,19 @@ const ReceiptInfoInline = ({ type }) => {
           apiId: m.id,
           isApiItem: true,
         }));
-      return [...rItems, ...cItems, ...apiItems];
+      const allWithApi = [...rItems, ...cItems, ...apiItems];
+      const existingAfterApi = new Set(allWithApi.map((m) => (m.name || "").toLowerCase()));
+      const defaultItems = SETTINGS_DEFAULT_MERCHANTS_WITH_LOGOS
+        .filter((m) => m.name && !existingAfterApi.has((m.name || "").toLowerCase()))
+        .map((m) => ({
+          key: `default_${m.name}`,
+          name: m.name,
+          logo: m.image || null,
+          isReceiptItem: false,
+          isApiItem: false,
+          isDefaultItem: true,
+        }));
+      return [...allWithApi, ...defaultItems];
     }
     if (type === "categories") {
       const rItems = receiptCategoriesRaw.map(c => ({ key: c, name: c, logo: null, isReceiptItem: true, isApiItem: false }));
@@ -1838,14 +2093,18 @@ const ReceiptInfoInline = ({ type }) => {
       // API payment methods not already in receipt-derived or custom lists
       const allExistingPayKeys = new Set([...rItems.map(p => p.name.toLowerCase()), ...cItems.map(p => p.name.toLowerCase())]);
       const apiItems = (apiPaymentMethods || [])
-        .filter(m => m.card_number && !allExistingPayKeys.has((m.card_number || "").toLowerCase()))
+        .filter(m =>
+          m.card_number &&
+          getApiEntityId(m) !== null &&
+          !allExistingPayKeys.has((m.card_number || "").toLowerCase())
+        )
         .map(m => ({
-          key: `api_${m.id}`,
+          key: `api_${getApiEntityId(m)}`,
           name: m.card_number,
           logo: getPayLogoResolved(m.card_number),
           isReceiptItem: false,
           isApiItem: true,
-          apiId: m.id,
+          apiId: getApiEntityId(m),
         }));
       const allWithApi = [...rItems, ...cItems, ...apiItems];
       const existingAfterApi = new Set(allWithApi.map((p) => (p.name || "").toLowerCase()));
@@ -2009,6 +2268,15 @@ const ReceiptInfoInline = ({ type }) => {
 
       {/* ── List ── */}
       <div className="flex flex-col gap-1.5">
+        {isDeleteSyncing && (
+          <div className="flex items-center gap-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 mb-1">
+            <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+            </svg>
+            Syncing latest data...
+          </div>
+        )}
 
         {/* Taxes */}
         {type === "taxes" && (
@@ -2178,7 +2446,7 @@ const ReceiptInfoInline = ({ type }) => {
                 className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
                 Cancel
               </button>
-              <button type="button" onClick={doConfirmMerchantDelete}
+              <button type="button" onClick={doConfirmMerchantDelete} disabled={isDeleteSyncing}
                 className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 rounded-xl text-white font-semibold text-sm transition-colors">
                 Delete
               </button>
@@ -2235,7 +2503,7 @@ const ReceiptInfoInline = ({ type }) => {
                 className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
                 Cancel
               </button>
-              <button type="button" onClick={doConfirmCategoryDelete}
+              <button type="button" onClick={doConfirmCategoryDelete} disabled={isDeleteSyncing}
                 className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 rounded-xl text-white font-semibold text-sm transition-colors">
                 Delete
               </button>
@@ -2294,7 +2562,7 @@ const ReceiptInfoInline = ({ type }) => {
                 className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
                 Cancel
               </button>
-              <button type="button" onClick={doConfirmPaymentDelete}
+              <button type="button" onClick={doConfirmPaymentDelete} disabled={isDeleteSyncing}
                 className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 rounded-xl text-white font-semibold text-sm transition-colors">
                 Delete
               </button>

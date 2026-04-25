@@ -58,6 +58,10 @@ const AddReceiptModal = ({ onClose, onReceiptAdded }) => {
     addCustomMerchant,
     addApiMerchant,
     saveMerchLogo,
+    apiMerchants,
+    deleteApiMerchant,
+    apiExpenseCategories,
+    deleteApiExpenseCategory,
   } = useData();
   const { getPaymentLogo, getPaymentDisplay } = usePaymentDisplay();
 
@@ -808,6 +812,11 @@ const [localMerchants, setLocalMerchants] = useState([]);
     const decPart = (decRaw || "").slice(0, 2);
     return cleaned.includes(".") ? `${intPart || "0"}.${decPart}` : intPart;
   };
+  const normalizeMatchKey = (value) =>
+    String(value || "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLowerCase();
 
   // Auto-dismiss error banner after 3.5 s
   useEffect(() => {
@@ -1626,6 +1635,15 @@ const handleFieldChange = (field, value) => {
       }
       if ((formData.expense_type || "").toLowerCase() === deletingCategory.toLowerCase()) {
         handleFieldChange("expense_type", "");
+      }
+      const apiCategoryMatch = (apiExpenseCategories || []).find(
+        (c) => normalizeMatchKey(c.expense_category_name) === normalizeMatchKey(deletingCategory)
+      );
+      if (apiCategoryMatch?.id) {
+        const deleteCategoryResult = await deleteApiExpenseCategory(apiCategoryMatch.id);
+        if (!deleteCategoryResult?.ok) {
+          throw new Error(deleteCategoryResult?.error || "Failed to delete category");
+        }
       }
       setShowDeleteCategoryConfirm(false);
       setDeletingCategory(null);
@@ -2735,6 +2753,15 @@ const handleFieldChange = (field, value) => {
       setLocalMerchants((prev) =>
         prev.filter((m) => m.name.toLowerCase() !== merchant.name.toLowerCase())
       );
+      const apiMerchantMatch = (apiMerchants || []).find(
+        (m) => normalizeMatchKey(m.store_name) === normalizeMatchKey(merchant.name)
+      );
+      if (apiMerchantMatch?.id) {
+        const deleteMerchantResult = await deleteApiMerchant(apiMerchantMatch.id);
+        if (!deleteMerchantResult?.ok) {
+          throw new Error(deleteMerchantResult?.error || "Failed to delete merchant");
+        }
+      }
       if ((formData.storeName || "").toLowerCase() === merchant.name.toLowerCase()) {
         handleFieldChange("storeName", "");
         setDetectedMerchantLogo(null);

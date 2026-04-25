@@ -32,6 +32,50 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
     bank: MasterCard, // MasterCard logo for bank cards (like mobile app)
     other: Creditdebitcardicon, // Credit card icon for Starbucks, gift cards, other
   };
+  const cardTypeLogoMap = {
+    "visa": logoMap.visa,
+    "mastercard": logoMap.mastercard,
+    "american express": logoMap.americanexpress,
+    "discover": logoMap.discover,
+    "diners club": logoMap.dinersclub,
+    "paypal": logoMap.paypal,
+    "debit card": logoMap.debitcard,
+    "cash": logoMap.cash,
+    "other": logoMap.other,
+  };
+  const payCardSelectionMap = useMemo(() => {
+    try {
+      const raw = JSON.parse(
+        localStorage.getItem("cat_pay_card_types") ||
+        localStorage.getItem("cat_pay_card_map") ||
+        "{}"
+      );
+      if (!raw || typeof raw !== "object") return {};
+      return raw;
+    } catch {
+      return {};
+    }
+  }, []);
+  const normalizeMethodKey = useCallback((value) => {
+    return String(value || "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLowerCase();
+  }, []);
+  const getMappedCardTypeForMethod = useCallback((method) => {
+    const direct = payCardSelectionMap[method];
+    if (direct) return direct;
+    const normalizedMethod = normalizeMethodKey(method);
+    const entries = Object.entries(payCardSelectionMap || {});
+    const exactNormalized = entries.find(([k]) => normalizeMethodKey(k) === normalizedMethod);
+    if (exactNormalized) return exactNormalized[1];
+    const methodBase = normalizeMethodKey(String(method || "").replace(/\s*\*\s*\d{3,4}\s*$/g, ""));
+    const byBase = entries.find(([k]) => {
+      const keyBase = normalizeMethodKey(String(k || "").replace(/\s*\*\s*\d{3,4}\s*$/g, ""));
+      return keyBase && keyBase === methodBase;
+    });
+    return byBase ? byBase[1] : null;
+  }, [normalizeMethodKey, payCardSelectionMap]);
 
   // Improved logo detection - matching usePaymentDisplay.js logic
   const getPaymentLogo = (r) => {
@@ -59,6 +103,9 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
     } else {
       // If we're passed a string
       paymentType = (r || "").toString().trim();
+      const selectedCardType = getMappedCardTypeForMethod(paymentType);
+      const selectedLogo = cardTypeLogoMap[(selectedCardType || "").toString().toLowerCase()];
+      if (selectedLogo) return selectedLogo;
     }
 
     if (!paymentType) return logoMap.other;
@@ -175,7 +222,7 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
       });
       
       const logo = matchingReceipt
-        ? getPaymentLogo(matchingReceipt)
+        ? (getPaymentLogo(method) || getPaymentLogo(matchingReceipt))
         : getPaymentLogo(method);
       
       // Extract detailed payment information
@@ -331,7 +378,7 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
             }
             
             // Get logo - use receipt if available, otherwise use payment method string
-            const logo = matchingReceipt ? getPaymentLogo(matchingReceipt) : getPaymentLogo(paymentMethod);
+            const logo = getPaymentLogo(paymentMethod) || (matchingReceipt ? getPaymentLogo(matchingReceipt) : getPaymentLogo(paymentMethod));
             
             // Format display: issuer name *last4 (or just issuer name if no last4)
             const displayText = issuerName 

@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+import { PHP_API_BASE } from "../api/Axios";
 
 const DataContext = createContext();
 const BASE_URL = "/api";
@@ -51,6 +52,51 @@ const getLast4 = (cardNumber, hintedLast4) => {
   if (hintedLast4 && /^\d{4}$/.test(hintedLast4)) return hintedLast4;
   const digits = onlyDigits(cardNumber);
   return digits.length >= 4 ? digits.slice(-4) : "";
+};
+const parseJsonSafe = async (response) => {
+  try { return await response.json(); } catch { return null; }
+};
+const getEntityId = (item) =>
+  item?.id ??
+  item?.store_id ??
+  item?.fk_store_id ??
+  item?.payment_method_id ??
+  item?.fk_payment_method_id ??
+  item?.expense_category_id ??
+  item?.fk_expense_category_id ??
+  null;
+const isDeleteResponseSuccessful = (data) => {
+  if (data === null || data === undefined) return false;
+  if (typeof data !== "object") {
+    const normalized = String(data).trim().toLowerCase();
+    return ["1", "true", "success", "deleted", "ok"].includes(normalized);
+  }
+  const normalizedCode = String(data.code || data.error_code || "").trim();
+  if (["010", "401", "403"].includes(normalizedCode)) return false;
+  const statusLike = [data.success, data.status, data.ok, data.isSuccess]
+    .filter((v) => v !== undefined);
+  if (statusLike.some((v) => v === false || v === 0 || String(v).toLowerCase() === "false")) {
+    return false;
+  }
+  if (statusLike.length > 0) return true;
+  if (data.message || data.msg) {
+    const m = String(data.message || data.msg).toLowerCase();
+    if (
+      m.includes("fail") ||
+      m.includes("error") ||
+      m.includes("not") ||
+      m.includes("invalid") ||
+      m.includes("unauthorized") ||
+      m.includes("expired")
+    ) return false;
+    if (m.includes("success") || m.includes("delete")) return true;
+  }
+  return true;
+};
+const withDeleteQuery = (endpoint, id) => {
+  const fkUserId = localStorage.getItem("fk_user_id") || "";
+  const glue = endpoint.includes("?") ? "&" : "?";
+  return `${endpoint}${glue}id=${encodeURIComponent(id)}&deleteId=${encodeURIComponent(id)}&store_id=${encodeURIComponent(id)}&payment_method_id=${encodeURIComponent(id)}&expense_category_id=${encodeURIComponent(id)}&fk_user_id=${encodeURIComponent(fkUserId)}`;
 };
 const maskToLast4 = (cardNumber, hintedLast4) => {
   const last4 = getLast4(cardNumber, hintedLast4);
@@ -374,23 +420,82 @@ export const DataProvider = ({ children }) => {
   const deleteApiMerchant = async (id) => {
     const token = localStorage.getItem("token");
     if (!token) return { ok: false, data: null, error: "Missing token" };
-    const payload = { id };
+    const fkUserId = localStorage.getItem("fk_user_id") || "";
+    const payload = { id, deleteId: id, store_id: id, fk_store_id: id, fk_user_id: fkUserId };
     console.log("%c[Merchants] POST /userstore/deleteStorev1 →", "color:#ef4444;font-weight:bold", payload);
     try {
-      const res = await fetch(`${BASE_URL}/userstore/deleteStorev1`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        console.log("%c[Merchants] deleteApiMerchant response:", "color:#ef4444;font-weight:bold", data);
-        setApiMerchants(prev => prev.filter(m => m.id !== id));
-        return { ok: true, data, error: null };
-      } else {
-        console.warn("[Merchants] deleteApiMerchant failed, status:", res.status);
-        return { ok: false, data: null, error: `Failed with status ${res.status}` };
+      let authErrorMessage = "";
+      const endpoint = `${BASE_URL}/userstore/deleteStorev1`;
+      const queryUrl = withDeleteQuery(endpoint, id);
+      const attempts = [
+        {
+          method: "DELETE",
+          url: `${endpoint}?id=${encodeURIComponent(id)}`,
+          headers: { Accesstoken: token },
+          body: undefined,
+        },
+        {
+          method: "DELETE",
+          url: queryUrl,
+          headers: { Accesstoken: token },
+          body: undefined,
+        },
+        {
+          method: "POST",
+          url: endpoint,
+          headers: { "Content-Type": "application/json", Accesstoken: token },
+          body: JSON.stringify(payload),
+        },
+        {
+          method: "POST",
+          url: endpoint,
+          headers: { Accesstoken: token },
+          body: JSON.stringify(payload),
+        },
+        {
+          method: "POST",
+          url: queryUrl,
+          headers: { Accesstoken: token },
+          body: undefined,
+        },
+        {
+          method: "GET",
+          url: queryUrl,
+          headers: { Accesstoken: token },
+          body: undefined,
+        },
+      ];
+      for (const attempt of attempts) {
+        try {
+          const res = await fetch(attempt.url, {
+            method: attempt.method,
+            headers: attempt.headers,
+            body: attempt.body,
+          });
+          const data = await parseJsonSafe(res);
+          if (data && String(data.code || "") === "010") {
+            authErrorMessage = data.message || "Session Token Invalid";
+          }
+          if (res.ok && isDeleteResponseSuccessful(data)) {
+            console.log("%c[Merchants] deleteApiMerchant response:", "color:#ef4444;font-weight:bold", data);
+            setApiMerchants(prev => prev.filter(m => String(getEntityId(m)) !== String(id)));
+            return { ok: true, data, error: null };
+          }
+          console.warn("[Merchants] deleteApiMerchant failed:", {
+            status: res.status, endpoint: attempt.url, method: attempt.method, data
+          });
+        } catch (attemptErr) {
+          console.warn("[Merchants] deleteApiMerchant network error:", {
+            endpoint: attempt.url,
+            method: attempt.method,
+            error: attemptErr?.message || String(attemptErr),
+          });
+        }
       }
+      if (authErrorMessage) {
+        return { ok: false, data: null, error: authErrorMessage };
+      }
+      return { ok: false, data: null, error: "Failed to delete merchant (all endpoints)" };
     } catch (e) {
       console.error("[Merchants] deleteApiMerchant error", e);
       return { ok: false, data: null, error: e.message || "Failed to delete merchant" };
@@ -473,22 +578,70 @@ export const DataProvider = ({ children }) => {
   const deleteApiPaymentMethod = async (id) => {
     const token = localStorage.getItem("token");
     if (!token) return { ok: false, data: null, error: "Missing token" };
-    const payload = { id };
+    const fkUserId = localStorage.getItem("fk_user_id") || "";
+    const payload = { id, deleteId: id, payment_method_id: id, fk_payment_method_id: id, fk_user_id: fkUserId };
     console.log("%c[PaymentMethods] POST /userpaymentmethod/deletePaymentMethodv1 →", "color:#ef4444;font-weight:bold", payload);
     try {
-      const res = await fetch(`${BASE_URL}/userpaymentmethod/deletePaymentMethodv1`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        console.log("%c[PaymentMethods] deleteApiPaymentMethod response:", "color:#ef4444;font-weight:bold", data);
-        setApiPaymentMethods(prev => prev.filter(m => m.id !== id));
-        return { ok: true, data, error: null };
+      let authErrorMessage = "";
+      const endpoint = `${BASE_URL}/userpaymentmethod/deletePaymentMethodv1`;
+      const queryUrl = withDeleteQuery(endpoint, id);
+      const attempts = [
+        {
+          method: "POST",
+          url: endpoint,
+          headers: { "Content-Type": "application/json", Accesstoken: token },
+          body: JSON.stringify(payload),
+        },
+        {
+          method: "POST",
+          url: endpoint,
+          headers: { Accesstoken: token },
+          body: JSON.stringify(payload),
+        },
+        {
+          method: "POST",
+          url: queryUrl,
+          headers: { Accesstoken: token },
+          body: undefined,
+        },
+        {
+          method: "GET",
+          url: queryUrl,
+          headers: { Accesstoken: token },
+          body: undefined,
+        },
+      ];
+      for (const attempt of attempts) {
+        try {
+          const res = await fetch(attempt.url, {
+            method: attempt.method,
+            headers: attempt.headers,
+            body: attempt.body,
+          });
+          const data = await parseJsonSafe(res);
+          if (data && String(data.code || "") === "010") {
+            authErrorMessage = data.message || "Session Token Invalid";
+          }
+          if (res.ok && isDeleteResponseSuccessful(data)) {
+            console.log("%c[PaymentMethods] deleteApiPaymentMethod response:", "color:#ef4444;font-weight:bold", data);
+            setApiPaymentMethods(prev => prev.filter(m => String(getEntityId(m)) !== String(id)));
+            return { ok: true, data, error: null };
+          }
+          console.warn("[PaymentMethods] deleteApiPaymentMethod failed:", {
+            status: res.status, endpoint: attempt.url, method: attempt.method, data
+          });
+        } catch (attemptErr) {
+          console.warn("[PaymentMethods] deleteApiPaymentMethod network error:", {
+            endpoint: attempt.url,
+            method: attempt.method,
+            error: attemptErr?.message || String(attemptErr),
+          });
+        }
       }
-      console.warn("[PaymentMethods] deleteApiPaymentMethod failed, status:", res.status);
-      return { ok: false, data: null, error: `Failed with status ${res.status}` };
+      if (authErrorMessage) {
+        return { ok: false, data: null, error: authErrorMessage };
+      }
+      return { ok: false, data: null, error: "Failed to delete payment method (all endpoints)" };
     } catch (e) {
       console.error("[PaymentMethods] deleteApiPaymentMethod error", e);
       return { ok: false, data: null, error: e.message || "Failed to delete payment method" };
@@ -565,21 +718,70 @@ export const DataProvider = ({ children }) => {
   const deleteApiExpenseCategory = async (id) => {
     const token = localStorage.getItem("token");
     if (!token) return { ok: false, data: null, error: "Missing token" };
-    const payload = { id };
+    const fkUserId = localStorage.getItem("fk_user_id") || "";
+    const payload = { id, deleteId: id, expense_category_id: id, fk_expense_category_id: id, fk_user_id: fkUserId };
     console.log("%c[ExpenseCategories] POST /userexpensecategory/deleteExpenseCategoryv1 →", "color:#ef4444;font-weight:bold", payload);
     try {
-      const res = await fetch(`${BASE_URL}/userexpensecategory/deleteExpenseCategoryv1`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        console.log("%c[ExpenseCategories] deleteApiExpenseCategory response:", "color:#ef4444;font-weight:bold", data);
-        setApiExpenseCategories(prev => prev.filter(c => c.id !== id));
-        return { ok: true, data, error: null };
+      let authErrorMessage = "";
+      const endpoint = `${BASE_URL}/userexpensecategory/deleteExpenseCategoryv1`;
+      const queryUrl = withDeleteQuery(endpoint, id);
+      const attempts = [
+        {
+          method: "POST",
+          url: endpoint,
+          headers: { "Content-Type": "application/json", Accesstoken: token },
+          body: JSON.stringify(payload),
+        },
+        {
+          method: "POST",
+          url: endpoint,
+          headers: { Accesstoken: token },
+          body: JSON.stringify(payload),
+        },
+        {
+          method: "POST",
+          url: queryUrl,
+          headers: { Accesstoken: token },
+          body: undefined,
+        },
+        {
+          method: "GET",
+          url: queryUrl,
+          headers: { Accesstoken: token },
+          body: undefined,
+        },
+      ];
+      for (const attempt of attempts) {
+        try {
+          const res = await fetch(attempt.url, {
+            method: attempt.method,
+            headers: attempt.headers,
+            body: attempt.body,
+          });
+          const data = await parseJsonSafe(res);
+          if (data && String(data.code || "") === "010") {
+            authErrorMessage = data.message || "Session Token Invalid";
+          }
+          if (res.ok && isDeleteResponseSuccessful(data)) {
+            console.log("%c[ExpenseCategories] deleteApiExpenseCategory response:", "color:#ef4444;font-weight:bold", data);
+            setApiExpenseCategories(prev => prev.filter(c => String(getEntityId(c)) !== String(id)));
+            return { ok: true, data, error: null };
+          }
+          console.warn("[ExpenseCategories] deleteApiExpenseCategory failed:", {
+            status: res.status, endpoint: attempt.url, method: attempt.method, data
+          });
+        } catch (attemptErr) {
+          console.warn("[ExpenseCategories] deleteApiExpenseCategory network error:", {
+            endpoint: attempt.url,
+            method: attempt.method,
+            error: attemptErr?.message || String(attemptErr),
+          });
+        }
       }
-      return { ok: false, data: null, error: `Failed with status ${res.status}` };
+      if (authErrorMessage) {
+        return { ok: false, data: null, error: authErrorMessage };
+      }
+      return { ok: false, data: null, error: "Failed to delete expense category (all endpoints)" };
     } catch (e) {
       console.error("deleteApiExpenseCategory error", e);
       return { ok: false, data: null, error: e.message || "Failed to delete category" };
