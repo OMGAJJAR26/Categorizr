@@ -999,9 +999,22 @@ const ReceiptInfoInline = ({ type }) => {
   const [isFetchAddLogo, setIsFetchAddLogo]   = useState(false);
 
   // Add-payment state
-  const [newCardType, setNewCardType]     = useState("");
-  const [newIssuerName, setNewIssuerName] = useState("");
-  const [newLast4, setNewLast4]           = useState("");
+  const [newCardType, setNewCardType]         = useState("");
+  const [newIssuerName, setNewIssuerName]     = useState("");
+  const [newLast4, setNewLast4]               = useState("");
+  const [newExpenseType, setNewExpenseType]   = useState("Personal"); // Personal | Business
+
+  // localStorage: payment display string → "Personal" or "Business"
+  const [payExpenseTypeMap, setPayExpenseTypeMap] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; }
+  });
+  const savePayExpenseType = (payStr, expType) => {
+    setPayExpenseTypeMap(prev => {
+      const next = { ...prev, [payStr]: expType };
+      localStorage.setItem("cat_pay_expense_type", JSON.stringify(next));
+      return next;
+    });
+  };
 
   // localStorage: merchant name → logo URL
   const [merchLogos, setMerchLogos] = useState(() => {
@@ -1289,10 +1302,11 @@ const ReceiptInfoInline = ({ type }) => {
       if (!payStr) return toast("error", "Select Card Type");
       addCustomPaymentMethod(payStr);
       if (ct) savePayCard(payStr, ct);
+      savePayExpenseType(payStr, newExpenseType);
       // Also persist to API
       const addPaymentResult = await addApiPaymentMethod(payStr, "");
       if (!addPaymentResult?.ok) throw new Error(addPaymentResult?.error || "Failed to add payment method");
-      setNewCardType(""); setNewIssuerName(""); setNewLast4("");
+      setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
       setShowAddForm(false);
       toast("success", "Payment Method Added");
       return;
@@ -1929,6 +1943,19 @@ const ReceiptInfoInline = ({ type }) => {
               <input className={`${mInput} max-w-[110px]`} placeholder="Last 4 digits" value={newLast4} maxLength={4}
                 onChange={e => setNewLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} />
             </div>
+            {/* Personal / Business toggle */}
+            <div className="flex items-center gap-2">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Default Type</p>
+              <div className="flex rounded-xl border border-slate-200 overflow-hidden">
+                {["Personal", "Business"].map(opt => (
+                  <button key={opt} type="button"
+                    onClick={() => setNewExpenseType(opt)}
+                    className={`px-4 py-1.5 text-xs font-semibold transition-all ${newExpenseType === opt ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            </div>
             <button type="button" onClick={handleAdd}  className={`px-4 py-2 rounded-xl text-white text-sm font-semibold self-start ${colors.btn}`}>Add Payment Method</button>
           </>
         )}
@@ -2256,8 +2283,10 @@ const ReceiptInfoInline = ({ type }) => {
           className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
             className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl text-center border border-slate-200">
-            <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
-              Tax rate changed. Choose how to proceed.
+            <p className="text-base font-bold text-slate-900 mb-1">Important</p>
+            <p className="text-sm font-medium text-slate-600 leading-relaxed mb-5">
+              You have changed the Tax Rate.<br />
+              How would you like to proceed?
             </p>
             <div className="flex flex-col gap-2">
               <button type="button"

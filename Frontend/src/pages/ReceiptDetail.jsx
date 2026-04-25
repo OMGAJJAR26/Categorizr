@@ -4814,6 +4814,15 @@ Thank you for using our receipt management system.
                                           );
                                         }
 
+                                        // Auto-apply Personal/Business preference saved in Settings
+                                        const _petMap = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
+                                        const _storedExpType = _petMap[method];
+                                        if (_storedExpType === "Business") {
+                                          handleFieldChange("receipt_category", "1");
+                                        } else if (_storedExpType === "Personal") {
+                                          handleFieldChange("receipt_category", "0");
+                                        }
+
                                         setShowPaymentDropdown(false);
                                       }}
                                     >

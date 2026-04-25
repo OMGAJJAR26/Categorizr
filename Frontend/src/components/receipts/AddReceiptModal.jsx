@@ -1435,6 +1435,8 @@ const handleFieldChange = (field, value) => {
         console.log("Uploading files to uploadmediaV1...");
         setUploadProgress(10);
         mediaUrls = await uploadFilesToMedia(files); // upload ALL selected files
+        // Deduplicate to prevent same image appearing twice
+        mediaUrls = [...new Set(mediaUrls.filter(Boolean))];
         setUploadedMediaUrls(mediaUrls);
         console.log("Media URLs from uploadmediaV1:", mediaUrls);
         setUploadProgress(30);
@@ -4698,6 +4700,15 @@ const handleSelectLogo = (index) => {
                         "last_4_digit_card",
                         "",
                       );
+                    }
+
+                    // Auto-apply Personal/Business preference saved in Settings
+                    const _petMap = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
+                    const _storedExpType = _petMap[methodString] || _petMap[displayText];
+                    if (_storedExpType === "Business") {
+                      handleFieldChange("receipt_category", "1");
+                    } else if (_storedExpType === "Personal") {
+                      handleFieldChange("receipt_category", "0");
                     }
 
                     setIsPaymentTyping(false);
