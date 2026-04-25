@@ -19,6 +19,7 @@ const ReceiptsTable = ({
   formatCurrency,
   onClearQuickbooksLink,
   isToBeVerified = false,
+  disableDelete = false,
 }) => {
   const [showIntegrateMenu, setShowIntegrateMenu] = useState(false);
   const menuRef = useRef(null);
@@ -37,6 +38,7 @@ const ReceiptsTable = ({
   const getFormattedDate = () => {
     return receipt.product_date
       ? new Date(Number(receipt.product_date) * 1000).toLocaleDateString("en-US", {
+          timeZone: "UTC",
           month: "short",
           day: "numeric",
           year: "numeric",
@@ -209,10 +211,12 @@ const ReceiptsTable = ({
           <button
             onClick={(e) => {
               e.stopPropagation();
+              if (disableDelete) return;
               onDeleteClick && onDeleteClick(receipt);
             }}
-            className="p-1.5 hover:bg-red-50 rounded-full transition-colors group w-auto pr-6"
-            title="Delete receipt"
+            disabled={disableDelete}
+            className={`p-1.5 rounded-full transition-colors group w-auto pr-6 ${disableDelete ? "opacity-40 cursor-not-allowed" : "hover:bg-red-50"}`}
+            title={disableDelete ? "Draft receipts cannot be swiped/deleted" : "Delete receipt"}
           >
             <Trash2 size={16} className="text-red-500 group-hover:text-red-600" />
           </button>
@@ -306,10 +310,12 @@ const ReceiptsTable = ({
             <button
               onClick={(e) => {
                 e.stopPropagation();
+                if (disableDelete) return;
                 onDeleteClick && onDeleteClick(receipt);
               }}
-              className="p-1.5 hover:bg-red-50 rounded-full transition-colors group"
-              title="Delete receipt"
+              disabled={disableDelete}
+              className={`p-1.5 rounded-full transition-colors group ${disableDelete ? "opacity-40 cursor-not-allowed" : "hover:bg-red-50"}`}
+              title={disableDelete ? "Draft receipts cannot be swiped/deleted" : "Delete receipt"}
             >
               <Trash2 size={16} className="text-red-500 group-hover:text-red-600" />
             </button>

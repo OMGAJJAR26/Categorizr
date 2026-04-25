@@ -13,6 +13,7 @@ const normalizeKey = (name = "") =>
     .toLowerCase();
 
 const merchantKey = (name) => `merchantLogo:${normalizeKey(name)}`;
+const SHELL_LOGO_URL = "https://logo.clearbit.com/shell.com";
 
 /** Returns true for any URL we can try to display (http or data URI). */
 const isValidUrl = (u) => {
@@ -55,6 +56,8 @@ const clearCached = (name) => {
 
 const buildClearbitUrl = (name) => {
   if (!name) return null;
+  const normalized = normalizeKey(name);
+  if (normalized.includes("shell")) return SHELL_LOGO_URL;
   const domain = name.toString().replace(/\s+/g, "").toLowerCase();
   return domain ? `https://logo.clearbit.com/${domain}.com` : null;
 };

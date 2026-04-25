@@ -113,6 +113,18 @@ const ReceiptDetail = ({
   setSelectedIndex,
   onDeleteReceipt,
 }) => {
+  const MAX_NOTES_LENGTH = 100;
+  const MAX_DESCRIPTION_LENGTH = 500;
+  const MAX_TAX_TYPES = 2;
+  const DEFAULT_TAGS = {
+    locked: false,
+    starred: false,
+    flagged: false,
+    verified: false,
+    reconciled: false,
+    reimbursed: false,
+    warrantied: false,
+  };
   const [selectedReceipt, setSelectedReceipt] = useState(receipt || null);
   const [sortedReceipts, setSortedReceipts] = useState([]);
   const [startX, setStartX] = useState(null);
@@ -236,15 +248,7 @@ const ReceiptDetail = ({
   const [annotatorSource, setAnnotatorSource] = useState(null); // { type: 'existing'|'additional', index: number }
 
   // Editable tags state
-  const [editedTags, setEditedTags] = useState({
-    locked: false,
-    starred: false,
-    flagged: false,
-    verified: false,
-    reconciled: false,
-    reimbursed: false,
-    warrantied: false,
-  });
+  const [editedTags, setEditedTags] = useState(DEFAULT_TAGS);
 
   const {
     receipts,
@@ -754,6 +758,27 @@ useEffect(() => {
     isPaymentTyping,
   ]);
 
+  const expenseCategoryExists = (name, excludeName = "") => {
+    const normalized = (name || "").trim().toLowerCase();
+    const excluded = (excludeName || "").trim().toLowerCase();
+    if (!normalized) return false;
+    return allExpenseCategories.some((c) => {
+      const cn = (c || "").trim().toLowerCase();
+      return cn === normalized && cn !== excluded;
+    });
+  };
+
+  const paymentMethodDuplicateExists = (cardType, last4) => {
+    const normalizedCardType = (cardType || "").trim().toLowerCase();
+    const normalizedLast4 = (last4 || "").replace(/\D/g, "").slice(0, 4);
+    if (!normalizedCardType || normalizedLast4.length !== 4) return false;
+    return (receipts || []).some((rct) => {
+      const existingCardType = (rct.paymentType || rct.payment_type || "").toString().trim().toLowerCase();
+      const existingLast4 = (rct.last_4_digit_card || rct.last4DigitCard || "").toString().replace(/\D/g, "").slice(-4);
+      return existingCardType === normalizedCardType && existingLast4 === normalizedLast4;
+    });
+  };
+
   // Toggle tag
   const toggleTag = (tagName) => {
     setEditedTags((prev) => ({
@@ -790,6 +815,7 @@ useEffect(() => {
   const goToPrevious = () => {
     if (currentIndex > 0) {
       setDirection(-1);
+      setEditedTags(DEFAULT_TAGS);
       setSelectedReceipt(sortedReceipts[currentIndex - 1]);
     }
   };
@@ -797,6 +823,7 @@ useEffect(() => {
   const goToNext = () => {
     if (currentIndex < sortedReceipts.length - 1) {
       setDirection(1);
+      setEditedTags(DEFAULT_TAGS);
       setSelectedReceipt(sortedReceipts[currentIndex + 1]);
     }
   };
@@ -865,6 +892,16 @@ useEffect(() => {
     });
   };
 
+  const sanitizeMoneyInput = (raw) => {
+    if (raw === null || raw === undefined) return "";
+    const cleaned = String(raw).replace(/[^0-9.]/g, "");
+    if (!cleaned) return "";
+    const [intPartRaw = "", decRaw = ""] = cleaned.split(".");
+    const intPart = intPartRaw.replace(/^0+(?=\d)/, "") || (intPartRaw ? "0" : "");
+    const decPart = (decRaw || "").slice(0, 2);
+    return cleaned.includes(".") ? `${intPart || "0"}.${decPart}` : intPart;
+  };
+
   // Function to parse receipt tags
   const parseReceiptTags = (receiptTagString) => {
     if (!receiptTagString) return null;
@@ -898,6 +935,11 @@ useEffect(() => {
   // Handle field changes in edit mode
   const handleFieldChange = (field, value) => {
     if (editedTags.locked) return; // Receipt is locked — prevent any changes
+    if (field === "notes") value = (value || "").toString().slice(0, MAX_NOTES_LENGTH);
+    if (field === "product_name") value = (value || "").toString().slice(0, MAX_DESCRIPTION_LENGTH);
+    if (field === "subtotal" || field === "purchasePrice" || field === "tip") {
+      value = sanitizeMoneyInput(value);
+    }
     setEditedReceipt((prev) => {
       const newData = { ...prev, [field]: value };
 
@@ -955,9 +997,12 @@ useEffect(() => {
   };
 
   const handleAddPaymentMethod = () => {
-    if (!newPaymentCardType || newPaymentCardType.trim().length === 0) return;
+    if (!newPaymentCardType || newPaymentCardType.trim().length === 0) {
+      setToast({ isVisible: true, message: "Select Card Type", type: "error" });
+      return;
+    }
     if (!newLast4Digits || newLast4Digits.trim().replace(/\D/g, "").length < 4) {
-      alert("Please enter the last 4 digits of the card.");
+      setToast({ isVisible: true, message: "Please enter last 4 digits of card number", type: "error" });
       return;
     }
 
@@ -985,6 +1030,10 @@ useEffect(() => {
     let finalCardIssuerName =
       newCardIssuerName.trim() || selectedCardTypeForLogo;
     const last4 = newLast4Digits.trim().replace(/\D/g, "").slice(0, 4);
+    if (paymentMethodDuplicateExists(selectedCardTypeForLogo, last4)) {
+      setToast({ isVisible: true, message: "Payment Method already exists", type: "error" });
+      return;
+    }
 
     // Update form fields
     handleFieldChange("paymentType", selectedCardTypeForLogo);
@@ -998,6 +1047,7 @@ useEffect(() => {
     }
 
     handleCloseAddPaymentModal();
+    setToast({ isVisible: true, message: "Payment Method Added", type: "success" });
   };
 
   // ============ Tax Management Functions ============
@@ -1017,6 +1067,10 @@ useEffect(() => {
         (t) => t.tax_name === tax.tax_name && t.tax_rate === tax.tax_rate
       );
       if (alreadyExists) return prev;
+      if (currentTaxValues.length >= MAX_TAX_TYPES) {
+        setTaxError("You can only add up to 2 tax types");
+        return prev;
+      }
 
       const total =
         parseFloat(prev.purchasePrice) ||
@@ -1117,6 +1171,28 @@ useEffect(() => {
     });
   };
 
+  // Tax amount input: digits + one decimal point, max 2 decimals.
+  const handleTaxAmountChange = (index, rawValue) => {
+    const numeric = sanitizeMoneyInput(rawValue);
+    const fieldKey = index === 0 ? "tax0" : "tax1";
+    setCurrencyInputs((p) => ({ ...p, [fieldKey]: numeric ? `$${numeric}` : "$" }));
+    setEditedReceipt((prev) => {
+      const currentTaxValues =
+        prev.receipt_tax_values ||
+        enrichedReceiptTaxValues.filter(
+          (t) => !(t.tax_name || "").toLowerCase().includes("tip")
+        ) ||
+        [];
+      const updatedTaxValues = currentTaxValues.map((t, i) =>
+        i === index ? { ...t, tax_amount: numeric === "" ? 0 : parseFloat(numeric) } : t
+      );
+      return {
+        ...prev,
+        receipt_tax_values: updatedTaxValues,
+      };
+    });
+  };
+
   // ── Tax field validation helpers ─────────────────────────────────────────
   const TAX_NAME_MAX = 15;
   const TAX_RATE_MAX = 99.999;
@@ -1152,12 +1228,20 @@ useEffect(() => {
 
   // Manage Tax Types modal handlers
   const handleAddTaxType = async () => {
-    if (!newTaxName.trim() || !newTaxRate.trim()) {
-      setTaxError("Tax Name and Tax Rate are required.");
+    if (!newTaxName.trim()) {
+      setTaxError("Please enter Tax Name");
+      return;
+    }
+    if (((editedReceipt.receipt_tax_values || []).length) >= MAX_TAX_TYPES) {
+      setTaxError("You can only add up to 2 tax types");
+      return;
+    }
+    if (!newTaxRate.trim()) {
+      setTaxError("Please enter Tax Rate");
       return;
     }
     if (isDuplicateTaxName(newTaxName.trim())) {
-      setTaxError(`"${newTaxName.trim()}" already exists. Please use a different name.`);
+      setTaxError("Tax Type already exists");
       return;
     }
     if (hasMoreThan3Decimals(newTaxRate)) {
@@ -1214,7 +1298,7 @@ useEffect(() => {
       return;
     }
     if (isDuplicateTaxName(newTaxName.trim(), editingTaxId)) {
-      setTaxError(`"${newTaxName.trim()}" already exists. Use a different name.`);
+      setTaxError("Tax Type already exists");
       return;
     }
     if (hasMoreThan3Decimals(newTaxRate)) {
@@ -1590,7 +1674,8 @@ useEffect(() => {
         // Fallback to local object URL
         url = URL.createObjectURL(file);
       }
-      setAdditionalPhotoUrls((prev) => [...prev, url]);
+      const normalizedUrl = (url || "").toString().trim();
+      if (!normalizedUrl) return;
       // Persist to receipt immediately: fill empty slots first
       const r = selectedReceipt;
       const hasImage = r?.receipt_image && !["0", "null", ""].includes(r.receipt_image.trim());
@@ -1600,6 +1685,12 @@ useEffect(() => {
         : { receipt_image: url };
       if (Object.keys(patch).length > 0) {
         handleFieldChange(Object.keys(patch)[0], url);
+      } else {
+        setAdditionalPhotoUrls((prev) => {
+          if (prev.some((u) => (u || "").toString().trim() === normalizedUrl))
+            return prev;
+          return [...prev, normalizedUrl];
+        });
       }
     } catch (err) {
       console.error("Add photo failed:", err);
@@ -1652,7 +1743,11 @@ useEffect(() => {
 
   const handleSaveEditCategory = async () => {
     const newName = editCategoryName.trim();
-    if (!newName) { setEditCategoryError("Category name is required."); return; }
+    if (!newName) { setEditCategoryError("Please enter Expense Category"); return; }
+    if (expenseCategoryExists(newName, editingCategory)) {
+      setEditCategoryError("Expense Category already exists");
+      return;
+    }
     setIsSavingEditCategory(true);
     setEditCategoryError(null);
     const oldName = editingCategory;
@@ -1670,7 +1765,7 @@ useEffect(() => {
       setShowEditCategoryModal(false);
       setEditingCategory(null);
       await refreshData();
-      setToast({ isVisible: true, message: "Expense category updated successfully!", type: "success" });
+      setToast({ isVisible: true, message: "Expense Category Updated", type: "success" });
     } catch (err) {
       setEditCategoryError(err.message || "Failed to update category.");
     } finally {
@@ -1753,6 +1848,12 @@ useEffect(() => {
 
   /** Update a field on a specific split, auto-calculating tax/total like the main form */
   const updateSplitField = (idx, field, value) => {
+    if (field === "subtotal" || field === "purchasePrice") {
+      value = sanitizeMoneyInput(value);
+    }
+    if (field === "product_name") {
+      value = (value || "").toString().slice(0, MAX_DESCRIPTION_LENGTH);
+    }
     const mainSubtotal = parseFloat(editedReceipt.subtotal) || parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.subtotal) || 0;
     const mainTotal    = parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0;
 
@@ -4033,6 +4134,7 @@ Thank you for using our receipt management system.
                               <input type="text"
                                 className="w-full border border-blue-400 text-sm px-2 py-2 rounded-md bg-white text-gray-800"
                                 value={split.product_name || ""} onChange={(e) => updateSplitField(activeSplitIndex, "product_name", e.target.value)}
+                                maxLength={MAX_DESCRIPTION_LENGTH}
                                 placeholder="Enter a description" />
                             </div>
                           </div>
@@ -4144,7 +4246,7 @@ Thank you for using our receipt management system.
                     {editedTags.locked && (
                       <div className="mx-3 sm:mx-6 mt-3 px-4 py-3 bg-red-50 border border-red-300 rounded-lg flex items-center gap-2 text-red-700 text-sm font-medium">
                         <img src={locked} alt="Locked" className="w-4 h-4 object-contain" />
-                        This receipt is locked. Toggle the lock in Tags below to make changes.
+                        This receipt is locked. Unlock it in Tags below to edit and save changes.
                       </div>
                     )}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 p-3 sm:p-6 text-sm text-gray-800">
@@ -4813,10 +4915,7 @@ Thank you for using our receipt management system.
                                     setCurrencyInputs(p => ({ ...p, tax0: `$${num ? num.toFixed(2) : "0.00"}` }));
                                   }}
                                   onChange={(e) => {
-                                    const val = e.target.value;
-                                    setCurrencyInputs(p => ({ ...p, tax0: val }));
-                                    const parsed = parseFloat(val.replace(/[^0-9.-]/g, ""));
-                                    if (!isNaN(parsed)) handleTaxChange(0, parsed);
+                                    handleTaxAmountChange(0, e.target.value);
                                   }}
                                   onBlur={() => setCurrencyInputs(p => ({ ...p, tax0: undefined }))}
                                   placeholder="$0.00"
@@ -4854,10 +4953,7 @@ Thank you for using our receipt management system.
                                     setCurrencyInputs(p => ({ ...p, tax1: `$${num ? num.toFixed(2) : "0.00"}` }));
                                   }}
                                   onChange={(e) => {
-                                    const val = e.target.value;
-                                    setCurrencyInputs(p => ({ ...p, tax1: val }));
-                                    const parsed = parseFloat(val.replace(/[^0-9.-]/g, ""));
-                                    if (!isNaN(parsed)) handleTaxChange(1, parsed);
+                                    handleTaxAmountChange(1, e.target.value);
                                   }}
                                   onBlur={() => setCurrencyInputs(p => ({ ...p, tax1: undefined }))}
                                   placeholder="$0.00"
@@ -5073,6 +5169,7 @@ Thank you for using our receipt management system.
                         onChange={(e) =>
                           handleFieldChange("product_name", e.target.value)
                         }
+                        maxLength={MAX_DESCRIPTION_LENGTH}
                         placeholder="No description provided"
                       />
                       <h3 className="font-semibold mb-2 text-gray-900">
@@ -5084,6 +5181,7 @@ Thank you for using our receipt management system.
                         onChange={(e) =>
                           handleFieldChange("notes", e.target.value)
                         }
+                        maxLength={MAX_NOTES_LENGTH}
                         placeholder="No notes provided"
                       />
 
@@ -5212,7 +5310,13 @@ Thank you for using our receipt management system.
                             return proxy + encodeURIComponent(url);
                           };
 
-                          const allUrls = [...urls, ...additionalPhotoUrls];
+                          const allUrls = [
+                            ...new Set(
+                              [...urls, ...additionalPhotoUrls]
+                                .map((u) => (u || "").toString().trim())
+                                .filter(Boolean)
+                            ),
+                          ];
 
                           if (allUrls.length === 0) {
                             return (
@@ -5260,6 +5364,27 @@ Thank you for using our receipt management system.
                                     }
                                   />
                                 )}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (isAdditional) {
+                                      setAdditionalPhotoUrls((prev) =>
+                                        prev.filter((_, i) => i !== idx - urls.length)
+                                      );
+                                      return;
+                                    }
+                                    if (idx === 0) {
+                                      handleFieldChange("emailAttachment", "0");
+                                    } else if (idx === 1) {
+                                      handleFieldChange("receipt_image", "0");
+                                    }
+                                  }}
+                                  className="absolute top-1 right-1 bg-white/90 hover:bg-red-600 hover:text-white text-red-600 rounded p-1 opacity-0 group-hover:opacity-100 transition-all shadow"
+                                  title="Delete file"
+                                >
+                                  <Trash2 size={11} />
+                                </button>
                                 {/* Annotate button */}
                                 {!isPdf(u) && (
                                   <button
@@ -5273,8 +5398,8 @@ Thank you for using our receipt management system.
                                           : { type: "existing", index: idx }
                                       );
                                     }}
-                                    className="absolute bottom-1 right-1 bg-white/90 hover:bg-blue-600 hover:text-white text-gray-700 rounded p-1 opacity-0 group-hover:opacity-100 transition-all shadow"
-                                    title="Annotate / Write on this receipt"
+                                    className="absolute top-1 right-8 bg-white/90 hover:bg-blue-600 hover:text-white text-gray-700 rounded p-1 opacity-0 group-hover:opacity-100 transition-all shadow"
+                                    title="Edit receipt image"
                                   >
                                     <PenLine size={11} />
                                   </button>
@@ -6153,11 +6278,21 @@ Thank you for using our receipt management system.
                   onChange={(e) => setNewCategoryName(e.target.value)}
                   placeholder="Enter category name"
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && newCategoryName.trim()) {
-                      addExpenseCategory(newCategoryName.trim());
-                      handleFieldChange("expense_type", newCategoryName.trim());
+                    if (e.key === "Enter") {
+                      const nextCategory = newCategoryName.trim();
+                      if (!nextCategory) {
+                        setToast({ isVisible: true, message: "Please enter Expense Category", type: "error" });
+                        return;
+                      }
+                      if (expenseCategoryExists(nextCategory)) {
+                        setToast({ isVisible: true, message: "Expense Category already exists", type: "error" });
+                        return;
+                      }
+                      addExpenseCategory(nextCategory);
+                      handleFieldChange("expense_type", nextCategory);
                       setShowAddCategoryInput(false);
                       setNewCategoryName("");
+                      setToast({ isVisible: true, message: "Expense Category Added", type: "success" });
                     } else if (e.key === "Escape") {
                       setShowAddCategoryInput(false);
                       setNewCategoryName("");
@@ -6169,12 +6304,20 @@ Thank you for using our receipt management system.
                     type="button"
                     disabled={!newCategoryName.trim()}
                     onClick={() => {
-                      if (newCategoryName.trim()) {
-                        addExpenseCategory(newCategoryName.trim());
-                        handleFieldChange("expense_type", newCategoryName.trim());
-                        setShowAddCategoryInput(false);
-                        setNewCategoryName("");
+                      const nextCategory = newCategoryName.trim();
+                      if (!nextCategory) {
+                        setToast({ isVisible: true, message: "Please enter Expense Category", type: "error" });
+                        return;
                       }
+                      if (expenseCategoryExists(nextCategory)) {
+                        setToast({ isVisible: true, message: "Expense Category already exists", type: "error" });
+                        return;
+                      }
+                      addExpenseCategory(nextCategory);
+                      handleFieldChange("expense_type", nextCategory);
+                      setShowAddCategoryInput(false);
+                      setNewCategoryName("");
+                      setToast({ isVisible: true, message: "Expense Category Added", type: "success" });
                     }}
                     className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >

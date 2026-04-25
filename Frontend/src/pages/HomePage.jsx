@@ -957,6 +957,7 @@ const HomePage = () => {
                           isLinkingXero={linkingXeroReceiptId === receipt.id}
                           formatCurrency={formatCurrency}
                           isToBeVerified={true}
+                          disableDelete={true}
                         />
                         <ReceiptsMobileView
                           receipt={receipt}
@@ -973,6 +974,7 @@ const HomePage = () => {
                           isLinkingXero={linkingXeroReceiptId === receipt.id}
                           formatCurrency={formatCurrency}
                           isToBeVerified={true}
+                          disableDelete={true}
                         />
                         {selectedReceipt?.id === receipt.id && (
                           <ReceiptDetail

@@ -18,6 +18,7 @@ const ReceiptsMobileView = ({
   formatCurrency,
   onClearQuickbooksLink,
   isToBeVerified = false,
+  disableDelete = false,
 }) => {
   const [showIntegrateMenu, setShowIntegrateMenu] = useState(false);
   const menuRef = useRef(null);
@@ -36,6 +37,7 @@ const ReceiptsMobileView = ({
   const getFormattedDate = () => {
     return receipt.product_date
       ? new Date(Number(receipt.product_date) * 1000).toLocaleDateString("en-US", {
+          timeZone: "UTC",
           month: "short",
           day: "numeric",
           year: "numeric",
@@ -238,10 +240,12 @@ const ReceiptsMobileView = ({
         <button
           onClick={(e) => {
             e.stopPropagation();
+            if (disableDelete) return;
             onDeleteClick && onDeleteClick(receipt);
           }}
-          className="p-1.5 transition-colors group"
-          title="Delete receipt"
+          disabled={disableDelete}
+          className={`p-1.5 transition-colors group ${disableDelete ? "opacity-40 cursor-not-allowed" : ""}`}
+          title={disableDelete ? "Draft receipts cannot be swiped/deleted" : "Delete receipt"}
         >
           <Trash2 size={16} className="text-red-500 group-hover:text-red-600" />
         </button>

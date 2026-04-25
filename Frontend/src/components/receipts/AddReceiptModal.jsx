@@ -37,6 +37,9 @@ import lockedImg from "../../assets/receipttags/locked.png";
 import unlockedImg from "../../assets/receipttags/unlocked.png";
 
 const AddReceiptModal = ({ onClose, onReceiptAdded }) => {
+  const MAX_NOTES_LENGTH = 100;
+  const MAX_DESCRIPTION_LENGTH = 500;
+  const MAX_TAX_TYPES = 2;
   const {
     merchants,
     paymentMethods,
@@ -649,17 +652,21 @@ const [localMerchants, setLocalMerchants] = useState([]);
     try {
       const newUrls = await uploadFilesToMedia([file]);
       if (newUrls.length > 0) {
-        setUploadedMediaUrls((prev) => [...prev, ...newUrls]);
+        setUploadedMediaUrls((prev) => {
+          const existing = new Set(prev);
+          const uniqueNew = newUrls.filter((u) => u && !existing.has(u));
+          return [...prev, ...uniqueNew];
+        });
       } else {
         // Fallback: upload returned empty — use local blob URL for display
         const localUrl = URL.createObjectURL(file);
-        setUploadedMediaUrls((prev) => [...prev, localUrl]);
+        setUploadedMediaUrls((prev) => (prev.includes(localUrl) ? prev : [...prev, localUrl]));
       }
     } catch (err) {
       console.error("Add photo upload failed:", err);
       // Fallback: use local object URL
       const localUrl = URL.createObjectURL(file);
-      setUploadedMediaUrls((prev) => [...prev, localUrl]);
+      setUploadedMediaUrls((prev) => (prev.includes(localUrl) ? prev : [...prev, localUrl]));
     } finally {
       setIsAddingPhoto(false);
     }
@@ -701,6 +708,10 @@ const [localMerchants, setLocalMerchants] = useState([]);
       }
       return newFiles;
     });
+  };
+
+  const removeUploadedMediaAt = (index) => {
+    setUploadedMediaUrls((prev) => prev.filter((_, i) => i !== index));
   };
 
   const getFilePreview = (file) => {
@@ -788,6 +799,16 @@ const [localMerchants, setLocalMerchants] = useState([]);
     return subtotal > 0 ? subtotal.toFixed(2) : "0.00";
   };
 
+  const sanitizeMoneyInput = (raw) => {
+    if (raw === null || raw === undefined) return "";
+    const cleaned = String(raw).replace(/[^0-9.]/g, "");
+    if (!cleaned) return "";
+    const [intPartRaw = "", decRaw = ""] = cleaned.split(".");
+    const intPart = intPartRaw.replace(/^0+(?=\d)/, "") || (intPartRaw ? "0" : "");
+    const decPart = (decRaw || "").slice(0, 2);
+    return cleaned.includes(".") ? `${intPart || "0"}.${decPart}` : intPart;
+  };
+
   // Auto-dismiss error banner after 3.5 s
   useEffect(() => {
     if (!error) return;
@@ -797,6 +818,11 @@ const [localMerchants, setLocalMerchants] = useState([]);
 
   // Handle form field changes with auto-calculation
 const handleFieldChange = (field, value) => {
+  if (field === "notes") value = (value || "").toString().slice(0, MAX_NOTES_LENGTH);
+  if (field === "product_name") value = (value || "").toString().slice(0, MAX_DESCRIPTION_LENGTH);
+  if (field === "subtotal" || field === "purchasePrice" || field === "tip") {
+    value = sanitizeMoneyInput(value);
+  }
   // Clear error banner when user changes the merchant field
   if (field === "storeName" && error) setError(null);
   setFormData((prev) => {
@@ -917,13 +943,11 @@ const handleFieldChange = (field, value) => {
   const normalizeCurrencyInput = (raw) => {
     if (!raw) return "$";
     if (raw === "-") return "-$";
-    if (raw.startsWith("$-")) return `-$${raw.slice(2)}`; // user typed $- → flip to -$
-    if (raw.startsWith("-") && !raw.startsWith("-$")) return `-$${raw.slice(1)}`;
-    if (!raw.startsWith("$") && !raw.startsWith("-$")) {
-      // $ was deleted somehow — add it back
-      return `$${raw.replace(/[^0-9.]/g, "")}`;
-    }
-    return raw;
+    const isNeg = raw.startsWith("-") || raw.startsWith("-$") || raw.startsWith("$-");
+    const unsigned = raw.replace(/^-?\$?/, "");
+    const cleaned = sanitizeMoneyInput(unsigned);
+    if (!cleaned) return isNeg ? "-$" : "$";
+    return isNeg ? `-$${cleaned}` : `$${cleaned}`;
   };
 
   // Parse display string ("$9.78" / "-$9.78") back to a plain number string for formData.
@@ -932,7 +956,8 @@ const handleFieldChange = (field, value) => {
     const isNeg = display.startsWith("-");
     const numPart = display.replace(/^-?\$/, "");
     if (!numPart || numPart === ".") return "";
-    return isNeg ? `-${numPart}` : numPart;
+    const sanitized = sanitizeMoneyInput(numPart);
+    return isNeg && sanitized ? `-${sanitized}` : sanitized;
   };
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -949,6 +974,10 @@ const handleFieldChange = (field, value) => {
     console.log("Tax already exists:", exists);
 
     if (!exists) {
+      if ((formData.receipt_tax_values || []).length >= MAX_TAX_TYPES) {
+        setError("You can only add up to 2 tax types");
+        return;
+      }
       // Use current total and tip to compute subtotal, then tax amounts
       const totalNum = parseFloat(formData.purchasePrice) || 0;
       const tipNum = parseFloat(formData.tip) || 0;
@@ -1075,12 +1104,20 @@ const handleFieldChange = (field, value) => {
     console.log("Tax Number:", newTaxNumber);
     console.log("Current step:", step);
 
-    if (!newTaxName.trim() || !newTaxRate.trim()) {
-      setError("Tax Name and Tax Rate are required");
+    if (!newTaxName.trim()) {
+      setError("Please enter Tax Name");
+      return;
+    }
+    if ((formData.receipt_tax_values || []).length >= MAX_TAX_TYPES) {
+      setError("You can only add up to 2 tax types");
+      return;
+    }
+    if (!newTaxRate.trim()) {
+      setError("Please enter Tax Rate");
       return;
     }
     if (isDuplicateTaxName(newTaxName.trim())) {
-      setError(`"${newTaxName.trim()}" already exists. Please use a different name.`);
+      setError("Tax Type already exists");
       return;
     }
     if (hasMoreThan3Decimals(newTaxRate)) {
@@ -1185,7 +1222,7 @@ const handleFieldChange = (field, value) => {
   // Handle updating existing tax
   const handleUpdateTax = async () => {
     if (!editingTaxId || !newTaxName.trim() || !newTaxRate.trim()) {
-      setError("Tax Name and Tax Rate are required");
+      setError("Please enter Tax Name and Tax Rate");
       return;
     }
     if (newTaxName.trim().length > TAX_NAME_MAX) {
@@ -1201,7 +1238,7 @@ const handleFieldChange = (field, value) => {
       return;
     }
     if (isDuplicateTaxName(newTaxName.trim(), editingTaxId)) {
-      setError(`"${newTaxName.trim()}" already exists. Use a different name.`);
+      setError("Tax Type already exists");
       return;
     }
     if (hasMoreThan3Decimals(newTaxRate)) {
@@ -1545,7 +1582,11 @@ const handleFieldChange = (field, value) => {
 
   const handleSaveEditCategory = async () => {
     const newName = editCategoryName.trim();
-    if (!newName) { setEditCategoryError("Category name is required."); return; }
+    if (!newName) { setEditCategoryError("Please enter Expense Category"); return; }
+    if (expenseCategoryExists(newName, editingCategory)) {
+      setEditCategoryError("Expense Category already exists");
+      return;
+    }
     setIsSavingEditCategory(true);
     setEditCategoryError(null);
     const oldName = editingCategory;
@@ -1563,7 +1604,7 @@ const handleFieldChange = (field, value) => {
       setShowEditCategoryModal(false);
       setEditingCategory(null);
       await refreshData();
-      setToast({ isVisible: true, message: "Expense category updated successfully!", type: "success" });
+      setToast({ isVisible: true, message: "Expense Category Updated", type: "success" });
     } catch (err) {
       setEditCategoryError(err.message || "Failed to update category.");
     } finally {
@@ -2251,25 +2292,31 @@ const handleFieldChange = (field, value) => {
   /** POST a payload to addReceiptv1 and return the response data */
   const postNewReceipt = async (payload) => {
     const token = localStorage.getItem("token");
+    console.log("%c[Receipt] POST /api/receipt/addReceiptv1 payload:", "color:#22c55e;font-weight:bold", payload);
     const response = await fetch("/api/receipt/addReceiptv1", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accesstoken: token },
       body: JSON.stringify(payload),
     });
     if (!response.ok) throw new Error(`Failed to save receipt: ${response.status}`);
-    return response.json();
+    const data = await response.json();
+    console.log("%c[Receipt] addReceiptv1 response (full):", "color:#22c55e;font-weight:bold", data);
+    return data;
   };
 
   /** PUT payload to updateReceiptv1 */
   const putUpdateReceipt = async (payload) => {
     const token = localStorage.getItem("token");
+    console.log("%c[Receipt] POST /api/receipt/updateReceiptv1 payload:", "color:#f59e0b;font-weight:bold", payload);
     const response = await fetch("/api/receipt/updateReceiptv1", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accesstoken: token },
       body: JSON.stringify(payload),
     });
     if (!response.ok) throw new Error(`Failed to update receipt: ${response.status}`);
-    return response.json();
+    const data = await response.json();
+    console.log("%c[Receipt] updateReceiptv1 response (full):", "color:#f59e0b;font-weight:bold", data);
+    return data;
   };
 
   /** Save original receipt then enter duplicate mode */
@@ -2353,6 +2400,12 @@ const handleFieldChange = (field, value) => {
    *
    *  Amounts are capped at the main receipt's values; an alert fires if exceeded. */
   const updateSplitField = (idx, field, value) => {
+    if (field === "subtotal" || field === "purchasePrice") {
+      value = sanitizeMoneyInput(value);
+    }
+    if (field === "product_name") {
+      value = (value || "").toString().slice(0, MAX_DESCRIPTION_LENGTH);
+    }
     const mainSubtotal = parseFloat(formData.subtotal) || parseFloat(formData.purchasePrice) || 0;
     const mainTotal    = parseFloat(formData.purchasePrice) || 0;
 
@@ -3052,11 +3105,11 @@ const handleSelectLogo = (index) => {
   // Handle adding new payment method
   const handleAddPaymentMethod = () => {
     if (!newPaymentCardType || newPaymentCardType.trim().length === 0) {
-      setError("Payment Card Type is required");
+      setError("Select Card Type");
       return;
     }
     if (!newLast4Digits || newLast4Digits.trim().replace(/\D/g, "").length < 4) {
-      setError("Last 4 digits of the card are required");
+      setError("Please enter last 4 digits of card number");
       return;
     }
 
@@ -3106,6 +3159,10 @@ const handleSelectLogo = (index) => {
     if (newLast4Digits && newLast4Digits.trim().length > 0) {
       const last4 = newLast4Digits.trim().replace(/\D/g, "").slice(0, 4);
       if (last4.length > 0) {
+        if (paymentMethodDuplicateExists(selectedCardTypeForLogo, last4)) {
+          setError("Payment Method already exists");
+          return;
+        }
         paymentMethodString = `${paymentMethodString} *${last4}`;
       }
     }
@@ -3150,6 +3207,7 @@ const handleSelectLogo = (index) => {
     // Reset form and close modal
     handleCloseAddPaymentModal();
     setShowPaymentDropdown(false);
+    setToast({ isVisible: true, message: "Payment Method Added", type: "success" });
   };
 
   // Filter functions for dropdowns - use merchantsWithImages
@@ -3256,6 +3314,35 @@ const handleSelectLogo = (index) => {
     });
 
     return Array.from(methodMap.values());
+  };
+
+  const expenseCategoryExists = (name, excludeName = "") => {
+    const normalized = (name || "").trim().toLowerCase();
+    const excluded = (excludeName || "").trim().toLowerCase();
+    if (!normalized) return false;
+    return allExpenseCategories.some((c) => {
+      const cn = (c || "").trim().toLowerCase();
+      return cn === normalized && cn !== excluded;
+    });
+  };
+
+  const paymentMethodDuplicateExists = (cardType, last4) => {
+    const normalizedCardType = (cardType || "").trim().toLowerCase();
+    const normalizedLast4 = (last4 || "").replace(/\D/g, "").slice(0, 4);
+    if (!normalizedCardType || normalizedLast4.length !== 4) return false;
+
+    const inReceipts = (receipts || []).some((r) => {
+      const existingCardType = (r.paymentType || r.payment_type || "").toString().trim().toLowerCase();
+      const existingLast4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().replace(/\D/g, "").slice(-4);
+      return existingCardType === normalizedCardType && existingLast4 === normalizedLast4;
+    });
+    if (inReceipts) return true;
+
+    return (localPaymentMethods || []).some((pm) => {
+      const existingCardType = (pm.selectedCardType || pm.paymentType || "").toString().trim().toLowerCase();
+      const existingLast4 = (pm.last4DigitCard || "").toString().replace(/\D/g, "").slice(-4);
+      return existingCardType === normalizedCardType && existingLast4 === normalizedLast4;
+    });
   };
 
   const filteredPaymentMethods = (() => {
@@ -3664,6 +3751,7 @@ const handleSelectLogo = (index) => {
                                 className="w-full border border-blue-400 text-sm px-2 py-2 rounded-md bg-white text-gray-800"
                                 value={split.product_name || ""}
                                 onChange={(e) => updateSplitField(activeSplitIndex, "product_name", e.target.value)}
+                                maxLength={MAX_DESCRIPTION_LENGTH}
                                 placeholder="Enter a description"
                               />
                             </div>
@@ -5050,6 +5138,7 @@ const handleSelectLogo = (index) => {
                         onChange={(e) =>
                           handleFieldChange("product_name", e.target.value)
                         }
+                        maxLength={MAX_DESCRIPTION_LENGTH}
                         placeholder="e.g., Nespresso VertuoPlus Espresso Maker"
                       />
                       <h3 className="font-semibold mb-2 text-gray-900">
@@ -5061,6 +5150,7 @@ const handleSelectLogo = (index) => {
                         onChange={(e) =>
                           handleFieldChange("notes", e.target.value)
                         }
+                        maxLength={MAX_NOTES_LENGTH}
                         placeholder="e.g., Birthday gift for Mom"
                       />
 
@@ -5159,6 +5249,17 @@ const handleSelectLogo = (index) => {
                                   className="w-24 h-auto rounded cursor-pointer border border-gray-200"
                                   onClick={() => window.open(url, "_blank")}
                                 />
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeUploadedMediaAt(idx);
+                                  }}
+                                  className="absolute top-1 right-1 bg-white/90 hover:bg-red-600 hover:text-white text-red-600 rounded p-1 opacity-0 group-hover:opacity-100 transition-all shadow"
+                                  title="Delete image"
+                                >
+                                  <Trash2 size={11} />
+                                </button>
                                 {/* Annotate button overlay */}
                                 <button
                                   type="button"
@@ -5185,6 +5286,23 @@ const handleSelectLogo = (index) => {
                                 window.open(getImagePreviewUrl(), "_blank")
                               }
                             />
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setUploadedImageUrl(null);
+                                setPdfPreviewUrl(null);
+                                setLocalImageFile(null);
+                                setUploadedReceiptData((prev) => {
+                                  if (!prev) return prev;
+                                  return { ...prev, receipt_image: "0", emailAttachment: "0" };
+                                });
+                              }}
+                              className="absolute top-1 right-1 bg-white/90 hover:bg-red-600 hover:text-white text-red-600 rounded p-1 opacity-0 group-hover:opacity-100 transition-all shadow"
+                              title="Delete image"
+                            >
+                              <Trash2 size={11} />
+                            </button>
                             <button
                               type="button"
                               onClick={(e) => {
@@ -6128,11 +6246,21 @@ const handleSelectLogo = (index) => {
                   onChange={(e) => setNewCategoryName(e.target.value)}
                   placeholder="Enter category name"
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && newCategoryName.trim()) {
-                      addExpenseCategory(newCategoryName.trim());
-                      handleFieldChange("expense_type", newCategoryName.trim());
+                    if (e.key === "Enter") {
+                      const nextCategory = newCategoryName.trim();
+                      if (!nextCategory) {
+                        setError("Please enter Expense Category");
+                        return;
+                      }
+                      if (expenseCategoryExists(nextCategory)) {
+                        setError("Expense Category already exists");
+                        return;
+                      }
+                      addExpenseCategory(nextCategory);
+                      handleFieldChange("expense_type", nextCategory);
                       setShowAddCategoryInput(false);
                       setNewCategoryName("");
+                      setToast({ isVisible: true, message: "Expense Category Added", type: "success" });
                     } else if (e.key === "Escape") {
                       setShowAddCategoryInput(false);
                       setNewCategoryName("");
@@ -6144,12 +6272,20 @@ const handleSelectLogo = (index) => {
                     type="button"
                     disabled={!newCategoryName.trim()}
                     onClick={() => {
-                      if (newCategoryName.trim()) {
-                        addExpenseCategory(newCategoryName.trim());
-                        handleFieldChange("expense_type", newCategoryName.trim());
-                        setShowAddCategoryInput(false);
-                        setNewCategoryName("");
+                      const nextCategory = newCategoryName.trim();
+                      if (!nextCategory) {
+                        setError("Please enter Expense Category");
+                        return;
                       }
+                      if (expenseCategoryExists(nextCategory)) {
+                        setError("Expense Category already exists");
+                        return;
+                      }
+                      addExpenseCategory(nextCategory);
+                      handleFieldChange("expense_type", nextCategory);
+                      setShowAddCategoryInput(false);
+                      setNewCategoryName("");
+                      setToast({ isVisible: true, message: "Expense Category Added", type: "success" });
                     }}
                     className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >

@@ -963,6 +963,19 @@ const ReceiptInfoInline = ({ type }) => {
   const [pendingMerchantEdit, setPendingMerchantEdit] = useState(null); // { item, newName, keepLogo }
   const [showMerchantDeleteConfirm, setShowMerchantDeleteConfirm] = useState(false);
   const [pendingMerchantDelete, setPendingMerchantDelete] = useState(null); // item
+  const [showCategoryEditConfirm, setShowCategoryEditConfirm] = useState(false);
+  const [pendingCategoryEdit, setPendingCategoryEdit] = useState(null); // { item, newName }
+  const [showCategoryDeleteConfirm, setShowCategoryDeleteConfirm] = useState(false);
+  const [pendingCategoryDelete, setPendingCategoryDelete] = useState(null); // item
+  const [showPaymentEditConfirm, setShowPaymentEditConfirm] = useState(false);
+  const [pendingPaymentEdit, setPendingPaymentEdit] = useState(null); // { item, newName }
+  const [showPaymentDeleteConfirm, setShowPaymentDeleteConfirm] = useState(false);
+  const [pendingPaymentDelete, setPendingPaymentDelete] = useState(null); // item
+  const [showTaxRateDecisionConfirm, setShowTaxRateDecisionConfirm] = useState(false);
+  const [pendingTaxRateEdit, setPendingTaxRateEdit] = useState(null); // { tax, nextName, nextRate, nextNumber }
+  const [showTaxDeleteBlockedMsg, setShowTaxDeleteBlockedMsg] = useState(false);
+  const [showTaxDeleteConfirm, setShowTaxDeleteConfirm] = useState(false);
+  const [pendingTaxDeleteId, setPendingTaxDeleteId] = useState(null);
 
   // Add-merchant state
   const [newMerchantName, setNewMerchantName] = useState("");
@@ -1037,7 +1050,91 @@ const ReceiptInfoInline = ({ type }) => {
     return null;
   };
 
+  const inferCardTypeFromPayment = (value) => {
+    const v = (value || "").toLowerCase();
+    if (v.includes("visa")) return "Visa";
+    if (v.includes("master")) return "MasterCard";
+    if (v.includes("american") || v.includes("amex")) return "American Express";
+    if (v.includes("discover")) return "Discover";
+    if (v.includes("diners")) return "Diners Club";
+    if (v.includes("paypal")) return "PayPal";
+    if (v.includes("debit")) return "Debit Card";
+    if (v.includes("cash")) return "Cash";
+    return "Other";
+  };
+
+  const parsePaymentDisplay = (value) => {
+    const raw = (value || "").toString().trim();
+    const match = raw.match(/^(.*?)(?:\s*\*(\d{3,4}))?$/);
+    const issuer = (match?.[1] || raw).trim();
+    const last4 = (match?.[2] || "").trim();
+    return { issuer, last4 };
+  };
+
+  const getPaymentBrand = (paymentName, fallbackCardType = "") => {
+    const key = (paymentName || "").toString().trim();
+    if (!key) return (fallbackCardType || "").trim();
+    const fromLocal = payCardMap[key];
+    if (fromLocal) return fromLocal;
+    const fromReceipts = receiptDisplayToCardType[key.toLowerCase()];
+    if (fromReceipts) return fromReceipts;
+    const inferred = inferCardTypeFromPayment(key);
+    return inferred === "Other" ? (fallbackCardType || "").trim() : inferred;
+  };
+
+  const getPaymentSignature = (paymentName, fallbackCardType = "") => {
+    const { last4 } = parsePaymentDisplay(paymentName);
+    const brand = getPaymentBrand(paymentName, fallbackCardType);
+    const normalizedBrand = (brand || "").toString().trim().toLowerCase();
+    const normalizedLast4 = (last4 || "").toString().trim();
+    if (!normalizedBrand || !normalizedLast4) return "";
+    return `${normalizedBrand}|${normalizedLast4}`;
+  };
+
+  const isCashMethod = (name) => {
+    const base = (name || "")
+      .toString()
+      .replace(/\s*\*\s*\d{3,4}\s*$/g, "")
+      .trim()
+      .toLowerCase();
+    return base === "cash";
+  };
+
+  const paymentDisplayForReceipt = (r) => {
+    const iss = (r.card_issuer_name || r.cardIssuerName || "").toString().trim();
+    const l4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
+    return iss ? (l4 ? `${iss} *${l4}` : iss) : (r.paymentType || r.payment_type || "").toString().trim();
+  };
+
+  const getReceiptsByMerchant = (name) =>
+    (receipts || []).filter(
+      (r) =>
+        ((r.storeName || r.store_name || "").toString().trim().toLowerCase() ===
+          (name || "").toString().trim().toLowerCase())
+    );
+
+  const getReceiptsByCategory = (name) =>
+    (receipts || []).filter(
+      (r) =>
+        ((r.expense_type || r.expenseType || "").toString().trim().toLowerCase() ===
+          (name || "").toString().trim().toLowerCase())
+    );
+
+  const getReceiptsByPaymentDisplay = (name) =>
+    (receipts || []).filter(
+      (r) => paymentDisplayForReceipt(r).toLowerCase() === (name || "").toLowerCase()
+    );
+
   const toast = (t, text) => { setMsg({ type: t, text }); setTimeout(() => setMsg(null), 3000); };
+  const TAX_RATE_MAX = 99.999;
+
+  const expenseCategoryExists = (name, excludeKey = null) => {
+    const normalized = (name || "").trim().toLowerCase();
+    if (!normalized) return false;
+    return buildAllItems().some(
+      (item) => item.name.toLowerCase() === normalized && item.key !== excludeKey
+    );
+  };
 
   // Generic logo fetch
   const doFetch = async (keyword, setFetching, setOpts, setSel) => {
@@ -1115,12 +1212,20 @@ const ReceiptInfoInline = ({ type }) => {
   const handleAdd = async () => {
     if (type === "taxes") {
       const n = addTaxVal.tax_name.trim(), r = addTaxVal.tax_rate.toString().trim();
-      if (!n || !r) return toast("error", "Name and rate are required.");
+      if (!n) return toast("error", "Please enter Tax Name");
+      if (!r) return toast("error", "Please enter Tax Rate");
+      if (parseFloat(r) > TAX_RATE_MAX || parseFloat(r) < 0) {
+        return toast("error", `Tax Rate must be between 0 and ${TAX_RATE_MAX}`);
+      }
+      const duplicateTaxName = (taxData || []).some(
+        (tax) => (tax.tax_name || "").toLowerCase() === n.toLowerCase()
+      );
+      if (duplicateTaxName) return toast("error", "Tax Type already exists");
       try {
         await addTax({ tax_name: n, tax_rate: r, tax_number: addTaxVal.tax_number.trim(), fk_user_id: localStorage.getItem("fk_user_id") || "" });
         setAddTaxVal({ tax_name: "", tax_rate: "", tax_number: "" });
         setShowAddForm(false);
-        toast("success", `"${n}" added.`);
+        toast("success", "Tax Type Added");
       } catch (e) { toast("error", e.message || "Failed."); }
       return;
     }
@@ -1135,7 +1240,8 @@ const ReceiptInfoInline = ({ type }) => {
       const selectedUrl = addLogoSel !== null ? (addLogoOpts[addLogoSel]?.displayUrl || addLogoOpts[addLogoSel]?.storeUrl || null) : null;
       addCustomMerchant(name);
       if (selectedUrl) saveMerchLogo(name, selectedUrl);
-      await addApiMerchant(name, selectedUrl || "");
+      const addMerchantResult = await addApiMerchant(name, selectedUrl || "");
+      if (!addMerchantResult?.ok) throw new Error(addMerchantResult?.error || "Failed to add merchant");
       setNewMerchantName(""); setAddLogoOpts([]); setAddLogoSel(null);
       setShowAddForm(false);
       toast("success", "Merchant Added");
@@ -1145,25 +1251,42 @@ const ReceiptInfoInline = ({ type }) => {
       const ct     = newCardType.trim();
       const issuer = newIssuerName.trim();
       const last4  = newLast4.trim();
+      if (!ct) return toast("error", "Select Card Type");
+      if (ct.toLowerCase() === "cash" || isCashMethod(issuer)) {
+        return toast("error", "Cash already exists and cannot be created again");
+      }
+      if (!last4 || last4.replace(/\D/g, "").length < 4) {
+        return toast("error", "Please enter last 4 digits of card number");
+      }
+      const newPaymentName = issuer ? `${issuer} *${last4}` : `${ct} *${last4}`;
+      const nextSignature = getPaymentSignature(newPaymentName, ct);
+      const duplicateExists = buildAllItems().some((item) => {
+        const sig = getPaymentSignature(item.name);
+        return sig && sig === nextSignature;
+      });
+      if (duplicateExists) return toast("error", "Payment Method already exists");
       let payStr   = issuer ? (last4 ? `${issuer} *${last4}` : issuer) : (ct ? (last4 ? `${ct} *${last4}` : ct) : "");
-      if (!payStr) return toast("error", "Select a card type or enter issuer name.");
+      if (!payStr) return toast("error", "Select Card Type");
       addCustomPaymentMethod(payStr);
       if (ct) savePayCard(payStr, ct);
       // Also persist to API
-      await addApiPaymentMethod(payStr, "");
+      const addPaymentResult = await addApiPaymentMethod(payStr, "");
+      if (!addPaymentResult?.ok) throw new Error(addPaymentResult?.error || "Failed to add payment method");
       setNewCardType(""); setNewIssuerName(""); setNewLast4("");
       setShowAddForm(false);
-      toast("success", `"${payStr}" added.`);
+      toast("success", "Payment Method Added");
       return;
     }
     if (type === "categories") {
-      if (!addVal.trim()) return;
+      if (!addVal.trim()) return toast("error", "Please enter Expense Category");
       const catName = addVal.trim();
+      if (expenseCategoryExists(catName)) return toast("error", "Expense Category already exists");
       addCustomCategory(catName);
-      await addApiExpenseCategory(catName);
+      const addCategoryResult = await addApiExpenseCategory(catName);
+      if (!addCategoryResult?.ok) throw new Error(addCategoryResult?.error || "Failed to add expense category");
       setAddVal("");
       setShowAddForm(false);
-      toast("success", `"${catName}" added.`);
+      toast("success", "Expense Category Added");
       return;
     }
     if (!addVal.trim()) return;
@@ -1176,13 +1299,28 @@ const ReceiptInfoInline = ({ type }) => {
     if (!pendingMerchantEdit) return;
     const { item, newName, keepLogo } = pendingMerchantEdit;
     try {
+      // Always propagate merchant edits to existing receipts that use this merchant.
+      // This keeps list edits in sync with homepage/edit-receipt merchant name+logo.
+      const matching = (receipts || []).filter(
+        (r) => ((r.storeName || r.store_name || "").toString().trim().toLowerCase() === (item.name || "").toString().trim().toLowerCase())
+      );
+      if (matching.length > 0) {
+        await Promise.all(
+          matching.map((r) =>
+            updateReceipt(r.id, {
+              storeName: newName,
+              store_image: keepLogo || r.store_image || "",
+            })
+          )
+        );
+      }
+
       if (item.isReceiptItem) {
-        const matching = (receipts || []).filter(r => (r.storeName || r.store_name || "") === item.name);
-        await Promise.all(matching.map(r => updateReceipt(r.id, { storeName: newName })));
         if (keepLogo) saveMerchLogo(newName, keepLogo);
         hideMerchant(item.key); addCustomMerchant(newName);
       } else if (item.isApiItem) {
-        await updateApiMerchant(item.apiId, newName, keepLogo || "");
+        const updateMerchantResult = await updateApiMerchant(item.apiId, newName, keepLogo || "");
+        if (!updateMerchantResult?.ok) throw new Error(updateMerchantResult?.error || "Failed to update merchant");
         if (keepLogo) saveMerchLogo(newName, keepLogo);
       } else {
         editCustomMerchant(item.key, newName);
@@ -1200,31 +1338,246 @@ const ReceiptInfoInline = ({ type }) => {
     if (!pendingMerchantDelete) return;
     const item = pendingMerchantDelete;
     try {
+      const matching = getReceiptsByMerchant(item.name);
+      if (matching.length > 0) {
+        await Promise.all(
+          matching.map((r) => updateReceipt(r.id, { storeName: "Miscellaneous" }))
+        );
+      }
       if (item.isReceiptItem) {
-        const matching = (receipts || []).filter(r => (r.storeName || r.store_name || "") === item.name);
-        await Promise.all(matching.map(r => updateReceipt(r.id, { storeName: "Miscellaneous" })));
         hideMerchant(item.key);
       } else if (item.isApiItem) {
-        await deleteApiMerchant(item.apiId);
+        const deleteMerchantResult = await deleteApiMerchant(item.apiId);
+        if (!deleteMerchantResult?.ok) throw new Error(deleteMerchantResult?.error || "Failed to delete merchant");
       } else {
         deleteCustomMerchant(item.key);
       }
-      toast("success", "Merchant deleted. Receipts updated to Miscellaneous.");
+      toast("success", "Merchant Deleted");
     } catch (e) { toast("error", e.message || "Delete failed."); }
     setPendingMerchantDelete(null);
+  };
+
+  const applyCategoryEdit = async (item, newName) => {
+    const currentName = item.name;
+    if (item.isReceiptItem) {
+      const matching = getReceiptsByCategory(currentName);
+      await Promise.all(matching.map(r => updateReceipt(r.id, { expense_type: newName })));
+      hideCategory(item.key); addCustomCategory(newName);
+      toast("success", "Expense Category Updated");
+      return;
+    }
+    if (item.isApiItem) {
+      const updateCategoryResult = await updateApiExpenseCategory(item.apiId, newName);
+      if (!updateCategoryResult?.ok) throw new Error(updateCategoryResult?.error || "Failed to update expense category");
+      toast("success", "Expense Category Updated");
+      return;
+    }
+    editCustomCategory(item.key, newName);
+    toast("success", "Expense Category Updated");
+  };
+
+  const applyPaymentEdit = async (item, newName) => {
+    const currentName = item.name;
+    if (item.isReceiptItem) {
+      const { issuer, last4 } = parsePaymentDisplay(newName);
+      const matching = getReceiptsByPaymentDisplay(currentName);
+      await Promise.all(matching.map(r => updateReceipt(r.id, {
+        paymentType: getPaymentBrand(currentName, r.paymentType || r.payment_type || ""),
+        card_issuer_name: issuer,
+        last_4_digit_card: last4 || (r.last_4_digit_card || r.last4DigitCard || ""),
+      })));
+      savePayCard(newName, getPaymentBrand(currentName, inferCardTypeFromPayment(currentName)));
+      hidePaymentMethod(item.key); addCustomPaymentMethod(newName);
+      toast("success", "Payment Method Updated");
+      return;
+    }
+    if (item.isApiItem) {
+      const existingApi = (apiPaymentMethods || []).find((p) => p.id === item.apiId);
+      const updatePaymentResult = await updateApiPaymentMethod(item.apiId, newName, existingApi?.icon_image || "");
+      if (!updatePaymentResult?.ok) throw new Error(updatePaymentResult?.error || "Failed to update payment method");
+      savePayCard(newName, getPaymentBrand(item.name, newCardType || ""));
+      toast("success", "Payment Method Updated");
+      return;
+    }
+    editCustomPaymentMethod(item.key, newName);
+    savePayCard(newName, getPaymentBrand(item.key, inferCardTypeFromPayment(item.key)));
+    toast("success", "Payment Method Updated");
+  };
+
+  const doConfirmCategoryEdit = async () => {
+    setShowCategoryEditConfirm(false);
+    if (!pendingCategoryEdit) return;
+    try {
+      await applyCategoryEdit(pendingCategoryEdit.item, pendingCategoryEdit.newName);
+    } catch (e) {
+      toast("error", e.message || "Update failed.");
+    } finally {
+      setPendingCategoryEdit(null);
+      closeEdit();
+    }
+  };
+
+  const doConfirmPaymentEdit = async () => {
+    setShowPaymentEditConfirm(false);
+    if (!pendingPaymentEdit) return;
+    try {
+      await applyPaymentEdit(pendingPaymentEdit.item, pendingPaymentEdit.newName);
+    } catch (e) {
+      toast("error", e.message || "Update failed.");
+    } finally {
+      setPendingPaymentEdit(null);
+      closeEdit();
+    }
+  };
+
+  const applyCategoryDelete = async (item) => {
+    if (item.isReceiptItem) {
+      const matching = getReceiptsByCategory(item.name || "");
+      await Promise.all(matching.map(r => updateReceipt(r.id, { expense_type: "" })));
+      hideCategory(item.key);
+      toast("success", "Expense Category Deleted");
+      return;
+    }
+    if (item.isApiItem) {
+      const matching = getReceiptsByCategory(item.name || "");
+      if (matching.length > 0) {
+        await Promise.all(matching.map((r) => updateReceipt(r.id, { expense_type: "" })));
+      }
+      const deleteCategoryResult = await deleteApiExpenseCategory(item.apiId);
+      if (!deleteCategoryResult?.ok) throw new Error(deleteCategoryResult?.error || "Failed to delete expense category");
+      toast("success", "Expense Category Deleted");
+      return;
+    }
+    const matching = getReceiptsByCategory(item.name || "");
+    if (matching.length > 0) {
+      await Promise.all(matching.map((r) => updateReceipt(r.id, { expense_type: "" })));
+    }
+    deleteCustomCategory(item.key);
+    toast("success", "Expense Category Deleted");
+  };
+
+  const applyPaymentDelete = async (item) => {
+    if (isCashMethod(item.name)) {
+      toast("error", "Cash payment method cannot be deleted");
+      return;
+    }
+    const matching = getReceiptsByPaymentDisplay(item.name || "");
+    await Promise.all(
+      matching.map(r =>
+        updateReceipt(r.id, {
+          paymentType: "",
+          card_issuer_name: "",
+          last_4_digit_card: "",
+        })
+      )
+    );
+    if (item.isReceiptItem) {
+      hidePaymentMethod(item.key);
+      deleteCustomPaymentMethod(item.name);
+      const apiMatch = (apiPaymentMethods || []).find((p) => (p.card_number || "").toLowerCase() === (item.name || "").toLowerCase());
+      if (apiMatch?.id) {
+        const deletePaymentResult = await deleteApiPaymentMethod(apiMatch.id);
+        if (!deletePaymentResult?.ok) throw new Error(deletePaymentResult?.error || "Failed to delete payment method");
+      }
+      toast("success", "Payment Method Deleted");
+      return;
+    }
+    if (item.isApiItem) {
+      hidePaymentMethod(item.name);
+      deleteCustomPaymentMethod(item.name);
+      const deletePaymentResult = await deleteApiPaymentMethod(item.apiId);
+      if (!deletePaymentResult?.ok) throw new Error(deletePaymentResult?.error || "Failed to delete payment method");
+      toast("success", "Payment Method Deleted");
+      return;
+    }
+    hidePaymentMethod(item.name);
+    deleteCustomPaymentMethod(item.key);
+    toast("success", "Payment Method Deleted");
+  };
+
+  const doConfirmCategoryDelete = async () => {
+    setShowCategoryDeleteConfirm(false);
+    if (!pendingCategoryDelete) return;
+    try {
+      await applyCategoryDelete(pendingCategoryDelete);
+    } catch (e) {
+      toast("error", e.message || "Delete failed.");
+    } finally {
+      setPendingCategoryDelete(null);
+    }
+  };
+
+  const doConfirmPaymentDelete = async () => {
+    setShowPaymentDeleteConfirm(false);
+    if (!pendingPaymentDelete) return;
+    try {
+      await applyPaymentDelete(pendingPaymentDelete);
+    } catch (e) {
+      toast("error", e.message || "Delete failed.");
+    } finally {
+      setPendingPaymentDelete(null);
+    }
   };
 
   // ── SAVE EDIT ──
   const handleSaveEdit = async (item) => {
     const newName = editVal.trim();
     if (!newName) return;
+    if (type === "payments" && (item.name || "").trim().toLowerCase() === "cash") {
+      toast("error", "Cash payment method cannot be edited");
+      closeEdit();
+      return;
+    }
+    if (type === "payments" && isCashMethod(newName) && !isCashMethod(item.name)) {
+      toast("error", "Cash already exists and cannot be created again");
+      closeEdit();
+      return;
+    }
+    if (type === "payments") {
+      const fallbackBrand = getPaymentBrand(item.name, newCardType || "");
+      const newSignature = getPaymentSignature(newName, fallbackBrand);
+      const duplicatePayment = buildAllItems().some((other) => {
+        if (other.key === item.key) return false;
+        const sig = getPaymentSignature(other.name);
+        return sig && sig === newSignature;
+      });
+      if (duplicatePayment) {
+        toast("error", "Payment Method already exists");
+        closeEdit();
+        return;
+      }
+    }
     const newLogoUrl = editLogoSel !== null ? (editLogoOpts[editLogoSel]?.displayUrl || editLogoOpts[editLogoSel]?.storeUrl || null) : null;
     const keepLogo   = newLogoUrl || editOrigLogo; // use new if picked, else keep original
 
     if (type === "taxes") {
       const n = editTaxVal.tax_name.trim(), r = editTaxVal.tax_rate.toString().trim();
-      if (!n || !r) return;
-      try { await updateTax({ ...taxData.find(t => t.id === editKey), tax_name: n, tax_rate: r, tax_number: editTaxVal.tax_number.trim() }); setEditTaxKey(null); }
+      if (!n) return toast("error", "Please enter Tax Name");
+      if (!r) return toast("error", "Please enter Tax Rate");
+      if (parseFloat(r) > TAX_RATE_MAX || parseFloat(r) < 0) {
+        return toast("error", `Tax Rate must be between 0 and ${TAX_RATE_MAX}`);
+      }
+      const originalTax = (taxData || []).find((t) => t.id === editKey);
+      const duplicateTaxName = (taxData || []).some(
+        (tax) => tax.id !== editKey && (tax.tax_name || "").toLowerCase() === n.toLowerCase()
+      );
+      if (duplicateTaxName) return toast("error", "Tax Type already exists");
+      const rateChanged = String(originalTax?.tax_rate ?? "") !== String(r);
+      if (rateChanged) {
+        setPendingTaxRateEdit({
+          tax: originalTax,
+          nextName: n,
+          nextRate: r,
+          nextNumber: editTaxVal.tax_number.trim(),
+        });
+        setShowTaxRateDecisionConfirm(true);
+        return;
+      }
+      try {
+        await updateTax({ ...originalTax, tax_name: n, tax_rate: r, tax_number: editTaxVal.tax_number.trim() });
+        toast("success", "Tax Type Updated");
+        setEditTaxKey(null);
+      }
       catch (e) { toast("error", e.message || "Failed."); }
       return;
     }
@@ -1240,53 +1593,30 @@ const ReceiptInfoInline = ({ type }) => {
       return;
     }
 
+    if (type === "categories") {
+      setPendingCategoryEdit({ item, newName });
+      setShowCategoryEditConfirm(true);
+      return;
+    }
+    if (type === "payments") {
+      setPendingPaymentEdit({ item, newName });
+      setShowPaymentEditConfirm(true);
+      return;
+    }
     try {
       if (item.isReceiptItem) {
         const currentName = item.name;
-        if (type === "merchants") {
-          const matching = (receipts || []).filter(r => (r.storeName || r.store_name || "") === currentName);
-          await Promise.all(matching.map(r => updateReceipt(r.id, { storeName: newName })));
-          if (keepLogo) saveMerchLogo(newName, keepLogo);
-          hideMerchant(item.key); addCustomMerchant(newName);
-        }
-        if (type === "categories") {
-          const matching = (receipts || []).filter(r => (r.expense_type || r.expenseType || "") === currentName);
-          await Promise.all(matching.map(r => updateReceipt(r.id, { expense_type: newName })));
-          hideCategory(item.key); addCustomCategory(newName);
-        }
-        if (type === "payments") {
-          const matching = (receipts || []).filter(r => {
-            const iss  = (r.card_issuer_name || r.cardIssuerName || "").trim();
-            const l4   = (r.last_4_digit_card || r.last4DigitCard || "").trim();
-            const disp = iss ? (l4 ? `${iss} *${l4}` : iss) : (r.paymentType || r.payment_type || "");
-            return disp === currentName;
-          });
-          await Promise.all(matching.map(r => updateReceipt(r.id, { paymentType: newName })));
-          hidePaymentMethod(item.key); addCustomPaymentMethod(newName);
-        }
-        toast("success", "Updated across all receipts.");
+        const matching = (receipts || []).filter(r => (r.storeName || r.store_name || "") === currentName);
+        await Promise.all(matching.map(r => updateReceipt(r.id, { storeName: newName, store_image: keepLogo || r.store_image || "" })));
+        if (keepLogo) saveMerchLogo(newName, keepLogo);
+        hideMerchant(item.key); addCustomMerchant(newName);
       } else if (item.isApiItem) {
-        // API-backed item — update on server
-        if (type === "merchants") {
-          await updateApiMerchant(item.apiId, newName, keepLogo || "");
-          if (keepLogo) saveMerchLogo(newName, keepLogo);
-        }
-        if (type === "payments") {
-          await updateApiPaymentMethod(item.apiId, newName, "");
-          if (newCardType) savePayCard(newName, newCardType);
-        }
-        if (type === "categories") {
-          await updateApiExpenseCategory(item.apiId, newName);
-        }
-        toast("success", "Updated.");
+        const updateMerchantResult = await updateApiMerchant(item.apiId, newName, keepLogo || "");
+        if (!updateMerchantResult?.ok) throw new Error(updateMerchantResult?.error || "Failed to update merchant");
+        if (keepLogo) saveMerchLogo(newName, keepLogo);
       } else {
-        // Custom item
-        if (type === "merchants") {
-          editCustomMerchant(item.key, newName);
-          if (keepLogo) saveMerchLogo(newName, keepLogo);
-        }
-        if (type === "categories") editCustomCategory(item.key, newName);
-        if (type === "payments")   editCustomPaymentMethod(item.key, newName);
+        editCustomMerchant(item.key, newName);
+        if (keepLogo) saveMerchLogo(newName, keepLogo);
       }
     } catch (e) { toast("error", e.message || "Update failed."); }
     closeEdit();
@@ -1294,7 +1624,23 @@ const ReceiptInfoInline = ({ type }) => {
 
   // ── DELETE ──
   const handleDelete = async (item) => {
-    if (type === "taxes") { try { await deleteTax(item.key); } catch (e) { toast("error", e.message || "Failed."); } return; }
+    if (type === "taxes") {
+      const targetTax = (taxData || []).find((t) => t.id === item.key);
+      const hasAssociation = (receipts || []).some((r) =>
+        (Array.isArray(r.receipt_tax_values) ? r.receipt_tax_values : []).some((t) => {
+          const byId = String(t?.fk_tax_id || "") === String(item.key);
+          const byName = (t?.tax_name || "").toString().trim().toLowerCase() === (targetTax?.tax_name || "").toString().trim().toLowerCase();
+          return byId || byName;
+        })
+      );
+      if (hasAssociation) {
+        setShowTaxDeleteBlockedMsg(true);
+        return;
+      }
+      setPendingTaxDeleteId(item.key);
+      setShowTaxDeleteConfirm(true);
+      return;
+    }
 
     // Merchants: block Miscellaneous deletion + require confirmation
     if (type === "merchants") {
@@ -1307,40 +1653,78 @@ const ReceiptInfoInline = ({ type }) => {
       return;
     }
 
+    if (type === "categories") {
+      setPendingCategoryDelete(item);
+      setShowCategoryDeleteConfirm(true);
+      return;
+    }
+    if (type === "payments") {
+      setPendingPaymentDelete(item);
+      setShowPaymentDeleteConfirm(true);
+      return;
+    }
     try {
-      if (item.isReceiptItem) {
-        const name = item.name;
-        if (type === "merchants") {
-          const matching = (receipts || []).filter(r => (r.storeName || r.store_name || "") === name);
-          await Promise.all(matching.map(r => updateReceipt(r.id, { storeName: "Miscellaneous" })));
-          hideMerchant(item.key);
-        }
-        if (type === "categories") {
-          const matching = (receipts || []).filter(r => (r.expense_type || r.expenseType || "") === name);
-          await Promise.all(matching.map(r => updateReceipt(r.id, { expense_type: "Miscellaneous" })));
-          hideCategory(item.key);
-        }
-        if (type === "payments") {
-          const matching = (receipts || []).filter(r => {
-            const iss  = (r.card_issuer_name || r.cardIssuerName || "").trim();
-            const l4   = (r.last_4_digit_card || r.last4DigitCard || "").trim();
-            const disp = iss ? (l4 ? `${iss} *${l4}` : iss) : (r.paymentType || r.payment_type || "");
-            return disp === name;
-          });
-          await Promise.all(matching.map(r => updateReceipt(r.id, { paymentType: "Cash" })));
-          hidePaymentMethod(item.key);
-        }
-        toast("success", "Removed and reassigned in all receipts.");
-      } else if (item.isApiItem) {
-        // API-backed item — remove from local state (no server delete endpoint)
-        if (type === "payments")    deleteApiPaymentMethod(item.apiId);
-        if (type === "categories")  deleteApiExpenseCategory(item.apiId);
-      } else {
-        if (type === "merchants")  deleteCustomMerchant(item.key);
-        if (type === "categories") deleteCustomCategory(item.key);
-        if (type === "payments")   deleteCustomPaymentMethod(item.key);
+      const matching = getReceiptsByMerchant(item.name);
+      if (matching.length > 0) {
+        await Promise.all(matching.map((r) => updateReceipt(r.id, { storeName: "Miscellaneous" })));
       }
+      deleteCustomMerchant(item.key);
+      toast("success", "Merchant Deleted");
     } catch (e) { toast("error", e.message || "Delete failed."); }
+  };
+
+  const handleTaxRateDecisionAddNew = () => {
+    if (!pendingTaxRateEdit) return;
+    const base = pendingTaxRateEdit.nextName || "Tax";
+    const candidate = `${base} (1)`;
+    setShowTaxRateDecisionConfirm(false);
+    setPendingTaxRateEdit(null);
+    setEditTaxKey(null);
+    setShowAddForm(true);
+    setAddTaxVal({
+      tax_name: candidate,
+      tax_rate: pendingTaxRateEdit.nextRate,
+      tax_number: pendingTaxRateEdit.nextNumber || "",
+    });
+  };
+
+  const handleTaxRateDecisionUpdateCurrent = async () => {
+    if (!pendingTaxRateEdit?.tax) return;
+    const targetTax = pendingTaxRateEdit.tax;
+    try {
+      await updateTax({
+        ...targetTax,
+        tax_name: pendingTaxRateEdit.nextName,
+        tax_rate: pendingTaxRateEdit.nextRate,
+        tax_number: pendingTaxRateEdit.nextNumber || "",
+      });
+      const impactedReceipts = (receipts || []).filter((r) =>
+        (Array.isArray(r.receipt_tax_values) ? r.receipt_tax_values : []).some((t) =>
+          String(t?.fk_tax_id || "") === String(targetTax.id)
+        )
+      );
+      await Promise.all(
+        impactedReceipts.map((r) => {
+          const patchedTaxes = (Array.isArray(r.receipt_tax_values) ? r.receipt_tax_values : []).map((t) => {
+            if (String(t?.fk_tax_id || "") !== String(targetTax.id)) return t;
+            return {
+              ...t,
+              fk_tax_id: 0,
+              tax_name: pendingTaxRateEdit.nextName,
+              tax_rate: pendingTaxRateEdit.nextRate,
+            };
+          });
+          return updateReceipt(r.id, { receipt_tax_values: patchedTaxes });
+        })
+      );
+      toast("success", "Tax Type Updated");
+      setEditTaxKey(null);
+    } catch (e) {
+      toast("error", e.message || "Failed.");
+    } finally {
+      setShowTaxRateDecisionConfirm(false);
+      setPendingTaxRateEdit(null);
+    }
   };
 
   // Build unified list (receipt-derived + custom + API, no dupes, no "Custom" label)
@@ -1564,8 +1948,20 @@ const ReceiptInfoInline = ({ type }) => {
                           <input className={mInput} value={editTaxVal.tax_number} onChange={e => setEditTaxVal(p => ({ ...p, tax_number: e.target.value }))} placeholder="Tax number (optional)" />
                           <button type="button" onClick={async () => {
                             const n = editTaxVal.tax_name.trim(), r = editTaxVal.tax_rate.toString().trim();
-                            if (!n || !r) return;
-                            try { await updateTax({ ...taxData.find(t => t.id === editTaxKey), tax_name: n, tax_rate: r, tax_number: editTaxVal.tax_number.trim() }); setEditTaxKey(null); }
+                            if (!n) return toast("error", "Please enter Tax Name");
+                            if (!r) return toast("error", "Please enter Tax Rate");
+                            if (parseFloat(r) > TAX_RATE_MAX || parseFloat(r) < 0) {
+                              return toast("error", `Tax Rate must be between 0 and ${TAX_RATE_MAX}`);
+                            }
+                            const duplicateTaxName = (taxData || []).some(
+                              (tax) => tax.id !== editTaxKey && (tax.tax_name || "").toLowerCase() === n.toLowerCase()
+                            );
+                            if (duplicateTaxName) return toast("error", "Tax Type already exists");
+                            try {
+                              await updateTax({ ...taxData.find(t => t.id === editTaxKey), tax_name: n, tax_rate: r, tax_number: editTaxVal.tax_number.trim() });
+                              toast("success", "Tax Type Updated");
+                              setEditTaxKey(null);
+                            }
                             catch (e) { toast("error", e.message || "Failed."); }
                           }} style={{ margin: 0 }} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex-shrink-0">Save</button>
                           <button type="button" onClick={() => setEditTaxKey(null)} style={{ margin: 0 }} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex-shrink-0">Cancel</button>
@@ -1575,7 +1971,7 @@ const ReceiptInfoInline = ({ type }) => {
                       <ItemRow name={tax.tax_name} sublabel={tax.tax_number ? `#${tax.tax_number}` : undefined} badge={`${parseFloat(parseFloat(tax.tax_rate).toFixed(3))}%`} badgeCls={colors.badge}
                         actions={<>
                           <Btn color="bg-blue-500 hover:bg-blue-600" onClick={() => { setEditTaxKey(tax.id); setEditTaxVal({ tax_name: tax.tax_name, tax_rate: parseFloat(parseFloat(tax.tax_rate).toFixed(3)).toString(), tax_number: tax.tax_number || "" }); }}><Pencil size={13}/></Btn>
-                          <Btn color="bg-red-400 hover:bg-red-500" onClick={async () => { try { await deleteTax(tax.id); } catch (e) { toast("error", e.message || "Failed."); } }}><Trash2 size={13}/></Btn>
+                          <Btn color="bg-red-400 hover:bg-red-500" onClick={() => handleDelete({ key: tax.id, name: tax.tax_name })}><Trash2 size={13}/></Btn>
                         </>}
                       />
                     )}
@@ -1633,7 +2029,9 @@ const ReceiptInfoInline = ({ type }) => {
                             setEditVal(item.name); setEditOrigLogo(displayLogo);
                             setEditLogoOpts([]); setEditLogoSel(null);
                           }}><Pencil size={13}/></Btn>
-                          <Btn color="bg-red-400 hover:bg-red-500" onClick={() => handleDelete(item)}><Trash2 size={13}/></Btn>
+                          {!(type === "payments" && isCashMethod(item.name)) && (
+                            <Btn color="bg-red-400 hover:bg-red-500" onClick={() => handleDelete(item)}><Trash2 size={13}/></Btn>
+                          )}
                         </>}
                       />
                     )}
@@ -1694,6 +2092,218 @@ const ReceiptInfoInline = ({ type }) => {
                 Cancel
               </button>
               <button type="button" onClick={doConfirmMerchantDelete}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 rounded-xl text-white font-semibold text-sm transition-colors">
+                Delete
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* Expense Category Edit Confirmation Popup */}
+    <AnimatePresence>
+      {showCategoryEditConfirm && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
+            className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center border border-slate-200">
+            <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
+              When editing an Expense Category<br />
+              all receipts associated with that<br />
+              Expense Category will also be updated.
+            </p>
+            <div className="flex gap-3">
+              <button type="button"
+                onClick={() => { setShowCategoryEditConfirm(false); setPendingCategoryEdit(null); }}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
+                Cancel
+              </button>
+              <button type="button" onClick={doConfirmCategoryEdit}
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 rounded-xl text-white font-semibold text-sm transition-colors">
+                Okay
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* Expense Category Delete Confirmation Popup */}
+    <AnimatePresence>
+      {showCategoryDeleteConfirm && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
+            className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center border border-slate-200">
+            <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
+              Are you sure you want to delete this Expense<br />
+              Category? When deleting an Expense Category all<br />
+              receipts associated with that Expense Category will<br />
+              have that Expense Category removed.
+            </p>
+            <div className="flex gap-3">
+              <button type="button"
+                onClick={() => { setShowCategoryDeleteConfirm(false); setPendingCategoryDelete(null); }}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
+                Cancel
+              </button>
+              <button type="button" onClick={doConfirmCategoryDelete}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 rounded-xl text-white font-semibold text-sm transition-colors">
+                Delete
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* Payment Method Edit Confirmation Popup */}
+    <AnimatePresence>
+      {showPaymentEditConfirm && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
+            className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center border border-slate-200">
+            <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
+              When editing an Payment Method all<br />
+              receipts associated with that Payment<br />
+              Method will also be updated.
+            </p>
+            <div className="flex gap-3">
+              <button type="button"
+                onClick={() => { setShowPaymentEditConfirm(false); setPendingPaymentEdit(null); }}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
+                Cancel
+              </button>
+              <button type="button" onClick={doConfirmPaymentEdit}
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 rounded-xl text-white font-semibold text-sm transition-colors">
+                Okay
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* Payment Method Delete Confirmation Popup */}
+    <AnimatePresence>
+      {showPaymentDeleteConfirm && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
+            className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center border border-slate-200">
+            <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
+              Are you sure you want to delete this<br />
+              Payment Method? When deleting a<br />
+              Payment Method all receipts<br />
+              associated with that Payment Method<br />
+              will have that Payment Method<br />
+              removed.
+            </p>
+            <div className="flex gap-3">
+              <button type="button"
+                onClick={() => { setShowPaymentDeleteConfirm(false); setPendingPaymentDelete(null); }}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
+                Cancel
+              </button>
+              <button type="button" onClick={doConfirmPaymentDelete}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 rounded-xl text-white font-semibold text-sm transition-colors">
+                Delete
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* Tax Rate Change Decision Popup */}
+    <AnimatePresence>
+      {showTaxRateDecisionConfirm && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
+            className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl text-center border border-slate-200">
+            <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
+              Tax rate changed. Choose how to proceed.
+            </p>
+            <div className="flex flex-col gap-2">
+              <button type="button"
+                onClick={() => { setShowTaxRateDecisionConfirm(false); setPendingTaxRateEdit(null); }}
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
+                Go Back
+              </button>
+              <button type="button" onClick={handleTaxRateDecisionAddNew}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 rounded-xl text-white font-semibold text-sm transition-colors">
+                Add New Tax Types
+              </button>
+              <button type="button" onClick={handleTaxRateDecisionUpdateCurrent}
+                className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 rounded-xl text-white font-semibold text-sm transition-colors">
+                Update Current Rate
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* Tax Delete Blocked Message Popup */}
+    <AnimatePresence>
+      {showTaxDeleteBlockedMsg && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
+            className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl text-center border border-slate-200">
+            <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
+              Before you can delete this Tax Type you must<br />
+              remove that Tax Type from any associated<br />
+              receipts. You can do this by using the Search<br />
+              Filters on the Main Receipt screen and<br />
+              tapping the &quot;Tax Type &amp; Tip&quot; filter and<br />
+              selecting this Tax Type. From here you can<br />
+              edit each receipt by either removing this Tax<br />
+              Type or replacing it with another Tax Type.
+            </p>
+            <button type="button"
+              onClick={() => setShowTaxDeleteBlockedMsg(false)}
+              className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
+              Ok
+            </button>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
+    {/* Tax Delete Confirmation Popup */}
+    <AnimatePresence>
+      {showTaxDeleteConfirm && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
+            className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center border border-slate-200">
+            <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
+              Are you sure you want to delete this<br />
+              Tax Type?
+            </p>
+            <div className="flex gap-3">
+              <button type="button"
+                onClick={() => { setShowTaxDeleteConfirm(false); setPendingTaxDeleteId(null); }}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
+                Cancel
+              </button>
+              <button type="button" onClick={async () => {
+                try {
+                  if (pendingTaxDeleteId) {
+                    await deleteTax(pendingTaxDeleteId);
+                    toast("success", "Tax Type Deleted");
+                  }
+                } catch (e) {
+                  toast("error", e.message || "Failed.");
+                } finally {
+                  setShowTaxDeleteConfirm(false);
+                  setPendingTaxDeleteId(null);
+                }
+              }}
                 className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 rounded-xl text-white font-semibold text-sm transition-colors">
                 Delete
               </button>

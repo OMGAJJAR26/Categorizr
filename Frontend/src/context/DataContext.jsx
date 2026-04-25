@@ -3,6 +3,16 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef } f
 const DataContext = createContext();
 const BASE_URL = "/api";
 const onlyDigits = (s) => (s ?? "").toString().replace(/\D/g, "");
+const DEFAULT_PAYMENT_METHODS = ["Cash"];
+const DEFAULT_MERCHANTS_WITH_LOGOS = [
+  { name: "Costco", image: "https://logo.clearbit.com/costco.com" },
+  { name: "Home Depot", image: "https://logo.clearbit.com/homedepot.com" },
+  { name: "Lowe's", image: "https://logo.clearbit.com/lowes.com" },
+  { name: "Miscellaneous", image: "/miscellaneous-logo.png" },
+  { name: "Nordstrom", image: "https://logo.clearbit.com/nordstrom.com" },
+  { name: "Target", image: "https://logo.clearbit.com/target.com" },
+  { name: "Walmart", image: "https://logo.clearbit.com/walmart.com" },
+];
 
 // Build a deduplicated list of payment methods from a receipts array.
 // Prefers "issuerName *last4" format, falls back to paymentType.
@@ -143,6 +153,8 @@ export const DataProvider = ({ children }) => {
   // ── API-backed payment methods (server-stored via /userpaymentmethod endpoints) ──
   // ── API-backed expense categories (server-stored via /userexpensecategory endpoints) ──
   const [apiExpenseCategories, setApiExpenseCategories] = useState([]);
+  // Placeholder for future Admin meta-driven default categories (Visible = Yes).
+  const [adminDefaultExpenseCategories, setAdminDefaultExpenseCategories] = useState([]);
   const [apiPaymentMethods, setApiPaymentMethods] = useState([]);
 
   // ── Custom receipt-info items (localStorage-backed, managed via Settings → Receipt Information) ──
@@ -186,6 +198,7 @@ export const DataProvider = ({ children }) => {
         const taxArray = Array.isArray(taxes) ? taxes : [];
         setTaxData(taxArray);
 
+        console.log("%c[Tax] fetchTaxes response (full):", "color:#f59e0b;font-weight:bold", taxes);
         console.log("Tax API response status:", taxArray);
         return taxArray; // Return taxes for immediate use
       } else {
@@ -220,6 +233,7 @@ export const DataProvider = ({ children }) => {
       }
       
       const savedTax = await response.json();
+      console.log("%c[Tax] addTax response (full):", "color:#22c55e;font-weight:bold", savedTax);
       await fetchTaxes(); // Refresh taxes list
       return savedTax;
     } catch (err) {
@@ -248,6 +262,7 @@ export const DataProvider = ({ children }) => {
       }
       
       const updatedTax = await response.json();
+      console.log("%c[Tax] updateTax response (full):", "color:#f59e0b;font-weight:bold", updatedTax);
       await fetchTaxes(); // Refresh taxes list
       return updatedTax;
     } catch (err) {
@@ -301,7 +316,7 @@ export const DataProvider = ({ children }) => {
 
   const addApiMerchant = async (name, logoUrl = "") => {
     const token = localStorage.getItem("token");
-    if (!token || !name.trim()) return null;
+    if (!token || !name.trim()) return { ok: false, data: null, error: "Missing token or merchant name" };
     const payload = { store_name: name.trim(), store_image_url: logoUrl || "" };
     console.log("%c[Merchants] POST /userstore/addStorev1 →", "color:#22c55e;font-weight:bold", payload);
     try {
@@ -314,17 +329,20 @@ export const DataProvider = ({ children }) => {
         const data = await res.json();
         console.log("%c[Merchants] addApiMerchant response:", "color:#22c55e;font-weight:bold", data);
         setApiMerchants(prev => [...prev, data]);
-        return data;
+        return { ok: true, data, error: null };
       } else {
         console.warn("[Merchants] addApiMerchant failed, status:", res.status);
+        return { ok: false, data: null, error: `Failed with status ${res.status}` };
       }
-    } catch (e) { console.error("[Merchants] addApiMerchant error", e); }
-    return null;
+    } catch (e) {
+      console.error("[Merchants] addApiMerchant error", e);
+      return { ok: false, data: null, error: e.message || "Failed to add merchant" };
+    }
   };
 
   const updateApiMerchant = async (id, name, logoUrl = "") => {
     const token = localStorage.getItem("token");
-    if (!token) return false;
+    if (!token) return { ok: false, data: null, error: "Missing token" };
     const payload = { id, store_name: name.trim(), store_image_url: logoUrl || "" };
     console.log("%c[Merchants] POST /userstore/updateStorev1 →", "color:#f59e0b;font-weight:bold", payload);
     try {
@@ -337,17 +355,20 @@ export const DataProvider = ({ children }) => {
         const data = await res.json();
         console.log("%c[Merchants] updateApiMerchant response:", "color:#f59e0b;font-weight:bold", data);
         setApiMerchants(prev => prev.map(m => m.id === id ? data : m));
-        return true;
+        return { ok: true, data, error: null };
       } else {
         console.warn("[Merchants] updateApiMerchant failed, status:", res.status);
+        return { ok: false, data: null, error: `Failed with status ${res.status}` };
       }
-    } catch (e) { console.error("[Merchants] updateApiMerchant error", e); }
-    return false;
+    } catch (e) {
+      console.error("[Merchants] updateApiMerchant error", e);
+      return { ok: false, data: null, error: e.message || "Failed to update merchant" };
+    }
   };
 
   const deleteApiMerchant = async (id) => {
     const token = localStorage.getItem("token");
-    if (!token) return false;
+    if (!token) return { ok: false, data: null, error: "Missing token" };
     const payload = { id };
     console.log("%c[Merchants] POST /userstore/deleteStorev1 →", "color:#ef4444;font-weight:bold", payload);
     try {
@@ -360,12 +381,15 @@ export const DataProvider = ({ children }) => {
         const data = await res.json();
         console.log("%c[Merchants] deleteApiMerchant response:", "color:#ef4444;font-weight:bold", data);
         setApiMerchants(prev => prev.filter(m => m.id !== id));
-        return true;
+        return { ok: true, data, error: null };
       } else {
         console.warn("[Merchants] deleteApiMerchant failed, status:", res.status);
+        return { ok: false, data: null, error: `Failed with status ${res.status}` };
       }
-    } catch (e) { console.error("[Merchants] deleteApiMerchant error", e); }
-    return false;
+    } catch (e) {
+      console.error("[Merchants] deleteApiMerchant error", e);
+      return { ok: false, data: null, error: e.message || "Failed to delete merchant" };
+    }
   };
 
   // ── API Payment Method CRUD (via /userpaymentmethod endpoints, card_type="payment") ──
@@ -391,7 +415,7 @@ export const DataProvider = ({ children }) => {
 
   const addApiPaymentMethod = async (name, logoUrl = "") => {
     const token = localStorage.getItem("token");
-    if (!token || !name.trim()) return null;
+    if (!token || !name.trim()) return { ok: false, data: null, error: "Missing token or payment method name" };
     const payload = { card_number: name.trim(), icon_image: logoUrl || "", card_type: "payment", default_payment_category: "" };
     console.log("%c[PaymentMethods] POST /userpaymentmethod/addPaymentMethodv1 →", "color:#06b6d4;font-weight:bold", payload);
     try {
@@ -404,17 +428,20 @@ export const DataProvider = ({ children }) => {
         const data = await res.json();
         console.log("%c[PaymentMethods] addApiPaymentMethod response:", "color:#06b6d4;font-weight:bold", data);
         setApiPaymentMethods(prev => [...prev, data]);
-        return data;
+        return { ok: true, data, error: null };
       } else {
         console.warn("[PaymentMethods] addApiPaymentMethod failed, status:", res.status);
+        return { ok: false, data: null, error: `Failed with status ${res.status}` };
       }
-    } catch (e) { console.error("[PaymentMethods] addApiPaymentMethod error", e); }
-    return null;
+    } catch (e) {
+      console.error("[PaymentMethods] addApiPaymentMethod error", e);
+      return { ok: false, data: null, error: e.message || "Failed to add payment method" };
+    }
   };
 
   const updateApiPaymentMethod = async (id, name, logoUrl = "") => {
     const token = localStorage.getItem("token");
-    if (!token) return false;
+    if (!token) return { ok: false, data: null, error: "Missing token" };
     const payload = { id, card_number: name.trim(), icon_image: logoUrl || "", card_type: "payment", default_payment_category: "" };
     console.log("%c[PaymentMethods] POST /userpaymentmethod/updatePaymentMethodv1 →", "color:#f59e0b;font-weight:bold", payload);
     try {
@@ -427,17 +454,40 @@ export const DataProvider = ({ children }) => {
         const data = await res.json();
         console.log("%c[PaymentMethods] updateApiPaymentMethod response:", "color:#f59e0b;font-weight:bold", data);
         setApiPaymentMethods(prev => prev.map(m => m.id === id ? data : m));
-        return true;
+        return { ok: true, data, error: null };
       } else {
         console.warn("[PaymentMethods] updateApiPaymentMethod failed, status:", res.status);
+        return { ok: false, data: null, error: `Failed with status ${res.status}` };
       }
-    } catch (e) { console.error("[PaymentMethods] updateApiPaymentMethod error", e); }
-    return false;
+    } catch (e) {
+      console.error("[PaymentMethods] updateApiPaymentMethod error", e);
+      return { ok: false, data: null, error: e.message || "Failed to update payment method" };
+    }
   };
 
-  const deleteApiPaymentMethod = (id) => {
-    console.log("%c[PaymentMethods] deleteApiPaymentMethod (local only) id:", "color:#ef4444;font-weight:bold", id);
-    setApiPaymentMethods(prev => prev.filter(m => m.id !== id));
+  const deleteApiPaymentMethod = async (id) => {
+    const token = localStorage.getItem("token");
+    if (!token) return { ok: false, data: null, error: "Missing token" };
+    const payload = { id };
+    console.log("%c[PaymentMethods] POST /userpaymentmethod/deletePaymentMethodv1 →", "color:#ef4444;font-weight:bold", payload);
+    try {
+      const res = await fetch(`${BASE_URL}/userpaymentmethod/deletePaymentMethodv1`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        console.log("%c[PaymentMethods] deleteApiPaymentMethod response:", "color:#ef4444;font-weight:bold", data);
+        setApiPaymentMethods(prev => prev.filter(m => m.id !== id));
+        return { ok: true, data, error: null };
+      }
+      console.warn("[PaymentMethods] deleteApiPaymentMethod failed, status:", res.status);
+      return { ok: false, data: null, error: `Failed with status ${res.status}` };
+    } catch (e) {
+      console.error("[PaymentMethods] deleteApiPaymentMethod error", e);
+      return { ok: false, data: null, error: e.message || "Failed to delete payment method" };
+    }
   };
 
   // ── API Expense Category CRUD (via /userexpensecategory endpoints) ──
@@ -445,12 +495,15 @@ export const DataProvider = ({ children }) => {
     const token = localStorage.getItem("token");
     if (!token) return;
     try {
+      console.log("%c[ExpenseCategories] GET /userexpensecategory/getExpenseCategoryv1", "color:#a855f7;font-weight:bold");
       const res = await fetch(`${BASE_URL}/userexpensecategory/getExpenseCategoryv1`, {
         headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         const data = await res.json();
         const cats = Array.isArray(data) ? data.filter(c => c.expense_category_name) : [];
+        console.log("%c[ExpenseCategories] fetchApiExpenseCategories response (full):", "color:#a855f7;font-weight:bold", data);
+        console.log("%c[ExpenseCategories] filtered categories:", "color:#a855f7;font-weight:bold", cats);
         setApiExpenseCategories(cats);
       }
     } catch (e) { console.error("fetchApiExpenseCategories error", e); }
@@ -458,42 +511,74 @@ export const DataProvider = ({ children }) => {
 
   const addApiExpenseCategory = async (name) => {
     const token = localStorage.getItem("token");
-    if (!token || !name.trim()) return null;
+    if (!token || !name.trim()) return { ok: false, data: null, error: "Missing token or category name" };
+    const payload = { expense_category_name: name.trim() };
+    console.log("%c[ExpenseCategories] POST /userexpensecategory/addExpenseCategoryv1 →", "color:#22c55e;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userexpensecategory/addExpenseCategoryv1`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ expense_category_name: name.trim() }),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         const data = await res.json();
+        console.log("%c[ExpenseCategories] addApiExpenseCategory response (full):", "color:#22c55e;font-weight:bold", data);
         setApiExpenseCategories(prev => [...prev, data]);
-        return data;
+        return { ok: true, data, error: null };
       }
-    } catch (e) { console.error("addApiExpenseCategory error", e); }
-    return null;
+      return { ok: false, data: null, error: `Failed with status ${res.status}` };
+    } catch (e) {
+      console.error("addApiExpenseCategory error", e);
+      return { ok: false, data: null, error: e.message || "Failed to add category" };
+    }
   };
 
   const updateApiExpenseCategory = async (id, name) => {
     const token = localStorage.getItem("token");
-    if (!token) return false;
+    if (!token) return { ok: false, data: null, error: "Missing token" };
+    const payload = { id, expense_category_name: name.trim() };
+    console.log("%c[ExpenseCategories] POST /userexpensecategory/updateExpenseCategoryv1 →", "color:#f59e0b;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userexpensecategory/updateExpenseCategoryv1`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ id, expense_category_name: name.trim() }),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         const data = await res.json();
+        console.log("%c[ExpenseCategories] updateApiExpenseCategory response (full):", "color:#f59e0b;font-weight:bold", data);
         setApiExpenseCategories(prev => prev.map(c => c.id === id ? data : c));
-        return true;
+        return { ok: true, data, error: null };
       }
-    } catch (e) { console.error("updateApiExpenseCategory error", e); }
-    return false;
+      return { ok: false, data: null, error: `Failed with status ${res.status}` };
+    } catch (e) {
+      console.error("updateApiExpenseCategory error", e);
+      return { ok: false, data: null, error: e.message || "Failed to update category" };
+    }
   };
 
-  const deleteApiExpenseCategory = (id) => {
-    setApiExpenseCategories(prev => prev.filter(c => c.id !== id));
+  const deleteApiExpenseCategory = async (id) => {
+    const token = localStorage.getItem("token");
+    if (!token) return { ok: false, data: null, error: "Missing token" };
+    const payload = { id };
+    console.log("%c[ExpenseCategories] POST /userexpensecategory/deleteExpenseCategoryv1 →", "color:#ef4444;font-weight:bold", payload);
+    try {
+      const res = await fetch(`${BASE_URL}/userexpensecategory/deleteExpenseCategoryv1`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        console.log("%c[ExpenseCategories] deleteApiExpenseCategory response:", "color:#ef4444;font-weight:bold", data);
+        setApiExpenseCategories(prev => prev.filter(c => c.id !== id));
+        return { ok: true, data, error: null };
+      }
+      return { ok: false, data: null, error: `Failed with status ${res.status}` };
+    } catch (e) {
+      console.error("deleteApiExpenseCategory error", e);
+      return { ok: false, data: null, error: e.message || "Failed to delete category" };
+    }
   };
 
   const clearDataContent = () => setDataContent(null);
@@ -549,6 +634,7 @@ export const DataProvider = ({ children }) => {
       );
       if (!receiptRes.ok) throw new Error("Failed to fetch receipts");
       const receiptData = await receiptRes.json();
+      console.log("%c[Receipts] getreceiptfromdatev1 response (all receipts):", "color:#06b6d4;font-weight:bold", receiptData);
       
       // Fetch taxes from API (needed to enrich receipt_tax_values)
       // Do this in parallel with receipt processing to avoid blocking
@@ -1343,6 +1429,18 @@ setMerchantsWithImages(
         return existingReceipt?.[field] ?? defaultValue;
       };
 
+      // Build payment fields safely so partial updates (e.g. merchant/category rename)
+      // do not accidentally downgrade card brand to "Other" on backend.
+      const rawPaymentType = (getValue("paymentType", "") ?? "").toString().trim();
+      const normalizedPaymentType = rawPaymentType.replace(/\s*\*\d{3,4}/g, "").trim();
+      const rawIssuerName = (getValue("card_issuer_name", "") ?? "").toString().trim();
+      const rawLast4 = (getValue("last_4_digit_card", "") ?? "").toString().trim();
+      const inferredLast4FromPayment = (() => {
+        if (!rawPaymentType.includes("*")) return "";
+        const matches = [...rawPaymentType.matchAll(/\*(\d{3,4})/g)];
+        return matches.length > 0 ? matches[matches.length - 1][1] : "";
+      })();
+
       // Build the update payload matching API model
       // Only update fields that are provided, preserve existing values for others
       const updatePayload = {
@@ -1371,9 +1469,9 @@ setMerchantsWithImages(
           if (val === null || val === undefined) return existingReceipt?.status ?? 0;
           return parseInt(val) || 0;
         })(),
-        paymentType: getValue("paymentType", ""),
-        last_4_digit_card: getValue("last_4_digit_card", ""),
-        card_issuer_name: getValue("card_issuer_name", ""),
+        paymentType: normalizedPaymentType,
+        last_4_digit_card: rawLast4 || inferredLast4FromPayment || "",
+        card_issuer_name: rawIssuerName,
         fk_original_receipt_id: getValue("fk_original_receipt_id", "0"),
         fk_forward_from_receipt_id: getValue("fk_forward_from_receipt_id", "0"),
         // Preserve receipt_category - only update if explicitly provided
@@ -1448,6 +1546,8 @@ setMerchantsWithImages(
           }
 
           if (response.ok) {
+            console.log(`%c[Receipt Update] ${endpoint} response status:`, "color:#22c55e;font-weight:bold", response.status);
+            console.log(`%c[Receipt Update] ${endpoint} response (full):`, "color:#22c55e;font-weight:bold", json);
             success = true;
             break;
           }
@@ -1671,9 +1771,16 @@ setMerchantsWithImages(
 
   // Dropdown-ready: receipt-derived (minus hidden) + custom (minus hidden duplicates)
   const _rmLower = new Set(receiptMerchantsRaw.map((m) => (m || "").toLowerCase()));
+  const _rmCustomLower = new Set([
+    ..._rmLower,
+    ...customMerchants.map((m) => (m || "").toLowerCase()),
+  ]);
   const mergedMerchants = [
     ...receiptMerchantsRaw.filter((m) => !hiddenMerchants.has(m)),
     ...customMerchants.filter((m) => !hiddenMerchants.has(m) && !_rmLower.has(m.toLowerCase())),
+    ...DEFAULT_MERCHANTS_WITH_LOGOS
+      .map((m) => m.name)
+      .filter((m) => m && !hiddenMerchants.has(m) && !_rmCustomLower.has((m || "").toLowerCase())),
   ].sort((a, b) =>
     (a || "").toString().toLowerCase().localeCompare((b || "").toString().toLowerCase())
   );
@@ -1691,6 +1798,12 @@ setMerchantsWithImages(
     ...apiMerchants
       .filter((m) => m.store_name && !hiddenMerchants.has(m.store_name) && !_miCustomLower.has((m.store_name || "").toLowerCase()))
       .map((m) => ({ name: m.store_name, image: m.store_image_url || "" })),
+    ...DEFAULT_MERCHANTS_WITH_LOGOS.filter(
+      (m) =>
+        m.name &&
+        !hiddenMerchants.has(m.name) &&
+        !_miCustomLower.has((m.name || "").toLowerCase())
+    ),
   ].sort((a, b) =>
     (a?.name || "").toString().toLowerCase().localeCompare((b?.name || "").toString().toLowerCase())
   );
@@ -1708,6 +1821,11 @@ setMerchantsWithImages(
         !hiddenCategories.has(c.expense_category_name) &&
         !_rcCustomLower.has((c.expense_category_name || "").toLowerCase()))
       .map((c) => c.expense_category_name),
+    // Admin defaults (UI-ready hook; endpoint wiring to be added later)
+    ...adminDefaultExpenseCategories.filter((c) => {
+      const n = (c || "").toString().trim();
+      return n && !hiddenCategories.has(n) && !_rcCustomLower.has(n.toLowerCase());
+    }),
   ];
   const _rpLower = new Set(receiptPaymentsRaw.map((p) => (p || "").toLowerCase()));
   const _rpCustomLower = new Set([
@@ -1721,7 +1839,25 @@ setMerchantsWithImages(
     ...apiPaymentMethods
       .filter((m) => m.card_number && !hiddenPaymentMethods.has(m.card_number) && !_rpCustomLower.has((m.card_number || "").toLowerCase()))
       .map((m) => m.card_number),
+    ...DEFAULT_PAYMENT_METHODS.filter(
+      (m) =>
+        m &&
+        !hiddenPaymentMethods.has(m) &&
+        !_rpCustomLower.has((m || "").toLowerCase())
+    ),
   ];
+  const normalizedPaymentMethods = Array.from(
+    new Map(
+      mergedPaymentMethods
+        .map((p) => (p || "").toString().trim())
+        .filter(Boolean)
+        .map((p) => {
+          const base = p.replace(/\s*\*\s*\d{3,4}\s*$/g, "").trim().toLowerCase();
+          const normalized = base === "cash" ? "Cash" : p;
+          return [normalized.toLowerCase(), normalized];
+        })
+    ).values()
+  ).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 
   return (
     <DataContext.Provider
@@ -1731,7 +1867,7 @@ setMerchantsWithImages(
         // Dropdown-ready arrays (merged + hidden-filtered)
         merchants: mergedMerchants,
         expenseCategories: mergedExpenseCategories,
-        paymentMethods: mergedPaymentMethods,
+        paymentMethods: normalizedPaymentMethods,
         merchantsWithImages: mergedMerchantsWithImages,
         // Raw receipt-derived arrays (for the management modal — includes hidden items)
         receiptMerchantsRaw,
@@ -1780,6 +1916,8 @@ setMerchantsWithImages(
         deleteApiPaymentMethod,
         // API-backed expense category management
         apiExpenseCategories,
+        adminDefaultExpenseCategories,
+        setAdminDefaultExpenseCategories,
         fetchApiExpenseCategories,
         addApiExpenseCategory,
         updateApiExpenseCategory,
