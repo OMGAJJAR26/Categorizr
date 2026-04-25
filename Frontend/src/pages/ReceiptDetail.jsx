@@ -902,6 +902,16 @@ useEffect(() => {
     return cleaned.includes(".") ? `${intPart || "0"}.${decPart}` : intPart;
   };
 
+  const normalizeMediaUrl = (url) => {
+    const raw = (url || "").toString().trim();
+    if (!raw) return "";
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  };
+
   // Function to parse receipt tags
   const parseReceiptTags = (receiptTagString) => {
     if (!receiptTagString) return null;
@@ -1674,20 +1684,32 @@ useEffect(() => {
         // Fallback to local object URL
         url = URL.createObjectURL(file);
       }
-      const normalizedUrl = (url || "").toString().trim();
+      const normalizedUrl = normalizeMediaUrl(url);
       if (!normalizedUrl) return;
+      const existingNormalized = new Set(
+        [
+          selectedReceipt?.emailAttachment,
+          selectedReceipt?.receipt_image,
+          editedReceipt?.emailAttachment,
+          editedReceipt?.receipt_image,
+          ...additionalPhotoUrls,
+        ]
+          .map(normalizeMediaUrl)
+          .filter(Boolean)
+      );
+      if (existingNormalized.has(normalizedUrl)) return;
       // Persist to receipt immediately: fill empty slots first
       const r = selectedReceipt;
       const hasImage = r?.receipt_image && !["0", "null", ""].includes(r.receipt_image.trim());
       const hasAttachment = r?.emailAttachment && !["0", "null", ""].includes(r.emailAttachment.trim());
       const patch = hasImage
-        ? hasAttachment ? {} : { emailAttachment: url }
-        : { receipt_image: url };
+        ? hasAttachment ? {} : { emailAttachment: normalizedUrl }
+        : { receipt_image: normalizedUrl };
       if (Object.keys(patch).length > 0) {
-        handleFieldChange(Object.keys(patch)[0], url);
+        handleFieldChange(Object.keys(patch)[0], normalizedUrl);
       } else {
         setAdditionalPhotoUrls((prev) => {
-          if (prev.some((u) => (u || "").toString().trim() === normalizedUrl))
+          if (prev.some((u) => normalizeMediaUrl(u) === normalizedUrl))
             return prev;
           return [...prev, normalizedUrl];
         });
@@ -5313,7 +5335,7 @@ Thank you for using our receipt management system.
                           const allUrls = [
                             ...new Set(
                               [...urls, ...additionalPhotoUrls]
-                                .map((u) => (u || "").toString().trim())
+                                .map((u) => normalizeMediaUrl(u))
                                 .filter(Boolean)
                             ),
                           ];

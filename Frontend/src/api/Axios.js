@@ -27,9 +27,11 @@ export const proxyImageUrl = (url) => {
   if (url.startsWith("data:")) return url;          // data URI — no proxy needed
   if (url.startsWith("/")) return url;               // relative path — no proxy needed
   if (!url.startsWith("http")) return url;           // not an HTTP URL
-  if (!NODE_API_URL) return url;                     // local dev — Vite handles CORS
+  // Use same-origin proxy when NODE_API_URL is not configured so blocked
+  // hotlinked logos (403/anti-leech) still render in web app builds.
+  const proxyBase = NODE_API_URL || "";
   if (url.includes("/api/imageproxy?url=")) return url; // already proxied
-  return `${NODE_API_URL}/api/imageproxy?url=${encodeURIComponent(url)}`;
+  return `${proxyBase}/api/imageproxy?url=${encodeURIComponent(url)}`;
 };
 
 /** Strip proxy wrapper and return the original raw URL (for localStorage storage). */

@@ -3,7 +3,12 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef } f
 const DataContext = createContext();
 const BASE_URL = "/api";
 const onlyDigits = (s) => (s ?? "").toString().replace(/\D/g, "");
-const DEFAULT_PAYMENT_METHODS = ["Cash"];
+const DEFAULT_PAYMENT_METHODS = [
+  "Cash",
+  "American Express",
+  "Bank of America",
+  "Citibank",
+];
 const DEFAULT_MERCHANTS_WITH_LOGOS = [
   { name: "Costco", image: "https://logo.clearbit.com/costco.com" },
   { name: "Home Depot", image: "https://logo.clearbit.com/homedepot.com" },

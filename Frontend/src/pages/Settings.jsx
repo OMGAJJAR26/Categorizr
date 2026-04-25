@@ -77,6 +77,21 @@ const PAYMENT_CARD_TYPES = [
   { name: "Other",            logo: creditDebitCardIcon },
 ];
 
+const DEFAULT_PAYMENT_CARD_MAP = {
+  "American Express": "American Express",
+  "Bank of America": "MasterCard",
+  "Citibank": "Visa",
+  "Mastercard": "MasterCard",
+  "Visa": "Visa",
+  "Cash": "Cash",
+};
+const SETTINGS_DEFAULT_PAYMENT_METHODS = [
+  "Cash",
+  "American Express",
+  "Bank of America",
+  "Citibank",
+];
+
 /* ─── Shared styles ────────────────────────────────────── */
 const inputCls = "w-full bg-white/95 border border-slate-200 text-slate-900 text-sm rounded-xl px-4 py-2.5 placeholder-slate-400 shadow-sm focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all";
 const labelCls = "block text-[11px] font-semibold text-slate-500 uppercase tracking-[0.08em] mb-1.5";
@@ -1002,7 +1017,12 @@ const ReceiptInfoInline = ({ type }) => {
 
   // localStorage: payment display string → card type name
   const [payCardMap, setPayCardMap] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; }
+    try {
+      const stored = JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}");
+      return { ...DEFAULT_PAYMENT_CARD_MAP, ...(stored || {}) };
+    } catch {
+      return { ...DEFAULT_PAYMENT_CARD_MAP };
+    }
   });
   const savePayCard = (payStr, cardTypeName) => {
     setPayCardMap(prev => {
@@ -1792,7 +1812,19 @@ const ReceiptInfoInline = ({ type }) => {
           isApiItem: true,
           apiId: m.id,
         }));
-      return [...rItems, ...cItems, ...apiItems];
+      const allWithApi = [...rItems, ...cItems, ...apiItems];
+      const existingAfterApi = new Set(allWithApi.map((p) => (p.name || "").toLowerCase()));
+      const defaultItems = SETTINGS_DEFAULT_PAYMENT_METHODS
+        .filter((name) => !existingAfterApi.has((name || "").toLowerCase()))
+        .map((name) => ({
+          key: `default_${name}`,
+          name,
+          logo: getPayLogoResolved(name),
+          isReceiptItem: false,
+          isApiItem: false,
+          isDefaultItem: true,
+        }));
+      return [...allWithApi, ...defaultItems];
     }
     return [];
   };
