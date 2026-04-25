@@ -405,8 +405,25 @@ export const DataProvider = ({ children }) => {
       if (res.ok) {
         const data = await res.json();
         console.log("%c[Merchants] updateApiMerchant response:", "color:#f59e0b;font-weight:bold", data);
-        setApiMerchants(prev => prev.map(m => m.id === id ? data : m));
-        return { ok: true, data, error: null };
+        let nextMerchant = data;
+        setApiMerchants((prev) => {
+          const existing = prev.find((m) => String(getEntityId(m)) === String(id));
+          // Some backend variants return only {code, message}; keep merchant shape stable.
+          if (!data || typeof data !== "object" || !data.store_name) {
+            nextMerchant = {
+              ...(existing || {}),
+              id: existing?.id ?? id,
+              store_id: existing?.store_id ?? id,
+              fk_store_id: existing?.fk_store_id ?? id,
+              store_name: name.trim(),
+              store_image_url: logoUrl || existing?.store_image_url || "",
+            };
+          }
+          return prev.map((m) =>
+            String(getEntityId(m)) === String(id) ? nextMerchant : m
+          );
+        });
+        return { ok: true, data: nextMerchant, error: null };
       } else {
         console.warn("[Merchants] updateApiMerchant failed, status:", res.status);
         return { ok: false, data: null, error: `Failed with status ${res.status}` };

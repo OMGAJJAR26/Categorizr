@@ -158,7 +158,7 @@ const ManageModal = ({ type, onClose }) => {
     receiptPaymentsRaw, customPaymentMethods, hidePaymentMethod, addCustomPaymentMethod, editCustomPaymentMethod, deleteCustomPaymentMethod,
     taxData, addTax, updateTax, deleteTax, fetchTaxes,
     hiddenMerchants, hiddenCategories, hiddenPaymentMethods,
-    apiMerchants, fetchApiMerchants, deleteApiMerchant,
+    apiMerchants, fetchApiMerchants, addApiMerchant, updateApiMerchant, deleteApiMerchant,
     apiPaymentMethods, fetchApiPaymentMethods, deleteApiPaymentMethod,
   } = useData();
 
@@ -193,13 +193,37 @@ const ManageModal = ({ type, onClose }) => {
       return;
     }
     if (!addVal.trim()) return;
-    if (type === "merchants")  addCustomMerchant(addVal);
+    if (type === "merchants") {
+      const merchantName = addVal.trim();
+      const duplicate = [
+        ...(receiptMerchWImgRaw || []).map((m) => m?.name || ""),
+        ...(customMerchants || []),
+        ...(apiMerchants || []).map((m) => m?.store_name || ""),
+      ].some((m) => normalizeMatchKey(m) === normalizeMatchKey(merchantName));
+      if (duplicate) {
+        toast("error", "Merchant already exists");
+        return;
+      }
+      try {
+        const result = await addApiMerchant(merchantName, "");
+        if (!result?.ok) throw new Error(result?.error || "Failed to add merchant");
+        await fetchApiMerchants();
+        toast("success", "Merchant Added");
+      } catch (e) {
+        toast("error", e.message || "Failed.");
+      }
+      setAddVal("");
+      return;
+    }
     if (type === "categories") addCustomCategory(addVal);
     if (type === "payments")   addCustomPaymentMethod(addVal);
     setAddVal("");
   };
 
-  const handleEdit = async (key) => {
+  const handleEdit = async (itemOrKey) => {
+    const item = typeof itemOrKey === "object" && itemOrKey !== null
+      ? itemOrKey
+      : { key: itemOrKey, name: String(itemOrKey || "") };
     if (type === "taxes") {
       const n = editTaxVal.tax_name.trim(), r = editTaxVal.tax_rate.toString().trim();
       if (!n || !r) return;
@@ -208,9 +232,44 @@ const ManageModal = ({ type, onClose }) => {
       return;
     }
     if (!editVal.trim()) return;
-    if (type === "merchants")  editCustomMerchant(key, editVal);
-    if (type === "categories") editCustomCategory(key, editVal);
-    if (type === "payments")   editCustomPaymentMethod(key, editVal);
+    if (type === "merchants") {
+      const nextName = editVal.trim();
+      const duplicate = [
+        ...(receiptMerchWImgRaw || []).map((m) => m?.name || ""),
+        ...(customMerchants || []),
+        ...(apiMerchants || []).map((m) => m?.store_name || ""),
+      ].some((m) => normalizeMatchKey(m) === normalizeMatchKey(nextName) && normalizeMatchKey(m) !== normalizeMatchKey(item?.name));
+      if (duplicate) {
+        toast("error", "Merchant already exists");
+        return;
+      }
+      try {
+        const directMerchantId = getApiMerchantId(item);
+        if (directMerchantId !== null) {
+          const result = await updateApiMerchant(directMerchantId, nextName, "");
+          if (!result?.ok) throw new Error(result?.error || "Failed to update merchant");
+        } else {
+          const apiMatch = (apiMerchants || []).find(
+            (m) => normalizeMatchKey(m?.store_name) === normalizeMatchKey(item?.name)
+          );
+          const apiId = getApiMerchantId(apiMatch);
+          if (apiId !== null) {
+            const result = await updateApiMerchant(apiId, nextName, "");
+            if (!result?.ok) throw new Error(result?.error || "Failed to update merchant");
+          } else {
+            editCustomMerchant(item.key, nextName);
+          }
+        }
+        await fetchApiMerchants();
+        toast("success", "Merchant Updated");
+      } catch (e) {
+        toast("error", e.message || "Failed.");
+      }
+      setEditKey(null);
+      return;
+    }
+    if (type === "categories") editCustomCategory(item.key, editVal);
+    if (type === "payments")   editCustomPaymentMethod(item.key, editVal);
     setEditKey(null);
   };
 
@@ -316,10 +375,28 @@ const ManageModal = ({ type, onClose }) => {
     }
   };
 
-  const handleReceiptEdit = (key, currentName) => {
+  const handleReceiptEdit = async (key, currentName) => {
     const newName = editReceiptVal.trim();
     if (!newName || newName === currentName) { setEditReceiptKey(null); return; }
-    if (type === "merchants")  { hideMerchant(key);      addCustomMerchant(newName); }
+    if (type === "merchants")  {
+      try {
+        const apiMatch = (apiMerchants || []).find(
+          (m) => normalizeMatchKey(m?.store_name) === normalizeMatchKey(currentName)
+        );
+        const apiId = getApiMerchantId(apiMatch);
+        if (apiId !== null) {
+          const result = await updateApiMerchant(apiId, newName, "");
+          if (!result?.ok) throw new Error(result?.error || "Failed to update merchant");
+          await fetchApiMerchants();
+        } else {
+          hideMerchant(key);
+          addCustomMerchant(newName);
+        }
+      } catch (e) {
+        toast("error", e.message || "Failed.");
+        return;
+      }
+    }
     if (type === "categories") { hideCategory(key);      addCustomCategory(newName); }
     if (type === "payments")   { hidePaymentMethod(key); addCustomPaymentMethod(newName); }
     setEditReceiptKey(null); setEditReceiptVal("");
@@ -515,7 +592,7 @@ const ManageModal = ({ type, onClose }) => {
                           {isEd ? (
                             <div className="flex gap-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
                               <input className={mInput} value={editVal} onChange={e => setEditVal(e.target.value)} placeholder={item.name} />
-                              <button onClick={() => handleEdit(item.key)} className="px-3 py-1 bg-blue-600 text-white text-xs font-semibold rounded-lg">Save</button>
+                              <button onClick={() => handleEdit(item)} className="px-3 py-1 bg-blue-600 text-white text-xs font-semibold rounded-lg">Save</button>
                               <button onClick={() => setEditKey(null)} className="px-3 py-1 bg-gray-100 text-gray-600 text-xs font-semibold rounded-lg">Cancel</button>
                             </div>
                           ) : (
@@ -1090,7 +1167,7 @@ const LogoGrid = ({ options, selectedIndex, onSelect }) => {
 const ReceiptInfoInline = ({ type }) => {
   const {
     receipts, updateReceipt,
-    receiptMerchWImgRaw, customMerchants, hideMerchant, addCustomMerchant, editCustomMerchant, deleteCustomMerchant,
+    receiptMerchWImgRaw, customMerchants, hiddenMerchants, hideMerchant, addCustomMerchant, editCustomMerchant, deleteCustomMerchant,
     receiptCategoriesRaw, customCategories, hideCategory, addCustomCategory, editCustomCategory, deleteCustomCategory,
     receiptPaymentsRaw, customPaymentMethods, hidePaymentMethod, addCustomPaymentMethod, editCustomPaymentMethod, deleteCustomPaymentMethod,
     taxData, addTax, updateTax, deleteTax, fetchTaxes,
@@ -1566,6 +1643,17 @@ const ReceiptInfoInline = ({ type }) => {
 
       if (item.isReceiptItem) {
         if (keepLogo) saveMerchLogo(newName, keepLogo);
+        // If there's an API merchant with the same name, update it so /userstore/updateStorev1 fires.
+        const apiMatch = (apiMerchants || []).find(
+          (m) => normalizeMatchKey(m.store_name) === normalizeMatchKey(item.name)
+        );
+        if (apiMatch) {
+          const updateMerchantResult = await updateApiMerchant(apiMatch.id, newName, keepLogo || apiMatch.store_image_url || "");
+          if (!updateMerchantResult?.ok) throw new Error(updateMerchantResult?.error || "Failed to update merchant");
+        } else {
+          // No API entry yet — create one so it's persisted on the server.
+          await addApiMerchant(newName, keepLogo || "");
+        }
         hideMerchant(item.key); addCustomMerchant(newName);
       } else if (item.isApiItem) {
         const updateMerchantResult = await updateApiMerchant(item.apiId, newName, keepLogo || "");
@@ -1575,6 +1663,7 @@ const ReceiptInfoInline = ({ type }) => {
         editCustomMerchant(item.key, newName);
         if (keepLogo) saveMerchLogo(newName, keepLogo);
       }
+      await Promise.all([refreshData(), fetchApiMerchants()]);
       toast("success", "Merchant Updated");
     } catch (e) { toast("error", e.message || "Update failed."); }
     closeEdit();
@@ -2028,20 +2117,22 @@ const ReceiptInfoInline = ({ type }) => {
   // Build unified list (receipt-derived + custom + API, no dupes, no "Custom" label)
   const buildAllItems = () => {
     if (type === "merchants") {
-      const rItems = receiptMerchWImgRaw.map(m => ({
-        key: m.name, name: m.name,
-        logo: merchLogos[m.name] || m.image || null,
-        isReceiptItem: true,
-        isApiItem: false,
-      }));
-      const rKeys = new Set(receiptMerchWImgRaw.map(m => m.name.toLowerCase()));
+      const rItems = receiptMerchWImgRaw
+        .filter(m => !hiddenMerchants.has(m.name))
+        .map(m => ({
+          key: m.name, name: m.name,
+          logo: merchLogos[m.name] || m.image || null,
+          isReceiptItem: true,
+          isApiItem: false,
+        }));
+      const rKeys = new Set(rItems.map(m => m.name.toLowerCase()));
       const cItems = customMerchants
-        .filter(m => !rKeys.has(m.toLowerCase()))
+        .filter(m => !rKeys.has(m.toLowerCase()) && !hiddenMerchants.has(m))
         .map(m => ({ key: m, name: m, logo: merchLogos[m] || null, isReceiptItem: false, isApiItem: false }));
       // API merchants (server-stored, shown below receipt-derived and custom)
       const allExistingKeys = new Set([...rItems.map(m => m.name.toLowerCase()), ...cItems.map(m => m.name.toLowerCase())]);
       const apiItems = (apiMerchants || [])
-        .filter(m => m.store_name && !allExistingKeys.has((m.store_name || "").toLowerCase()))
+        .filter(m => m.store_name && !allExistingKeys.has((m.store_name || "").toLowerCase()) && !hiddenMerchants.has(m.store_name))
         .map(m => ({
           key: `api_${m.id}`,
           name: m.store_name,
