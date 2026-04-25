@@ -960,6 +960,27 @@ const ReceiptInfoInline = ({ type }) => {
   const [addTaxVal, setAddTaxVal] = useState({ tax_name: "", tax_rate: "", tax_number: "" });
   const [msg, setMsg]           = useState(null);
 
+  // Default tax IDs (shared with AddReceiptModal via localStorage)
+  const DEFAULT_TAX_STORAGE_KEY = "categorizr_defaultTaxIds";
+  const [defaultTaxIds, setDefaultTaxIdsState] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(DEFAULT_TAX_STORAGE_KEY) || "[]"); } catch { return []; }
+  });
+  const toggleDefaultTax = (taxId) => {
+    setDefaultTaxIdsState(prev => {
+      let next;
+      if (prev.includes(taxId)) {
+        next = prev.filter(id => id !== taxId);
+      } else if (prev.length < 2) {
+        next = [...prev, taxId];
+      } else {
+        toast("error", "You can only set up to 2 Default Tax Types.");
+        return prev;
+      }
+      localStorage.setItem(DEFAULT_TAX_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
+
   // Edit state (unified for all non-tax item types)
   const [editKey, setEditKey]             = useState(null);   // item.key being edited
   const [editIsReceipt, setEditIsReceipt] = useState(false);  // is it a receipt-derived item?
@@ -2029,6 +2050,13 @@ const ReceiptInfoInline = ({ type }) => {
                     ) : (
                       <ItemRow name={tax.tax_name} sublabel={tax.tax_number ? `#${tax.tax_number}` : undefined} badge={`${parseFloat(parseFloat(tax.tax_rate).toFixed(3))}%`} badgeCls={colors.badge}
                         actions={<>
+                          <button type="button"
+                            onClick={() => toggleDefaultTax(tax.id)}
+                            title={defaultTaxIds.includes(tax.id) ? "Remove as default" : "Set as default (auto-applied to new receipts)"}
+                            style={{ margin: 0, padding: 0, width: 28, height: 28, flexShrink: 0 }}
+                            className={`flex items-center justify-center rounded-lg text-xs transition-all border ${defaultTaxIds.includes(tax.id) ? "bg-yellow-50 border-yellow-400 text-yellow-600" : "bg-white border-slate-200 text-slate-400 hover:border-yellow-400 hover:text-yellow-500"}`}>
+                            <Star size={13} fill={defaultTaxIds.includes(tax.id) ? "currentColor" : "none"} />
+                          </button>
                           <Btn color="bg-blue-500 hover:bg-blue-600" onClick={() => { setEditTaxKey(tax.id); setEditTaxVal({ tax_name: tax.tax_name, tax_rate: parseFloat(parseFloat(tax.tax_rate).toFixed(3)).toString(), tax_number: tax.tax_number || "" }); }}><Pencil size={13}/></Btn>
                           <Btn color="bg-red-400 hover:bg-red-500" onClick={() => handleDelete({ key: tax.id, name: tax.tax_name })}><Trash2 size={13}/></Btn>
                         </>}
