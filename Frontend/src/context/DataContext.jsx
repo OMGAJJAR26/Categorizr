@@ -595,32 +595,12 @@ export const DataProvider = ({ children }) => {
   const deleteApiPaymentMethod = async (id) => {
     const token = localStorage.getItem("token");
     if (!token) return { ok: false, data: null, error: "Missing token" };
-    const fkUserId = localStorage.getItem("fk_user_id") || "";
-    const payload = { id, deleteId: id, payment_method_id: id, fk_payment_method_id: id, fk_user_id: fkUserId };
-    console.log("%c[PaymentMethods] POST /userpaymentmethod/deletePaymentMethodv1 →", "color:#ef4444;font-weight:bold", payload);
+    console.log("%c[PaymentMethods] GET /userpaymentmethod/deletePaymentMethodv1 →", "color:#ef4444;font-weight:bold", { id });
     try {
       let authErrorMessage = "";
       const endpoint = `${BASE_URL}/userpaymentmethod/deletePaymentMethodv1`;
-      const queryUrl = withDeleteQuery(endpoint, id);
+      const queryUrl = `${endpoint}?id=${encodeURIComponent(id)}`;
       const attempts = [
-        {
-          method: "POST",
-          url: endpoint,
-          headers: { "Content-Type": "application/json", Accesstoken: token },
-          body: JSON.stringify(payload),
-        },
-        {
-          method: "POST",
-          url: endpoint,
-          headers: { Accesstoken: token },
-          body: JSON.stringify(payload),
-        },
-        {
-          method: "POST",
-          url: queryUrl,
-          headers: { Accesstoken: token },
-          body: undefined,
-        },
         {
           method: "GET",
           url: queryUrl,
@@ -658,7 +638,7 @@ export const DataProvider = ({ children }) => {
       if (authErrorMessage) {
         return { ok: false, data: null, error: authErrorMessage };
       }
-      return { ok: false, data: null, error: "Failed to delete payment method (all endpoints)" };
+      return { ok: false, data: null, error: "Failed to delete payment method" };
     } catch (e) {
       console.error("[PaymentMethods] deleteApiPaymentMethod error", e);
       return { ok: false, data: null, error: e.message || "Failed to delete payment method" };

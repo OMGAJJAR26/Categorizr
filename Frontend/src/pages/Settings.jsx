@@ -1848,7 +1848,7 @@ const hasMoreThan3Decimals = (val) => {
     await Promise.all(
       matching.map(r =>
         updateReceipt(r.id, {
-          paymentType: "",
+          paymentType: "Cash",
           card_issuer_name: "",
           last_4_digit_card: "",
         })
