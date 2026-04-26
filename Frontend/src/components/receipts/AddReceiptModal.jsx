@@ -45,7 +45,6 @@ const AddReceiptModal = ({ onClose, onReceiptAdded }) => {
     paymentMethods,
     receipts,
     expenseCategories,
-    receiptTaxValues,
     taxData,
     merchantsWithImages,
     refreshData,
@@ -225,30 +224,29 @@ const [localMerchants, setLocalMerchants] = useState([]);
     : null;
   const taxFormHasError = !!(taxNameError || taxRateError || taxNumberError);
 
-  const defaultTaxIds = (taxData || [])
-    .filter(t => t.is_default_tax === 1)
-    .sort((a, b) => (a.default_tax_order || 0) - (b.default_tax_order || 0))
-    .map(t => t.id);
+  const defaultTaxIds = useMemo(() => {
+    return (taxData || []).filter(t => parseInt(t.is_default_tax) === 1).map(t => t.id);
+  }, [taxData]);
 
   const toggleDefaultTax = async (taxId) => {
-    const tax = (taxData || []).find(t => t.id === taxId);
-    if (!tax) return;
-
+    const taxToToggle = (taxData || []).find(t => t.id === taxId);
+    if (!taxToToggle) return;
+    
+    const isCurrentlyDefault = parseInt(taxToToggle.is_default_tax) === 1;
+    
+    if (!isCurrentlyDefault && defaultTaxIds.length >= 2) {
+      alert("You can only set up to 2 Default Tax Types.");
+      return;
+    }
+    
     try {
-      if (tax.is_default_tax === 1) {
-        await updateTax({ ...tax, is_default_tax: 0, default_tax_order: 0 });
-      } else {
-        const currentDefaults = (taxData || []).filter(t => t.is_default_tax === 1);
-        if (currentDefaults.length >= 2) {
-          alert("You can only set up to 2 Default Tax Types.");
-          return;
-        }
-        const usedOrders = currentDefaults.map(t => t.default_tax_order);
-        const order = usedOrders.includes(1) ? 2 : 1;
-        await updateTax({ ...tax, is_default_tax: 1, default_tax_order: order });
-      }
+      const taxPayload = {
+        ...taxToToggle,
+        is_default_tax: isCurrentlyDefault ? 0 : 1,
+      };
+      await updateTax(taxPayload);
     } catch (e) {
-      alert("Failed to update default tax");
+      console.error("Failed to update default tax", e);
     }
   };
 
@@ -494,30 +492,12 @@ const [localMerchants, setLocalMerchants] = useState([]);
     // Add taxes from taxData API (saved tax definitions)
     if (Array.isArray(taxData)) taxData.forEach(addToMap);
 
-    // Add taxes from receiptTaxValues for backward compatibility
-    if (Array.isArray(receiptTaxValues)) receiptTaxValues.forEach((tax) => {
-      const name = (tax.tax_name || "").toString().trim();
-      const rate = (tax.tax_rate || "").toString().trim();
-      if (name && rate && !name.toLowerCase().includes("tip")) {
-        const key = `${name}|${rate}`;
-        if (!taxMap.has(key)) {
-          taxMap.set(key, {
-            tax_name: name,
-            tax_rate: rate,
-            tax_number: tax.tax_number || "",
-            id: tax.id || tax.fk_tax_id || 0,
-            fk_user_id: tax.fk_user_id || 0,
-          });
-        }
-      }
-    });
-
     // Add locally-added taxes (created during this modal session) to ensure they always
     // appear even if the context taxData is reset by a background refreshData() call.
     if (Array.isArray(localTaxTypes)) localTaxTypes.forEach(addToMap);
 
     return Array.from(taxMap.values());
-  }, [taxData, receiptTaxValues, localTaxTypes, taxDropdownKey]);
+  }, [taxData, localTaxTypes, taxDropdownKey]);
 
   const handleDragOver = useCallback((e) => {
     e.preventDefault();
@@ -1283,8 +1263,8 @@ const handleFieldChange = (field, value) => {
         tax_name: newTaxName.trim(),
         tax_rate: cleanRate,
         tax_number: newTaxNumber.trim() || "",
-        is_default_tax: existingTax?.is_default_tax || 0,
-        is_tips: existingTax?.is_tips || 0,
+        is_default_tax: parseInt(existingTax?.is_default_tax) || 0,
+        is_tips: parseInt(existingTax?.is_tips) || 0,
         default_tax_order: existingTax?.default_tax_order || 0,
         created: existingTax?.created || 0,
         udpated: 0,
@@ -1322,8 +1302,8 @@ const handleFieldChange = (field, value) => {
         tax_name: newName,
         tax_rate: newRate,
         tax_number: newNumber || "",
-        is_default_tax: existingTax?.is_default_tax || 0,
-        is_tips: existingTax?.is_tips || 0,
+        is_default_tax: parseInt(existingTax?.is_default_tax) || 0,
+        is_tips: parseInt(existingTax?.is_tips) || 0,
         default_tax_order: existingTax?.default_tax_order || 0,
         created: existingTax?.created || 0,
         udpated: 0,
@@ -1814,8 +1794,8 @@ const handleFieldChange = (field, value) => {
         // Try to align tip structure with existing tax records so backend & mobile app treat it the same
         // 1) Prefer an existing "Tip" tax definition from receiptTaxValues (global tax types)
         let baseTipTax = null;
-        if (Array.isArray(receiptTaxValues) && receiptTaxValues.length > 0) {
-          baseTipTax = receiptTaxValues.find((t) =>
+        if (Array.isArray(taxData) && taxData.length > 0) {
+          baseTipTax = taxData.find((t) =>
             (t.tax_name || "").toString().toLowerCase().includes("tip"),
           );
         }
@@ -2961,25 +2941,23 @@ const handleFieldChange = (field, value) => {
   useEffect(() => {
     if (step !== "form") return;
     if (formData.receipt_tax_values.length > 0) return; // OCR already set taxes — don't override
-    const storedIds = (() => {
-      try { return JSON.parse(localStorage.getItem(DEFAULT_TAX_STORAGE_KEY) || "[]"); } catch { return []; }
-    })();
-    if (storedIds.length === 0 || !taxData?.length) return;
-    const toApply = storedIds
-      .map(id => taxData.find(t => t.id === id))
-      .filter(Boolean)
-      .map(t => ({
-        id: t.id || 0,
-        fk_user_id: t.fk_user_id || 0,
-        fk_receipt_id: 0,
-        fk_tax_id: t.id || 0,
-        tax_name: t.tax_name || "",
-        tax_rate: t.tax_rate || "0",
-        tax_amount: "",
-        tax_number: t.tax_number || "",
-        created: 0,
-        updated: 0,
-      }));
+    if (!taxData?.length) return;
+    
+    const defaultTaxes = taxData.filter(t => parseInt(t.is_default_tax) === 1);
+    if (defaultTaxes.length === 0) return;
+    
+    const toApply = defaultTaxes.map(t => ({
+      id: t.id || 0,
+      fk_user_id: t.fk_user_id || 0,
+      fk_receipt_id: 0,
+      fk_tax_id: t.id || 0,
+      tax_name: t.tax_name || "",
+      tax_rate: t.tax_rate || "0",
+      tax_amount: "",
+      tax_number: t.tax_number || "",
+      created: 0,
+      updated: 0,
+    }));
     if (toApply.length > 0) {
       setFormData(prev => ({ ...prev, receipt_tax_values: toApply }));
     }
@@ -5201,9 +5179,8 @@ const handleSelectLogo = (index) => {
                     </h2>
 
                     <div className="px-6 pb-4 text-align-left mb-4">
-                      <h3 className="font-semibold mb-2 text-gray-900 flex justify-between">
-                        <span>Describe Purchase</span>
-                        <span className="font-normal text-xs text-gray-500">{(formData.product_name || "").length}/{MAX_DESCRIPTION_LENGTH}</span>
+                      <h3 className="font-semibold mb-2 text-gray-900">
+                        Describe Purchase
                       </h3>
                       <textarea
                         className="w-full border border-blue-400 rounded-md p-2 mb-2 text-sm"
@@ -5214,9 +5191,8 @@ const handleSelectLogo = (index) => {
                         maxLength={MAX_DESCRIPTION_LENGTH}
                         placeholder="e.g., Nespresso VertuoPlus Espresso Maker"
                       />
-                      <h3 className="font-semibold mb-2 text-gray-900 flex justify-between">
-                        <span>Notes</span>
-                        <span className="font-normal text-xs text-gray-500">{(formData.notes || "").length}/{MAX_NOTES_LENGTH}</span>
+                      <h3 className="font-semibold mb-2 text-gray-900">
+                        Notes
                       </h3>
                       <textarea
                         className="w-full border border-blue-400 rounded-md p-2 mb-2 text-sm"
@@ -6108,9 +6084,15 @@ const handleSelectLogo = (index) => {
                           taxNameError ? "border-red-400 bg-red-50" : "border-gray-200"
                         }`}
                         value={newTaxName}
-                        onChange={e => setNewTaxName(e.target.value)}
+                        onChange={e => {
+                          const val = e.target.value;
+                          if (val.length > TAX_NAME_MAX) {
+                            setToast({ isVisible: true, message: `Tax Name cannot exceed ${TAX_NAME_MAX} characters`, type: "error" });
+                            return;
+                          }
+                          setNewTaxName(val);
+                        }}
                         placeholder="Enter Tax Name (e.g. GST, HST, VAT)"
-                        maxLength={TAX_NAME_MAX}
                         autoFocus
                       />
                       {taxNameError && (
@@ -6134,7 +6116,14 @@ const handleSelectLogo = (index) => {
                         value={taxRateFocused ? newTaxRate : (newTaxRate !== "" ? `${newTaxRate}%` : "")}
                         onFocus={() => setTaxRateFocused(true)}
                         onBlur={() => setTaxRateFocused(false)}
-                        onChange={e => setNewTaxRate(e.target.value.replace(/%/g, ""))}
+                        onChange={e => {
+                          const val = e.target.value.replace(/%/g, "");
+                          if (val && parseFloat(val) > TAX_RATE_MAX) {
+                            setToast({ isVisible: true, message: `Tax Rate cannot exceed ${TAX_RATE_MAX}%`, type: "error" });
+                            return;
+                          }
+                          setNewTaxRate(val);
+                        }}
                         placeholder="Enter Tax Rate (%)"
                       />
                       {taxRateError && (

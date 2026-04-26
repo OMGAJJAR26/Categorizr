@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { NODE_API_URL } from "../api/Axios";
 import { formatTaxRate } from "../utils/receiptFormatters";
-import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine, Check} from "lucide-react";
+import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine,} from "lucide-react";
 import ReceiptAnnotator from "../components/receipts/ReceiptAnnotator";
 import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationDialog";
 import "../App.css";
@@ -261,7 +261,6 @@ const ReceiptDetail = ({
     expenseCategories,
     paymentMethods,
     merchantsWithImages,
-    receiptTaxValues,
     taxData,
     refreshData,
     silentRefreshData,
@@ -385,6 +384,9 @@ const ReceiptDetail = ({
     return "";
   }, []);
 
+  const isCashPaymentMethod = (name) =>
+    (name || "").toString().replace(/\s*\*\s*\d{3,4}\s*$/, "").trim().toLowerCase() === "cash";
+
   // Get all payment methods - use actual user payment methods from receipts
   // (like "Bank of America *1111", "Visa *0177", etc.)
   const allPaymentMethods = React.useMemo(() => {
@@ -431,26 +433,6 @@ const ReceiptDetail = ({
     });
   }
 
-  // Priority 2: Also include taxes from receiptTaxValues for backward compatibility
-  if (Array.isArray(receiptTaxValues)) {
-    receiptTaxValues.forEach((tax) => {
-      const name = (tax.tax_name || "").toString().trim();
-      const rate = (tax.tax_rate || "").toString().trim();
-      if (name && rate && !name.toLowerCase().includes("tip")) {
-        const key = `${name}|${rate}`;
-        if (!taxMap.has(key)) {
-          taxMap.set(key, {
-            tax_name: name,
-            tax_rate: rate,
-            tax_number: tax.tax_number || "",
-            id: tax.id || tax.fk_tax_id || 0,
-            fk_user_id: tax.fk_user_id || 0,
-          });
-        }
-      }
-    });
-  }
-
   // Also include any taxes added locally this session
   localTaxTypes.forEach((tax) => {
     const name = (tax.tax_name || "").toString().trim();
@@ -471,7 +453,7 @@ const ReceiptDetail = ({
   });
 
   return Array.from(taxMap.values());
-}, [taxData, receiptTaxValues, taxRefreshKey, localTaxTypes]);
+}, [taxData, taxRefreshKey, localTaxTypes]);
 
 // Add this useEffect to fetch taxes when component mounts
 useEffect(() => {
@@ -823,6 +805,76 @@ useEffect(() => {
     }
   }, [receipts, receipt, receiptList, setSelectedIndex]);
 
+  // Close options menu on outside click
+  useEffect(() => {
+    if (!showOptionsMenu) return;
+    const handler = (e) => {
+      if (optionsMenuRef.current && !optionsMenuRef.current.contains(e.target)) {
+        setShowOptionsMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showOptionsMenu]);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setShareMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
+  // Enrich receipt_tax_values with tax_name and tax_rate from taxData for display
+  const enrichedReceiptTaxValues = React.useMemo(() => {
+    if (
+      !selectedReceipt ||
+      !Array.isArray(selectedReceipt.receipt_tax_values) ||
+      selectedReceipt.receipt_tax_values.length === 0
+    ) {
+      return [];
+    }
+
+    return selectedReceipt.receipt_tax_values.map((tax) => {
+      // If tax already has tax_name and tax_rate, use them
+      if (tax.tax_name && tax.tax_rate) {
+        return tax;
+      }
+
+      // Try to find tax definition by fk_tax_id
+      const taxId = parseInt(tax.fk_tax_id) || 0;
+      if (taxId > 0 && Array.isArray(taxData) && taxData.length > 0) {
+        const taxDefinition = taxData.find((t) => parseInt(t.id) === taxId);
+        if (taxDefinition) {
+          return {
+            ...tax,
+            tax_name: taxDefinition.tax_name || tax.tax_name || "",
+            tax_rate: taxDefinition.tax_rate || tax.tax_rate || "0",
+          };
+        }
+      }
+
+      // If fk_tax_id is 0 or not found, calculate tax_rate from tax_amount and subtotal as fallback
+      const subtotal =
+        parseFloat(selectedReceipt.subtotal) || parseFloat(selectedReceipt.purchasePrice) || 0;
+      const taxAmount = parseFloat(tax.tax_amount) || 0;
+      let calculatedRate = 0;
+      if (subtotal > 0 && taxAmount > 0) {
+        calculatedRate = Math.round((taxAmount / subtotal) * 100);
+      }
+
+      return {
+        ...tax,
+        tax_name: tax.tax_name || "Tax",
+        tax_rate: tax.tax_rate || calculatedRate.toString(),
+      };
+    });
+  }, [selectedReceipt, taxData]);
+
   if (!selectedReceipt) return null;
 
   const currentIndex = sortedReceipts.findIndex(
@@ -1030,8 +1082,6 @@ useEffect(() => {
   };
 
   // ── Payment method delete from dropdown ───────────────────────────────────
-  const isCashPaymentMethod = (name) =>
-    (name || "").toString().replace(/\s*\*\s*\d{3,4}\s*$/, "").trim().toLowerCase() === "cash";
 
   const getPaymentDisplayForReceipt = (r) => {
     const iss = (r.card_issuer_name || r.cardIssuerName || "").toString().trim();
@@ -1387,32 +1437,6 @@ useEffect(() => {
     ? `Tax Number cannot exceed ${TAX_NUMBER_MAX} characters (${newTaxNumber.length}/${TAX_NUMBER_MAX})`
     : null;
 
-  const defaultTaxIds = (taxData || [])
-    .filter(t => t.is_default_tax === 1)
-    .sort((a, b) => (a.default_tax_order || 0) - (b.default_tax_order || 0))
-    .map(t => t.id);
-
-  const toggleDefaultTax = async (taxId) => {
-    const tax = (taxData || []).find(t => t.id === taxId);
-    if (!tax) return;
-    try {
-      if (tax.is_default_tax === 1) {
-        await updateTax({ ...tax, is_default_tax: 0, default_tax_order: 0 });
-      } else {
-        const currentDefaults = (taxData || []).filter(t => t.is_default_tax === 1);
-        if (currentDefaults.length >= 2) {
-          alert("You can only set up to 2 Default Tax Types.");
-          return;
-        }
-        const usedOrders = currentDefaults.map(t => t.default_tax_order);
-        const order = usedOrders.includes(1) ? 2 : 1;
-        await updateTax({ ...tax, is_default_tax: 1, default_tax_order: order });
-      }
-    } catch (e) {
-      alert("Failed to update default tax");
-    }
-  };
-
   // Manage Tax Types modal handlers
   const handleAddTaxType = async () => {
     if (!newTaxName.trim()) {
@@ -1511,8 +1535,8 @@ useEffect(() => {
         tax_name: newTaxName.trim(),
         tax_rate: cleanRate,
         tax_number: newTaxNumber.trim() || "",
-        is_default_tax: existingTax?.is_default_tax || 0,
-        is_tips: existingTax?.is_tips || 0,
+        is_default_tax: parseInt(existingTax?.is_default_tax) || 0,
+        is_tips: parseInt(existingTax?.is_tips) || 0,
         default_tax_order: existingTax?.default_tax_order || 0,
         created: existingTax?.created || 0,
         udpated: Date.now(),
@@ -1549,8 +1573,8 @@ useEffect(() => {
         tax_name: newName,
         tax_rate: newRate,
         tax_number: newNumber || "",
-        is_default_tax: existingTax?.is_default_tax || 0,
-        is_tips: existingTax?.is_tips || 0,
+        is_default_tax: parseInt(existingTax?.is_default_tax) || 0,
+        is_tips: parseInt(existingTax?.is_tips) || 0,
         default_tax_order: existingTax?.default_tax_order || 0,
         created: existingTax?.created || 0,
         udpated: Date.now(),
@@ -2263,17 +2287,6 @@ useEffect(() => {
     }
   };
 
-  // Close options menu on outside click
-  useEffect(() => {
-    if (!showOptionsMenu) return;
-    const handler = (e) => {
-      if (optionsMenuRef.current && !optionsMenuRef.current.contains(e.target)) {
-        setShowOptionsMenu(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [showOptionsMenu]);
 
   // Save edited receipt
   const handleSave = async () => {
@@ -2506,62 +2519,6 @@ useEffect(() => {
   const inputClass =
     "w-full border border-blue-400 text-sm px-2 py-1 rounded-md bg-white text-gray-800 mt-2.5 mb-0  ";
 
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setShareMenu(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, []);
-
-  // Enrich receipt_tax_values with tax_name and tax_rate from taxData for display
-  const enrichedReceiptTaxValues = React.useMemo(() => {
-    if (
-      !Array.isArray(r.receipt_tax_values) ||
-      r.receipt_tax_values.length === 0
-    ) {
-      return [];
-    }
-
-    return r.receipt_tax_values.map((tax) => {
-      // If tax already has tax_name and tax_rate, use them
-      if (tax.tax_name && tax.tax_rate) {
-        return tax;
-      }
-
-      // Try to find tax definition by fk_tax_id
-      const taxId = parseInt(tax.fk_tax_id) || 0;
-      if (taxId > 0 && Array.isArray(taxData) && taxData.length > 0) {
-        const taxDefinition = taxData.find((t) => parseInt(t.id) === taxId);
-        if (taxDefinition) {
-          return {
-            ...tax,
-            tax_name: taxDefinition.tax_name || tax.tax_name || "",
-            tax_rate: taxDefinition.tax_rate || tax.tax_rate || "0",
-          };
-        }
-      }
-
-      // If fk_tax_id is 0 or not found, calculate tax_rate from tax_amount and subtotal as fallback
-      const subtotal =
-        parseFloat(r.subtotal) || parseFloat(r.purchasePrice) || 0;
-      const taxAmount = parseFloat(tax.tax_amount) || 0;
-      let calculatedRate = 0;
-      if (subtotal > 0 && taxAmount > 0) {
-        calculatedRate = Math.round((taxAmount / subtotal) * 100);
-      }
-
-      return {
-        ...tax,
-        tax_name: tax.tax_name || "Tax",
-        tax_rate: tax.tax_rate || calculatedRate.toString(),
-      };
-    });
-  }, [r.receipt_tax_values, r.subtotal, r.purchasePrice, taxData]);
 
   const taxes = enrichedReceiptTaxValues.filter(
     (t) => !(t.tax_name || "").toLowerCase().includes("tip")
@@ -5349,7 +5306,14 @@ Thank you for using our receipt management system.
                               (t) => !(t.tax_name || "").toLowerCase().includes("tip")
                             ) || [];
 
-                          const sortedTaxPills = [...allTaxTypes]
+                          const combinedTaxesMap = new Map();
+                          allTaxTypes.forEach(t => combinedTaxesMap.set(`${t.tax_name}|${t.tax_rate}`, t));
+                          currentTaxVals.forEach(t => {
+                             const key = `${t.tax_name}|${t.tax_rate}`;
+                             if (!combinedTaxesMap.has(key)) combinedTaxesMap.set(key, t);
+                          });
+
+                          const sortedTaxPills = Array.from(combinedTaxesMap.values())
                             .map((tax) => ({
                               ...tax,
                               _selIdx: currentTaxVals.findIndex(
@@ -5444,9 +5408,8 @@ Thank you for using our receipt management system.
                     </h2>
 
                     <div className="px-6 pb-4 text-align-left mb-4">
-                      <h3 className="font-semibold mb-2 text-gray-900 flex justify-between">
-                        <span>Describe Purchase</span>
-                        <span className="font-normal text-xs text-gray-500">{(editedReceipt.product_name ?? r.product_name ?? "").length}/{MAX_DESCRIPTION_LENGTH}</span>
+                      <h3 className="font-semibold mb-2 text-gray-900">
+                        Describe Purchase
                       </h3>
                       <textarea
                         className="w-full border border-blue-400 rounded-md p-2 mb-2 text-sm"
@@ -5459,9 +5422,8 @@ Thank you for using our receipt management system.
                         maxLength={MAX_DESCRIPTION_LENGTH}
                         placeholder="No description provided"
                       />
-                      <h3 className="font-semibold mb-2 text-gray-900 flex justify-between">
-                        <span>Notes</span>
-                        <span className="font-normal text-xs text-gray-500">{(editedReceipt.notes ?? r.notes ?? "").length}/{MAX_NOTES_LENGTH}</span>
+                      <h3 className="font-semibold mb-2 text-gray-900">
+                        Notes
                       </h3>
                       <textarea
                         className="w-full border border-blue-400 rounded-md p-2 mb-2 text-sm"
@@ -6366,18 +6328,6 @@ Thank you for using our receipt management system.
                               </div>
                             </div>
                             <div className="flex items-center gap-1.5 flex-shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => toggleDefaultTax(tax.id)}
-                                className={`px-2 py-1 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1 ${
-                                  defaultTaxIds.includes(tax.id)
-                                    ? "bg-green-100 text-green-700"
-                                    : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-                                }`}
-                              >
-                                {defaultTaxIds.includes(tax.id) ? <Check size={12} /> : null}
-                                {defaultTaxIds.includes(tax.id) ? "Default" : "Set as Default"}
-                              </button>
                               <button
                                 type="button"
                                 onClick={() => handleEditTax(tax)}

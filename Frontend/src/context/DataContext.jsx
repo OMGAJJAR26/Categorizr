@@ -238,10 +238,9 @@ export const DataProvider = ({ children }) => {
       if (!token) return [];
       
       const dateTimeStamp = Date.now();
-      const response = await fetch(`${BASE_URL}/tax/getTax?date_time_stamp=${dateTimeStamp}`, {
-        method: "GET",
+      const response = await fetch(`${BASE_URL}/tax/getTax?date_time_stamp=0&fk_user_id=10476`, {
         headers: {
-          Accesstoken: token,
+          accesstoken: `${token}`,
         },
       });
       

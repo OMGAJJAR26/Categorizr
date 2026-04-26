@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Settings as SettingsIcon,
@@ -227,7 +227,11 @@ const ManageModal = ({ type, onClose }) => {
     if (type === "taxes") {
       const n = editTaxVal.tax_name.trim(), r = editTaxVal.tax_rate.toString().trim();
       if (!n || !r) return;
-      try { await updateTax({ ...taxData.find(t => t.id === key), tax_name: n, tax_rate: r, tax_number: editTaxVal.tax_number.trim() }); setEditTaxKey(null); }
+      try { 
+        const tObj = taxData.find(t => t.id === item.key);
+        await updateTax({ ...tObj, tax_name: n, tax_rate: r, tax_number: editTaxVal.tax_number.trim(), is_default_tax: parseInt(tObj?.is_default_tax) || 0, is_tips: parseInt(tObj?.is_tips) || 0 }); 
+        setEditTaxKey(null); 
+      }
       catch (e) { toast("error", e.message || "Failed."); }
       return;
     }
@@ -489,7 +493,7 @@ const ManageModal = ({ type, onClose }) => {
             <div className="flex flex-col gap-2">
               <div className="flex gap-2">
                 <input className={mInput} placeholder="Tax name (e.g. GST)" value={addTaxVal.tax_name} onChange={e => setAddTaxVal(p => ({ ...p, tax_name: e.target.value }))} />
-                <input className={`${mInput} max-w-[80px]`} placeholder="Rate %" value={addTaxVal.tax_rate} onChange={e => setAddTaxVal(p => ({ ...p, tax_rate: e.target.value }))} />
+                <input className={`${mInput} max-w-[80px]`} placeholder="Tax Rate %" value={addTaxVal.tax_rate} onChange={e => setAddTaxVal(p => ({ ...p, tax_rate: e.target.value }))} />
               </div>
               <div className="flex gap-2">
                 <input className={mInput} placeholder="Tax number (optional)" value={addTaxVal.tax_number} onChange={e => setAddTaxVal(p => ({ ...p, tax_number: e.target.value }))} />
@@ -532,7 +536,7 @@ const ManageModal = ({ type, onClose }) => {
                     <div className="flex flex-col gap-2 bg-blue-50 border border-blue-200 rounded-xl p-3">
                       <div className="flex gap-2">
                         <input className={mInput} value={editTaxVal.tax_name} onChange={e => setEditTaxVal(p => ({ ...p, tax_name: e.target.value }))} placeholder="Name" />
-                        <input className={`${mInput} max-w-[80px]`} value={editTaxVal.tax_rate} onChange={e => setEditTaxVal(p => ({ ...p, tax_rate: e.target.value }))} placeholder="Rate %" />
+                        <input className={`${mInput} max-w-[80px]`} value={editTaxVal.tax_rate} onChange={e => setEditTaxVal(p => ({ ...p, tax_rate: e.target.value }))} placeholder="Tax Rate %" />
                       </div>
                       <div className="flex gap-2">
                         <input className={mInput} value={editTaxVal.tax_number} onChange={e => setEditTaxVal(p => ({ ...p, tax_number: e.target.value }))} placeholder="Tax number (optional)" />
@@ -1192,29 +1196,27 @@ const ReceiptInfoInline = ({ type }) => {
   const [addTaxVal, setAddTaxVal] = useState({ tax_name: "", tax_rate: "", tax_number: "" });
   const [msg, setMsg]           = useState(null);
 
-  const defaultTaxIds = (taxData || [])
-    .filter(t => t.is_default_tax === 1)
-    .sort((a, b) => (a.default_tax_order || 0) - (b.default_tax_order || 0))
-    .map(t => t.id);
+  const defaultTaxIds = useMemo(() => {
+    return (taxData || []).filter(t => parseInt(t.is_default_tax) === 1).map(t => t.id);
+  }, [taxData]);
 
   const toggleDefaultTax = async (taxId) => {
-    const tax = (taxData || []).find(t => t.id === taxId);
-    if (!tax) return;
-
+    const taxToToggle = (taxData || []).find(t => t.id === taxId);
+    if (!taxToToggle) return;
+    
+    const isCurrentlyDefault = parseInt(taxToToggle.is_default_tax) === 1;
+    
+    if (!isCurrentlyDefault && defaultTaxIds.length >= 2) {
+      toast("error", "You can only set up to 2 Default Tax Types.");
+      return;
+    }
+    
     try {
-      if (tax.is_default_tax === 1) {
-        // Unset default
-        await updateTax({ ...tax, is_default_tax: 0, default_tax_order: 0 });
-      } else {
-        const currentDefaults = (taxData || []).filter(t => t.is_default_tax === 1);
-        if (currentDefaults.length >= 2) {
-          toast("error", "You can only set up to 2 Default Tax Types.");
-          return;
-        }
-        const usedOrders = currentDefaults.map(t => t.default_tax_order);
-        const order = usedOrders.includes(1) ? 2 : 1;
-        await updateTax({ ...tax, is_default_tax: 1, default_tax_order: order });
-      }
+      const taxPayload = {
+        ...taxToToggle,
+        is_default_tax: isCurrentlyDefault ? 0 : 1,
+      };
+      await updateTax(taxPayload);
     } catch (e) {
       toast("error", "Failed to update default tax");
     }
@@ -1618,18 +1620,32 @@ const hasMoreThan3Decimals = (val) => {
           return sig && newSig && sig === newSig;
         });
         if (dupExists) return toast("error", "Payment Method already exists");
-        // Show confirmation popup instead of executing immediately
-        setPendingPaymentEdit({
-          isModalEdit: true,
-          oldName,
-          targetId,
-          payStr,
-          selectedLogoUrl,
-          ct,
-          newExpenseType,
-          item: payEditMode.item
-        });
-        setShowPaymentEditConfirm(true);
+        // Update via API
+        if (targetId != null) {
+          const res = await updateApiPaymentMethod(targetId, payStr, selectedLogoUrl);
+          if (!res?.ok) throw new Error(res?.error || "Failed to update payment method");
+        }
+        // Propagate to receipts that use old name
+        const matchingReceipts = getReceiptsByPaymentDisplay(oldName);
+        if (matchingReceipts.length > 0) {
+          const { issuer: newIssuer, last4: newL4 } = parsePaymentDisplay(payStr);
+          await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
+            paymentType: ct,
+            card_issuer_name: newIssuer,
+            last_4_digit_card: newL4 || r.last_4_digit_card || "",
+          })));
+        }
+        // Update localStorage mappings
+        savePayCard(payStr, ct);
+        savePayExpenseType(payStr, newExpenseType);
+        // If it was a custom entry, rename it too
+        if (!payEditMode.item.isApiItem) editCustomPaymentMethod(oldName, payStr);
+        // Reset & refresh
+        setPayEditMode(null);
+        setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
+        setShowAddForm(false);
+        await Promise.all([refreshData(), fetchApiPaymentMethods()]);
+        toast("success", "Payment Method Updated");
         return;
       }
 
@@ -1824,38 +1840,7 @@ const hasMoreThan3Decimals = (val) => {
     setShowPaymentEditConfirm(false);
     if (!pendingPaymentEdit) return;
     try {
-      if (pendingPaymentEdit.isModalEdit) {
-        const { oldName, targetId, payStr, selectedLogoUrl, ct, newExpenseType, item } = pendingPaymentEdit;
-        
-        // Update via API
-        if (targetId != null) {
-          const res = await updateApiPaymentMethod(targetId, payStr, selectedLogoUrl);
-          if (!res?.ok) throw new Error(res?.error || "Failed to update payment method");
-        }
-        // Propagate to receipts that use old name
-        const matchingReceipts = getReceiptsByPaymentDisplay(oldName);
-        if (matchingReceipts.length > 0) {
-          const { issuer: newIssuer, last4: newL4 } = parsePaymentDisplay(payStr);
-          await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
-            paymentType: ct,
-            card_issuer_name: newIssuer,
-            last_4_digit_card: newL4 || r.last_4_digit_card || "",
-          })));
-        }
-        // Update localStorage mappings
-        savePayCard(payStr, ct);
-        savePayExpenseType(payStr, newExpenseType);
-        // If it was a custom entry, rename it too
-        if (!item.isApiItem) editCustomPaymentMethod(oldName, payStr);
-        // Reset & refresh
-        setPayEditMode(null);
-        setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
-        setShowAddForm(false);
-        await Promise.all([refreshData(), fetchApiPaymentMethods()]);
-        toast("success", "Payment Method Updated");
-      } else {
-        await applyPaymentEdit(pendingPaymentEdit.item, pendingPaymentEdit.newName);
-      }
+      await applyPaymentEdit(pendingPaymentEdit.item, pendingPaymentEdit.newName);
     } catch (e) {
       toast("error", e.message || "Update failed.");
     } finally {
@@ -2029,11 +2014,11 @@ const hasMoreThan3Decimals = (val) => {
           nextRate: r,
           nextNumber: editTaxVal.tax_number.trim(),
         });
-        setShowTaxRateDecisionConfirm(true);
+        setShowTaxRateChangeWarning(true);
         return;
       }
       try {
-        await updateTax({ ...originalTax, tax_name: n, tax_rate: r, tax_number: editTaxVal.tax_number.trim() });
+        await updateTax({ ...originalTax, tax_name: n, tax_rate: r, tax_number: editTaxVal.tax_number.trim(), is_default_tax: parseInt(originalTax?.is_default_tax) || 0, is_tips: parseInt(originalTax?.is_tips) || 0 });
         toast("success", "Tax Type Updated");
         setEditTaxKey(null);
       }
@@ -2124,6 +2109,8 @@ const hasMoreThan3Decimals = (val) => {
         tax_name: pendingTaxRateEdit.nextName,
         tax_rate: pendingTaxRateEdit.nextRate,
         tax_number: pendingTaxRateEdit.nextNumber || "",
+        is_default_tax: parseInt(targetTax?.is_default_tax) || 0,
+        is_tips: parseInt(targetTax?.is_tips) || 0,
       });
       toast("success", "Tax Type Updated");
       setEditTaxKey(null);
@@ -2453,7 +2440,7 @@ const hasMoreThan3Decimals = (val) => {
                               return;
                             }
                             try {
-                              await updateTax({ ...originalTax, tax_name: n, tax_rate: r, tax_number: num });
+                              await updateTax({ ...originalTax, tax_name: n, tax_rate: r, tax_number: num, is_default_tax: parseInt(originalTax?.is_default_tax) || 0, is_tips: parseInt(originalTax?.is_tips) || 0 });
                               toast("success", "Tax Type Updated");
                               setEditTaxKey(null);
                             } catch (e) { toast("error", e.message || "Failed."); }
