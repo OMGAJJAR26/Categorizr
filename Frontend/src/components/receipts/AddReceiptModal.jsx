@@ -5193,8 +5193,9 @@ const handleSelectLogo = (index) => {
                     </h2>
 
                     <div className="px-6 pb-4 text-align-left mb-4">
-                      <h3 className="font-semibold mb-2 text-gray-900">
-                        Describe Purchase
+                      <h3 className="font-semibold mb-2 text-gray-900 flex justify-between">
+                        <span>Describe Purchase</span>
+                        <span className="font-normal text-xs text-gray-500">{(formData.product_name || "").length}/{MAX_DESCRIPTION_LENGTH}</span>
                       </h3>
                       <textarea
                         className="w-full border border-blue-400 rounded-md p-2 mb-2 text-sm"
@@ -5205,8 +5206,9 @@ const handleSelectLogo = (index) => {
                         maxLength={MAX_DESCRIPTION_LENGTH}
                         placeholder="e.g., Nespresso VertuoPlus Espresso Maker"
                       />
-                      <h3 className="font-semibold mb-2 text-gray-900">
-                        Notes
+                      <h3 className="font-semibold mb-2 text-gray-900 flex justify-between">
+                        <span>Notes</span>
+                        <span className="font-normal text-xs text-gray-500">{(formData.notes || "").length}/{MAX_NOTES_LENGTH}</span>
                       </h3>
                       <textarea
                         className="w-full border border-blue-400 rounded-md p-2 mb-2 text-sm"

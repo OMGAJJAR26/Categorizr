@@ -1611,32 +1611,18 @@ const hasMoreThan3Decimals = (val) => {
           return sig && newSig && sig === newSig;
         });
         if (dupExists) return toast("error", "Payment Method already exists");
-        // Update via API
-        if (targetId != null) {
-          const res = await updateApiPaymentMethod(targetId, payStr, selectedLogoUrl);
-          if (!res?.ok) throw new Error(res?.error || "Failed to update payment method");
-        }
-        // Propagate to receipts that use old name
-        const matchingReceipts = getReceiptsByPaymentDisplay(oldName);
-        if (matchingReceipts.length > 0) {
-          const { issuer: newIssuer, last4: newL4 } = parsePaymentDisplay(payStr);
-          await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
-            paymentType: ct,
-            card_issuer_name: newIssuer,
-            last_4_digit_card: newL4 || r.last_4_digit_card || "",
-          })));
-        }
-        // Update localStorage mappings
-        savePayCard(payStr, ct);
-        savePayExpenseType(payStr, newExpenseType);
-        // If it was a custom entry, rename it too
-        if (!payEditMode.item.isApiItem) editCustomPaymentMethod(oldName, payStr);
-        // Reset & refresh
-        setPayEditMode(null);
-        setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
-        setShowAddForm(false);
-        await Promise.all([refreshData(), fetchApiPaymentMethods()]);
-        toast("success", "Payment Method Updated");
+        // Show confirmation popup instead of executing immediately
+        setPendingPaymentEdit({
+          isModalEdit: true,
+          oldName,
+          targetId,
+          payStr,
+          selectedLogoUrl,
+          ct,
+          newExpenseType,
+          item: payEditMode.item
+        });
+        setShowPaymentEditConfirm(true);
         return;
       }
 
@@ -1831,7 +1817,38 @@ const hasMoreThan3Decimals = (val) => {
     setShowPaymentEditConfirm(false);
     if (!pendingPaymentEdit) return;
     try {
-      await applyPaymentEdit(pendingPaymentEdit.item, pendingPaymentEdit.newName);
+      if (pendingPaymentEdit.isModalEdit) {
+        const { oldName, targetId, payStr, selectedLogoUrl, ct, newExpenseType, item } = pendingPaymentEdit;
+        
+        // Update via API
+        if (targetId != null) {
+          const res = await updateApiPaymentMethod(targetId, payStr, selectedLogoUrl);
+          if (!res?.ok) throw new Error(res?.error || "Failed to update payment method");
+        }
+        // Propagate to receipts that use old name
+        const matchingReceipts = getReceiptsByPaymentDisplay(oldName);
+        if (matchingReceipts.length > 0) {
+          const { issuer: newIssuer, last4: newL4 } = parsePaymentDisplay(payStr);
+          await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
+            paymentType: ct,
+            card_issuer_name: newIssuer,
+            last_4_digit_card: newL4 || r.last_4_digit_card || "",
+          })));
+        }
+        // Update localStorage mappings
+        savePayCard(payStr, ct);
+        savePayExpenseType(payStr, newExpenseType);
+        // If it was a custom entry, rename it too
+        if (!item.isApiItem) editCustomPaymentMethod(oldName, payStr);
+        // Reset & refresh
+        setPayEditMode(null);
+        setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
+        setShowAddForm(false);
+        await Promise.all([refreshData(), fetchApiPaymentMethods()]);
+        toast("success", "Payment Method Updated");
+      } else {
+        await applyPaymentEdit(pendingPaymentEdit.item, pendingPaymentEdit.newName);
+      }
     } catch (e) {
       toast("error", e.message || "Update failed.");
     } finally {
