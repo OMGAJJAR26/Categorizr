@@ -225,22 +225,30 @@ const [localMerchants, setLocalMerchants] = useState([]);
     : null;
   const taxFormHasError = !!(taxNameError || taxRateError || taxNumberError);
 
-  // ── Default Tax Types (up to 2, stored in localStorage) ──────────────────
-  const DEFAULT_TAX_STORAGE_KEY = "categorizr_defaultTaxIds";
-  const [defaultTaxIds, setDefaultTaxIdsState] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(DEFAULT_TAX_STORAGE_KEY) || "[]"); } catch { return []; }
-  });
-  const persistDefaultTaxIds = (ids) => {
-    setDefaultTaxIdsState(ids);
-    localStorage.setItem(DEFAULT_TAX_STORAGE_KEY, JSON.stringify(ids));
-  };
-  const toggleDefaultTax = (taxId) => {
-    if (defaultTaxIds.includes(taxId)) {
-      persistDefaultTaxIds(defaultTaxIds.filter(id => id !== taxId));
-    } else if (defaultTaxIds.length < 2) {
-      persistDefaultTaxIds([...defaultTaxIds, taxId]);
-    } else {
-      alert("You can only set up to 2 Default Tax Types.");
+  const defaultTaxIds = (taxData || [])
+    .filter(t => t.is_default_tax === 1)
+    .sort((a, b) => (a.default_tax_order || 0) - (b.default_tax_order || 0))
+    .map(t => t.id);
+
+  const toggleDefaultTax = async (taxId) => {
+    const tax = (taxData || []).find(t => t.id === taxId);
+    if (!tax) return;
+
+    try {
+      if (tax.is_default_tax === 1) {
+        await updateTax({ ...tax, is_default_tax: 0, default_tax_order: 0 });
+      } else {
+        const currentDefaults = (taxData || []).filter(t => t.is_default_tax === 1);
+        if (currentDefaults.length >= 2) {
+          alert("You can only set up to 2 Default Tax Types.");
+          return;
+        }
+        const usedOrders = currentDefaults.map(t => t.default_tax_order);
+        const order = usedOrders.includes(1) ? 2 : 1;
+        await updateTax({ ...tax, is_default_tax: 1, default_tax_order: order });
+      }
+    } catch (e) {
+      alert("Failed to update default tax");
     }
   };
 

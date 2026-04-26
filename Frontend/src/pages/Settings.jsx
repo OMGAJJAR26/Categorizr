@@ -1192,25 +1192,32 @@ const ReceiptInfoInline = ({ type }) => {
   const [addTaxVal, setAddTaxVal] = useState({ tax_name: "", tax_rate: "", tax_number: "" });
   const [msg, setMsg]           = useState(null);
 
-  // Default tax IDs (shared with AddReceiptModal via localStorage)
-  const DEFAULT_TAX_STORAGE_KEY = "categorizr_defaultTaxIds";
-  const [defaultTaxIds, setDefaultTaxIdsState] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(DEFAULT_TAX_STORAGE_KEY) || "[]"); } catch { return []; }
-  });
-  const toggleDefaultTax = (taxId) => {
-    setDefaultTaxIdsState(prev => {
-      let next;
-      if (prev.includes(taxId)) {
-        next = prev.filter(id => id !== taxId);
-      } else if (prev.length < 2) {
-        next = [...prev, taxId];
+  const defaultTaxIds = (taxData || [])
+    .filter(t => t.is_default_tax === 1)
+    .sort((a, b) => (a.default_tax_order || 0) - (b.default_tax_order || 0))
+    .map(t => t.id);
+
+  const toggleDefaultTax = async (taxId) => {
+    const tax = (taxData || []).find(t => t.id === taxId);
+    if (!tax) return;
+
+    try {
+      if (tax.is_default_tax === 1) {
+        // Unset default
+        await updateTax({ ...tax, is_default_tax: 0, default_tax_order: 0 });
       } else {
-        toast("error", "You can only set up to 2 Default Tax Types.");
-        return prev;
+        const currentDefaults = (taxData || []).filter(t => t.is_default_tax === 1);
+        if (currentDefaults.length >= 2) {
+          toast("error", "You can only set up to 2 Default Tax Types.");
+          return;
+        }
+        const usedOrders = currentDefaults.map(t => t.default_tax_order);
+        const order = usedOrders.includes(1) ? 2 : 1;
+        await updateTax({ ...tax, is_default_tax: 1, default_tax_order: order });
       }
-      localStorage.setItem(DEFAULT_TAX_STORAGE_KEY, JSON.stringify(next));
-      return next;
-    });
+    } catch (e) {
+      toast("error", "Failed to update default tax");
+    }
   };
 
   // Edit state (unified for all non-tax item types)

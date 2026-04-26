@@ -238,9 +238,10 @@ export const DataProvider = ({ children }) => {
       if (!token) return [];
       
       const dateTimeStamp = Date.now();
-      const response = await fetch(`${BASE_URL}/tax/getTax?date_time_stamp=0&fk_user_id=10476`, {
+      const response = await fetch(`${BASE_URL}/tax/getTax?date_time_stamp=${dateTimeStamp}`, {
+        method: "GET",
         headers: {
-          accesstoken: `${token}`,
+          Accesstoken: token,
         },
       });
       
@@ -273,7 +274,7 @@ export const DataProvider = ({ children }) => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-           accesstoken: `${token}`,
+          Accesstoken: token,
         },
         body: JSON.stringify(taxData),
       });
@@ -302,7 +303,7 @@ export const DataProvider = ({ children }) => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          Accesstoken: token,
         },
         body: JSON.stringify(taxData),
       });
@@ -328,9 +329,9 @@ export const DataProvider = ({ children }) => {
       if (!token) throw new Error("Authentication token not found");
       
       const response = await fetch(`${BASE_URL}/tax/deleteTax?deleteId=${taxId}`, {
-        method: "DELETE",
+        method: "GET",
         headers: {
-          Authorization: `Bearer ${token}`,
+          Accesstoken: token,
         },
       });
       

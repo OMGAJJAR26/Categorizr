@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { NODE_API_URL } from "../api/Axios";
 import { formatTaxRate } from "../utils/receiptFormatters";
-import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine,} from "lucide-react";
+import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine, Check} from "lucide-react";
 import ReceiptAnnotator from "../components/receipts/ReceiptAnnotator";
 import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationDialog";
 import "../App.css";
@@ -1386,6 +1386,32 @@ useEffect(() => {
   const taxNumberError = newTaxNumber.length > TAX_NUMBER_MAX
     ? `Tax Number cannot exceed ${TAX_NUMBER_MAX} characters (${newTaxNumber.length}/${TAX_NUMBER_MAX})`
     : null;
+
+  const defaultTaxIds = (taxData || [])
+    .filter(t => t.is_default_tax === 1)
+    .sort((a, b) => (a.default_tax_order || 0) - (b.default_tax_order || 0))
+    .map(t => t.id);
+
+  const toggleDefaultTax = async (taxId) => {
+    const tax = (taxData || []).find(t => t.id === taxId);
+    if (!tax) return;
+    try {
+      if (tax.is_default_tax === 1) {
+        await updateTax({ ...tax, is_default_tax: 0, default_tax_order: 0 });
+      } else {
+        const currentDefaults = (taxData || []).filter(t => t.is_default_tax === 1);
+        if (currentDefaults.length >= 2) {
+          alert("You can only set up to 2 Default Tax Types.");
+          return;
+        }
+        const usedOrders = currentDefaults.map(t => t.default_tax_order);
+        const order = usedOrders.includes(1) ? 2 : 1;
+        await updateTax({ ...tax, is_default_tax: 1, default_tax_order: order });
+      }
+    } catch (e) {
+      alert("Failed to update default tax");
+    }
+  };
 
   // Manage Tax Types modal handlers
   const handleAddTaxType = async () => {
@@ -6340,6 +6366,18 @@ Thank you for using our receipt management system.
                               </div>
                             </div>
                             <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => toggleDefaultTax(tax.id)}
+                                className={`px-2 py-1 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1 ${
+                                  defaultTaxIds.includes(tax.id)
+                                    ? "bg-green-100 text-green-700"
+                                    : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                                }`}
+                              >
+                                {defaultTaxIds.includes(tax.id) ? <Check size={12} /> : null}
+                                {defaultTaxIds.includes(tax.id) ? "Default" : "Set as Default"}
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => handleEditTax(tax)}
