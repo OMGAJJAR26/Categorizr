@@ -168,6 +168,7 @@ const ReceiptDetail = ({
 
   // Add Payment Method modal state
   const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
+  const [payModalEditMode, setPayModalEditMode] = useState(null); // null | { name, apiId }
   const [newPaymentCardType, setNewPaymentCardType] = useState("");
   const [newCardIssuerName, setNewCardIssuerName] = useState("");
   const [newLast4Digits, setNewLast4Digits] = useState("");
@@ -273,6 +274,14 @@ const ReceiptDetail = ({
     deleteApiMerchant,
     apiExpenseCategories,
     deleteApiExpenseCategory,
+    apiPaymentMethods,
+    fetchApiPaymentMethods,
+    deleteApiPaymentMethod,
+    updateApiPaymentMethod,
+    addApiPaymentMethod,
+    editCustomPaymentMethod,
+    deleteCustomPaymentMethod,
+    hidePaymentMethod,
   } = useData();
   const { formatCurrency } = useCurrency();
   const { getPaymentLogo } = usePaymentDisplay();
@@ -1015,9 +1024,84 @@ useEffect(() => {
     setNewLast4Digits("");
     setNewPaymentCategoryType("");
     setShowAddPaymentModal(false);
+    setPayModalEditMode(null);
   };
 
-  const handleAddPaymentMethod = () => {
+  // ── Payment method delete from dropdown ───────────────────────────────────
+  const isCashPaymentMethod = (name) =>
+    (name || "").toString().replace(/\s*\*\s*\d{3,4}\s*$/, "").trim().toLowerCase() === "cash";
+
+  const getPaymentDisplayForReceipt = (r) => {
+    const iss = (r.card_issuer_name || r.cardIssuerName || "").toString().trim();
+    const l4  = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
+    return iss ? (l4 ? `${iss} *${l4}` : iss) : (r.paymentType || r.payment_type || "").toString().trim();
+  };
+
+  const handleDeletePaymentInDropdown = async (method) => {
+    if (isCashPaymentMethod(method)) return; // safety
+    // Replace this payment with Cash in all receipts
+    const matchingReceipts = (receipts || []).filter(
+      (r) => getPaymentDisplayForReceipt(r).toLowerCase() === (method || "").toLowerCase()
+    );
+    if (matchingReceipts.length > 0) {
+      await Promise.all(matchingReceipts.map(r =>
+        updateReceipt(r.id, { paymentType: "Cash", card_issuer_name: "", last_4_digit_card: "" })
+      ));
+    }
+    // Delete from API
+    const apiMatch = (apiPaymentMethods || []).find(
+      (p) => (p.card_number || "").toLowerCase() === (method || "").toLowerCase()
+    );
+    if (apiMatch) {
+      const apiId = apiMatch.id ?? apiMatch.payment_method_id ?? apiMatch.fk_payment_method_id;
+      if (apiId != null) {
+        await deleteApiPaymentMethod(apiId);
+      }
+    }
+    // Hide/delete local custom entry
+    hidePaymentMethod(method);
+    deleteCustomPaymentMethod(method);
+    await Promise.all([refreshData(), fetchApiPaymentMethods()]);
+    setToast({ isVisible: true, message: "Payment Method Deleted", type: "success" });
+  };
+
+  const handleEditPaymentInDropdown = (method) => {
+    if (isCashPaymentMethod(method)) return;
+    // Parse method name into components
+    const parts = method.split("*");
+    const issuer = (parts[0] || "").trim();
+    const last4  = (parts[1] || "").trim();
+    // Detect card type
+    const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
+    const cardType = _pct[method] || (() => {
+      const v = (method || "").toLowerCase();
+      if (v.includes("visa")) return "Visa";
+      if (v.includes("master")) return "MasterCard";
+      if (v.includes("american") || v.includes("amex")) return "American Express";
+      if (v.includes("discover")) return "Discover";
+      if (v.includes("diners")) return "Diners Club";
+      if (v.includes("paypal")) return "PayPal";
+      if (v.includes("debit")) return "Debit Card";
+      return "Other";
+    })();
+    const apiMatch = (apiPaymentMethods || []).find(
+      (p) => (p.card_number || "").toLowerCase() === (method || "").toLowerCase()
+    );
+    const apiId = apiMatch
+      ? (apiMatch.id ?? apiMatch.payment_method_id ?? apiMatch.fk_payment_method_id ?? null)
+      : null;
+    // Prefill the modal
+    setNewPaymentCardType(cardType);
+    setNewCardIssuerName(issuer || "");
+    setNewLast4Digits(last4 || "");
+    const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
+    setNewPaymentCategoryType(_pet[method] || "");
+    setPayModalEditMode({ name: method, apiId });
+    setShowAddPaymentModal(true);
+    setShowPaymentDropdown(false);
+  };
+
+  const handleAddPaymentMethod = async () => {
     if (!newPaymentCardType || newPaymentCardType.trim().length === 0) {
       setToast({ isVisible: true, message: "Select Card Type", type: "error" });
       return;
@@ -1027,38 +1111,74 @@ useEffect(() => {
       return;
     }
 
-    // Determine selected card type for logo detection
+    // Resolve card type display name
     const cardTypeLower = newPaymentCardType.trim().toLowerCase();
     let selectedCardTypeForLogo = newPaymentCardType.trim();
     if (cardTypeLower.includes("visa")) selectedCardTypeForLogo = "Visa";
-    else if (cardTypeLower.includes("master"))
-      selectedCardTypeForLogo = "MasterCard";
-    else if (
-      cardTypeLower.includes("american express") ||
-      cardTypeLower.includes("amex")
-    )
-      selectedCardTypeForLogo = "American Express";
-    else if (cardTypeLower.includes("discover"))
-      selectedCardTypeForLogo = "Discover";
-    else if (cardTypeLower.includes("diners"))
-      selectedCardTypeForLogo = "Diners Club";
-    else if (cardTypeLower.includes("paypal"))
-      selectedCardTypeForLogo = "PayPal";
-    else if (cardTypeLower.includes("debit"))
-      selectedCardTypeForLogo = "Debit Card";
+    else if (cardTypeLower.includes("master")) selectedCardTypeForLogo = "MasterCard";
+    else if (cardTypeLower.includes("american express") || cardTypeLower.includes("amex")) selectedCardTypeForLogo = "American Express";
+    else if (cardTypeLower.includes("discover")) selectedCardTypeForLogo = "Discover";
+    else if (cardTypeLower.includes("diners")) selectedCardTypeForLogo = "Diners Club";
+    else if (cardTypeLower.includes("paypal")) selectedCardTypeForLogo = "PayPal";
+    else if (cardTypeLower.includes("debit")) selectedCardTypeForLogo = "Debit Card";
     else if (cardTypeLower === "other") selectedCardTypeForLogo = "Other";
 
-    let finalCardIssuerName =
-      newCardIssuerName.trim() || selectedCardTypeForLogo;
+    const finalCardIssuerName = newCardIssuerName.trim() || selectedCardTypeForLogo;
     const last4 = newLast4Digits.trim().replace(/\D/g, "").slice(0, 4);
+    const newPayStr = newCardIssuerName.trim()
+      ? `${newCardIssuerName.trim()} *${last4}`
+      : `${selectedCardTypeForLogo} *${last4}`;
+
+    // ── EDIT MODE ────────────────────────────────────────────────────────────
+    if (payModalEditMode) {
+      const { name: oldName, apiId } = payModalEditMode;
+      // Update via API if we have an ID
+      if (apiId != null) {
+        const PAYMENT_LOGOS = { Visa: Visa, MasterCard: MasterCard, "American Express": AmericanExpress, Discover: Discover, "Diners Club": DinersClub, PayPal: PayPal, "Debit Card": DebitCard, Cash: Cash };
+        const logoUrl = PAYMENT_LOGOS[selectedCardTypeForLogo] || "";
+        await updateApiPaymentMethod(apiId, newPayStr, logoUrl);
+      }
+      // Propagate to receipts using old name
+      const matchingReceipts = (receipts || []).filter(
+        (r) => getPaymentDisplayForReceipt(r).toLowerCase() === (oldName || "").toLowerCase()
+      );
+      if (matchingReceipts.length > 0) {
+        await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
+          paymentType: selectedCardTypeForLogo,
+          card_issuer_name: finalCardIssuerName,
+          last_4_digit_card: last4 || r.last_4_digit_card || "",
+        })));
+      }
+      // Save localStorage mappings
+      const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
+      _pct[newPayStr] = selectedCardTypeForLogo;
+      localStorage.setItem("cat_pay_card_types", JSON.stringify(_pct));
+      if (newPaymentCategoryType) {
+        const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
+        _pet[newPayStr] = newPaymentCategoryType;
+        localStorage.setItem("cat_pay_expense_type", JSON.stringify(_pet));
+      }
+      // Rename custom entry if present
+      editCustomPaymentMethod(oldName, newPayStr);
+      await Promise.all([refreshData(), fetchApiPaymentMethods()]);
+      // Apply to current receipt form
+      handleFieldChange("paymentType", selectedCardTypeForLogo);
+      handleFieldChange("paymentBrand", "");
+      handleFieldChange("card_issuer_name", finalCardIssuerName);
+      handleFieldChange("last_4_digit_card", last4);
+      setPayModalEditMode(null);
+      handleCloseAddPaymentModal();
+      setToast({ isVisible: true, message: "Payment Method Updated", type: "success" });
+      return;
+    }
+
+    // ── ADD MODE ─────────────────────────────────────────────────────────────
     if (paymentMethodDuplicateExists(selectedCardTypeForLogo, last4)) {
       setToast({ isVisible: true, message: "Payment Method already exists", type: "error" });
       return;
     }
-
-    // Update form fields
+    // Apply to current receipt form
     handleFieldChange("paymentType", selectedCardTypeForLogo);
-    // Clear paymentBrand so original receipt's brand doesn't override logo detection
     handleFieldChange("paymentBrand", "");
     handleFieldChange("card_issuer_name", finalCardIssuerName);
     if (last4.length > 0) {
@@ -1066,7 +1186,19 @@ useEffect(() => {
     } else {
       handleFieldChange("last_4_digit_card", "");
     }
-
+    // Save to API
+    const PAYMENT_LOGOS = { Visa: Visa, MasterCard: MasterCard, "American Express": AmericanExpress, Discover: Discover, "Diners Club": DinersClub, PayPal: PayPal, "Debit Card": DebitCard, Cash: Cash };
+    const logoUrl = PAYMENT_LOGOS[selectedCardTypeForLogo] || "";
+    await addApiPaymentMethod(newPayStr, logoUrl);
+    const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
+    _pct[newPayStr] = selectedCardTypeForLogo;
+    localStorage.setItem("cat_pay_card_types", JSON.stringify(_pct));
+    if (newPaymentCategoryType) {
+      const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
+      _pet[newPayStr] = newPaymentCategoryType;
+      localStorage.setItem("cat_pay_expense_type", JSON.stringify(_pet));
+    }
+    await fetchApiPaymentMethods();
     handleCloseAddPaymentModal();
     setToast({ isVisible: true, message: "Payment Method Added", type: "success" });
   };
@@ -4704,6 +4836,7 @@ Thank you for using our receipt management system.
                                   </span>
                                 </div>
                                 {filteredPaymentMethods.map((method, idx) => {
+                                  const isCashItem = isCashPaymentMethod(method);
                                   // Logo = card type. Find a receipt with this payment display so we use its paymentType for logo
                                   const receiptsToSearch =
                                     receiptList && receiptList.length > 0
@@ -4722,7 +4855,11 @@ Thank you for using our receipt management system.
                                   return (
                                     <div
                                       key={idx}
-                                      className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left flex items-center gap-2"
+                                      className="px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2"
+                                      style={{ cursor: "default" }}
+                                    >
+                                    <div
+                                      style={{ cursor: "pointer", flex: 1, display: "flex", alignItems: "center", gap: 8 }}
                                       onClick={() => {
                                         // Extract card issuer name and last4 from selected method
                                         const methodParts = method.split("*");
@@ -4893,9 +5030,31 @@ Thank you for using our receipt management system.
                                           src={logo}
                                           alt={method}
                                           className="w-5 h-5 rounded"
+                                          style={{ flexShrink: 0 }}
                                         />
                                       )}
-                                      {method}
+                                      <span style={{ flex: 1 }}>{method}</span>
+                                    </div>
+                                    {!isCashItem && (
+                                      <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                                        <button
+                                          type="button"
+                                          title="Edit payment method"
+                                          onClick={(e) => { e.stopPropagation(); handleEditPaymentInDropdown(method); }}
+                                          style={{ padding: "2px 5px", borderRadius: 6, background: "#eff6ff", border: "1px solid #bfdbfe", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                                        >
+                                          <Pencil size={11} style={{ color: "#2563eb" }} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          title="Delete payment method"
+                                          onClick={(e) => { e.stopPropagation(); handleDeletePaymentInDropdown(method); }}
+                                          style={{ padding: "2px 5px", borderRadius: 6, background: "#fef2f2", border: "1px solid #fecaca", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                                        >
+                                          <Trash2 size={11} style={{ color: "#dc2626" }} />
+                                        </button>
+                                      </div>
+                                    )}
                                     </div>
                                   );
                                 })}
@@ -5657,7 +5816,7 @@ Thank you for using our receipt management system.
               {/* Modal Header */}
               <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 bg-white">
                 <h2 className="text-xl font-bold text-gray-900">
-                  Add Payment Method
+                  {payModalEditMode ? "Edit Payment Method" : "Add Payment Method"}
                 </h2>
                 <button
                   onClick={handleCloseAddPaymentModal}
@@ -5780,7 +5939,7 @@ Thank you for using our receipt management system.
                     disabled={!newPaymentCardType || newLast4Digits.replace(/\D/g, "").length < 4}
                     className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
-                    Add Payment Method
+                    {payModalEditMode ? "Edit Payment Method" : "Add Payment Method"}
                   </button>
                 </div>
               </div>

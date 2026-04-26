@@ -530,8 +530,9 @@ export const DataProvider = ({ children }) => {
       });
       if (res.ok) {
         const data = await res.json();
-        // Payment methods: everything with a card_number that isn't a merchant
-        const payments = Array.isArray(data)
+        // Handle {"code":"001","message":"No Records Found"} gracefully — treat as empty list
+        const isNoRecords = !Array.isArray(data) && data && String(data.code) === "001";
+        const payments = (!isNoRecords && Array.isArray(data))
           ? data.filter(m => m.card_number && m.card_type !== "merchant")
           : [];
         console.log("%c[PaymentMethods] fetchApiPaymentMethods response:", "color:#8b5cf6;font-weight:bold", payments);

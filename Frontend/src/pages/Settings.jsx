@@ -1259,6 +1259,9 @@ const ReceiptInfoInline = ({ type }) => {
   const [newExpenseType, setNewExpenseType]   = useState("Personal"); // Personal | Business
 
   // localStorage: payment display string → "Personal" or "Business"
+  // payEditMode: null = add mode, { item, apiId } = edit an existing payment method via the Add form
+  const [payEditMode, setPayEditMode] = useState(null);
+
   const [payExpenseTypeMap, setPayExpenseTypeMap] = useState(() => {
     try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; }
   });
@@ -1588,27 +1591,68 @@ const hasMoreThan3Decimals = (val) => {
       const issuer = newIssuerName.trim();
       const last4  = newLast4.trim();
       if (!ct) return toast("error", "Select Card Type");
-      if (ct.toLowerCase() === "cash" || isCashMethod(issuer)) {
-        return toast("error", "Cash already exists and cannot be created again");
-      }
       if (!last4 || last4.replace(/\D/g, "").length < 4) {
         return toast("error", "Please enter last 4 digits of card number");
       }
-      const newPaymentName = issuer ? `${issuer} *${last4}` : `${ct} *${last4}`;
-      const nextSignature = getPaymentSignature(newPaymentName, ct);
+      const payStr = issuer ? `${issuer} *${last4}` : `${ct} *${last4}`;
+      if (!payStr) return toast("error", "Select Card Type");
+      const selectedCard = PAYMENT_CARD_TYPES.find((c) => c.name === ct);
+      const selectedLogoUrl = selectedCard?.logo || "";
+
+      // ── EDIT MODE ──────────────────────────────────────────────────────────
+      if (payEditMode) {
+        const oldName  = payEditMode.item.name;
+        const targetId = payEditMode.apiId;
+        // Duplicate check (skip self)
+        const dupExists = buildAllItems().some((i) => {
+          if (i.key === payEditMode.item.key) return false;
+          const sig = getPaymentSignature(i.name);
+          const newSig = getPaymentSignature(payStr, ct);
+          return sig && newSig && sig === newSig;
+        });
+        if (dupExists) return toast("error", "Payment Method already exists");
+        // Update via API
+        if (targetId != null) {
+          const res = await updateApiPaymentMethod(targetId, payStr, selectedLogoUrl);
+          if (!res?.ok) throw new Error(res?.error || "Failed to update payment method");
+        }
+        // Propagate to receipts that use old name
+        const matchingReceipts = getReceiptsByPaymentDisplay(oldName);
+        if (matchingReceipts.length > 0) {
+          const { issuer: newIssuer, last4: newL4 } = parsePaymentDisplay(payStr);
+          await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
+            paymentType: ct,
+            card_issuer_name: newIssuer,
+            last_4_digit_card: newL4 || r.last_4_digit_card || "",
+          })));
+        }
+        // Update localStorage mappings
+        savePayCard(payStr, ct);
+        savePayExpenseType(payStr, newExpenseType);
+        // If it was a custom entry, rename it too
+        if (!payEditMode.item.isApiItem) editCustomPaymentMethod(oldName, payStr);
+        // Reset & refresh
+        setPayEditMode(null);
+        setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
+        setShowAddForm(false);
+        await Promise.all([refreshData(), fetchApiPaymentMethods()]);
+        toast("success", "Payment Method Updated");
+        return;
+      }
+
+      // ── ADD MODE ───────────────────────────────────────────────────────────
+      if (ct.toLowerCase() === "cash" || isCashMethod(issuer)) {
+        return toast("error", "Cash already exists and cannot be created again");
+      }
+      const nextSignature = getPaymentSignature(payStr, ct);
       const duplicateExists = buildAllItems().some((item) => {
         const sig = getPaymentSignature(item.name);
         return sig && sig === nextSignature;
       });
       if (duplicateExists) return toast("error", "Payment Method already exists");
-      let payStr   = issuer ? (last4 ? `${issuer} *${last4}` : issuer) : (ct ? (last4 ? `${ct} *${last4}` : ct) : "");
-      if (!payStr) return toast("error", "Select Card Type");
       addCustomPaymentMethod(payStr);
       if (ct) savePayCard(payStr, ct);
       savePayExpenseType(payStr, newExpenseType);
-      const selectedCard = PAYMENT_CARD_TYPES.find((c) => c.name === ct);
-      const selectedLogoUrl = selectedCard?.logo || "";
-      // Also persist to API
       const addPaymentResult = await addApiPaymentMethod(payStr, selectedLogoUrl);
       if (!addPaymentResult?.ok) throw new Error(addPaymentResult?.error || "Failed to add payment method");
       setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
@@ -2216,7 +2260,7 @@ const hasMoreThan3Decimals = (val) => {
       <div className="flex justify-end">
         <button
           type="button"
-          onClick={() => setShowAddForm((prev) => !prev)}
+          onClick={() => { setShowAddForm((prev) => !prev); setPayEditMode(null); }}
           className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-semibold transition-all ${
             showAddForm
               ? "bg-slate-100 text-slate-700 hover:bg-slate-200"
@@ -2303,7 +2347,7 @@ const hasMoreThan3Decimals = (val) => {
                 ))}
               </div>
             </div>
-            <button type="button" onClick={handleAdd}  className={`px-4 py-2 rounded-xl text-white text-sm font-semibold self-start ${colors.btn}`}>Add Payment Method</button>
+            <button type="button" onClick={handleAdd}  className={`px-4 py-2 rounded-xl text-white text-sm font-semibold self-start ${colors.btn}`}>{payEditMode ? "Edit Payment Method" : "Add Payment Method"}</button>
           </>
         )}
 
@@ -2475,11 +2519,27 @@ const hasMoreThan3Decimals = (val) => {
                     ) : (
                       <ItemRow logo={displayLogo} name={item.name} badgeCls={colors.badge}
                         actions={<>
-                          <Btn color="bg-blue-500 hover:bg-blue-600" onClick={() => {
-                            setEditKey(item.key); setEditIsReceipt(item.isReceiptItem);
-                            setEditVal(item.name); setEditOrigLogo(displayLogo);
-                            setEditLogoOpts([]); setEditLogoSel(null);
-                          }}><Pencil size={13}/></Btn>
+                          {!(type === "payments" && isCashMethod(item.name)) && (
+                            <Btn color="bg-blue-500 hover:bg-blue-600" onClick={() => {
+                              if (type === "payments") {
+                                // Open Add form prefilled for edit
+                                const { issuer: pIssuer, last4: pLast4 } = parsePaymentDisplay(item.name);
+                                const pBrand = getPaymentBrand(item.name, inferCardTypeFromPayment(item.name));
+                                const pApiMatches = resolvePaymentApiMatches(item);
+                                const pApiId = item.apiId ?? getApiEntityId(pApiMatches[0]) ?? null;
+                                setNewCardType(pBrand || "");
+                                setNewIssuerName(pIssuer || "");
+                                setNewLast4(pLast4 || "");
+                                setNewExpenseType(payExpenseTypeMap[item.name] || "Personal");
+                                setPayEditMode({ item, apiId: pApiId });
+                                setShowAddForm(true);
+                              } else {
+                                setEditKey(item.key); setEditIsReceipt(item.isReceiptItem);
+                                setEditVal(item.name); setEditOrigLogo(displayLogo);
+                                setEditLogoOpts([]); setEditLogoSel(null);
+                              }
+                            }}><Pencil size={13}/></Btn>
+                          )}
                           {!(type === "payments" && isCashMethod(item.name)) && (
                             <Btn color="bg-red-400 hover:bg-red-500" onClick={() => handleDelete(item)}><Trash2 size={13}/></Btn>
                           )}
