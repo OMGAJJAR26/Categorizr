@@ -1169,7 +1169,7 @@ const ReceiptInfoInline = ({ type }) => {
     receipts, updateReceipt,
     receiptMerchWImgRaw, customMerchants, hiddenMerchants, hideMerchant, addCustomMerchant, editCustomMerchant, deleteCustomMerchant,
     receiptCategoriesRaw, customCategories, hideCategory, addCustomCategory, editCustomCategory, deleteCustomCategory,
-    receiptPaymentsRaw, customPaymentMethods, hidePaymentMethod, addCustomPaymentMethod, editCustomPaymentMethod, deleteCustomPaymentMethod,
+    receiptPaymentsRaw, customPaymentMethods, hiddenPaymentMethods, hidePaymentMethod, addCustomPaymentMethod, editCustomPaymentMethod, deleteCustomPaymentMethod,
     taxData, addTax, updateTax, deleteTax, fetchTaxes,
     apiMerchants, fetchApiMerchants, addApiMerchant, updateApiMerchant, deleteApiMerchant,
     apiPaymentMethods, fetchApiPaymentMethods, addApiPaymentMethod, updateApiPaymentMethod, deleteApiPaymentMethod,
@@ -1888,53 +1888,36 @@ const hasMoreThan3Decimals = (val) => {
       toast("error", "Cash payment method cannot be deleted");
       return;
     }
+    // Step 1 — replace this method with Cash in every matching receipt
     const matching = getReceiptsByPaymentDisplay(item.name || "");
-    await Promise.all(
-      matching.map(r =>
-        updateReceipt(r.id, {
-          paymentType: "Cash",
-          card_issuer_name: "",
-          last_4_digit_card: "",
-        })
-      )
+    if (matching.length > 0) {
+      await Promise.all(
+        matching.map(r =>
+          updateReceipt(r.id, { paymentType: "Cash", card_issuer_name: "", last_4_digit_card: "" })
+        )
+      );
+    }
+    // Step 2 — find the API ID via multiple strategies (most reliable first)
+    const directNameMatch = (apiPaymentMethods || []).find(
+      (p) => normalizeMatchKey(p.card_number) === normalizeMatchKey(item.name)
     );
-    const apiMatches = resolvePaymentApiMatches(item);
-    if (item.isReceiptItem) {
-      hidePaymentMethod(item.key);
-      deleteCustomPaymentMethod(item.name);
-      for (const apiMatch of apiMatches) {
-        const apiId = getApiEntityId(apiMatch);
-        const deletePaymentResult = await deleteApiPaymentMethod(apiId);
-        if (!deletePaymentResult?.ok) throw new Error(deletePaymentResult?.error || "Failed to delete payment method");
+    const targetApiId =
+      (item.isApiItem && item.apiId != null ? item.apiId : null) ||
+      (directNameMatch ? getApiEntityId(directNameMatch) : null) ||
+      getApiEntityId(resolvePaymentApiMatches(item)[0]) ||
+      null;
+    // Step 3 — delete from API (always attempt if we have an ID)
+    if (targetApiId != null) {
+      const deletePaymentResult = await deleteApiPaymentMethod(targetApiId);
+      if (!deletePaymentResult?.ok) {
+        console.warn("[applyPaymentDelete] API delete failed:", deletePaymentResult?.error);
+        // Non-fatal — still clean up locally
       }
-      setIsDeleteSyncing(true);
-      await Promise.all([refreshData(), fetchApiPaymentMethods()]);
-      toast("success", "Payment Method Deleted");
-      return;
     }
-    if (item.isApiItem) {
-      hidePaymentMethod(item.name);
-      deleteCustomPaymentMethod(item.name);
-      const targetApiId =
-        item.apiId ||
-        getApiEntityId(apiMatches[0]) ||
-        null;
-      if (targetApiId !== null) {
-        const deletePaymentResult = await deleteApiPaymentMethod(targetApiId);
-        if (!deletePaymentResult?.ok) throw new Error(deletePaymentResult?.error || "Failed to delete payment method");
-      }
-      setIsDeleteSyncing(true);
-      await Promise.all([refreshData(), fetchApiPaymentMethods()]);
-      toast("success", "Payment Method Deleted");
-      return;
-    }
+    // Step 4 — hide & remove from local state
     hidePaymentMethod(item.name);
-    deleteCustomPaymentMethod(item.key);
-    for (const apiMatch of apiMatches) {
-      const apiId = getApiEntityId(apiMatch);
-      const deletePaymentResult = await deleteApiPaymentMethod(apiId);
-      if (!deletePaymentResult?.ok) throw new Error(deletePaymentResult?.error || "Failed to delete payment method");
-    }
+    deleteCustomPaymentMethod(item.key !== item.name ? item.key : item.name);
+    // Step 5 — refresh
     setIsDeleteSyncing(true);
     await Promise.all([refreshData(), fetchApiPaymentMethods()]);
     toast("success", "Payment Method Deleted");
@@ -2190,10 +2173,14 @@ const hasMoreThan3Decimals = (val) => {
       return [...rItems, ...cItems, ...apiItems];
     }
     if (type === "payments") {
-      const rItems = receiptPaymentsRaw.map(p => ({ key: p, name: p, logo: getPayLogoResolved(p), isReceiptItem: true, isApiItem: false }));
-      const rKeys  = new Set(receiptPaymentsRaw.map(p => p.toLowerCase()));
+      // Helper: is this a Cash variant like "Cash *0700" (not the canonical "Cash")?
+      const isCashVariant = (p) => isCashMethod(p) && (p || "").toLowerCase() !== "cash";
+      const rItems = receiptPaymentsRaw
+        .filter(p => !hiddenPaymentMethods.has(p) && !isCashVariant(p))
+        .map(p => ({ key: p, name: p, logo: getPayLogoResolved(p), isReceiptItem: true, isApiItem: false }));
+      const rKeys  = new Set(rItems.map(p => p.name.toLowerCase()));
       const cItems = customPaymentMethods
-        .filter(p => !rKeys.has(p.toLowerCase()))
+        .filter(p => !rKeys.has(p.toLowerCase()) && !hiddenPaymentMethods.has(p) && !isCashVariant(p))
         .map(p => ({ key: p, name: p, logo: getPayLogoResolved(p), isReceiptItem: false, isApiItem: false }));
       // API payment methods not already in receipt-derived or custom lists
       const allExistingPayKeys = new Set([...rItems.map(p => p.name.toLowerCase()), ...cItems.map(p => p.name.toLowerCase())]);
@@ -2201,7 +2188,9 @@ const hasMoreThan3Decimals = (val) => {
         .filter(m =>
           m.card_number &&
           getApiEntityId(m) !== null &&
-          !allExistingPayKeys.has((m.card_number || "").toLowerCase())
+          !allExistingPayKeys.has((m.card_number || "").toLowerCase()) &&
+          !hiddenPaymentMethods.has(m.card_number) &&
+          !isCashVariant(m.card_number)
         )
         .map(m => ({
           key: `api_${getApiEntityId(m)}`,

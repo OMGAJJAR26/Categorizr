@@ -397,6 +397,8 @@ const ReceiptDetail = ({
       if (/^cash\s*\*\s*0$/i.test(val)) return false;
       // Filter out any payment ending with *0 (invalid card number)
       if (/\*\s*0$/.test(val)) return false;
+      // Filter out Cash variants like "Cash *0700" — only canonical "Cash" is allowed
+      if (isCashPaymentMethod(val) && val.toLowerCase() !== "cash") return false;
       return true;
     });
     // Sort alphabetically - same as mobile app
@@ -1039,7 +1041,7 @@ useEffect(() => {
 
   const handleDeletePaymentInDropdown = async (method) => {
     if (isCashPaymentMethod(method)) return; // safety
-    // Replace this payment with Cash in all receipts
+    // Step 1 — replace this payment with Cash in all matching receipts
     const matchingReceipts = (receipts || []).filter(
       (r) => getPaymentDisplayForReceipt(r).toLowerCase() === (method || "").toLowerCase()
     );
@@ -1048,19 +1050,25 @@ useEffect(() => {
         updateReceipt(r.id, { paymentType: "Cash", card_issuer_name: "", last_4_digit_card: "" })
       ));
     }
-    // Delete from API
+    // Step 2 — find API ID via direct name match (most reliable)
     const apiMatch = (apiPaymentMethods || []).find(
       (p) => (p.card_number || "").toLowerCase() === (method || "").toLowerCase()
     );
-    if (apiMatch) {
-      const apiId = apiMatch.id ?? apiMatch.payment_method_id ?? apiMatch.fk_payment_method_id;
-      if (apiId != null) {
-        await deleteApiPaymentMethod(apiId);
+    const targetApiId = apiMatch
+      ? (apiMatch.id ?? apiMatch.payment_method_id ?? apiMatch.fk_payment_method_id ?? null)
+      : null;
+    // Step 3 — delete from API (non-fatal if it fails)
+    if (targetApiId != null) {
+      try {
+        await deleteApiPaymentMethod(targetApiId);
+      } catch (e) {
+        console.warn("[handleDeletePaymentInDropdown] API delete failed:", e);
       }
     }
-    // Hide/delete local custom entry
+    // Step 4 — hide & remove from local state
     hidePaymentMethod(method);
     deleteCustomPaymentMethod(method);
+    // Step 5 — refresh
     await Promise.all([refreshData(), fetchApiPaymentMethods()]);
     setToast({ isVisible: true, message: "Payment Method Deleted", type: "success" });
   };
