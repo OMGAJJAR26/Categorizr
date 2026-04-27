@@ -61,6 +61,14 @@ const AddReceiptModal = ({ onClose, onReceiptAdded }) => {
     deleteApiMerchant,
     apiExpenseCategories,
     deleteApiExpenseCategory,
+    apiPaymentMethods,
+    fetchApiPaymentMethods,
+    addApiPaymentMethod,
+    updateApiPaymentMethod,
+    deleteApiPaymentMethod,
+    editCustomPaymentMethod,
+    deleteCustomPaymentMethod,
+    hidePaymentMethod,
   } = useData();
   const { getPaymentLogo, getPaymentDisplay } = usePaymentDisplay();
 
@@ -90,6 +98,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
 
   // Add Payment Method modal state
   const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
+  const [payModalEditMode, setPayModalEditMode] = useState(null); // null | { name, apiId }
   const [newPaymentCardType, setNewPaymentCardType] = useState("");
   const [newCardIssuerName, setNewCardIssuerName] = useState("");
   const [newLast4Digits, setNewLast4Digits] = useState("");
@@ -3132,6 +3141,7 @@ const handleSelectLogo = (index) => {
 
   // Handle opening Add Payment Method modal
   const handleOpenAddPaymentModal = () => {
+    setPayModalEditMode(null);
     setNewPaymentCardType(
       formData.paymentType ? formData.paymentType.split(" *")[0] : "",
     );
@@ -3150,12 +3160,62 @@ const handleSelectLogo = (index) => {
     setNewCardIssuerName("");
     setNewLast4Digits("");
     setNewPaymentCategoryType("");
+    setPayModalEditMode(null);
     setShowAddPaymentModal(false);
     setError(null);
   };
 
+  // ── Payment method helpers (same logic as ReceiptDetail) ──────────────────
+  const isCashPaymentMethod = (name) =>
+    (name || "").toString().replace(/\s*\*\s*\d{3,4}\s*$/, "").trim().toLowerCase() === "cash";
+
+  const handleEditPaymentInDropdown = (method) => {
+    if (isCashPaymentMethod(method)) return;
+    const parts = method.split("*");
+    const issuer = (parts[0] || "").trim();
+    const last4  = (parts[1] || "").trim();
+    const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
+    const cardType = _pct[method] || (() => {
+      const v = (method || "").toLowerCase();
+      if (v.includes("visa")) return "Visa";
+      if (v.includes("master")) return "MasterCard";
+      if (v.includes("american") || v.includes("amex")) return "American Express";
+      if (v.includes("discover")) return "Discover";
+      if (v.includes("diners")) return "Diners Club";
+      if (v.includes("paypal")) return "PayPal";
+      if (v.includes("debit")) return "Debit Card";
+      return "Other";
+    })();
+    const apiMatch = (apiPaymentMethods || []).find(
+      (p) => (p.card_number || "").toLowerCase() === (method || "").toLowerCase()
+    );
+    const apiId = apiMatch ? (apiMatch.id ?? apiMatch.payment_method_id ?? null) : null;
+    setNewPaymentCardType(cardType);
+    setNewCardIssuerName(issuer || "");
+    setNewLast4Digits(last4 || "");
+    const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
+    setNewPaymentCategoryType(_pet[method] || "");
+    setPayModalEditMode({ name: method, apiId });
+    setShowAddPaymentModal(true);
+    setShowPaymentDropdown(false);
+  };
+
+  const handleDeletePaymentInDropdown = async (method) => {
+    if (isCashPaymentMethod(method)) return;
+    const apiMatch = (apiPaymentMethods || []).find(
+      (p) => (p.card_number || "").toLowerCase() === (method || "").toLowerCase()
+    );
+    const targetApiId = apiMatch ? (apiMatch.id ?? apiMatch.payment_method_id ?? null) : null;
+    // Call delete API (best-effort — always hide locally regardless)
+    await deleteApiPaymentMethod(targetApiId, method);
+    hidePaymentMethod(method);
+    deleteCustomPaymentMethod(method);
+    await Promise.all([refreshData(), fetchApiPaymentMethods()]);
+    setToast({ isVisible: true, message: "Payment Method Deleted", type: "success" });
+  };
+
   // Handle adding new payment method
-  const handleAddPaymentMethod = () => {
+  const handleAddPaymentMethod = async () => {
     if (!newPaymentCardType || newPaymentCardType.trim().length === 0) {
       setError("Select Card Type");
       return;
@@ -3219,37 +3279,78 @@ const handleSelectLogo = (index) => {
       }
     }
 
-    // Add to local payment methods list
-    const newPaymentMethod = {
-      paymentType: paymentMethodString,
-      cardIssuerName: finalCardIssuerName, // Display name (can be custom)
-      selectedCardType: selectedCardTypeForLogo, // Card type for logo detection
-      last4DigitCard:
-        newLast4Digits.trim().replace(/\D/g, "").slice(0, 4) || "",
-      paymentCategoryType: newPaymentCategoryType || "Personal",
-    };
+    const PAYMENT_LOGOS = { Visa: Visa, MasterCard: MasterCard, "American Express": AmericanExpress, Discover: Discover, "Diners Club": DinersClub, PayPal: PayPal, "Debit Card": DebitCard, Cash: Cash };
+    const logoUrl = PAYMENT_LOGOS[selectedCardTypeForLogo] || "";
+    const last4Final = newLast4Digits.trim().replace(/\D/g, "").slice(0, 4);
 
-    setLocalPaymentMethods((prev) => [...prev, newPaymentMethod]);
-
-    // Select the new payment method
-    // paymentType should be the card type (selectedCardTypeForLogo) for logo detection
-    handleFieldChange(
-      "paymentType",
-      selectedCardTypeForLogo || paymentMethodString,
-    );
-
-    // Set card_issuer_name for display (custom name if entered, otherwise card type)
-    handleFieldChange("card_issuer_name", finalCardIssuerName);
-
-    // Set last_4_digit_card if provided
-    if (newLast4Digits && newLast4Digits.trim().length > 0) {
-      const last4 = newLast4Digits.trim().replace(/\D/g, "").slice(0, 4);
-      if (last4.length > 0) {
-        handleFieldChange("last_4_digit_card", last4);
+    // ── EDIT MODE ────────────────────────────────────────────────────────────
+    if (payModalEditMode) {
+      const { name: oldName, apiId } = payModalEditMode;
+      if (apiId != null) {
+        await updateApiPaymentMethod(apiId, paymentMethodString, logoUrl);
       }
+      // Update receipts that used the old payment method name
+      const matchingReceipts = (receipts || []).filter(
+        (r) => {
+          const issuer = (r.card_issuer_name || r.cardIssuerName || "").toString().trim();
+          const l4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
+          const disp = issuer ? (l4 ? `${issuer} *${l4}` : issuer) : (r.paymentType || "").toString().trim();
+          return disp.toLowerCase() === (oldName || "").toLowerCase();
+        }
+      );
+      if (matchingReceipts.length > 0) {
+        await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
+          paymentType: selectedCardTypeForLogo,
+          card_issuer_name: finalCardIssuerName,
+          last_4_digit_card: last4Final || r.last_4_digit_card || "",
+        })));
+      }
+      const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
+      _pct[paymentMethodString] = selectedCardTypeForLogo;
+      localStorage.setItem("cat_pay_card_types", JSON.stringify(_pct));
+      if (newPaymentCategoryType) {
+        const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
+        _pet[paymentMethodString] = newPaymentCategoryType;
+        localStorage.setItem("cat_pay_expense_type", JSON.stringify(_pet));
+      }
+      editCustomPaymentMethod(oldName, paymentMethodString);
+      await Promise.all([refreshData(), fetchApiPaymentMethods()]);
+      handleFieldChange("paymentType", selectedCardTypeForLogo || paymentMethodString);
+      handleFieldChange("card_issuer_name", finalCardIssuerName);
+      if (last4Final) handleFieldChange("last_4_digit_card", last4Final);
+      handleCloseAddPaymentModal();
+      setShowPaymentDropdown(false);
+      setToast({ isVisible: true, message: "Payment Method Updated", type: "success" });
+      return;
     }
 
-    // Set payment category type (Business/Personal)
+    // ── ADD MODE ─────────────────────────────────────────────────────────────
+    // Add to local payment methods list (for this receipt session)
+    const newPaymentMethod = {
+      paymentType: paymentMethodString,
+      cardIssuerName: finalCardIssuerName,
+      selectedCardType: selectedCardTypeForLogo,
+      last4DigitCard: last4Final || "",
+      paymentCategoryType: newPaymentCategoryType || "Personal",
+    };
+    setLocalPaymentMethods((prev) => [...prev, newPaymentMethod]);
+
+    // Save to API so it's available everywhere
+    await addApiPaymentMethod(paymentMethodString, logoUrl);
+    const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
+    _pct[paymentMethodString] = selectedCardTypeForLogo;
+    localStorage.setItem("cat_pay_card_types", JSON.stringify(_pct));
+    if (newPaymentCategoryType) {
+      const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
+      _pet[paymentMethodString] = newPaymentCategoryType;
+      localStorage.setItem("cat_pay_expense_type", JSON.stringify(_pet));
+    }
+    await fetchApiPaymentMethods();
+
+    // Select the new payment method in the current form
+    handleFieldChange("paymentType", selectedCardTypeForLogo || paymentMethodString);
+    handleFieldChange("card_issuer_name", finalCardIssuerName);
+    if (last4Final) handleFieldChange("last_4_digit_card", last4Final);
     if (newPaymentCategoryType === "Business") {
       handleFieldChange("receipt_category", "1");
     } else if (newPaymentCategoryType === "Personal") {
@@ -4586,11 +4687,14 @@ const handleSelectLogo = (index) => {
                   : issuerName
                 : methodString; // Fallback to original if no issuer name
 
+              const isCashItem = isCashPaymentMethod(methodString);
               return (
                 <div
                   key={`payment-${methodString}-${idx}`}
-                  className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-left flex items-center gap-2"
-                  onClick={() => {
+                  className="px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2"
+                  style={{ cursor: "default" }}
+                >
+                <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }} onClick={() => {
                     // Use the already extracted issuerName and last4 (they handle both localPaymentMethods and method strings correctly)
                     const cardIssuerName = issuerName;
                     const finalLast4 = last4;
@@ -4801,7 +4905,29 @@ const handleSelectLogo = (index) => {
                       />
                     ) : null;
                   })()}
-                  <span>{displayText}</span>
+                  <span style={{ flex: 1 }}>{displayText}</span>
+                </div>
+                {/* Edit / Delete icons — not shown for Cash */}
+                {!isCashItem && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                    <button
+                      type="button"
+                      title="Edit payment method"
+                      onClick={(e) => { e.stopPropagation(); handleEditPaymentInDropdown(methodString); }}
+                      style={{ padding: "2px 5px", borderRadius: 6, background: "#eff6ff", border: "1px solid #bfdbfe", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                    >
+                      <Pencil size={11} style={{ color: "#2563eb" }} />
+                    </button>
+                    <button
+                      type="button"
+                      title="Delete payment method"
+                      onClick={(e) => { e.stopPropagation(); handleDeletePaymentInDropdown(methodString); }}
+                      style={{ padding: "2px 5px", borderRadius: 6, background: "#fef2f2", border: "1px solid #fecaca", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                    >
+                      <Trash2 size={11} style={{ color: "#dc2626" }} />
+                    </button>
+                  </div>
+                )}
                 </div>
               );
             })
@@ -5446,7 +5572,7 @@ const handleSelectLogo = (index) => {
               {/* Modal Header */}
               <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 bg-white">
                 <h2 className="text-xl font-bold text-gray-900">
-                  Add Payment Method
+                  {payModalEditMode ? "Edit Payment Method" : "Add Payment Method"}
                 </h2>
                 <button
                   onClick={handleCloseAddPaymentModal}
@@ -5582,7 +5708,7 @@ const handleSelectLogo = (index) => {
                     disabled={!newPaymentCardType || newLast4Digits.replace(/\D/g, "").length < 4}
                     className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
-                    Add Payment Method
+                    {payModalEditMode ? "Save Changes" : "Add Payment Method"}
                   </button>
                 </div>
               </div>
