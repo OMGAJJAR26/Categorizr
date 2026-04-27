@@ -65,6 +65,21 @@ const getEntityId = (item) =>
   item?.expense_category_id ??
   item?.fk_expense_category_id ??
   null;
+
+// Map a card name to the numeric card_type enum the backend expects:
+// 0=AmEx, 1=MasterCard, 2=Visa, 3=Debit, 4=Discover, 5=Diners, 6=PayPal, 7=Cash, 8=Other
+const inferCardTypeInt = (name) => {
+  const v = (name || "").toLowerCase();
+  if (v.includes("american") || v.includes("amex")) return 0;
+  if (v.includes("master")) return 1;
+  if (v.includes("visa")) return 2;
+  if (v.includes("debit")) return 3;
+  if (v.includes("discover")) return 4;
+  if (v.includes("diners")) return 5;
+  if (v.includes("paypal")) return 6;
+  if (v.includes("cash")) return 7;
+  return 8; // Other
+};
 const isDeleteResponseSuccessful = (data) => {
   if (data === null || data === undefined) return false;
   if (typeof data !== "object") {
@@ -519,7 +534,51 @@ export const DataProvider = ({ children }) => {
     }
   };
 
-  // ── API Payment Method CRUD (via /userpaymentmethod endpoints, card_type="payment") ──
+  // ── sessionStorage: persist card_number→id so deletes survive logout/re-login (same tab) ──
+  const _pmCacheKey = () => `cat_pm_ids_${localStorage.getItem("fk_user_id") || "anon"}`;
+  const _cachePaymentId = (cardNumber, id) => {
+    if (!cardNumber || !id || id === 0 || String(id) === "0") return;
+    try {
+      const cache = JSON.parse(sessionStorage.getItem(_pmCacheKey()) || "{}");
+      cache[(cardNumber || "").trim().toLowerCase()] = id;
+      sessionStorage.setItem(_pmCacheKey(), JSON.stringify(cache));
+    } catch {}
+  };
+  const _getCachedPaymentId = (cardNumber) => {
+    if (!cardNumber) return null;
+    try {
+      const cache = JSON.parse(sessionStorage.getItem(_pmCacheKey()) || "{}");
+      return cache[(cardNumber || "").trim().toLowerCase()] ?? null;
+    } catch { return null; }
+  };
+  const _extractPaymentId = (obj) =>
+    obj?.id ?? obj?.payment_method_id ?? obj?.fk_payment_method_id ?? obj?.record_id ?? null;
+  const _resolvePaymentMethodIdByCardNumber = async (token, cardNumber) => {
+    if (!token || !cardNumber) return null;
+    try {
+      const res = await fetch(`${BASE_URL}/userpaymentmethod/getPaymentMethodv1`, {
+        headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      const rawList = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+      const normalizedTarget = (cardNumber || "").trim().toLowerCase();
+      const matched = rawList.find(
+        (m) => (m?.card_number || "").toString().trim().toLowerCase() === normalizedTarget
+      );
+      const resolvedId = _extractPaymentId(matched);
+      if (resolvedId && resolvedId !== 0 && String(resolvedId) !== "0") {
+        _cachePaymentId(cardNumber, resolvedId);
+        return resolvedId;
+      }
+      return null;
+    } catch (err) {
+      console.warn("[PaymentMethods] _resolvePaymentMethodIdByCardNumber failed:", err);
+      return null;
+    }
+  };
+
+  // ── API Payment Method CRUD (via /userpaymentmethod endpoints) ──
   const fetchApiPaymentMethods = useCallback(async () => {
     const token = localStorage.getItem("token");
     if (!token) return;
@@ -530,12 +589,26 @@ export const DataProvider = ({ children }) => {
       });
       if (res.ok) {
         const data = await res.json();
+        console.log("%c[PaymentMethods] getPaymentMethodv1 raw response:", "color:#8b5cf6", data);
         // Handle {"code":"001","message":"No Records Found"} gracefully — treat as empty list
         const isNoRecords = !Array.isArray(data) && data && String(data.code) === "001";
-        const payments = (!isNoRecords && Array.isArray(data))
-          ? data.filter(m => m.card_number && m.card_type !== "merchant")
-          : [];
-        console.log("%c[PaymentMethods] fetchApiPaymentMethods response:", "color:#8b5cf6;font-weight:bold", payments);
+        // Support both flat array and {data:[...]} wrapped responses
+        const rawList = isNoRecords
+          ? []
+          : Array.isArray(data)
+            ? data
+            : Array.isArray(data?.data)
+              ? data.data
+              : [];
+        // Keep only payment records (card_number required); backfill id from sessionStorage if absent
+        const payments = rawList
+          .filter(m => m.card_number)
+          .map(m => {
+            if (m.id && m.id !== 0 && String(m.id) !== "0") return m; // id present — use it
+            const cachedId = _getCachedPaymentId(m.card_number);       // fall back to cache
+            return cachedId ? { ...m, id: cachedId } : m;
+          });
+        console.log("%c[PaymentMethods] fetchApiPaymentMethods (with IDs):", "color:#8b5cf6;font-weight:bold", payments);
         setApiPaymentMethods(payments);
       }
     } catch (e) { console.error("[PaymentMethods] fetchApiPaymentMethods error", e); }
@@ -544,7 +617,13 @@ export const DataProvider = ({ children }) => {
   const addApiPaymentMethod = async (name, logoUrl = "") => {
     const token = localStorage.getItem("token");
     if (!token || !name.trim()) return { ok: false, data: null, error: "Missing token or payment method name" };
-    const payload = { card_number: name.trim(), icon_image: logoUrl || "", card_type: "payment", default_payment_category: "" };
+    // card_type must be the integer enum value (0-8), NOT the string "payment"
+    const payload = {
+      card_number: name.trim(),
+      icon_image: logoUrl || "",
+      card_type: inferCardTypeInt(name.trim()),
+      default_payment_category: "",
+    };
     console.log("%c[PaymentMethods] POST /userpaymentmethod/addPaymentMethodv1 →", "color:#06b6d4;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userpaymentmethod/addPaymentMethodv1`, {
@@ -555,11 +634,40 @@ export const DataProvider = ({ children }) => {
       if (res.ok) {
         const data = await res.json();
         console.log("%c[PaymentMethods] addApiPaymentMethod response:", "color:#06b6d4;font-weight:bold", data);
-        setApiPaymentMethods(prev => [...prev, data]);
-        return { ok: true, data, error: null };
+        // Build a stable entity; if the backend returns the full object use it, else synthesize
+        const entity = (data && typeof data === "object" && data.card_number)
+          ? data
+          : { ...payload, id: data?.id ?? data?.payment_method_id ?? data?.record_id ?? null };
+        // Cache card_number→id in sessionStorage so future deletes can find the ID
+        let resolvedId = _extractPaymentId(entity);
+        if (!resolvedId || resolvedId === 0 || String(resolvedId) === "0") {
+          resolvedId = await _resolvePaymentMethodIdByCardNumber(token, entity.card_number || name.trim());
+        }
+        if (resolvedId && resolvedId !== 0 && String(resolvedId) !== "0") {
+          _cachePaymentId(entity.card_number || name.trim(), resolvedId);
+        }
+        const stableEntity = {
+          ...entity,
+          id: resolvedId || entity?.id || null,
+        };
+        console.log("%c[PaymentMethods] addApiPaymentMethod entity:", "color:#06b6d4", stableEntity, "resolvedId:", resolvedId);
+        setApiPaymentMethods(prev => {
+          const key = (stableEntity.card_number || "").toString().trim().toLowerCase();
+          if (!key) return [...prev, stableEntity];
+          const existingIdx = prev.findIndex(
+            (m) => (m?.card_number || "").toString().trim().toLowerCase() === key
+          );
+          if (existingIdx === -1) return [...prev, stableEntity];
+          const next = [...prev];
+          next[existingIdx] = { ...next[existingIdx], ...stableEntity };
+          return next;
+        });
+        return { ok: true, data: stableEntity, error: null };
       } else {
-        console.warn("[PaymentMethods] addApiPaymentMethod failed, status:", res.status);
-        return { ok: false, data: null, error: `Failed with status ${res.status}` };
+        const errData = await parseJsonSafe(res);
+        const errMsg = errData?.message || errData?.msg || `Failed with status ${res.status}`;
+        console.warn("[PaymentMethods] addApiPaymentMethod failed:", res.status, errData);
+        return { ok: false, data: null, error: errMsg };
       }
     } catch (e) {
       console.error("[PaymentMethods] addApiPaymentMethod error", e);
@@ -570,7 +678,7 @@ export const DataProvider = ({ children }) => {
   const updateApiPaymentMethod = async (id, name, logoUrl = "") => {
     const token = localStorage.getItem("token");
     if (!token) return { ok: false, data: null, error: "Missing token" };
-    const payload = { id, card_number: name.trim(), icon_image: logoUrl || "", card_type: "payment", default_payment_category: "" };
+    const payload = { id, card_number: name.trim(), icon_image: logoUrl || "", card_type: inferCardTypeInt(name.trim()), default_payment_category: "" };
     console.log("%c[PaymentMethods] POST /userpaymentmethod/updatePaymentMethodv1 →", "color:#f59e0b;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userpaymentmethod/updatePaymentMethodv1`, {
@@ -593,22 +701,59 @@ export const DataProvider = ({ children }) => {
     }
   };
 
-  const deleteApiPaymentMethod = async (id) => {
+  // id         — numeric payment method ID from the GET response (required by the delete endpoint)
+  // cardNumber — card_number string; used only for local state cleanup and ID cache lookup
+  const deleteApiPaymentMethod = async (id, cardNumber = "") => {
     const token = localStorage.getItem("token");
     if (!token) return { ok: false, data: null, error: "Missing token" };
-    console.log("%c[PaymentMethods] GET /userpaymentmethod/deletePaymentMethodv1 →", "color:#ef4444;font-weight:bold", { id });
+
+    // Resolve the numeric ID: prefer what was passed, then fall back to sessionStorage cache
+    let resolvedId = (id != null && id !== 0 && String(id) !== "0") ? id : null;
+    if (!resolvedId && cardNumber) resolvedId = _getCachedPaymentId(cardNumber);
+    if (!resolvedId && cardNumber) {
+      resolvedId = await _resolvePaymentMethodIdByCardNumber(token, cardNumber);
+    }
+
+    if (!resolvedId) {
+      console.warn("[PaymentMethods] deleteApiPaymentMethod — no ID available for", cardNumber || id);
+      return { ok: false, data: null, error: "Payment method ID not available" };
+    }
+
+    console.log("%c[PaymentMethods] DELETE /userpaymentmethod/deletePaymentMethodv1 →", "color:#ef4444;font-weight:bold", { resolvedId, cardNumber });
     try {
-      let authErrorMessage = "";
       const endpoint = `${BASE_URL}/userpaymentmethod/deletePaymentMethodv1`;
-      const queryUrl = `${endpoint}?id=${encodeURIComponent(id)}`;
+      const queryUrl = `${endpoint}?id=${encodeURIComponent(resolvedId)}&deleteId=${encodeURIComponent(resolvedId)}`;
+      const fkUserId = localStorage.getItem("fk_user_id") || "";
+      const payload = { id: resolvedId, deleteId: resolvedId, payment_method_id: resolvedId, fk_payment_method_id: resolvedId, fk_user_id: fkUserId };
+
+      let authErrorMessage = "";
       const attempts = [
         {
           method: "GET",
           url: queryUrl,
-          headers: { Accesstoken: token },
+          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
           body: undefined,
         },
+        {
+          method: "DELETE",
+          url: queryUrl,
+          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
+          body: undefined,
+        },
+        {
+          method: "POST",
+          url: endpoint,
+          headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
+          body: JSON.stringify(payload),
+        },
+        {
+          method: "POST",
+          url: queryUrl,
+          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
+          body: undefined,
+        }
       ];
+
       for (const attempt of attempts) {
         try {
           const res = await fetch(attempt.url, {
@@ -617,17 +762,21 @@ export const DataProvider = ({ children }) => {
             body: attempt.body,
           });
           const data = await parseJsonSafe(res);
+          console.log("%c[PaymentMethods] deletePaymentMethodv1 response:", "color:#ef4444;font-weight:bold", data);
+
           if (data && String(data.code || "") === "010") {
             authErrorMessage = data.message || "Session Token Invalid";
           }
           if (res.ok && isDeleteResponseSuccessful(data)) {
-            console.log("%c[PaymentMethods] deleteApiPaymentMethod response:", "color:#ef4444;font-weight:bold", data);
-            setApiPaymentMethods(prev => prev.filter(m => String(getEntityId(m)) !== String(id)));
+            // Remove from local state by numeric ID or card_number match
+            setApiPaymentMethods(prev => prev.filter(m => {
+              if (String(m.id ?? "") === String(resolvedId)) return false;
+              if (cardNumber && (m.card_number || "").toLowerCase() === cardNumber.toLowerCase()) return false;
+              return true;
+            }));
             return { ok: true, data, error: null };
           }
-          console.warn("[PaymentMethods] deleteApiPaymentMethod failed:", {
-            status: res.status, endpoint: attempt.url, method: attempt.method, data
-          });
+          console.warn("[PaymentMethods] deleteApiPaymentMethod failed:", { status: res.status, data });
         } catch (attemptErr) {
           console.warn("[PaymentMethods] deleteApiPaymentMethod network error:", {
             endpoint: attempt.url,
@@ -636,10 +785,11 @@ export const DataProvider = ({ children }) => {
           });
         }
       }
+
       if (authErrorMessage) {
         return { ok: false, data: null, error: authErrorMessage };
       }
-      return { ok: false, data: null, error: "Failed to delete payment method" };
+      return { ok: false, data: null, error: "Failed to delete payment method (all endpoints)" };
     } catch (e) {
       console.error("[PaymentMethods] deleteApiPaymentMethod error", e);
       return { ok: false, data: null, error: e.message || "Failed to delete payment method" };

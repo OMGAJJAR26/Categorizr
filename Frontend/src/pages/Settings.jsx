@@ -331,44 +331,13 @@ const ManageModal = ({ type, onClose }) => {
     }
     if (type === "payments") {
       try {
-        if (item?.apiId !== undefined && item?.apiId !== null) {
-          const directResult = await deleteApiPaymentMethod(item.apiId);
-          if (!directResult?.ok) throw new Error(directResult?.error || "Failed to delete payment method");
-          hidePaymentMethod(item.key || item.name);
-          deleteCustomPaymentMethod(item.key || item.name);
-          await fetchApiPaymentMethods();
-          toast("success", "Payment Method Deleted");
-          return;
-        }
-        const itemNameKey = normalizeMatchKey(item.name);
-        const itemParsed = parsePaymentDisplay(item.name);
-        const apiMatches = (apiPaymentMethods || []).filter((p) => {
-          const apiName = p?.card_number || "";
-          if (normalizeMatchKey(apiName) === itemNameKey) return true;
-          const apiParsed = parsePaymentDisplay(apiName);
-          return (
-            normalizeMatchKey(apiParsed.issuer) === normalizeMatchKey(itemParsed.issuer) &&
-            (!itemParsed.last4 || !apiParsed.last4 || apiParsed.last4 === itemParsed.last4)
-          );
-        });
-        for (const match of apiMatches) {
-          const apiId = getApiPaymentId(match);
-          if (apiId !== null) {
-            const result = await deleteApiPaymentMethod(apiId);
-            if (!result?.ok) throw new Error(result?.error || "Failed to delete payment method");
-          }
-        }
-        if (apiMatches.length === 0) {
-          const fallback = (apiPaymentMethods || []).find((p) => {
-            const apiName = normalizeMatchKey(p?.card_number || "");
-            return apiName && (itemNameKey.includes(apiName) || apiName.includes(itemNameKey));
-          });
-          const fallbackId = getApiPaymentId(fallback);
-          if (fallbackId !== null) {
-            const result = await deleteApiPaymentMethod(fallbackId);
-            if (!result?.ok) throw new Error(result?.error || "Failed to delete payment method");
-          }
-        }
+        // Resolve numeric ID: prefer item.apiId (from buildAllItems → m.id from GET response),
+        // then search apiPaymentMethods by name. deleteApiPaymentMethod also checks sessionStorage cache.
+        const directApiId = item?.apiId ?? getApiPaymentId(
+          (apiPaymentMethods || []).find(p => normalizeMatchKey(p?.card_number) === normalizeMatchKey(item.name))
+        ) ?? null;
+        const result = await deleteApiPaymentMethod(directApiId, item.name);
+        if (!result?.ok) throw new Error(result?.error || "Failed to delete payment method");
         hidePaymentMethod(item.key || item.name);
         deleteCustomPaymentMethod(item.key || item.name);
         await fetchApiPaymentMethods();
@@ -1893,6 +1862,7 @@ const hasMoreThan3Decimals = (val) => {
   };
 
   const applyPaymentDelete = async (item) => {
+    console.log(item, "item")
     if (isCashMethod(item.name)) {
       toast("error", "Cash payment method cannot be deleted");
       return;
@@ -1906,23 +1876,26 @@ const hasMoreThan3Decimals = (val) => {
         )
       );
     }
-    // Step 2 — find the API ID via multiple strategies (most reliable first)
+    console.log("jdhhj step22")
+    // Step 2 — resolve numeric ID (from item.apiId set by buildAllItems, or by name-match in API list)
+    // The GET /getPaymentMethodv1 response includes an `id` field per the Swagger schema.
     const directNameMatch = (apiPaymentMethods || []).find(
       (p) => normalizeMatchKey(p.card_number) === normalizeMatchKey(item.name)
     );
     const targetApiId =
-      (item.isApiItem && item.apiId != null ? item.apiId : null) ||
-      (directNameMatch ? getApiEntityId(directNameMatch) : null) ||
+      (item.isApiItem && item.apiId != null && item.apiId !== 0 ? item.apiId : null) ||
+      (directNameMatch?.id && directNameMatch.id !== 0 ? directNameMatch.id : null) ||
+      getApiEntityId(directNameMatch) ||
       getApiEntityId(resolvePaymentApiMatches(item)[0]) ||
       null;
-    // Step 3 — delete from API (always attempt if we have an ID)
-    if (targetApiId != null) {
-      const deletePaymentResult = await deleteApiPaymentMethod(targetApiId);
-      if (!deletePaymentResult?.ok) {
-        console.warn("[applyPaymentDelete] API delete failed:", deletePaymentResult?.error);
-        // Non-fatal — still clean up locally
-      }
+    console.log("[applyPaymentDelete] targetApiId:", targetApiId, "item:", item.name);
+    // Step 3 — call the delete API; deleteApiPaymentMethod also checks sessionStorage cache
+    const deletePaymentResult = await deleteApiPaymentMethod(targetApiId, item.name);
+    if (!deletePaymentResult?.ok) {
+      // Non-fatal — hide locally regardless so the UI always updates
+      console.warn("[applyPaymentDelete] API delete failed (non-fatal):", deletePaymentResult?.error);
     }
+    
     // Step 4 — hide & remove from local state
     hidePaymentMethod(item.name);
     deleteCustomPaymentMethod(item.key !== item.name ? item.key : item.name);
@@ -1948,7 +1921,9 @@ const hasMoreThan3Decimals = (val) => {
   const doConfirmPaymentDelete = async () => {
     setShowPaymentDeleteConfirm(false);
     if (!pendingPaymentDelete) return;
+
     try {
+      console.log(pendingPaymentDelete)
       await applyPaymentDelete(pendingPaymentDelete);
     } catch (e) {
       toast("error", e.message || "Delete failed.");
