@@ -974,11 +974,9 @@ useEffect(() => {
   const normalizeMediaUrl = (url) => {
     const raw = (url || "").toString().trim();
     if (!raw) return "";
-    try {
-      return decodeURIComponent(raw);
-    } catch {
-      return raw;
-    }
+    // Keep URLs encoded for backend storage (e.g. spaces => %20).
+    // Do not decode existing encoded values.
+    return encodeURI(raw);
   };
   const normalizeMatchKey = (value) =>
     String(value || "")
