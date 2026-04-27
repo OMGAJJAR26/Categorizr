@@ -28,7 +28,8 @@ import { useReceiptGrouping } from "../hooks/useReceiptGrouping";
 import { useReportGeneration } from "../hooks/useReportGeneration";
 import { usePaymentDisplay } from "../hooks/usePaymentDisplay";
 import { useChatAssistant } from "../hooks/useChatAssistant";
-import { ChatButton, ChatPanel } from "../components/chat";
+import ChatButton from "../components/chat/ChatButton";
+import ChatPanel from "../components/chat/ChatPanel";
 import "./HomePage.css";
 
 const HomePage = () => {
