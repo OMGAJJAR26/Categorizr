@@ -814,6 +814,15 @@ const [localMerchants, setLocalMerchants] = useState([]);
     const decPart = (decRaw || "").slice(0, 2);
     return cleaned.includes(".") ? `${intPart || "0"}.${decPart}` : intPart;
   };
+  /** Block non-numeric keys from monetary inputs at the keyboard level. */
+  const preventInvalidMoneyKey = (e) => {
+    if (e.ctrlKey || e.metaKey) return; // allow Ctrl+C, Ctrl+V, Ctrl+A, etc.
+    const allowed = ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab", "Enter", "Home", "End"];
+    if (allowed.includes(e.key)) return;
+    if (/^\d$/.test(e.key)) return; // digits 0-9
+    if (e.key === ".") return;       // decimal point
+    e.preventDefault();
+  };
   const normalizeMatchKey = (value) =>
     String(value || "")
       .trim()
@@ -5054,6 +5063,7 @@ const handleSelectLogo = (index) => {
                                 const num = parseFloat(formData.receipt_tax_values[0]?.tax_amount);
                                 setCurrencyInput("tax0", !num || num === 0 ? "$" : formatCurrencyDisplay(num));
                               }}
+                              onKeyDown={preventInvalidMoneyKey}
                               onChange={(e) => {
                                 const normalized = normalizeCurrencyInput(e.target.value);
                                 setCurrencyInput("tax0", normalized);
@@ -5150,6 +5160,7 @@ const handleSelectLogo = (index) => {
                                 const num = parseFloat(formData.receipt_tax_values[1]?.tax_amount);
                                 setCurrencyInput("tax1", !num || num === 0 ? "$" : formatCurrencyDisplay(num));
                               }}
+                              onKeyDown={preventInvalidMoneyKey}
                               onChange={(e) => {
                                 const normalized = normalizeCurrencyInput(e.target.value);
                                 setCurrencyInput("tax1", normalized);
@@ -5244,6 +5255,7 @@ const handleSelectLogo = (index) => {
                                 const num = parseFloat(formData.tip);
                                 setCurrencyInput("tip", !num || num === 0 ? "$" : formatCurrencyDisplay(num));
                               }}
+                              onKeyDown={preventInvalidMoneyKey}
                               onChange={(e) => {
                                 const normalized = normalizeCurrencyInput(e.target.value);
                                 setCurrencyInput("tip", normalized);
@@ -5274,6 +5286,7 @@ const handleSelectLogo = (index) => {
                               const num = parseFloat(formData.purchasePrice);
                               setCurrencyInput("total", !num || num === 0 ? "$" : formatCurrencyDisplay(num));
                             }}
+                            onKeyDown={preventInvalidMoneyKey}
                             onChange={(e) => {
                               const normalized = normalizeCurrencyInput(e.target.value);
                               setCurrencyInput("total", normalized);

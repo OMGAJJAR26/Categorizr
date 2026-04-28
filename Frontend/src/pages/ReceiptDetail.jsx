@@ -970,6 +970,15 @@ useEffect(() => {
     const decPart = (decRaw || "").slice(0, 2);
     return cleaned.includes(".") ? `${intPart || "0"}.${decPart}` : intPart;
   };
+  /** Block non-numeric keys from monetary inputs at the keyboard level. */
+  const preventInvalidMoneyKey = (e) => {
+    if (e.ctrlKey || e.metaKey) return; // allow Ctrl+C, Ctrl+V, Ctrl+A, etc.
+    const allowed = ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab", "Enter", "Home", "End"];
+    if (allowed.includes(e.key)) return;
+    if (/^\d$/.test(e.key)) return; // digits 0-9
+    if (e.key === ".") return;       // decimal point
+    e.preventDefault();
+  };
 
   const normalizeMediaUrl = (url) => {
     const raw = (url || "").toString().trim();
@@ -5216,6 +5225,7 @@ Thank you for using our receipt management system.
                                     const num = parseFloat(currentTaxValues[0].tax_amount);
                                     setCurrencyInputs(p => ({ ...p, tax0: `$${num ? num.toFixed(2) : "0.00"}` }));
                                   }}
+                                  onKeyDown={preventInvalidMoneyKey}
                                   onChange={(e) => {
                                     handleTaxAmountChange(0, e.target.value);
                                   }}
@@ -5254,6 +5264,7 @@ Thank you for using our receipt management system.
                                     const num = parseFloat(currentTaxValues[1].tax_amount);
                                     setCurrencyInputs(p => ({ ...p, tax1: `$${num ? num.toFixed(2) : "0.00"}` }));
                                   }}
+                                  onKeyDown={preventInvalidMoneyKey}
                                   onChange={(e) => {
                                     handleTaxAmountChange(1, e.target.value);
                                   }}
@@ -5298,10 +5309,14 @@ Thank you for using our receipt management system.
                                           tip: tipNum > 0 ? `$${tipNum.toFixed(2)}` : "$",
                                         }))
                                       }
+                                      onKeyDown={preventInvalidMoneyKey}
                                       onChange={(e) => {
-                                        const val = e.target.value;
-                                        setCurrencyInputs((p) => ({ ...p, tip: val }));
-                                        const parsed = parseFloat(val.replace(/[^0-9.-]/g, ""));
+                                        const raw = e.target.value;
+                                        const numPart = raw.replace(/^\$?/, "");
+                                        const sanitized = sanitizeMoneyInput(numPart);
+                                        const display = `$${sanitized}`;
+                                        setCurrencyInputs((p) => ({ ...p, tip: display }));
+                                        const parsed = parseFloat(raw.replace(/[^0-9.-]/g, ""));
                                         if (!isNaN(parsed)) handleFieldChange("tip", parsed);
                                       }}
                                       onBlur={() =>
@@ -5345,10 +5360,15 @@ Thank you for using our receipt management system.
                                 total: `$${isNaN(num) ? "0.00" : num.toFixed(2)}`,
                               }));
                             }}
+                            onKeyDown={preventInvalidMoneyKey}
                             onChange={(e) => {
-                              const val = e.target.value;
-                              setCurrencyInputs((p) => ({ ...p, total: val }));
-                              const parsed = parseFloat(val.replace(/[^0-9.-]/g, ""));
+                              const raw = e.target.value;
+                              const isNeg = raw.startsWith("-");
+                              const numPart = raw.replace(/^-?\$?/, "");
+                              const sanitized = sanitizeMoneyInput(numPart);
+                              const display = `${isNeg ? "-" : ""}$${sanitized}`;
+                              setCurrencyInputs((p) => ({ ...p, total: display }));
+                              const parsed = parseFloat(raw.replace(/[^0-9.-]/g, ""));
                               if (!isNaN(parsed)) handleFieldChange("purchasePrice", parsed);
                             }}
                             onBlur={() =>
