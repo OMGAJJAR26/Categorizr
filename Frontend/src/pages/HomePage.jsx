@@ -980,7 +980,7 @@ const HomePage = () => {
                         {selectedReceipt?.id === receipt.id && (
                           <ReceiptDetail
                             receipt={selectedReceipt}
-                            receiptList={draftReceipts}
+                            receiptList={[...draftReceipts, ...filteredReceipts]}
                             selectedIndex={selectedIndex}
                             setSelectedIndex={setSelectedIndex}
                             onSelectReceipt={handleReceiptClick}

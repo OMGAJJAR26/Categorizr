@@ -33,7 +33,13 @@ const getRawCached = (name) => {
     const val = localStorage.getItem(merchantKey(name));
     if (!val) return null;
     if (val === "failed") return "failed";
-    return unproxyImageUrl(val); // strip proxy prefix for old cached entries
+    const raw = unproxyImageUrl(val); // strip proxy prefix for old cached entries
+    // Evict any localhost URL that was cached during local dev — useless on staging/prod
+    if (/localhost|127\.0\.0\.1/i.test(raw)) {
+      localStorage.removeItem(merchantKey(name));
+      return null;
+    }
+    return raw;
   } catch {
     return null;
   }
@@ -83,26 +89,41 @@ const MerchantAvatar = ({ name, explicitUrl, className = "w-6 h-6" }) => {
   // Raw API-fetched URL (no proxy prefix)
   const [rawApiUrl, setRawApiUrl] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-  // Track whether the *current* display URL failed so we can fall back
-  const [failedUrl, setFailedUrl] = useState(null);
+  // Track which display URLs have failed so we can walk down the fallback chain
+  const [failedUrls, setFailedUrls] = useState(new Set());
 
   const rawCachedVal = getRawCached(name);
   const failedCached = rawCachedVal === "failed";
   const rawCached = !failedCached && isValidUrl(rawCachedVal) ? rawCachedVal : null;
 
-  const validExplicit = isValidUrl(explicitUrl);
+  // Strip any proxy wrapper from the passed-in URL so stored localhost:port
+  // proxy URLs (saved during local dev) degrade gracefully on staging.
+  const safeExplicit = explicitUrl ? unproxyImageUrl(explicitUrl) : null;
+  // Reject localhost URLs — they only work in local dev, not on staging/production
+  const validExplicit =
+    isValidUrl(safeExplicit) &&
+    !/localhost|127\.0\.0\.1/i.test(safeExplicit);
 
   // Choose raw source (priority: explicit > cached > api-fetched)
-  const rawSrc = validExplicit ? explicitUrl : rawCached ?? rawApiUrl;
+  const rawSrc = validExplicit ? safeExplicit : rawCached ?? rawApiUrl;
 
   // Proxied URL for the <img> element
-  const displaySrc = rawSrc ? proxyImageUrl(rawSrc) : null;
+  const proxiedSrc = rawSrc ? proxyImageUrl(rawSrc) : null;
+  // Direct (un-proxied) URL as secondary fallback for when the proxy returns 500
+  const directSrc = rawSrc && rawSrc !== proxiedSrc ? rawSrc : null;
 
   // Clearbit fallback (also proxied)
   const clearbitRaw = buildClearbitUrl(name);
   const clearbitDisplay = clearbitRaw ? proxyImageUrl(clearbitRaw) : null;
 
-  const finalDisplay = displaySrc || clearbitDisplay;
+  // Walk the fallback chain: proxied → direct → clearbit
+  // Skip any URL that has already failed this render cycle.
+  const displaySrc =
+    (proxiedSrc && !failedUrls.has(proxiedSrc) ? proxiedSrc : null) ??
+    (directSrc && !failedUrls.has(directSrc) ? directSrc : null) ??
+    (clearbitDisplay && !failedUrls.has(clearbitDisplay) ? clearbitDisplay : null);
+
+  const finalDisplay = displaySrc;
 
   // ── Fetch from API when no explicit URL and no valid cache ──────────────
   useEffect(() => {
@@ -186,7 +207,11 @@ const MerchantAvatar = ({ name, explicitUrl, className = "w-6 h-6" }) => {
 
   // ── Derived state ─────────────────────────────────────────────────────────
   const firstLetter = name?.toString().trim().charAt(0)?.toUpperCase?.() || "?";
-  const hasFailed = finalDisplay && failedUrl === finalDisplay;
+  // All candidates have been exhausted when every option is in failedUrls
+  const allFailed =
+    (!proxiedSrc || failedUrls.has(proxiedSrc)) &&
+    (!directSrc || failedUrls.has(directSrc)) &&
+    (!clearbitDisplay || failedUrls.has(clearbitDisplay));
 
   // ── Render ────────────────────────────────────────────────────────────────
   if (isLoading && !finalDisplay) {
@@ -200,7 +225,7 @@ const MerchantAvatar = ({ name, explicitUrl, className = "w-6 h-6" }) => {
     );
   }
 
-  if (!finalDisplay || hasFailed) {
+  if (!finalDisplay || allFailed) {
     return (
       <div
         className={`${className} rounded bg-gray-300 text-gray-700 flex items-center justify-center text-xs font-bold`}
@@ -221,21 +246,22 @@ const MerchantAvatar = ({ name, explicitUrl, className = "w-6 h-6" }) => {
       loading="lazy"
       onError={() => {
         setIsLoading(false);
-        setFailedUrl(finalDisplay);
+        // Add this URL to the failed set so the component falls to the next candidate
+        setFailedUrls((prev) => new Set([...prev, finalDisplay]));
 
-        if (displaySrc && displaySrc === finalDisplay) {
-          // The primary URL (cached or api-fetched) failed — clear cache so
-          // the component can attempt a fresh API fetch on next render.
+        if (finalDisplay === proxiedSrc) {
+          // Proxied primary failed — clear cache so we don't cache a bad URL
           if (rawCached) clearCached(name);
           if (rawApiUrl) setRawApiUrl(null);
-        } else {
-          // Clearbit also failed — mark as permanently failed
+        } else if (finalDisplay === clearbitDisplay) {
+          // Clearbit also failed — mark permanently failed
           try { localStorage.setItem(merchantKey(name), "failed"); } catch {}
         }
+        // directSrc or intermediate failures just flow to the next candidate via failedUrls
       }}
       onLoad={() => {
         setIsLoading(false);
-        // Persist the raw URL so future renders don't re-fetch
+        // Persist the raw URL that worked so future renders skip the proxy/fallback dance
         if (rawSrc && rawSrc !== clearbitRaw) {
           setRawCached(name, rawSrc);
         }

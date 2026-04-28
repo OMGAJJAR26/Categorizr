@@ -1014,6 +1014,28 @@ useEffect(() => {
     return subtotal > 0 ? subtotal : 0;
   };
 
+  // ── Merchant-category intelligence ──────────────────────────────────────────
+  // Scans existing receipts to find the most-recently-used expense category for
+  // the given merchant. Returns "" when no history is found.
+  const getMerchantDefaultCategory = React.useCallback(
+    (merchantName) => {
+      if (!merchantName?.trim() || !receipts?.length) return "";
+      const normalized = merchantName.toLowerCase().trim();
+      const matches = (receipts || [])
+        .filter((r) => {
+          const rStore = (r.storeName || r.store_name || "").toLowerCase().trim();
+          return rStore === normalized && (r.expense_type || "").trim();
+        })
+        .sort((a, b) => {
+          const dA = new Date(a.product_date || a.productDate || 0);
+          const dB = new Date(b.product_date || b.productDate || 0);
+          return dB - dA; // newest first
+        });
+      return matches[0]?.expense_type?.trim() || "";
+    },
+    [receipts]
+  );
+
   // Handle field changes in edit mode
   const handleFieldChange = (field, value) => {
     if (editedTags.locked) return; // Receipt is locked — prevent any changes
@@ -4169,17 +4191,26 @@ Thank you for using our receipt management system.
                   {/* Normal view: Locked/Unlocked + "..." options menu */}
                   {!showSplitScreen && (
                     <>
-                  {/* Locked/Unlocked Status */}
-                  <div className="flex items-center gap-1 bg-gray-100 rounded-full px-1.5 sm:px-2 py-1 sm:py-1.5">
+                  {/* Locked/Unlocked Status — click to toggle */}
+                  <button
+                    type="button"
+                    onClick={() => toggleTag("locked")}
+                    title={editedTags.locked ? "Click to unlock receipt" : "Click to lock receipt"}
+                    className={`flex items-center gap-1 rounded-full px-1.5 sm:px-2 py-1 sm:py-1.5 transition-colors ${
+                      editedTags.locked
+                        ? "bg-red-100 hover:bg-red-200"
+                        : "bg-gray-100 hover:bg-gray-200"
+                    }`}
+                  >
                     <img
-                      src={getTagImage("locked", receiptTags?.locked || false)}
-                      alt={receiptTags?.locked ? "Locked" : "Unlocked"}
+                      src={getTagImage("locked", editedTags.locked)}
+                      alt={editedTags.locked ? "Locked" : "Unlocked"}
                       className="w-3.5 h-3.5 sm:w-4 sm:h-4 object-contain flex-shrink-0"
                     />
-                    <span className="text-[8px] sm:text-[10px] font-medium text-gray-700 whitespace-nowrap">
-                      {receiptTags?.locked ? "Locked" : "Unlocked"}
+                    <span className={`text-[8px] sm:text-[10px] font-medium whitespace-nowrap ${editedTags.locked ? "text-red-700" : "text-gray-700"}`}>
+                      {editedTags.locked ? "Locked" : "Unlocked"}
                     </span>
-                  </div>
+                  </button>
 
                   {/* Share Button */}
                   <div className="relative">
@@ -4238,7 +4269,29 @@ Thank you for using our receipt management system.
               </div>
 
               {/* Scrollable Content */}
-              <div className="overflow-y-auto flex-1 min-h-0">
+              <div className="overflow-y-auto flex-1 min-h-0 relative">
+                {/* ── Locked overlay — blocks all form interactions when receipt is locked ── */}
+                {editedTags.locked && !showSplitScreen && (
+                  <div
+                    className="absolute inset-0 z-30 cursor-not-allowed flex flex-col items-center justify-start pt-10 gap-3"
+                    style={{ backgroundColor: "rgba(0,0,0,0.18)" }}
+                    onClick={() =>
+                      setToast({
+                        isVisible: true,
+                        message: "🔒 Receipt is locked. Click the lock icon in the header to unlock before editing.",
+                        type: "error",
+                      })
+                    }
+                  >
+                    <div className="bg-white/95 rounded-xl px-6 py-4 shadow-lg border border-red-200 flex items-center gap-3 max-w-xs mx-4">
+                      <img src={locked} alt="Locked" className="w-6 h-6 object-contain flex-shrink-0" />
+                      <p className="text-sm font-semibold text-gray-800">
+                        Receipt is locked.<br />
+                        <span className="text-red-600 font-bold">Click 🔒 in the header to unlock.</span>
+                      </p>
+                    </div>
+                  </div>
+                )}
                 {/* ── Split Screen ─────────────────────────────────────────── */}
                 {showSplitScreen ? (
                   <div className="p-4 sm:p-6">
@@ -4568,8 +4621,16 @@ Thank you for using our receipt management system.
                                       <div
                                         className="flex-1 flex items-center gap-2 cursor-pointer"
                                         onClick={() => {
-                                          handleFieldChange("storeName", merchant.name);
-                                          handleFieldChange("store_image", merchant.image || "");
+                                          // Auto-fill expense category from receipt history if currently empty
+                                          const suggestedCategory = getMerchantDefaultCategory(merchant.name);
+                                          setEditedReceipt((prev) => ({
+                                            ...prev,
+                                            storeName: merchant.name,
+                                            store_image: merchant.image || prev.store_image || "",
+                                            ...(suggestedCategory && !prev.expense_type
+                                              ? { expense_type: suggestedCategory }
+                                              : {}),
+                                          }));
                                           setShowMerchantDropdown(false);
                                         }}
                                       >
@@ -5695,9 +5756,9 @@ Thank you for using our receipt management system.
               <div className="flex-shrink-0 border-t border-gray-200 bg-white px-4 sm:px-6 py-3 flex flex-col gap-2">
                 <button
                   onClick={handleSave}
-                  disabled={isSaving || editedTags.locked}
+                  disabled={isSaving}
                   className="w-full py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                  title={editedTags.locked ? "Unlock receipt to save changes" : ""}
+                  title=""
                 >
                   {isSaving ? "Saving..." : "Save Changes"}
                 </button>

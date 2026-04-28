@@ -827,6 +827,28 @@ const [localMerchants, setLocalMerchants] = useState([]);
     return () => clearTimeout(t);
   }, [error]);
 
+  // ── Merchant-category intelligence ──────────────────────────────────────────
+  // Scans existing receipts to find the most-recently-used expense category for
+  // the given merchant. Returns "" when no history is found.
+  const getMerchantDefaultCategory = useCallback(
+    (merchantName) => {
+      if (!merchantName?.trim() || !receipts?.length) return "";
+      const normalized = merchantName.toLowerCase().trim();
+      const matches = (receipts || [])
+        .filter((r) => {
+          const rStore = (r.storeName || r.store_name || "").toLowerCase().trim();
+          return rStore === normalized && (r.expense_type || "").trim();
+        })
+        .sort((a, b) => {
+          const dA = new Date(a.product_date || a.productDate || 0);
+          const dB = new Date(b.product_date || b.productDate || 0);
+          return dB - dA; // newest first
+        });
+      return matches[0]?.expense_type?.trim() || "";
+    },
+    [receipts]
+  );
+
   // Handle form field changes with auto-calculation
 const handleFieldChange = (field, value) => {
   if (field === "notes") value = (value || "").toString().slice(0, MAX_NOTES_LENGTH);
@@ -1544,10 +1566,14 @@ const handleFieldChange = (field, value) => {
         return value.toString();
       };
 
+      // OCR-detected category takes priority; fall back to merchant receipt history
+      const ocrCategory = cleanTextValue(parsedReceiptData?.category || "");
+      const autoCategory = ocrCategory || getMerchantDefaultCategory(merchantName);
+
       setFormData((prev) => ({
         ...prev,
         storeName: merchantName,
-        expense_type: cleanTextValue(parsedReceiptData?.category || ""),
+        expense_type: autoCategory,
         paymentType: cleanPaymentType,
         card_issuer_name: "",
         last_4_digit_card: "",
@@ -3763,7 +3789,29 @@ const handleSelectLogo = (index) => {
               )}
 
               {/* Scrollable Content */}
-              <div className="overflow-y-auto flex-1 min-h-0">
+              <div className="overflow-y-auto flex-1 min-h-0 relative">
+                {/* ── Locked overlay — blocks all form interactions when receipt is locked ── */}
+                {tags.locked && step === "form" && !showSplitScreen && (
+                  <div
+                    className="absolute inset-0 z-30 cursor-not-allowed flex flex-col items-center justify-start pt-10 gap-3"
+                    style={{ backgroundColor: "rgba(0,0,0,0.18)" }}
+                    onClick={() =>
+                      setToast({
+                        isVisible: true,
+                        message: "🔒 Receipt is locked. Press the lock button to unlock before editing.",
+                        type: "error",
+                      })
+                    }
+                  >
+                    <div className="bg-white/95 rounded-xl px-6 py-4 shadow-lg border border-red-200 flex items-center gap-3 max-w-xs mx-4">
+                      <img src={lockedImg} alt="Locked" className="w-6 h-6 object-contain flex-shrink-0" />
+                      <p className="text-sm font-semibold text-gray-800">
+                        Receipt is locked.<br />
+                        <span className="text-red-600 font-bold">Tap 🔒 in the header to unlock.</span>
+                      </p>
+                    </div>
+                  </div>
+                )}
                 {showSplitScreen ? (
                   /* ── Split Screen ──────────────────────────────────── */
                   <div className="p-4 sm:p-6">
@@ -4288,6 +4336,12 @@ const handleSelectLogo = (index) => {
           // Delay to allow click events on dropdown items
           setTimeout(() => {
             setIsMerchantTyping(false);
+            // Auto-fill expense category from merchant history if field is currently empty
+            setFormData((prev) => {
+              if (prev.expense_type || !prev.storeName?.trim()) return prev;
+              const suggested = getMerchantDefaultCategory(prev.storeName);
+              return suggested ? { ...prev, expense_type: suggested } : prev;
+            });
           }, 200);
         }}
         placeholder="Select or type merchant name"
@@ -4331,7 +4385,16 @@ const handleSelectLogo = (index) => {
                           if (merchant.name !== uploadedReceiptData?.storeName) {
                             setDetectedMerchantLogo(null);
                           }
-                          handleFieldChange("storeName", merchant.name);
+                          // Auto-fill expense category from receipt history when empty
+                          const suggestedCategory = getMerchantDefaultCategory(merchant.name);
+                          setFormData((prev) => ({
+                            ...prev,
+                            storeName: merchant.name,
+                            ...(suggestedCategory && !prev.expense_type
+                              ? { expense_type: suggestedCategory }
+                              : {}),
+                          }));
+                          if (error) setError(null);
                           setIsMerchantTyping(false);
                           setShowMerchantDropdown(false);
                         }}

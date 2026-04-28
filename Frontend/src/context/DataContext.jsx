@@ -1137,7 +1137,15 @@ export const DataProvider = ({ children }) => {
               const last4DigitCard = r.last_4_digit_card ?? r.last4DigitCard ?? "";
               // Normalize merchant / category / tax fields – Android/iOS may use snake_case or camelCase
               const storeName = r.storeName ?? r.store_name ?? "";
-              const storeImage = r.store_image ?? r.storeImage ?? "";
+              // Strip any localhost proxy URL saved during local dev so receipt cards
+              // don't try to load broken localhost URLs on staging/production.
+              const _rawStoreImage = r.store_image ?? r.storeImage ?? "";
+              const _storeImageMarker = "/api/imageproxy?url=";
+              const _siIdx = _rawStoreImage.indexOf(_storeImageMarker);
+              const _storeImageUnproxied = _siIdx !== -1
+                ? (() => { try { return decodeURIComponent(_rawStoreImage.slice(_siIdx + _storeImageMarker.length)); } catch { return _rawStoreImage; } })()
+                : _rawStoreImage;
+              const storeImage = /localhost|127\.0\.0\.1/i.test(_storeImageUnproxied) ? "" : _storeImageUnproxied;
               const expenseType = r.expense_type ?? r.expenseType ?? "";
               const productName = r.product_name ?? r.productName ?? "";
               // iOS sends purchase_price (snake_case); web sends purchasePrice (camelCase)
@@ -1268,32 +1276,48 @@ export const DataProvider = ({ children }) => {
         ),
       ]);
 
- // In DataContext.js, update the fetchData function where merchantsWithImages is built
+      // Build merchantsWithImages — canonical logos are preferred in this order:
+      // 1. API merchant logo (user-managed, server-stored) — always wins
+      // 2. Receipt-derived logo (most recent first, localhost proxy URLs discarded)
+      // This guarantees all receipts for the same merchant show the same logo.
 
-// Find this section in your fetchData function:
-// Build merchantsWithImages from receipts (since API endpoint returns 404)
-// Extract merchant images directly from receipts
-const merchantsWithImagesMap = new Map();
-receiptsWithIntegrations.forEach((r) => {
-  const name = r.storeName?.toString().trim();
-  const image = r.store_image?.toString().trim();
-  if (name && name !== "0" && image && image !== "0") {
-    const key = name.toLowerCase().trim();
-    if (!merchantsWithImagesMap.has(key)) {
-      merchantsWithImagesMap.set(key, {
-        name: name,
-        image: image,
+      // Helper: strip proxy prefix and reject localhost URLs
+      const cleanMerchantImage = (url) => {
+        if (!url || url === "0") return "";
+        const s = url.toString().trim();
+        // Strip any /api/imageproxy?url= wrapper (localhost or staging)
+        const marker = "/api/imageproxy?url=";
+        const idx = s.indexOf(marker);
+        const raw = idx !== -1 ? (() => { try { return decodeURIComponent(s.slice(idx + marker.length)); } catch { return s; } })() : s;
+        // Reject localhost URLs — they are only valid in local dev
+        if (/localhost|127\.0\.0\.1/i.test(raw)) return "";
+        return raw;
+      };
+
+      // Step 1: seed with API merchants (highest priority — canonical logos)
+      const merchantsWithImagesMap = new Map();
+      apiMerchantsData.forEach(m => {
+        const key = (m.store_name || "").trim().toLowerCase();
+        if (!key) return;
+        const cleanImg = cleanMerchantImage(m.store_image_url || "");
+        merchantsWithImagesMap.set(key, { name: m.store_name, image: cleanImg });
       });
-    }
-  }
-});
-// Merge in API merchants (server-stored) if not already present from receipts
-apiMerchantsData.forEach(m => {
-  const key = (m.store_name || "").trim().toLowerCase();
-  if (key && !merchantsWithImagesMap.has(key)) {
-    merchantsWithImagesMap.set(key, { name: m.store_name, image: m.store_image_url || "" });
-  }
-});
+
+      // Step 2: fill gaps from receipt data (skip merchants already seeded from API)
+      receiptsWithIntegrations.forEach((r) => {
+        const name = r.storeName?.toString().trim();
+        const rawImage = r.store_image?.toString().trim();
+        if (!name || name === "0") return;
+        const key = name.toLowerCase().trim();
+        const cleanImg = cleanMerchantImage(rawImage);
+        if (!merchantsWithImagesMap.has(key)) {
+          // Merchant not yet in map — add it (even if image is empty)
+          merchantsWithImagesMap.set(key, { name, image: cleanImg });
+        } else if (!merchantsWithImagesMap.get(key).image && cleanImg) {
+          // Merchant is in map (from API) but has no image yet — fill in from receipt
+          merchantsWithImagesMap.set(key, { ...merchantsWithImagesMap.get(key), image: cleanImg });
+        }
+      });
 
 // "Miscellaneous" is always present
 if (!merchantsWithImagesMap.has("miscellaneous")) {
