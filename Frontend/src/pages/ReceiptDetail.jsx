@@ -272,6 +272,8 @@ const ReceiptDetail = ({
     apiMerchants,
     deleteApiMerchant,
     apiExpenseCategories,
+    addApiExpenseCategory,
+    updateApiExpenseCategory,
     deleteApiExpenseCategory,
     apiPaymentMethods,
     fetchApiPaymentMethods,
@@ -2013,13 +2015,23 @@ useEffect(() => {
     setEditCategoryError(null);
     const oldName = editingCategory;
     try {
+      // Update all receipts that reference the old name
       const affected = (receipts || []).filter(
         (r) => (r.expense_type || "").toLowerCase() === oldName.toLowerCase()
       );
       for (const r of affected) {
         await putUpdateReceipt({ ...r, expense_type: newName });
       }
-      addExpenseCategory(newName);
+      // Find and call the update API
+      const apiMatch = (apiExpenseCategories || []).find(
+        (c) => normalizeMatchKey(c.expense_category_name) === normalizeMatchKey(oldName)
+      );
+      if (apiMatch?.id) {
+        const updateResult = await updateApiExpenseCategory(String(apiMatch.id), newName);
+        if (!updateResult?.ok) throw new Error(updateResult?.error || "Failed to update category");
+      } else {
+        addExpenseCategory(newName);
+      }
       if ((editedReceipt.expense_type || "").toLowerCase() === oldName.toLowerCase()) {
         handleFieldChange("expense_type", newName);
       }
@@ -6663,7 +6675,7 @@ Thank you for using our receipt management system.
                   value={newCategoryName}
                   onChange={(e) => setNewCategoryName(e.target.value)}
                   placeholder="Enter category name"
-                  onKeyDown={(e) => {
+                  onKeyDown={async (e) => {
                     if (e.key === "Enter") {
                       const nextCategory = newCategoryName.trim();
                       if (!nextCategory) {
@@ -6674,10 +6686,13 @@ Thank you for using our receipt management system.
                         setToast({ isVisible: true, message: "Expense Category already exists", type: "error" });
                         return;
                       }
+                      // Immediate local state so dropdown shows it right away
                       addExpenseCategory(nextCategory);
                       handleFieldChange("expense_type", nextCategory);
                       setShowAddCategoryInput(false);
                       setNewCategoryName("");
+                      // Persist to server in background
+                      addApiExpenseCategory(nextCategory);
                       setToast({ isVisible: true, message: "Expense Category Added", type: "success" });
                     } else if (e.key === "Escape") {
                       setShowAddCategoryInput(false);
@@ -6689,7 +6704,7 @@ Thank you for using our receipt management system.
                   <button
                     type="button"
                     disabled={!newCategoryName.trim()}
-                    onClick={() => {
+                    onClick={async () => {
                       const nextCategory = newCategoryName.trim();
                       if (!nextCategory) {
                         setToast({ isVisible: true, message: "Please enter Expense Category", type: "error" });
@@ -6699,10 +6714,13 @@ Thank you for using our receipt management system.
                         setToast({ isVisible: true, message: "Expense Category already exists", type: "error" });
                         return;
                       }
+                      // Immediate local state so dropdown shows it right away
                       addExpenseCategory(nextCategory);
                       handleFieldChange("expense_type", nextCategory);
                       setShowAddCategoryInput(false);
                       setNewCategoryName("");
+                      // Persist to server in background
+                      addApiExpenseCategory(nextCategory);
                       setToast({ isVisible: true, message: "Expense Category Added", type: "success" });
                     }}
                     className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"

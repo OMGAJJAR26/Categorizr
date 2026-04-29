@@ -60,6 +60,8 @@ const AddReceiptModal = ({ onClose, onReceiptAdded }) => {
     apiMerchants,
     deleteApiMerchant,
     apiExpenseCategories,
+    addApiExpenseCategory,
+    updateApiExpenseCategory,
     deleteApiExpenseCategory,
     apiPaymentMethods,
     fetchApiPaymentMethods,
@@ -1665,13 +1667,23 @@ const handleFieldChange = (field, value) => {
     setEditCategoryError(null);
     const oldName = editingCategory;
     try {
+      // Update all receipts that reference the old name
       const affected = (receipts || []).filter(
         (r) => (r.expense_type || "").toLowerCase() === oldName.toLowerCase()
       );
       for (const r of affected) {
         await putUpdateReceipt({ ...r, expense_type: newName });
       }
-      addExpenseCategory(newName);
+      // Find and call the update API
+      const apiMatch = (apiExpenseCategories || []).find(
+        (c) => normalizeMatchKey(c.expense_category_name) === normalizeMatchKey(oldName)
+      );
+      if (apiMatch?.id) {
+        const updateResult = await updateApiExpenseCategory(String(apiMatch.id), newName);
+        if (!updateResult?.ok) throw new Error(updateResult?.error || "Failed to update category");
+      } else {
+        addExpenseCategory(newName);
+      }
       if ((formData.expense_type || "").toLowerCase() === oldName.toLowerCase()) {
         handleFieldChange("expense_type", newName);
       }
@@ -6523,7 +6535,7 @@ const handleSelectLogo = (index) => {
                   value={newCategoryName}
                   onChange={(e) => setNewCategoryName(e.target.value)}
                   placeholder="Enter category name"
-                  onKeyDown={(e) => {
+                  onKeyDown={async (e) => {
                     if (e.key === "Enter") {
                       const nextCategory = newCategoryName.trim();
                       if (!nextCategory) {
@@ -6534,10 +6546,13 @@ const handleSelectLogo = (index) => {
                         setError("Expense Category already exists");
                         return;
                       }
+                      // Immediate local state so the dropdown shows it right away
                       addExpenseCategory(nextCategory);
                       handleFieldChange("expense_type", nextCategory);
                       setShowAddCategoryInput(false);
                       setNewCategoryName("");
+                      // Persist to server in background
+                      addApiExpenseCategory(nextCategory);
                       setToast({ isVisible: true, message: "Expense Category Added", type: "success" });
                     } else if (e.key === "Escape") {
                       setShowAddCategoryInput(false);
@@ -6549,7 +6564,7 @@ const handleSelectLogo = (index) => {
                   <button
                     type="button"
                     disabled={!newCategoryName.trim()}
-                    onClick={() => {
+                    onClick={async () => {
                       const nextCategory = newCategoryName.trim();
                       if (!nextCategory) {
                         setError("Please enter Expense Category");
@@ -6559,10 +6574,13 @@ const handleSelectLogo = (index) => {
                         setError("Expense Category already exists");
                         return;
                       }
+                      // Immediate local state so the dropdown shows it right away
                       addExpenseCategory(nextCategory);
                       handleFieldChange("expense_type", nextCategory);
                       setShowAddCategoryInput(false);
                       setNewCategoryName("");
+                      // Persist to server in background
+                      addApiExpenseCategory(nextCategory);
                       setToast({ isVisible: true, message: "Expense Category Added", type: "success" });
                     }}
                     className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"

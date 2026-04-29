@@ -1642,7 +1642,8 @@ const hasMoreThan3Decimals = (val) => {
       if (!addVal.trim()) return toast("error", "Please enter Expense Category");
       const catName = addVal.trim();
       if (expenseCategoryExists(catName)) return toast("error", "Expense Category already exists");
-      addCustomCategory(catName);
+      // Use API only — response includes the id so the item appears as isApiItem:true in the list,
+      // which lets edit and delete work correctly via the API on the first try.
       const addCategoryResult = await addApiExpenseCategory(catName);
       if (!addCategoryResult?.ok) throw new Error(addCategoryResult?.error || "Failed to add expense category");
       setAddVal("");
@@ -1747,19 +1748,40 @@ const hasMoreThan3Decimals = (val) => {
 
   const applyCategoryEdit = async (item, newName) => {
     const currentName = item.name;
+    // Resolve the API entry regardless of whether the item was flagged as isApiItem.
+    // Items added via the old flow (addCustomCategory + addApiExpenseCategory) end up in
+    // customCategories with isApiItem:false, but their API record still exists.
+    const apiMatch = item.apiId
+      ? (apiExpenseCategories || []).find(c => String(c.id) === String(item.apiId))
+      : (apiExpenseCategories || []).find(c => normalizeMatchKey(c.expense_category_name) === normalizeMatchKey(currentName));
+
     if (item.isReceiptItem) {
+      // Update all receipts that reference the old category name
       const matching = getReceiptsByCategory(currentName);
       await Promise.all(matching.map(r => updateReceipt(r.id, { expense_type: newName })));
-      hideCategory(item.key); addCustomCategory(newName);
+      if (apiMatch?.id) {
+        // Has API backing — update via API (keeps the record, just renames it)
+        const updateCategoryResult = await updateApiExpenseCategory(String(apiMatch.id), newName);
+        if (!updateCategoryResult?.ok) throw new Error(updateCategoryResult?.error || "Failed to update expense category");
+      } else {
+        // No API backing — hide old receipt-derived entry, add new custom one
+        hideCategory(item.key);
+        addCustomCategory(newName);
+      }
       toast("success", "Expense Category Updated");
       return;
     }
-    if (item.isApiItem) {
-      const updateCategoryResult = await updateApiExpenseCategory(item.apiId, newName);
+    if (item.isApiItem || apiMatch?.id) {
+      // Direct API item or a custom item that has an API record
+      const targetId = item.isApiItem ? item.apiId : apiMatch.id;
+      const updateCategoryResult = await updateApiExpenseCategory(String(targetId), newName);
       if (!updateCategoryResult?.ok) throw new Error(updateCategoryResult?.error || "Failed to update expense category");
+      // Remove the stale custom-categories entry so the renamed API item is the only copy
+      if (!item.isApiItem) deleteCustomCategory(item.key);
       toast("success", "Expense Category Updated");
       return;
     }
+    // Pure local-only custom category with no API record
     editCustomCategory(item.key, newName);
     toast("success", "Expense Category Updated");
   };
@@ -1819,45 +1841,34 @@ const hasMoreThan3Decimals = (val) => {
   };
 
   const applyCategoryDelete = async (item) => {
-    const apiCategoryMatch = (apiExpenseCategories || []).find(
-      (c) => normalizeMatchKey(c.expense_category_name) === normalizeMatchKey(item.name)
-    );
-    if (item.isReceiptItem) {
-      const matching = getReceiptsByCategory(item.name || "");
-      await Promise.all(matching.map(r => updateReceipt(r.id, { expense_type: "" })));
-      hideCategory(item.key);
-      if (apiCategoryMatch?.id) {
-        const deleteCategoryResult = await deleteApiExpenseCategory(apiCategoryMatch.id);
-        if (!deleteCategoryResult?.ok) throw new Error(deleteCategoryResult?.error || "Failed to delete expense category");
-      }
-      setIsDeleteSyncing(true);
-      await Promise.all([refreshData(), fetchApiExpenseCategories()]);
-      toast("success", "Expense Category Deleted");
-      return;
-    }
-    if (item.isApiItem) {
-      const matching = getReceiptsByCategory(item.name || "");
-      if (matching.length > 0) {
-        await Promise.all(matching.map((r) => updateReceipt(r.id, { expense_type: "" })));
-      }
-      const deleteCategoryResult = await deleteApiExpenseCategory(item.apiId);
-      if (!deleteCategoryResult?.ok) throw new Error(deleteCategoryResult?.error || "Failed to delete expense category");
-      setIsDeleteSyncing(true);
-      await Promise.all([refreshData(), fetchApiExpenseCategories()]);
-      toast("success", "Expense Category Deleted");
-      return;
-    }
+    // Resolve the API record by apiId (preferred) or by name match
+    const apiCategoryMatch = item.apiId
+      ? (apiExpenseCategories || []).find(c => String(c.id) === String(item.apiId))
+      : (apiExpenseCategories || []).find(c => normalizeMatchKey(c.expense_category_name) === normalizeMatchKey(item.name));
+    const apiId = apiCategoryMatch?.id ?? null;
+
+    // Clear the category from every receipt that references it
     const matching = getReceiptsByCategory(item.name || "");
     if (matching.length > 0) {
-      await Promise.all(matching.map((r) => updateReceipt(r.id, { expense_type: "" })));
+      await Promise.all(matching.map(r => updateReceipt(r.id, { expense_type: "" })));
     }
-    deleteCustomCategory(item.key);
-    if (apiCategoryMatch?.id) {
-      const deleteCategoryResult = await deleteApiExpenseCategory(apiCategoryMatch.id);
+
+    // Remove from local state
+    if (item.isReceiptItem) {
+      hideCategory(item.key);
+    } else if (!item.isApiItem) {
+      deleteCustomCategory(item.key);
+    }
+
+    // Delete from the API when we have a confirmed API id
+    if (apiId) {
+      const deleteCategoryResult = await deleteApiExpenseCategory(String(apiId));
       if (!deleteCategoryResult?.ok) throw new Error(deleteCategoryResult?.error || "Failed to delete expense category");
     }
+
     setIsDeleteSyncing(true);
-    await Promise.all([refreshData(), fetchApiExpenseCategories()]);
+    // Sequential refresh — avoids concurrent setApiExpenseCategories calls racing each other
+    await refreshData();
     toast("success", "Expense Category Deleted");
   };
 

@@ -853,7 +853,7 @@ export const DataProvider = ({ children }) => {
       if (res.ok) {
         const data = await res.json();
         console.log("%c[ExpenseCategories] updateApiExpenseCategory response (full):", "color:#f59e0b;font-weight:bold", data);
-        setApiExpenseCategories(prev => prev.map(c => c.id === id ? data : c));
+        setApiExpenseCategories(prev => prev.map(c => String(c.id) === String(id) ? data : c));
         return { ok: true, data, error: null };
       }
       return { ok: false, data: null, error: `Failed with status ${res.status}` };
@@ -866,74 +866,41 @@ export const DataProvider = ({ children }) => {
   const deleteApiExpenseCategory = async (id) => {
     const token = localStorage.getItem("token");
     if (!token) return { ok: false, data: null, error: "Missing token" };
+    if (id == null || String(id).trim() === "") return { ok: false, data: null, error: "ID is required" };
     const fkUserId = localStorage.getItem("fk_user_id") || "";
-    const payload = { id, deleteId: id, expense_category_id: id, fk_expense_category_id: id, fk_user_id: fkUserId };
-    console.log("%c[ExpenseCategories] POST /userexpensecategory/deleteExpenseCategoryv1 →", "color:#ef4444;font-weight:bold", payload);
-    try {
-      let authErrorMessage = "";
-      const endpoint = `${BASE_URL}/userexpensecategory/deleteExpenseCategoryv1`;
-      const queryUrl = withDeleteQuery(endpoint, id);
-      const attempts = [
-        {
-          method: "POST",
-          url: endpoint,
-          headers: { "Content-Type": "application/json", Accesstoken: token },
-          body: JSON.stringify(payload),
-        },
-        {
-          method: "POST",
-          url: endpoint,
-          headers: { Accesstoken: token },
-          body: JSON.stringify(payload),
-        },
-        {
-          method: "POST",
-          url: queryUrl,
-          headers: { Accesstoken: token },
-          body: undefined,
-        },
-        {
-          method: "GET",
-          url: queryUrl,
-          headers: { Accesstoken: token },
-          body: undefined,
-        },
-      ];
-      for (const attempt of attempts) {
-        try {
-          const res = await fetch(attempt.url, {
-            method: attempt.method,
-            headers: attempt.headers,
-            body: attempt.body,
-          });
-          const data = await parseJsonSafe(res);
-          if (data && String(data.code || "") === "010") {
-            authErrorMessage = data.message || "Session Token Invalid";
-          }
-          if (res.ok && isDeleteResponseSuccessful(data)) {
-            console.log("%c[ExpenseCategories] deleteApiExpenseCategory response:", "color:#ef4444;font-weight:bold", data);
-            setApiExpenseCategories(prev => prev.filter(c => String(getEntityId(c)) !== String(id)));
-            return { ok: true, data, error: null };
-          }
-          console.warn("[ExpenseCategories] deleteApiExpenseCategory failed:", {
-            status: res.status, endpoint: attempt.url, method: attempt.method, data
-          });
-        } catch (attemptErr) {
-          console.warn("[ExpenseCategories] deleteApiExpenseCategory network error:", {
-            endpoint: attempt.url,
-            method: attempt.method,
-            error: attemptErr?.message || String(attemptErr),
-          });
+    const payload = { id: String(id), deleteId: String(id), expense_category_id: String(id), fk_user_id: fkUserId };
+    const endpoint = `${BASE_URL}/userexpensecategory/deleteExpenseCategoryv1`;
+    const queryUrl = withDeleteQuery(endpoint, id);
+    console.log("%c[ExpenseCategories] POST /userexpensecategory/deleteExpenseCategoryv1 →", "color:#ef4444;font-weight:bold", { id, queryUrl });
+    // API reads ID from query params — send with params in URL first, body fallback second
+    const attempts = [
+      { url: queryUrl, headers: { Accesstoken: token, Authorization: `Bearer ${token}` }, body: undefined },
+      { url: endpoint, headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` }, body: JSON.stringify(payload) },
+    ];
+    for (const attempt of attempts) {
+      try {
+        const res = await fetch(attempt.url, { method: "POST", headers: attempt.headers, body: attempt.body });
+        const data = await parseJsonSafe(res);
+        const code = String(data?.code || "");
+        const msg = String(data?.message || data?.msg || "").toLowerCase();
+        // Strict success: code "000" OR message explicitly says deleted/success (not just any truthy response)
+        const isSuccess = res.ok && (
+          code === "000" ||
+          msg.includes("deleted") ||
+          (msg.includes("delete") && !msg.includes("fail")) ||
+          msg.includes("success")
+        );
+        if (isSuccess) {
+          console.log("%c[ExpenseCategories] deleteApiExpenseCategory success:", "color:#ef4444;font-weight:bold", data);
+          setApiExpenseCategories(prev => prev.filter(c => String(getEntityId(c)) !== String(id)));
+          return { ok: true, data, error: null };
         }
+        console.warn("[ExpenseCategories] deleteApiExpenseCategory attempt failed:", { url: attempt.url, status: res.status, data });
+      } catch (attemptErr) {
+        console.warn("[ExpenseCategories] deleteApiExpenseCategory network error:", attemptErr?.message);
       }
-      if (authErrorMessage) {
-        return { ok: false, data: null, error: authErrorMessage };
-      }
-      return { ok: false, data: null, error: "Failed to delete expense category (all endpoints)" };
-    } catch (e) {
-      console.error("deleteApiExpenseCategory error", e);
-      return { ok: false, data: null, error: e.message || "Failed to delete category" };
     }
+    return { ok: false, data: null, error: "Failed to delete expense category" };
   };
 
   const clearDataContent = () => setDataContent(null);
