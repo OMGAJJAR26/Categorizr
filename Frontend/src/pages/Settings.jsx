@@ -2245,7 +2245,7 @@ const hasMoreThan3Decimals = (val) => {
       <div className="flex justify-end">
         <button
           type="button"
-          onClick={() => { setShowAddForm((prev) => !prev); setPayEditMode(null); }}
+          onClick={() => { setShowAddForm((prev) => !prev); setPayEditMode(null); setEditTaxKey(null); }}
           className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-semibold transition-all ${
             showAddForm
               ? "bg-slate-100 text-slate-700 hover:bg-slate-200"
