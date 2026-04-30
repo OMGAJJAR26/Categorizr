@@ -2450,7 +2450,7 @@ const hasMoreThan3Decimals = (val) => {
                             className={`px-2.5 py-1 text-xs rounded-lg border font-medium transition-colors ${defaultTaxIds.includes(tax.id) ? "bg-yellow-50 border-yellow-400 text-yellow-600" : "bg-white border-slate-200 text-slate-400 hover:border-yellow-400 hover:text-yellow-500"}`}>
                             {defaultTaxIds.includes(tax.id) ? "★ Default" : "Default"}
                           </button>
-                          <Btn color="bg-blue-500 hover:bg-blue-600" onClick={() => { setEditTaxKey(tax.id); setEditTaxVal({ tax_name: tax.tax_name, tax_rate: parseFloat(parseFloat(tax.tax_rate).toFixed(3)).toString(), tax_number: tax.tax_number || "" }); }}><Pencil size={13}/></Btn>
+                          <Btn color="bg-blue-500 hover:bg-blue-600" onClick={() => { setShowAddForm(false); setEditTaxKey(tax.id); setEditTaxVal({ tax_name: tax.tax_name, tax_rate: parseFloat(parseFloat(tax.tax_rate).toFixed(3)).toString(), tax_number: tax.tax_number || "" }); }}><Pencil size={13}/></Btn>
                           <Btn color="bg-red-400 hover:bg-red-500" onClick={() => handleDelete({ key: tax.id, name: tax.tax_name })}><Trash2 size={13}/></Btn>
                         </div>
                       </>
