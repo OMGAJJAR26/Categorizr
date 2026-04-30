@@ -1632,8 +1632,10 @@ const hasMoreThan3Decimals = (val) => {
       savePayExpenseType(payStr, newExpenseType);
       const addPaymentResult = await addApiPaymentMethod(payStr, selectedLogoUrl);
       if (!addPaymentResult?.ok) throw new Error(addPaymentResult?.error || "Failed to add payment method");
-      // Reset fields but keep the form open so the user can add another method right away
+      // Reset form fields and edit mode; keep the form OPEN so user can add the next method
+      setPayEditMode(null);
       setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
+      await Promise.all([refreshData(), fetchApiPaymentMethods()]);
       toast("success", "Payment Method Added");
       return;
     }
@@ -2514,11 +2516,13 @@ const hasMoreThan3Decimals = (val) => {
                                 const pApiMatches = resolvePaymentApiMatches(item);
                                 const pApiId = item.apiId ?? getApiEntityId(pApiMatches[0]) ?? null;
                                 setNewCardType(pBrand || "");
-                                // Only pre-fill Card Issuer when it's a distinct custom name (not just the card brand).
-                                // e.g. "Bank of America *1234" → issuer "Bank of America" (show it)
-                                //      "American Express"      → issuer "American Express" = brand (leave blank)
-                                //      "Visa *1234"            → issuer "Visa" = brand (leave blank)
-                                const issuerIsJustBrand = !pLast4 || normalizeMatchKey(pIssuer) === normalizeMatchKey(pBrand);
+                                // Only pre-fill Card Issuer when the parsed issuer is a distinct
+                                // custom name — not the card brand itself.
+                                // "American Express"      → issuer "American Express" = brand → blank
+                                // "Visa *1234"            → issuer "Visa" = brand "Visa"     → blank
+                                // "Bank of America"       → issuer "Bank of America" ≠ brand "MasterCard" → show
+                                // "Bank of America *1234" → issuer "Bank of America" ≠ brand "MasterCard" → show
+                                const issuerIsJustBrand = normalizeMatchKey(pIssuer) === normalizeMatchKey(pBrand);
                                 setNewIssuerName(issuerIsJustBrand ? "" : (pIssuer || ""));
                                 setNewLast4(pLast4 || "");
                                 setNewExpenseType(payExpenseTypeMap[item.name] || "Personal");
