@@ -73,7 +73,6 @@ const PAYMENT_CARD_TYPES = [
   { name: "Diners Club",      logo: dinersLogo },
   { name: "PayPal",           logo: paypalLogo },
   { name: "Debit Card",       logo: debitLogo },
-  { name: "Cash",             logo: cashLogo },
   { name: "Other",            logo: creditDebitCardIcon },
 ];
 
@@ -125,9 +124,9 @@ const ItemLogo = ({ logo, name }) => {
 };
 
 /* ─── ItemRow ──────────────────────────────────────────── */
-const ItemRow = ({ logo, name, sublabel, badge, badgeCls, actions }) => (
+const ItemRow = ({ logo, name, sublabel, badge, badgeCls, actions, showIcon = true }) => (
   <div className="flex items-center gap-3 bg-white rounded-xl px-3 py-2.5 border border-slate-200/80 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:shadow-[0_4px_14px_rgba(15,23,42,0.08)] transition-all">
-    <ItemLogo logo={logo} name={name} />
+    {showIcon && <ItemLogo logo={logo} name={name} />}
     <div className="flex-1 min-w-0">
       <p className="text-sm font-semibold text-slate-900 truncate">{name}</p>
       {sublabel && <p className="text-xs text-slate-400 truncate">{sublabel}</p>}
@@ -1633,8 +1632,8 @@ const hasMoreThan3Decimals = (val) => {
       savePayExpenseType(payStr, newExpenseType);
       const addPaymentResult = await addApiPaymentMethod(payStr, selectedLogoUrl);
       if (!addPaymentResult?.ok) throw new Error(addPaymentResult?.error || "Failed to add payment method");
+      // Reset fields but keep the form open so the user can add another method right away
       setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
-      setShowAddForm(false);
       toast("success", "Payment Method Added");
       return;
     }
@@ -2504,6 +2503,7 @@ const hasMoreThan3Decimals = (val) => {
                       </div>
                     ) : (
                       <ItemRow logo={displayLogo} name={item.name} badgeCls={colors.badge}
+                        showIcon={type !== "categories"}
                         actions={<>
                           {!(type === "payments" && isCashMethod(item.name)) && (
                             <Btn color="bg-blue-500 hover:bg-blue-600" onClick={() => {
@@ -2514,7 +2514,12 @@ const hasMoreThan3Decimals = (val) => {
                                 const pApiMatches = resolvePaymentApiMatches(item);
                                 const pApiId = item.apiId ?? getApiEntityId(pApiMatches[0]) ?? null;
                                 setNewCardType(pBrand || "");
-                                setNewIssuerName(pIssuer || "");
+                                // Only pre-fill Card Issuer when it's a distinct custom name (not just the card brand).
+                                // e.g. "Bank of America *1234" → issuer "Bank of America" (show it)
+                                //      "American Express"      → issuer "American Express" = brand (leave blank)
+                                //      "Visa *1234"            → issuer "Visa" = brand (leave blank)
+                                const issuerIsJustBrand = !pLast4 || normalizeMatchKey(pIssuer) === normalizeMatchKey(pBrand);
+                                setNewIssuerName(issuerIsJustBrand ? "" : (pIssuer || ""));
                                 setNewLast4(pLast4 || "");
                                 setNewExpenseType(payExpenseTypeMap[item.name] || "Personal");
                                 setPayEditMode({ item, apiId: pApiId });
