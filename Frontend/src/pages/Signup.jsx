@@ -10,6 +10,32 @@ import "slick-carousel/slick/slick.css";
 import "slick-carousel/slick/slick-theme.css";
 import { useLoader } from "../context/LoaderContext";
 
+// Resolve the user's country name from the browser.
+// 1st attempt: IP-based geolocation (no API key needed).
+// Fallback: derive from navigator.language locale code.
+const getBrowserCountry = async () => {
+  try {
+    const res = await fetch("https://ipapi.co/json/", { signal: AbortSignal.timeout(4000) });
+    if (res.ok) {
+      const data = await res.json();
+      return (data.country_name || data.country || "").trim();
+    }
+  } catch { /* ignore network errors */ }
+
+  // Fallback – extract region from navigator.language (e.g. "en-US" → "United States")
+  try {
+    const locale = navigator.language || "";
+    const parts  = locale.split("-");
+    if (parts.length >= 2) {
+      const regionCode = parts[parts.length - 1].toUpperCase();
+      const display = new Intl.DisplayNames(["en"], { type: "region" });
+      return display.of(regionCode) || "";
+    }
+  } catch { /* ignore */ }
+
+  return "";
+};
+
 const Signup = () => {
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
@@ -39,26 +65,60 @@ const Signup = () => {
     }),
     onSubmit: async (values) => {
       setLoading(true);
-
-      const query = new URLSearchParams({
-        userName: values.userName,
-        emailAddress: values.emailAddress,
-        password: values.password,
-      }).toString();
-
       try {
+        // ── 1. Resolve country from browser ─────────────────────────────────
+        const country = await getBrowserCountry();
+
+        // ── 2. Build signup payload ──────────────────────────────────────────
+        // recoveryEmail and duplicate_eReciept_email mirror the primary email.
+        const signupPayload = {
+          userName:                 values.userName,
+          emailAddress:             values.emailAddress,
+          password:                 values.password,
+          recoveryEmail:            values.emailAddress,
+          duplicate_eReciept_email: values.emailAddress,
+          location:                 country,
+        };
+
+        const query = new URLSearchParams(signupPayload).toString();
+
         const res = await fetch(`/api/user/signup?${query}`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Accesstoken: "-", // kept as in original
+            Accesstoken: "-",
           },
-          body: JSON.stringify(values),
+          body: JSON.stringify(signupPayload),
         });
 
         const data = await res.json();
 
         if (res.ok) {
+          // ── 3. Update device token (web device) ─────────────────────────
+          // deviceId=0, deviceType=2 (web), deviceToken=0, version=-
+          const token = data.authenticationToken || "";
+          if (token) {
+            try {
+              const deviceParams = new URLSearchParams({
+                deviceId:    "0",
+                deviceType:  "2",
+                deviceToken: "0",
+                version:     "-",
+              }).toString();
+
+              await fetch(`/api/user/updatedevicetoken?${deviceParams}`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Accesstoken: token,
+                },
+              });
+            } catch (deviceErr) {
+              // Non-fatal – signup already succeeded
+              console.warn("updatedevicetoken failed (non-fatal):", deviceErr?.message || deviceErr);
+            }
+          }
+
           alert(data.message || "Signup successful");
           navigate("/login");
         } else {
