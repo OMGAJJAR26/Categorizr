@@ -614,7 +614,7 @@ export const DataProvider = ({ children }) => {
     } catch (e) { console.error("[PaymentMethods] fetchApiPaymentMethods error", e); }
   }, []);
 
-  const addApiPaymentMethod = async (name, logoUrl = "") => {
+  const addApiPaymentMethod = async (name, logoUrl = "", expenseType = "") => {
     const token = localStorage.getItem("token");
     if (!token || !name.trim()) return { ok: false, data: null, error: "Missing token or payment method name" };
     // card_type must be the integer enum value (0-8), NOT the string "payment"
@@ -622,7 +622,7 @@ export const DataProvider = ({ children }) => {
       card_number: name.trim(),
       icon_image: logoUrl || "",
       card_type: inferCardTypeInt(name.trim()),
-      default_payment_category: "",
+      default_payment_category: expenseType || "",
     };
     console.log("%c[PaymentMethods] POST /userpaymentmethod/addPaymentMethodv1 →", "color:#06b6d4;font-weight:bold", payload);
     try {
@@ -675,10 +675,10 @@ export const DataProvider = ({ children }) => {
     }
   };
 
-  const updateApiPaymentMethod = async (id, name, logoUrl = "") => {
+  const updateApiPaymentMethod = async (id, name, logoUrl = "", expenseType = "") => {
     const token = localStorage.getItem("token");
     if (!token) return { ok: false, data: null, error: "Missing token" };
-    const payload = { id, card_number: name.trim(), icon_image: logoUrl || "", card_type: inferCardTypeInt(name.trim()), default_payment_category: "" };
+    const payload = { id, card_number: name.trim(), icon_image: logoUrl || "", card_type: inferCardTypeInt(name.trim()), default_payment_category: expenseType || "" };
     console.log("%c[PaymentMethods] POST /userpaymentmethod/updatePaymentMethodv1 →", "color:#f59e0b;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userpaymentmethod/updatePaymentMethodv1`, {

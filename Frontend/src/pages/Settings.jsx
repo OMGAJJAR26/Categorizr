@@ -1141,7 +1141,7 @@ const ReceiptInfoInline = ({ type }) => {
     receipts, updateReceipt,
     receiptMerchWImgRaw, customMerchants, hiddenMerchants, hideMerchant, addCustomMerchant, editCustomMerchant, deleteCustomMerchant,
     receiptCategoriesRaw, customCategories, hideCategory, addCustomCategory, editCustomCategory, deleteCustomCategory,
-    receiptPaymentsRaw, customPaymentMethods, hiddenPaymentMethods, hidePaymentMethod, addCustomPaymentMethod, editCustomPaymentMethod, deleteCustomPaymentMethod,
+    receiptPaymentsRaw, customPaymentMethods, hiddenPaymentMethods, hidePaymentMethod, unhidePaymentMethod, addCustomPaymentMethod, editCustomPaymentMethod, deleteCustomPaymentMethod,
     taxData, addTax, updateTax, deleteTax, fetchTaxes,
     apiMerchants, fetchApiMerchants, addApiMerchant, updateApiMerchant, deleteApiMerchant,
     apiPaymentMethods, fetchApiPaymentMethods, addApiPaymentMethod, updateApiPaymentMethod, deleteApiPaymentMethod,
@@ -1590,7 +1590,7 @@ const hasMoreThan3Decimals = (val) => {
         if (dupExists) return toast("error", "Payment Method already exists");
         // Update via API
         if (targetId != null) {
-          const res = await updateApiPaymentMethod(targetId, payStr, selectedLogoUrl);
+          const res = await updateApiPaymentMethod(targetId, payStr, selectedLogoUrl, newExpenseType);
           if (!res?.ok) throw new Error(res?.error || "Failed to update payment method");
         }
         // Propagate to receipts that use old name
@@ -1627,10 +1627,12 @@ const hasMoreThan3Decimals = (val) => {
         return sig && sig === nextSignature;
       });
       if (duplicateExists) return toast("error", "Payment Method already exists");
+      // Unhide first in case this name was previously deleted/hidden, then add to local state
+      unhidePaymentMethod(payStr);
       addCustomPaymentMethod(payStr);
       if (ct) savePayCard(payStr, ct);
       savePayExpenseType(payStr, newExpenseType);
-      const addPaymentResult = await addApiPaymentMethod(payStr, selectedLogoUrl);
+      const addPaymentResult = await addApiPaymentMethod(payStr, selectedLogoUrl, newExpenseType);
       if (!addPaymentResult?.ok) throw new Error(addPaymentResult?.error || "Failed to add payment method");
       // Reset form fields and edit mode; keep the form OPEN so user can add the next method
       setPayEditMode(null);
@@ -1908,9 +1910,11 @@ const hasMoreThan3Decimals = (val) => {
       console.warn("[applyPaymentDelete] API delete failed (non-fatal):", deletePaymentResult?.error);
     }
     
-    // Step 4 — hide & remove from local state
+    // Step 4 — hide & remove from local state.
+    // Always delete by item.name (the payment string like "Diners Club *1111"), not item.key
+    // ("api_28"), because customPaymentMethods is a plain string array keyed by name.
     hidePaymentMethod(item.name);
-    deleteCustomPaymentMethod(item.key !== item.name ? item.key : item.name);
+    deleteCustomPaymentMethod(item.name);
     // Step 5 — refresh
     setIsDeleteSyncing(true);
     await Promise.all([refreshData(), fetchApiPaymentMethods()]);
