@@ -383,7 +383,8 @@ export const DataProvider = ({ children }) => {
   const addApiMerchant = async (name, logoUrl = "") => {
     const token = localStorage.getItem("token");
     if (!token || !name.trim()) return { ok: false, data: null, error: "Missing token or merchant name" };
-    const payload = { store_name: name.trim(), store_image_url: logoUrl || "" };
+    const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
+    const payload = { store_name: name.trim(), store_image_url: logoUrl || "", fk_user_id };
     console.log("%c[Merchants] POST /userstore/addStorev1 →", "color:#22c55e;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userstore/addStorev1`, {
@@ -409,7 +410,8 @@ export const DataProvider = ({ children }) => {
   const updateApiMerchant = async (id, name, logoUrl = "") => {
     const token = localStorage.getItem("token");
     if (!token) return { ok: false, data: null, error: "Missing token" };
-    const payload = { id, store_name: name.trim(), store_image_url: logoUrl || "" };
+    const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
+    const payload = { id, store_name: name.trim(), store_image_url: logoUrl || "", fk_user_id };
     console.log("%c[Merchants] POST /userstore/updateStorev1 →", "color:#f59e0b;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userstore/updateStorev1`, {
@@ -624,9 +626,16 @@ export const DataProvider = ({ children }) => {
       card_type: inferCardTypeInt(name.trim()),
       default_payment_category: expenseType || "",
     };
+    // Send as both query-string AND JSON body so the backend reads it regardless of its parser
+    const addPayQuery = new URLSearchParams({
+      card_number:              payload.card_number,
+      icon_image:               payload.icon_image,
+      card_type:                String(payload.card_type),
+      default_payment_category: payload.default_payment_category,
+    }).toString();
     console.log("%c[PaymentMethods] POST /userpaymentmethod/addPaymentMethodv1 →", "color:#06b6d4;font-weight:bold", payload);
     try {
-      const res = await fetch(`${BASE_URL}/userpaymentmethod/addPaymentMethodv1`, {
+      const res = await fetch(`${BASE_URL}/userpaymentmethod/addPaymentMethodv1?${addPayQuery}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload),
@@ -649,6 +658,10 @@ export const DataProvider = ({ children }) => {
         const stableEntity = {
           ...entity,
           id: resolvedId || entity?.id || null,
+          // Preserve icon_image from payload when the API response omits it
+          icon_image: (entity.icon_image != null && entity.icon_image !== "")
+            ? entity.icon_image
+            : payload.icon_image,
         };
         console.log("%c[PaymentMethods] addApiPaymentMethod entity:", "color:#06b6d4", stableEntity, "resolvedId:", resolvedId);
         setApiPaymentMethods(prev => {
@@ -679,9 +692,17 @@ export const DataProvider = ({ children }) => {
     const token = localStorage.getItem("token");
     if (!token) return { ok: false, data: null, error: "Missing token" };
     const payload = { id, card_number: name.trim(), icon_image: logoUrl || "", card_type: inferCardTypeInt(name.trim()), default_payment_category: expenseType || "" };
+    // Send as both query-string AND JSON body so the backend reads it regardless of its parser
+    const updatePayQuery = new URLSearchParams({
+      id:                       String(id),
+      card_number:              payload.card_number,
+      icon_image:               payload.icon_image,
+      card_type:                String(payload.card_type),
+      default_payment_category: payload.default_payment_category,
+    }).toString();
     console.log("%c[PaymentMethods] POST /userpaymentmethod/updatePaymentMethodv1 →", "color:#f59e0b;font-weight:bold", payload);
     try {
-      const res = await fetch(`${BASE_URL}/userpaymentmethod/updatePaymentMethodv1`, {
+      const res = await fetch(`${BASE_URL}/userpaymentmethod/updatePaymentMethodv1?${updatePayQuery}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload),

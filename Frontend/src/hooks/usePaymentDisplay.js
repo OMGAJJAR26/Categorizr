@@ -12,7 +12,8 @@ const Creditdebitcardicon = "/payment-logos/Creditdebitcardicon.jpg";
 const isValidUrl = (u) => {
   if (!u || typeof u !== "string") return false;
   const s = u.trim();
-  return /^https?:\/\//i.test(s) || s.startsWith("data:image");
+  // Accept absolute URLs, data URIs, and stable /payment-logos/ public-folder paths
+  return /^https?:\/\//i.test(s) || s.startsWith("data:image") || s.startsWith("/payment-logos/");
 };
 
 const LOGO_MAP = {

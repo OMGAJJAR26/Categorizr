@@ -2229,14 +2229,22 @@ const sanitizeTaxRate = (raw) => {
           !hiddenPaymentMethods.has(m.card_number) &&
           !isCashVariant(m.card_number)
         )
-        .map(m => ({
-          key: `api_${getApiEntityId(m)}`,
-          name: m.card_number,
-          logo: getPayLogoResolved(m.card_number),
-          isReceiptItem: false,
-          isApiItem: true,
-          apiId: getApiEntityId(m),
-        }));
+        .map(m => {
+          // Prefer icon_image stored on the API (when it's from the stable /payment-logos/ folder
+          // or an absolute URL); fall back to keyword-based local detection for older entries.
+          const storedLogo = (m.icon_image || "").trim();
+          const logo = (storedLogo.startsWith("/payment-logos/") || /^https?:\/\//i.test(storedLogo))
+            ? storedLogo
+            : getPayLogoResolved(m.card_number);
+          return {
+            key: `api_${getApiEntityId(m)}`,
+            name: m.card_number,
+            logo,
+            isReceiptItem: false,
+            isApiItem: true,
+            apiId: getApiEntityId(m),
+          };
+        });
       const allWithApi = [...rItems, ...cItems, ...apiItems];
       const existingAfterApi = new Set(allWithApi.map((p) => (p.name || "").toLowerCase()));
       const defaultItems = SETTINGS_DEFAULT_PAYMENT_METHODS
