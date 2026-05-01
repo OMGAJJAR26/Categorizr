@@ -206,6 +206,32 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const TAX_RATE_MAX   = 99.999;
   const TAX_NUMBER_MAX = 35;
 
+  // IMPORTANT: allTaxTypes must be declared HERE — before isDuplicateTaxName and taxNameError —
+  // to avoid a Temporal Dead Zone crash when the user types in the tax name field.
+  // (useMemo deps taxData/localTaxTypes/taxDropdownKey are all initialized above.)
+  const allTaxTypes = useMemo(() => {
+    const taxMap = new Map();
+    const addToMap = (tax) => {
+      const name = (tax.tax_name || "").toString().trim();
+      const rate = (tax.tax_rate || "").toString().trim();
+      if (name && rate && !name.toLowerCase().includes("tip")) {
+        const key = `${name}|${rate}`;
+        if (!taxMap.has(key)) {
+          taxMap.set(key, {
+            tax_name: name,
+            tax_rate: rate,
+            tax_number: tax.tax_number || "",
+            id: tax.id || 0,
+            fk_user_id: tax.fk_user_id || 0,
+          });
+        }
+      }
+    };
+    if (Array.isArray(taxData)) taxData.forEach(addToMap);
+    if (Array.isArray(localTaxTypes)) localTaxTypes.forEach(addToMap);
+    return Array.from(taxMap.values());
+  }, [taxData, localTaxTypes, taxDropdownKey]);
+
   const isDuplicateTaxName = (name, excludeId = null) =>
     allTaxTypes.some(t =>
       t.tax_name.trim().toLowerCase() === name.trim().toLowerCase() &&
@@ -216,6 +242,35 @@ const [localMerchants, setLocalMerchants] = useState([]);
     const str = String(val).replace(/%/g, "").trim();
     const dot = str.indexOf(".");
     return dot !== -1 && str.length - dot - 1 > 3;
+  };
+
+  // ── Tax rate input helpers ────────────────────────────────────────────────
+  // Blocks letters and symbols at the keyboard level (paste handled by sanitizeTaxRate)
+  const preventInvalidTaxRateKey = (e) => {
+    if (e.ctrlKey || e.metaKey) return;
+    const allowed = ["Backspace","Delete","ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Tab","Enter","Home","End"];
+    if (allowed.includes(e.key)) return;
+    if (/^\d$/.test(e.key)) return;
+    if (e.key === ".") return;
+    e.preventDefault();
+  };
+
+  // Sanitizes pasted / typed values: digits + 1 decimal, max 2 whole digits,
+  // max 3 decimal places, value capped at 99.999.
+  const sanitizeTaxRate = (raw) => {
+    let v = String(raw).replace(/%/g, "").replace(/[^\d.]/g, "");
+    const dotIdx = v.indexOf(".");
+    if (dotIdx !== -1) {
+      // Remove any extra dots after the first
+      v = v.slice(0, dotIdx + 1) + v.slice(dotIdx + 1).replace(/\./g, "");
+      const [whole, dec] = v.split(".");
+      v = whole.slice(0, 2) + "." + dec.slice(0, 3);
+    } else {
+      v = v.slice(0, 2);
+    }
+    const num = parseFloat(v);
+    if (!isNaN(num) && num > 99.999) v = "99.999";
+    return v;
   };
 
   const taxNameError = newTaxName.length > TAX_NAME_MAX
@@ -481,39 +536,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b));
 
-  // Use taxData from DataContext (fetched from /tax/getTax API)
-  // Combine with receiptTaxValues for backward compatibility, plus any taxes added this session
-  const allTaxTypes = useMemo(() => {
-    const taxMap = new Map();
-
-    const addToMap = (tax) => {
-      console.log("Processing tax for dropdown:", tax);
-      const name = (tax.tax_name || "").toString().trim();
-      const rate = (tax.tax_rate || "").toString().trim();
-      if (name && rate && !name.toLowerCase().includes("tip")) {
-        const key = `${name}|${rate}`;
-        if (!taxMap.has(key)) {
-          console.log("Adding tax to map:", { name, rate, tax_number: tax.tax_number, id: tax.id, fk_user_id: tax.fk_user_id });
-          taxMap.set(key, {
-            tax_name: name,
-            tax_rate: rate,
-            tax_number: tax.tax_number || "",
-            id: tax.id || 0,
-            fk_user_id: tax.fk_user_id || 0,
-          });
-        }
-      }
-    };
-
-    // Add taxes from taxData API (saved tax definitions)
-    if (Array.isArray(taxData)) taxData.forEach(addToMap);
-
-    // Add locally-added taxes (created during this modal session) to ensure they always
-    // appear even if the context taxData is reset by a background refreshData() call.
-    if (Array.isArray(localTaxTypes)) localTaxTypes.forEach(addToMap);
-
-    return Array.from(taxMap.values());
-  }, [taxData, localTaxTypes, taxDropdownKey]);
+  // allTaxTypes is declared earlier (before isDuplicateTaxName) to avoid a TDZ crash.
 
   const handleDragOver = useCallback((e) => {
     e.preventDefault();
@@ -6341,14 +6364,8 @@ const handleSelectLogo = (index) => {
                         value={taxRateFocused ? newTaxRate : (newTaxRate !== "" ? `${newTaxRate}%` : "")}
                         onFocus={() => setTaxRateFocused(true)}
                         onBlur={() => setTaxRateFocused(false)}
-                        onChange={e => {
-                          const val = e.target.value.replace(/%/g, "");
-                          if (val && parseFloat(val) > TAX_RATE_MAX) {
-                            setToast({ isVisible: true, message: `Tax Rate cannot exceed ${TAX_RATE_MAX}%`, type: "error" });
-                            return;
-                          }
-                          setNewTaxRate(val);
-                        }}
+                        onKeyDown={preventInvalidTaxRateKey}
+                        onChange={e => setNewTaxRate(sanitizeTaxRate(e.target.value))}
                         placeholder="Enter Tax Rate (%)"
                       />
                       {taxRateError && (

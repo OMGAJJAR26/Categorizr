@@ -461,7 +461,7 @@ const ManageModal = ({ type, onClose }) => {
             <div className="flex flex-col gap-2">
               <div className="flex gap-2">
                 <input className={mInput} placeholder="Tax name (e.g. GST)" value={addTaxVal.tax_name} onChange={e => setAddTaxVal(p => ({ ...p, tax_name: e.target.value }))} />
-                <input className={`${mInput} max-w-[80px]`} placeholder="Tax Rate %" value={addTaxVal.tax_rate} onChange={e => setAddTaxVal(p => ({ ...p, tax_rate: e.target.value }))} />
+                <input className={`${mInput} max-w-[80px]`} placeholder="Tax Rate %" value={addTaxVal.tax_rate} onKeyDown={preventInvalidTaxRateKey} onChange={e => setAddTaxVal(p => ({ ...p, tax_rate: sanitizeTaxRate(e.target.value) }))} />
               </div>
               <div className="flex gap-2">
                 <input className={mInput} placeholder="Tax number (optional)" value={addTaxVal.tax_number} onChange={e => setAddTaxVal(p => ({ ...p, tax_number: e.target.value }))} />
@@ -504,7 +504,7 @@ const ManageModal = ({ type, onClose }) => {
                     <div className="flex flex-col gap-2 bg-blue-50 border border-blue-200 rounded-xl p-3">
                       <div className="flex gap-2">
                         <input className={mInput} value={editTaxVal.tax_name} onChange={e => setEditTaxVal(p => ({ ...p, tax_name: e.target.value }))} placeholder="Name" />
-                        <input className={`${mInput} max-w-[80px]`} value={editTaxVal.tax_rate} onChange={e => setEditTaxVal(p => ({ ...p, tax_rate: e.target.value }))} placeholder="Tax Rate %" />
+                        <input className={`${mInput} max-w-[80px]`} value={editTaxVal.tax_rate} onKeyDown={preventInvalidTaxRateKey} onChange={e => setEditTaxVal(p => ({ ...p, tax_rate: sanitizeTaxRate(e.target.value) }))} placeholder="Tax Rate %" />
                       </div>
                       <div className="flex gap-2">
                         <input className={mInput} value={editTaxVal.tax_number} onChange={e => setEditTaxVal(p => ({ ...p, tax_number: e.target.value }))} placeholder="Tax number (optional)" />
@@ -1439,6 +1439,33 @@ const hasMoreThan3Decimals = (val) => {
   return dot !== -1 && str.length - dot - 1 > 3;
 };
 
+// ── Tax-rate input helpers (shared by both ManageModal and ReceiptInfoInline) ──
+const preventInvalidTaxRateKey = (e) => {
+  if (e.ctrlKey || e.metaKey) return;
+  const allowed = ["Backspace","Delete","ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Tab","Enter","Home","End"];
+  if (allowed.includes(e.key)) return;
+  if (/^\d$/.test(e.key)) return;
+  if (e.key === ".") return;
+  e.preventDefault();
+};
+
+// Cleans pasted / typed tax-rate values: only digits + one dot,
+// max 2 whole digits, max 3 decimal places, value capped at 99.999.
+const sanitizeTaxRate = (raw) => {
+  let v = String(raw).replace(/%/g, "").replace(/[^\d.]/g, "");
+  const dotIdx = v.indexOf(".");
+  if (dotIdx !== -1) {
+    v = v.slice(0, dotIdx + 1) + v.slice(dotIdx + 1).replace(/\./g, "");
+    const [whole, dec] = v.split(".");
+    v = whole.slice(0, 2) + "." + dec.slice(0, 3);
+  } else {
+    v = v.slice(0, 2);
+  }
+  const num = parseFloat(v);
+  if (!isNaN(num) && num > 99.999) v = "99.999";
+  return v;
+};
+
   const expenseCategoryExists = (name, excludeKey = null) => {
     const normalized = (name || "").trim().toLowerCase();
     if (!normalized) return false;
@@ -2272,7 +2299,7 @@ const hasMoreThan3Decimals = (val) => {
             <div className="flex gap-2">
               <input className={mInput} placeholder="Enter Tax Name (e.g. GST, HST, VAT)" value={addTaxVal.tax_name} onChange={e => setAddTaxVal(p => ({ ...p, tax_name: e.target.value }))} maxLength={TAX_NAME_MAX} />
               <div className="relative max-w-[100px]">
-                <input className={`${mInput} pr-6`} placeholder="Rate" value={addTaxVal.tax_rate} onChange={e => setAddTaxVal(p => ({ ...p, tax_rate: e.target.value.replace(/%/g, "") }))} />
+                <input className={`${mInput} pr-6`} placeholder="Rate" value={addTaxVal.tax_rate} onKeyDown={preventInvalidTaxRateKey} onChange={e => setAddTaxVal(p => ({ ...p, tax_rate: sanitizeTaxRate(e.target.value) }))} />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-medium">%</span>
               </div>
             </div>
@@ -2393,7 +2420,7 @@ const hasMoreThan3Decimals = (val) => {
                         <div className="flex gap-2">
                           <input className={mInput} value={editTaxVal.tax_name} onChange={e => setEditTaxVal(p => ({ ...p, tax_name: e.target.value }))} placeholder="Tax Name (e.g. GST)" maxLength={TAX_NAME_MAX} />
                           <div className="relative max-w-[100px]">
-                            <input className={`${mInput} pr-6`} value={editTaxVal.tax_rate} onChange={e => setEditTaxVal(p => ({ ...p, tax_rate: e.target.value.replace(/%/g, "") }))} placeholder="Rate" />
+                            <input className={`${mInput} pr-6`} value={editTaxVal.tax_rate} onKeyDown={preventInvalidTaxRateKey} onChange={e => setEditTaxVal(p => ({ ...p, tax_rate: sanitizeTaxRate(e.target.value) }))} placeholder="Rate" />
                             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-medium">%</span>
                           </div>
                         </div>
