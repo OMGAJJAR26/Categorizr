@@ -34,15 +34,18 @@ import {
   Plus,
 } from "lucide-react";
 
-import visaLogo            from "../assets/payment/Visa.png";
-import mastercardLogo      from "../assets/payment/MasterCard.png";
-import amexLogo            from "../assets/payment/AmericanExpress.webp";
-import paypalLogo          from "../assets/payment/PayPal.png";
-import cashLogo            from "../assets/payment/Cash.jpg";
-import debitLogo           from "../assets/payment/DebitCard.webp";
-import dinersLogo          from "../assets/payment/DinersClub.png";
-import discoverLogo        from "../assets/payment/discover.png";
-import creditDebitCardIcon from "../assets/payment/Creditdebitcardicon.jpg";
+// Payment logos are served from /public/payment-logos/ so their URLs are
+// identical in dev, staging, and production — no Vite content-hash, no
+// environment mismatch when the path is stored as icon_image on the server.
+const visaLogo            = "/payment-logos/Visa.png";
+const mastercardLogo      = "/payment-logos/MasterCard.png";
+const amexLogo            = "/payment-logos/AmericanExpress.webp";
+const paypalLogo          = "/payment-logos/PayPal.png";
+const cashLogo            = "/payment-logos/Cash.jpg";
+const debitLogo           = "/payment-logos/DebitCard.webp";
+const dinersLogo          = "/payment-logos/DinersClub.png";
+const discoverLogo        = "/payment-logos/discover.png";
+const creditDebitCardIcon = "/payment-logos/Creditdebitcardicon.jpg";
 
 import { QRCodeSVG } from "qrcode.react";
 import Header from "../components/Header";
@@ -1153,7 +1156,15 @@ const ReceiptInfoInline = ({ type }) => {
   useEffect(() => { if (type === "merchants") fetchApiMerchants(); }, [type]);
   useEffect(() => { if (type === "payments") fetchApiPaymentMethods(); }, [type]);
   useEffect(() => { if (type === "categories") fetchApiExpenseCategories(); }, [type]);
-  useEffect(() => { setShowAddForm(false); }, [type]);
+  useEffect(() => { 
+    setShowAddForm(false); 
+    setAddVal("");
+    setAddTaxVal({ tax_name: "", tax_rate: "", tax_number: "" });
+    setNewMerchantName(""); setAddLogoOpts([]); setAddLogoSel(null);
+    setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
+    setPayEditMode(null);
+    setEditTaxKey(null);
+  }, [type]);
 
   const cfg    = MODAL_CFG[type];
   const colors = COLOR_MAP[cfg.color];
@@ -1567,7 +1578,6 @@ const sanitizeTaxRate = (raw) => {
       try {
         await addTax({ tax_name: n, tax_rate: r, tax_number: addTaxVal.tax_number.trim(), fk_user_id: localStorage.getItem("fk_user_id") || "" });
         setAddTaxVal({ tax_name: "", tax_rate: "", tax_number: "" });
-        setShowAddForm(false);
         toast("success", "Tax Type Added");
       } catch (e) { toast("error", e.message || "Failed."); }
       return;
@@ -1586,7 +1596,6 @@ const sanitizeTaxRate = (raw) => {
       const addMerchantResult = await addApiMerchant(name, selectedUrl || "");
       if (!addMerchantResult?.ok) throw new Error(addMerchantResult?.error || "Failed to add merchant");
       setNewMerchantName(""); setAddLogoOpts([]); setAddLogoSel(null);
-      setShowAddForm(false);
       toast("success", "Merchant Added");
       return;
     }
@@ -1677,7 +1686,6 @@ const sanitizeTaxRate = (raw) => {
       const addCategoryResult = await addApiExpenseCategory(catName);
       if (!addCategoryResult?.ok) throw new Error(addCategoryResult?.error || "Failed to add expense category");
       setAddVal("");
-      setShowAddForm(false);
       toast("success", "Expense Category Added");
       return;
     }
@@ -2278,7 +2286,15 @@ const sanitizeTaxRate = (raw) => {
       <div className="flex justify-end">
         <button
           type="button"
-          onClick={() => { setShowAddForm((prev) => !prev); setPayEditMode(null); setEditTaxKey(null); }}
+          onClick={() => {
+            if (showAddForm) {
+              setAddVal("");
+              setAddTaxVal({ tax_name: "", tax_rate: "", tax_number: "" });
+              setNewMerchantName(""); setAddLogoOpts([]); setAddLogoSel(null);
+              setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
+            }
+            setShowAddForm((prev) => !prev); setPayEditMode(null); setEditTaxKey(null);
+          }}
           className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-semibold transition-all ${
             showAddForm
               ? "bg-slate-100 text-slate-700 hover:bg-slate-200"

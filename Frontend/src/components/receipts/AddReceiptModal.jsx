@@ -10,15 +10,15 @@ import MerchantAvatar from "../MerchantAvatar";
 import { parseReceipt, pdfToImage, canvasToBlob } from "../../utils/receiptParser";
 
 // Payment method logos (for Add Payment Method modal card type list)
-import Visa from "../../assets/payment/Visa.png";
-import MasterCard from "../../assets/payment/MasterCard.png";
-import PayPal from "../../assets/payment/PayPal.png";
-import AmericanExpress from "../../assets/payment/AmericanExpress.webp";
-import Discover from "../../assets/payment/discover.png";
-import DinersClub from "../../assets/payment/DinersClub.png";
-import Cash from "../../assets/payment/Cash.jpg";
-import DebitCard from "../../assets/payment/DebitCard.webp";
-import Creditdebitcardicon from "../../assets/payment/Creditdebitcardicon.jpg";
+const Visa              = "/payment-logos/Visa.png";
+const MasterCard        = "/payment-logos/MasterCard.png";
+const PayPal            = "/payment-logos/PayPal.png";
+const AmericanExpress   = "/payment-logos/AmericanExpress.webp";
+const Discover          = "/payment-logos/discover.png";
+const DinersClub        = "/payment-logos/DinersClub.png";
+const Cash              = "/payment-logos/Cash.jpg";
+const DebitCard         = "/payment-logos/DebitCard.webp";
+const Creditdebitcardicon = "/payment-logos/Creditdebitcardicon.jpg";
 
 // Tag icons
 import flagDeselect from "../../assets/receipttags/flag_deselect.png";
