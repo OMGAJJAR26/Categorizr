@@ -180,12 +180,23 @@ const ManageModal = ({ type, onClose }) => {
   const [editReceiptVal, setEditReceiptVal]     = useState("");
   const [msg, setMsg]                           = useState(null);
 
+  const TAX_NAME_MAX   = 15;
+  const TAX_RATE_MAX   = 99.999;
+  const TAX_NUMBER_MAX = 35;
+
+  const [addTaxNameOverflow, setAddTaxNameOverflow]   = useState(false);
+  const [addTaxNumberOverflow, setAddTaxNumberOverflow] = useState(false);
+  const [editTaxNameOverflow, setEditTaxNameOverflow]  = useState(false);
+  const [editTaxNumberOverflow, setEditTaxNumberOverflow] = useState(false);
+
   const toast = (t, text) => { setMsg({ type: t, text }); setTimeout(() => setMsg(null), 3000); };
 
   const handleAdd = async () => {
     if (type === "taxes") {
       const n = addTaxVal.tax_name.trim(), r = addTaxVal.tax_rate.toString().trim();
       if (!n || !r) return toast("error", "Name and rate are required.");
+      const dupTax = (taxData || []).some(t => (t.tax_name || "").trim().toLowerCase() === n.toLowerCase());
+      if (dupTax) return toast("error", "Tax Type already exists");
       try {
         const fk_user_id = localStorage.getItem("fk_user_id") || "";
         await addTax({ tax_name: n, tax_rate: r, tax_number: addTaxVal.tax_number.trim(), fk_user_id });
@@ -229,10 +240,12 @@ const ManageModal = ({ type, onClose }) => {
     if (type === "taxes") {
       const n = editTaxVal.tax_name.trim(), r = editTaxVal.tax_rate.toString().trim();
       if (!n || !r) return;
-      try { 
+      const dupTax = (taxData || []).some(t => t.id !== item.key && (t.tax_name || "").trim().toLowerCase() === n.toLowerCase());
+      if (dupTax) return toast("error", "Tax Type already exists");
+      try {
         const tObj = taxData.find(t => t.id === item.key);
-        await updateTax({ ...tObj, tax_name: n, tax_rate: r, tax_number: editTaxVal.tax_number.trim(), is_default_tax: parseInt(tObj?.is_default_tax) || 0, is_tips: parseInt(tObj?.is_tips) || 0 }); 
-        setEditTaxKey(null); 
+        await updateTax({ ...tObj, tax_name: n, tax_rate: r, tax_number: editTaxVal.tax_number.trim(), is_default_tax: parseInt(tObj?.is_default_tax) || 0, is_tips: parseInt(tObj?.is_tips) || 0 });
+        setEditTaxKey(null);
       }
       catch (e) { toast("error", e.message || "Failed."); }
       return;
@@ -353,6 +366,13 @@ const ManageModal = ({ type, onClose }) => {
   const handleReceiptEdit = async (key, currentName) => {
     const newName = editReceiptVal.trim();
     if (!newName || newName === currentName) { setEditReceiptKey(null); return; }
+    const allReceiptItems = buildReceiptItems();
+    const allCustomItems = buildCustomItems();
+    const dupCheck = [...allReceiptItems, ...allCustomItems].some(i => i.key !== key && i.name.toLowerCase() === newName.toLowerCase());
+    if (dupCheck) {
+      if (type === "merchants") return toast("error", "Merchant already exists");
+      if (type === "categories") return toast("error", "Expense Category already exists");
+    }
     if (type === "merchants")  {
       try {
         const apiMatch = (apiMerchants || []).find(
@@ -463,11 +483,25 @@ const ManageModal = ({ type, onClose }) => {
           {type === "taxes" ? (
             <div className="flex flex-col gap-2">
               <div className="flex gap-2">
-                <input className={mInput} placeholder="Tax name (e.g. GST)" value={addTaxVal.tax_name} onChange={e => setAddTaxVal(p => ({ ...p, tax_name: e.target.value }))} />
+                <input className={mInput} placeholder="Tax name (e.g. GST)" value={addTaxVal.tax_name}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (v.length > TAX_NAME_MAX) { setAddTaxNameOverflow(true); return; }
+                    setAddTaxNameOverflow(false);
+                    setAddTaxVal(p => ({ ...p, tax_name: v }));
+                  }} />
                 <input className={`${mInput} max-w-[80px]`} placeholder="Tax Rate %" value={addTaxVal.tax_rate} onKeyDown={preventInvalidTaxRateKey} onChange={e => setAddTaxVal(p => ({ ...p, tax_rate: sanitizeTaxRate(e.target.value) }))} />
               </div>
-              <div className="flex gap-2">
-                <input className={mInput} placeholder="Tax number (optional)" value={addTaxVal.tax_number} onChange={e => setAddTaxVal(p => ({ ...p, tax_number: e.target.value }))} />
+              {addTaxNameOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NAME_MAX} exceeded</p>}
+              <input className={mInput} placeholder="Tax number (optional)" value={addTaxVal.tax_number}
+                onChange={e => {
+                  const v = e.target.value;
+                  if (v.length > TAX_NUMBER_MAX) { setAddTaxNumberOverflow(true); return; }
+                  setAddTaxNumberOverflow(false);
+                  setAddTaxVal(p => ({ ...p, tax_number: v }));
+                }} />
+              {addTaxNumberOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NUMBER_MAX} exceeded</p>}
+              <div className="flex justify-end">
                 <button onClick={handleAdd} className={`px-4 py-2 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn}`}>Add</button>
               </div>
             </div>
@@ -506,14 +540,28 @@ const ManageModal = ({ type, onClose }) => {
                   {isEd ? (
                     <div className="flex flex-col gap-2 bg-blue-50 border border-blue-200 rounded-xl p-3">
                       <div className="flex gap-2">
-                        <input className={mInput} value={editTaxVal.tax_name} onChange={e => setEditTaxVal(p => ({ ...p, tax_name: e.target.value }))} placeholder="Name" />
+                        <input className={mInput} value={editTaxVal.tax_name}
+                          onChange={e => {
+                            const v = e.target.value;
+                            if (v.length > TAX_NAME_MAX) { setEditTaxNameOverflow(true); return; }
+                            setEditTaxNameOverflow(false);
+                            setEditTaxVal(p => ({ ...p, tax_name: v }));
+                          }} placeholder="Name" />
                         <input className={`${mInput} max-w-[80px]`} value={editTaxVal.tax_rate} onKeyDown={preventInvalidTaxRateKey} onChange={e => setEditTaxVal(p => ({ ...p, tax_rate: sanitizeTaxRate(e.target.value) }))} placeholder="Tax Rate %" />
                       </div>
+                      {editTaxNameOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NAME_MAX} exceeded</p>}
                       <div className="flex gap-2">
-                        <input className={mInput} value={editTaxVal.tax_number} onChange={e => setEditTaxVal(p => ({ ...p, tax_number: e.target.value }))} placeholder="Tax number (optional)" />
+                        <input className={mInput} value={editTaxVal.tax_number}
+                          onChange={e => {
+                            const v = e.target.value;
+                            if (v.length > TAX_NUMBER_MAX) { setEditTaxNumberOverflow(true); return; }
+                            setEditTaxNumberOverflow(false);
+                            setEditTaxVal(p => ({ ...p, tax_number: v }));
+                          }} placeholder="Tax number (optional)" />
                         <button onClick={() => handleEdit(tax.id)} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg">Save</button>
                         <button onClick={() => setEditTaxKey(null)} className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-semibold rounded-lg">Cancel</button>
                       </div>
+                      {editTaxNumberOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NUMBER_MAX} exceeded</p>}
                     </div>
                   ) : (
                     <ItemRow name={tax.tax_name} sublabel={tax.tax_number ? `#${tax.tax_number}` : undefined} badge={`${tax.tax_rate}%`} badgeCls={colors.badge}
@@ -1213,6 +1261,12 @@ const ReceiptInfoInline = ({ type }) => {
   // Tax edit state
   const [editTaxKey, setEditTaxKey] = useState(null);
   const [editTaxVal, setEditTaxVal] = useState({ tax_name: "", tax_rate: "", tax_number: "" });
+
+  // Tax field overflow state (ReceiptInfoInline)
+  const [addTaxNameOverflow, setAddTaxNameOverflow]     = useState(false);
+  const [addTaxNumberOverflow, setAddTaxNumberOverflow]   = useState(false);
+  const [editTaxNameOverflow, setEditTaxNameOverflow]   = useState(false);
+  const [editTaxNumberOverflow, setEditTaxNumberOverflow] = useState(false);
 
   // Merchant confirmation dialog state
   const [showMerchantEditConfirm, setShowMerchantEditConfirm] = useState(false);
@@ -2064,6 +2118,9 @@ const sanitizeTaxRate = (raw) => {
     }
 
     if (type === "categories") {
+      if (buildAllItems().some(i => i.name.toLowerCase() === newName.toLowerCase() && i.key !== item.key)) {
+        return toast("error", "Expense Category already exists");
+      }
       setPendingCategoryEdit({ item, newName });
       setShowCategoryEditConfirm(true);
       return;
@@ -2321,17 +2378,31 @@ const sanitizeTaxRate = (raw) => {
         {type === "taxes" && (
           <>
             <div className="flex gap-2">
-              <input className={mInput} placeholder="Enter Tax Name (e.g. GST, HST, VAT)" value={addTaxVal.tax_name} onChange={e => setAddTaxVal(p => ({ ...p, tax_name: e.target.value }))} maxLength={TAX_NAME_MAX} />
+              <input className={mInput} placeholder="Enter Tax Name (e.g. GST, HST, VAT)" value={addTaxVal.tax_name}
+                onChange={e => {
+                  const v = e.target.value;
+                  if (v.length > TAX_NAME_MAX) { setAddTaxNameOverflow(true); return; }
+                  setAddTaxNameOverflow(false);
+                  setAddTaxVal(p => ({ ...p, tax_name: v }));
+                }} />
               <div className="relative max-w-[100px]">
                 <input className={`${mInput} pr-6`} placeholder="Rate" value={addTaxVal.tax_rate} onKeyDown={preventInvalidTaxRateKey} onChange={e => setAddTaxVal(p => ({ ...p, tax_rate: sanitizeTaxRate(e.target.value) }))} />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-medium">%</span>
               </div>
             </div>
-            <div className="flex gap-2 items-start">
-              <div className="flex-1">
-                <input className={mInput} placeholder="Tax Number" value={addTaxVal.tax_number} onChange={e => setAddTaxVal(p => ({ ...p, tax_number: e.target.value }))} maxLength={TAX_NUMBER_MAX} />
-                <p className="mt-1 text-xs text-slate-400">* Required</p>
-              </div>
+            {addTaxNameOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NAME_MAX} exceeded</p>}
+            <div className="flex flex-col gap-1">
+              <input className={mInput} placeholder="Tax Number" value={addTaxVal.tax_number}
+                onChange={e => {
+                  const v = e.target.value;
+                  if (v.length > TAX_NUMBER_MAX) { setAddTaxNumberOverflow(true); return; }
+                  setAddTaxNumberOverflow(false);
+                  setAddTaxVal(p => ({ ...p, tax_number: v }));
+                }} />
+              <p className="mt-1 text-xs text-slate-400">* Required</p>
+              {addTaxNumberOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NUMBER_MAX} exceeded</p>}
+            </div>
+            <div className="flex justify-end">
               <button type="button" onClick={handleAdd} className={`px-4 py-2.5 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn}`}>Add</button>
             </div>
           </>
@@ -2442,16 +2513,30 @@ const sanitizeTaxRate = (raw) => {
                     {isEd ? (
                       <div className="flex flex-col gap-2 w-full">
                         <div className="flex gap-2">
-                          <input className={mInput} value={editTaxVal.tax_name} onChange={e => setEditTaxVal(p => ({ ...p, tax_name: e.target.value }))} placeholder="Tax Name (e.g. GST)" maxLength={TAX_NAME_MAX} />
+                          <input className={mInput} value={editTaxVal.tax_name}
+                            onChange={e => {
+                              const v = e.target.value;
+                              if (v.length > TAX_NAME_MAX) { setEditTaxNameOverflow(true); return; }
+                              setEditTaxNameOverflow(false);
+                              setEditTaxVal(p => ({ ...p, tax_name: v }));
+                            }} placeholder="Tax Name (e.g. GST)" />
                           <div className="relative max-w-[100px]">
                             <input className={`${mInput} pr-6`} value={editTaxVal.tax_rate} onKeyDown={preventInvalidTaxRateKey} onChange={e => setEditTaxVal(p => ({ ...p, tax_rate: sanitizeTaxRate(e.target.value) }))} placeholder="Rate" />
                             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-medium">%</span>
                           </div>
                         </div>
+                        {editTaxNameOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NAME_MAX} exceeded</p>}
                         <div className="flex gap-2 items-start">
                           <div className="flex-1">
-                            <input className={mInput} value={editTaxVal.tax_number} onChange={e => setEditTaxVal(p => ({ ...p, tax_number: e.target.value }))} placeholder="Tax Number" maxLength={TAX_NUMBER_MAX} />
+                            <input className={mInput} value={editTaxVal.tax_number}
+                              onChange={e => {
+                                const v = e.target.value;
+                                if (v.length > TAX_NUMBER_MAX) { setEditTaxNumberOverflow(true); return; }
+                                setEditTaxNumberOverflow(false);
+                                setEditTaxVal(p => ({ ...p, tax_number: v }));
+                              }} placeholder="Tax Number" />
                             <p className="mt-1 text-xs text-slate-400">* Required</p>
+                            {editTaxNumberOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NUMBER_MAX} exceeded</p>}
                           </div>
                           <button type="button" onClick={async () => {
                             const n = editTaxVal.tax_name.trim(), r = editTaxVal.tax_rate.toString().trim(), num = editTaxVal.tax_number.trim();

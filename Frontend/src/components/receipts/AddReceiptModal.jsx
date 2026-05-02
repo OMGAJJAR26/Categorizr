@@ -206,6 +206,9 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const TAX_RATE_MAX   = 99.999;
   const TAX_NUMBER_MAX = 35;
 
+  const [taxNameOverflow, setTaxNameOverflow]     = useState(false);
+  const [taxNumberOverflow, setTaxNumberOverflow] = useState(false);
+
   // IMPORTANT: allTaxTypes must be declared HERE — before isDuplicateTaxName and taxNameError —
   // to avoid a Temporal Dead Zone crash when the user types in the tax name field.
   // (useMemo deps taxData/localTaxTypes/taxDropdownKey are all initialized above.)
@@ -217,18 +220,20 @@ const [localMerchants, setLocalMerchants] = useState([]);
       if (name && rate && !name.toLowerCase().includes("tip")) {
         const key = `${name}|${rate}`;
         if (!taxMap.has(key)) {
-          taxMap.set(key, {
-            tax_name: name,
-            tax_rate: rate,
-            tax_number: tax.tax_number || "",
-            id: tax.id || 0,
-            fk_user_id: tax.fk_user_id || 0,
-          });
+          taxMap.set(key, { tax_name: name, tax_rate: rate, tax_number: tax.tax_number || "", id: tax.id || 0, fk_user_id: tax.fk_user_id || 0 });
         }
       }
     };
+    // Primary source: taxData reflects server state
     if (Array.isArray(taxData)) taxData.forEach(addToMap);
-    if (Array.isArray(localTaxTypes)) localTaxTypes.forEach(addToMap);
+    // Secondary: localTaxTypes, but ONLY for names not in taxData
+    // (prevents stale/deleted entries from causing false "already exists")
+    const taxDataNames = new Set((taxData || []).map(t => (t.tax_name || "").trim().toLowerCase()));
+    if (Array.isArray(localTaxTypes)) {
+      localTaxTypes
+        .filter(t => !taxDataNames.has((t.tax_name || "").trim().toLowerCase()))
+        .forEach(addToMap);
+    }
     return Array.from(taxMap.values());
   }, [taxData, localTaxTypes, taxDropdownKey]);
 
@@ -273,20 +278,20 @@ const [localMerchants, setLocalMerchants] = useState([]);
     return v;
   };
 
-  const taxNameError = newTaxName.length > TAX_NAME_MAX
-    ? `Tax Name cannot exceed ${TAX_NAME_MAX} characters (${newTaxName.length}/${TAX_NAME_MAX})`
+  const taxNameError = taxNameOverflow
+    ? `Character limit of ${TAX_NAME_MAX} exceeded`
     : (newTaxName.trim() && isDuplicateTaxName(newTaxName.trim(), editingTaxId || null)
       ? `"${newTaxName.trim()}" already exists. Please use a different name.`
       : "");
 
   const taxRateError = newTaxRate !== "" && parseFloat(newTaxRate) > TAX_RATE_MAX
-    ? `Tax Rate cannot exceed ${TAX_RATE_MAX}%`
+    ? `Maximum tax rate of ${TAX_RATE_MAX}% exceeded`
     : (newTaxRate !== "" && hasMoreThan3Decimals(newTaxRate)
       ? "Tax Rate can have a maximum of 3 decimal places (e.g. 10.894%)"
       : "");
 
-  const taxNumberError = newTaxNumber.length > TAX_NUMBER_MAX
-    ? `Tax Number cannot exceed ${TAX_NUMBER_MAX} characters (${newTaxNumber.length}/${TAX_NUMBER_MAX})`
+  const taxNumberError = taxNumberOverflow
+    ? `Character limit of ${TAX_NUMBER_MAX} exceeded`
     : null;
   const taxFormHasError = !!(taxNameError || taxRateError || taxNumberError);
 
@@ -1171,12 +1176,10 @@ const handleFieldChange = (field, value) => {
     console.log("Tax Number:", newTaxNumber);
     console.log("Current step:", step);
 
+    if (isSavingTax) return;
+
     if (!newTaxName.trim()) {
       setError("Please enter Tax Name");
-      return;
-    }
-    if ((formData.receipt_tax_values || []).length >= MAX_TAX_TYPES) {
-      setError("You can only add up to 2 tax types");
       return;
     }
     if (!newTaxRate.trim()) {
@@ -1230,6 +1233,19 @@ const handleFieldChange = (field, value) => {
       const savedTax = await addTax(taxPayload);
       console.log("Saved tax response:", savedTax);
 
+      // Reset form fields immediately so that during the waits below,
+      // the duplicate check doesn't show an inline error banner for the new tax.
+      const addedTaxName = newTaxName.trim();
+      const addedTaxRate = newTaxRate.trim();
+      const addedTaxNumber = newTaxNumber.trim();
+      setNewTaxName("");
+      setNewTaxRate("");
+      setNewTaxNumber("");
+      setTaxNameOverflow(false);
+      setTaxNumberOverflow(false);
+      setShowAddTaxForm(false);
+      setError(null);
+
       // IMPORTANT: Wait for taxes to be refreshed
       // The addTax function in DataContext already calls fetchTaxes()
       // But we need to wait for the state to update
@@ -1246,20 +1262,13 @@ const handleFieldChange = (field, value) => {
 
       // Create tax object for adding to receipt
       const newTax = {
-        tax_name: savedTax.tax_name || newTaxName.trim(),
-        tax_rate: savedTax.tax_rate || newTaxRate.trim(),
+        tax_name: savedTax.tax_name || addedTaxName,
+        tax_rate: savedTax.tax_rate || addedTaxRate,
         tax_amount: "",
-        tax_number: savedTax.tax_number || newTaxNumber.trim() || "",
+        tax_number: savedTax.tax_number || addedTaxNumber || "",
         id: savedTax.id || 0,
         fk_user_id: savedTax.fk_user_id || parseInt(fk_user_id),
       };
-
-      // Reset form
-      setNewTaxName("");
-      setNewTaxRate("");
-      setNewTaxNumber("");
-      setShowManageTaxModal(false);
-      setError(null);
 
       console.log("Form reset, modal closed");
       console.log("=== handleAddTaxType SUCCESS ===");
@@ -1288,6 +1297,7 @@ const handleFieldChange = (field, value) => {
 
   // Handle updating existing tax
   const handleUpdateTax = async () => {
+    if (isSavingTax) return;
     if (!editingTaxId || !newTaxName.trim() || !newTaxRate.trim()) {
       setError("Please enter Tax Name and Tax Rate");
       return;
@@ -1346,6 +1356,8 @@ const handleFieldChange = (field, value) => {
       setNewTaxName("");
       setNewTaxRate("");
       setNewTaxNumber("");
+      setTaxNameOverflow(false);
+      setTaxNumberOverflow(false);
       setEditingTaxId(null);
       setShowAddTaxForm(false);
       setError(null);
@@ -1357,6 +1369,7 @@ const handleFieldChange = (field, value) => {
   };
 
   const confirmTaxRateChange = async () => {
+    if (isSavingTax) return;
     setShowTaxRateChangeWarning(false);
     if (!pendingTaxUpdate) return;
     const { newName, newRate, newNumber } = pendingTaxUpdate;
@@ -1379,6 +1392,7 @@ const handleFieldChange = (field, value) => {
         udpated: 0,
       });
       setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber(""); setEditingTaxId(null);
+      setTaxNameOverflow(false); setTaxNumberOverflow(false);
       setShowAddTaxForm(false); setError(null);
     } catch (err) {
       setError(err.message || "Failed to update tax type.");
@@ -1412,6 +1426,8 @@ const handleFieldChange = (field, value) => {
     setNewTaxName(tax.tax_name || "");
     setNewTaxRate(tax.tax_rate || "");
     setNewTaxNumber(tax.tax_number || "");
+    setTaxNameOverflow(false);
+    setTaxNumberOverflow(false);
     setShowAddTaxForm(true);
     setError(null);
   };
@@ -1422,6 +1438,8 @@ const handleFieldChange = (field, value) => {
     setNewTaxName("");
     setNewTaxRate("");
     setNewTaxNumber("");
+    setTaxNameOverflow(false);
+    setTaxNumberOverflow(false);
     setError(null);
   };
 
@@ -1430,6 +1448,7 @@ const handleFieldChange = (field, value) => {
     setShowAddTaxForm(false);
     setTaxRateFocused(false);
     setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber("");
+    setTaxNameOverflow(false); setTaxNumberOverflow(false);
     setEditingTaxId(null);
     setError(null);
   };
@@ -6228,6 +6247,7 @@ const handleSelectLogo = (index) => {
                       onClick={() => {
                         setShowAddTaxForm(true);
                         setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber("");
+                        setTaxNameOverflow(false); setTaxNumberOverflow(false);
                         setError(null);
                       }}
                       className="px-4 py-1.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors"
@@ -6335,9 +6355,10 @@ const handleSelectLogo = (index) => {
                         onChange={e => {
                           const val = e.target.value;
                           if (val.length > TAX_NAME_MAX) {
-                            setToast({ isVisible: true, message: `Tax Name cannot exceed ${TAX_NAME_MAX} characters`, type: "error" });
+                            setTaxNameOverflow(true);
                             return;
                           }
+                          setTaxNameOverflow(false);
                           setNewTaxName(val);
                         }}
                         placeholder="Enter Tax Name (e.g. GST, HST, VAT)"
@@ -6386,9 +6407,16 @@ const handleSelectLogo = (index) => {
                           taxNumberError ? "border-red-400 bg-red-50" : "border-gray-200"
                         }`}
                         value={newTaxNumber}
-                        onChange={e => setNewTaxNumber(e.target.value)}
+                        onChange={e => {
+                          const val = e.target.value;
+                          if (val.length > TAX_NUMBER_MAX) {
+                            setTaxNumberOverflow(true);
+                            return;
+                          }
+                          setTaxNumberOverflow(false);
+                          setNewTaxNumber(val);
+                        }}
                         placeholder="Enter Tax Number"
-                        maxLength={TAX_NUMBER_MAX}
                       />
                       <p className="mt-1.5 text-xs text-gray-400">* Required</p>
                       {taxNumberError && (
@@ -6406,6 +6434,7 @@ const handleSelectLogo = (index) => {
                           setShowAddTaxForm(false);
                           setEditingTaxId(null);
                           setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber("");
+                          setTaxNameOverflow(false); setTaxNumberOverflow(false);
                           setTaxRateFocused(false);
                           setError(null);
                         }}

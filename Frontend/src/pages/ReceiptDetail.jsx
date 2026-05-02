@@ -1470,6 +1470,8 @@ useEffect(() => {
 
   // Manage Tax Types modal handlers
   const handleAddTaxType = async () => {
+    if (isSavingTax) return;
+
     if (!newTaxName.trim()) {
       setTaxError("Please enter Tax Name");
       return;
@@ -1507,25 +1509,33 @@ useEffect(() => {
         udpated: 0,
       };
       const savedTax = await addTax(taxPayload);
+      
+      // Cache values for local update
+      const addedTaxName = newTaxName.trim();
+      const addedTaxRate = newTaxRate.trim();
+      const addedTaxNumber = newTaxNumber.trim();
+      
+      // Reset form immediately to prevent flashing error state
+      setNewTaxName("");
+      setNewTaxRate("");
+      setNewTaxNumber("");
+      setShowAddTaxForm(false);
+      
       if (savedTax) {
         // Add to receipt FIRST — must happen before any fetchTaxes/taxData update
         // (the ref guard in the init useEffect prevents taxData changes from
         //  resetting editedReceipt, but calling addTaxToReceipt first is safer)
         addTaxToReceipt({
           id: savedTax.id || 0,
-          tax_name: newTaxName.trim(),
-          tax_rate: newTaxRate.trim(),
-          tax_number: newTaxNumber.trim() || "",
+          tax_name: addedTaxName,
+          tax_rate: addedTaxRate,
+          tax_number: addedTaxNumber || "",
         });
         // Add to local session list so dropdown shows the new tax immediately
         setLocalTaxTypes((prev) => [...prev, { ...taxPayload, id: savedTax.id || Date.now() }]);
         setTaxRefreshKey((prev) => prev + 1);
         // fetchTaxes is called automatically by the modal-close useEffect
       }
-      setNewTaxName("");
-      setNewTaxRate("");
-      setNewTaxNumber("");
-      setShowManageTaxModal(false);
     } catch (err) {
       console.error("Error adding tax:", err);
       setTaxError(err.message || "Failed to add tax type.");
@@ -1535,6 +1545,7 @@ useEffect(() => {
   };
 
   const handleUpdateTaxType = async () => {
+    if (isSavingTax) return;
     if (!editingTaxId || !newTaxName.trim() || !newTaxRate.trim()) {
       setTaxError("Tax Name and Tax Rate are required.");
       return;
@@ -1588,6 +1599,7 @@ useEffect(() => {
   };
 
   const confirmTaxRateChange = async () => {
+    if (isSavingTax) return;
     setShowTaxRateChangeWarning(false);
     if (!pendingTaxUpdate) return;
     const { newName, newRate, newNumber } = pendingTaxUpdate;
