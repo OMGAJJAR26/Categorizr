@@ -113,8 +113,8 @@ const ReceiptDetail = ({
   setSelectedIndex,
   onDeleteReceipt,
 }) => {
-  const MAX_NOTES_LENGTH = 100;
-  const MAX_DESCRIPTION_LENGTH = 500;
+  const MAX_NOTES_LENGTH = 500;
+  const MAX_DESCRIPTION_LENGTH = 100;
   const MAX_TAX_TYPES = 2;
   const DEFAULT_TAGS = {
     locked: false,
@@ -243,6 +243,10 @@ const ReceiptDetail = ({
   const addPhotoInputRef = useRef(null);
   // Track which receipt ID has been initialized so taxData changes don't reset editedReceipt
   const lastInitReceiptIdRef = useRef(null);
+
+  // ── Character-limit overflow banners ─────────────────────────────────────
+  const [descriptionOverflow, setDescriptionOverflow] = useState(false);
+  const [notesOverflow, setNotesOverflow]             = useState(false);
 
   // ── Add Photo / Annotation state ──────────────────────────────────────────
   const [isAddingPhoto, setIsAddingPhoto] = useState(false);
@@ -1090,8 +1094,20 @@ useEffect(() => {
   // Handle field changes in edit mode
   const handleFieldChange = (field, value) => {
     if (editedTags.locked) return; // Receipt is locked — prevent any changes
-    if (field === "notes") value = (value || "").toString().slice(0, MAX_NOTES_LENGTH);
-    if (field === "product_name") value = (value || "").toString().slice(0, MAX_DESCRIPTION_LENGTH);
+    if (field === "notes") {
+      const raw = (value || "").toString();
+      setNotesOverflow(raw.length > MAX_NOTES_LENGTH);
+      value = raw.slice(0, MAX_NOTES_LENGTH);
+    }
+    if (field === "product_name") {
+      const raw = (value || "").toString();
+      setDescriptionOverflow(raw.length > MAX_DESCRIPTION_LENGTH);
+      value = raw.slice(0, MAX_DESCRIPTION_LENGTH);
+    }
+    // Normalize image URL fields so they're properly encoded for both web and mobile
+    if (field === "emailAttachment" || field === "receipt_image") {
+      value = normalizeMediaUrl(value) || "0";
+    }
     if (field === "subtotal" || field === "purchasePrice" || field === "tip") {
       value = sanitizeMoneyInput(value);
     }
@@ -5587,28 +5603,32 @@ Thank you for using our receipt management system.
                         Describe Purchase
                       </h3>
                       <textarea
-                        className="w-full border border-blue-400 rounded-md p-2 mb-2 text-sm"
-                        value={
-                          editedReceipt.product_name ?? r.product_name ?? ""
-                        }
-                        onChange={(e) =>
-                          handleFieldChange("product_name", e.target.value)
-                        }
-                        maxLength={MAX_DESCRIPTION_LENGTH}
+                        className={`w-full border rounded-md p-2 mb-1 text-sm ${descriptionOverflow ? "border-red-400 bg-red-50" : "border-blue-400"}`}
+                        value={editedReceipt.product_name ?? r.product_name ?? ""}
+                        onChange={(e) => handleFieldChange("product_name", e.target.value)}
                         placeholder="No description provided"
+                        rows={2}
                       />
+                      {descriptionOverflow && (
+                        <div className="mb-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-red-600 text-xs flex items-center gap-1.5">
+                          <span className="font-bold">!</span> Character limit of {MAX_DESCRIPTION_LENGTH} exceeded
+                        </div>
+                      )}
                       <h3 className="font-semibold mb-2 text-gray-900">
                         Notes
                       </h3>
                       <textarea
-                        className="w-full border border-blue-400 rounded-md p-2 mb-2 text-sm"
+                        className={`w-full border rounded-md p-2 mb-1 text-sm ${notesOverflow ? "border-red-400 bg-red-50" : "border-blue-400"}`}
                         value={editedReceipt.notes ?? r.notes ?? ""}
-                        onChange={(e) =>
-                          handleFieldChange("notes", e.target.value)
-                        }
-                        maxLength={MAX_NOTES_LENGTH}
+                        onChange={(e) => handleFieldChange("notes", e.target.value)}
                         placeholder="No notes provided"
+                        rows={6}
                       />
+                      {notesOverflow && (
+                        <div className="mb-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-red-600 text-xs flex items-center gap-1.5">
+                          <span className="font-bold">!</span> Character limit of {MAX_NOTES_LENGTH} exceeded
+                        </div>
+                      )}
 
                       {/* Receipt Tags Section - Clickable */}
                       <h3 className="font-semibold mb-2 text-gray-900">Tags</h3>
