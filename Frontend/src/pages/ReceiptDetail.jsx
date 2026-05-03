@@ -1979,25 +1979,28 @@ useEffect(() => {
       }
       const normalizedUrl = normalizeMediaUrl(url);
       if (!normalizedUrl) return;
+
+      // Use the most up-to-date values (editedReceipt takes priority over server data)
+      const r = selectedReceipt;
+      const emptyVals = new Set(["0", "null", "", "undefined"]);
+      const curReceiptImg   = normalizeMediaUrl(editedReceipt?.receipt_image   ?? r?.receipt_image   ?? "") || "";
+      const curEmailAttach  = normalizeMediaUrl(editedReceipt?.emailAttachment ?? r?.emailAttachment ?? "") || "";
+
+      // Deduplicate: skip if this URL is already displayed
       const existingNormalized = new Set(
-        [
-          selectedReceipt?.emailAttachment,
-          selectedReceipt?.receipt_image,
-          editedReceipt?.emailAttachment,
-          editedReceipt?.receipt_image,
-          ...additionalPhotoUrls,
-        ]
-          .map(normalizeMediaUrl)
-          .filter(Boolean)
+        [curReceiptImg, curEmailAttach, ...additionalPhotoUrls.map(normalizeMediaUrl)].filter(Boolean)
       );
       if (existingNormalized.has(normalizedUrl)) return;
-      // Persist to receipt immediately: fill empty slots first
-      const r = selectedReceipt;
-      const hasImage = r?.receipt_image && !["0", "null", ""].includes(r.receipt_image.trim());
-      const hasAttachment = r?.emailAttachment && !["0", "null", ""].includes(r.emailAttachment.trim());
+
+      const hasImage      = !emptyVals.has(curReceiptImg);
+      // emailAttachment counts as "empty" if it is the same URL as receipt_image
+      // (Add Receipt stores the same URL in both fields, so one slot is effectively free)
+      const hasAttachment = !emptyVals.has(curEmailAttach) && curEmailAttach !== curReceiptImg;
+
       const patch = hasImage
         ? hasAttachment ? {} : { emailAttachment: normalizedUrl }
         : { receipt_image: normalizedUrl };
+
       if (Object.keys(patch).length > 0) {
         handleFieldChange(Object.keys(patch)[0], normalizedUrl);
       } else {
@@ -2468,9 +2471,27 @@ useEffect(() => {
       const finalPaymentTypeForAPI = basePaymentType || paymentType;
 
       // Merge edited data with original receipt fields to ensure all fields are included
+      const mergedReceiptImg  = normalizeMediaUrl(editedReceipt.receipt_image  ?? selectedReceipt.receipt_image  ?? "") || "0";
+      const mergedEmailAttach = normalizeMediaUrl(editedReceipt.emailAttachment ?? selectedReceipt.emailAttachment ?? "") || "0";
+
+      // If emailAttachment is still a duplicate of receipt_image (common after Add Receipt),
+      // promote the first additionalPhotoUrl into that slot so it actually gets saved.
+      const emptyValsSet = new Set(["0", "null", "", "undefined"]);
+      let finalEmailAttach = mergedEmailAttach;
+      let remainingAdditional = [...additionalPhotoUrls];
+      if (
+        (emptyValsSet.has(mergedEmailAttach) || mergedEmailAttach === mergedReceiptImg) &&
+        remainingAdditional.length > 0
+      ) {
+        finalEmailAttach = normalizeMediaUrl(remainingAdditional[0]) || mergedEmailAttach;
+        remainingAdditional = remainingAdditional.slice(1);
+      }
+
       const updatedData = {
         ...selectedReceipt, // Include all original fields
         ...editedReceipt, // Override with edited fields
+        receipt_image:   mergedReceiptImg,
+        emailAttachment: finalEmailAttach,
         receipt_tag: receiptTag,
         receipt_tax_values: receiptTaxValuesPayload,
         store_image: storeImageToSave,
@@ -2700,10 +2721,21 @@ useEffect(() => {
 
     const finalPaymentTypeForAPI = basePaymentType || paymentType;
 
+    // Promote additionalPhotoUrls[0] into emailAttachment if that slot is a duplicate
+    const si2 = normalizeMediaUrl(editedReceipt.receipt_image  ?? selectedReceipt.receipt_image  ?? "") || "0";
+    const ea2 = normalizeMediaUrl(editedReceipt.emailAttachment ?? selectedReceipt.emailAttachment ?? "") || "0";
+    const emptyV2 = new Set(["0", "null", "", "undefined"]);
+    let finalEA2 = ea2;
+    if ((emptyV2.has(ea2) || ea2 === si2) && additionalPhotoUrls.length > 0) {
+      finalEA2 = normalizeMediaUrl(additionalPhotoUrls[0]) || ea2;
+    }
+
     // Merge edited data with original receipt fields
     const updatedData = {
       ...selectedReceipt,
       ...editedReceipt,
+      receipt_image: si2,
+      emailAttachment: finalEA2,
       receipt_tag: receiptTag,
       receipt_tax_values: receiptTaxValuesPayload,
       store_image: storeImageToSave,
