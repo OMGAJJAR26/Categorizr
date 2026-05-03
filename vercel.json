@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "installCommand": "rm -rf Frontend/node_modules && npm install",
+  "buildCommand": "npm run build",
+  "outputDirectory": "Frontend/dist",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://categorizr.com/emailserver/api/:path*"
+    },
+    {
+      "source": "/imagesearch",
+      "destination": "https://categorizr.com/imagesearchv2.php"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" }
+      ]
+    }
+  ]
+}
+
