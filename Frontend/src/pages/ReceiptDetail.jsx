@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { NODE_API_URL } from "../api/Axios";
 import { formatTaxRate } from "../utils/receiptFormatters";
 import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine,} from "lucide-react";
@@ -429,6 +429,7 @@ const ReceiptDetail = ({
             tax_number: tax.tax_number || "",
             id: tax.id || 0,
             fk_user_id: tax.fk_user_id || 0,
+            is_default_tax: tax.is_default_tax || 0,
           });
         }
       }
@@ -458,9 +459,20 @@ const ReceiptDetail = ({
 }, [taxData, taxRefreshKey, localTaxTypes]);
 
   // IDs of taxes marked as default (is_default_tax === 1)
+  // Also expose a helper to check by id or by is_default_tax on the allTaxTypes object itself
   const defaultTaxIds = useMemo(() => {
-    return (taxData || []).filter(t => parseInt(t.is_default_tax) === 1).map(t => t.id);
+    return (taxData || [])
+      .filter(t => parseInt(t.is_default_tax) === 1)
+      .map(t => t.id);
   }, [taxData]);
+
+  // Returns true if a tax row (from allTaxTypes) is a default tax
+  const isTaxDefault = useCallback((tax) => {
+    // Primary: check is_default_tax flag on the object itself (now preserved in allTaxTypes)
+    if (parseInt(tax?.is_default_tax) === 1) return true;
+    // Fallback: check against defaultTaxIds list
+    return defaultTaxIds.includes(tax?.id);
+  }, [defaultTaxIds]);
 
   // Toggle a tax's default status (max 2 defaults allowed)
   const toggleDefaultTax = async (taxId) => {
@@ -6446,7 +6458,7 @@ Thank you for using our receipt management system.
                     {[...allTaxTypes]
                       .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""))
                       .map(tax => {
-                        const isDefault = defaultTaxIds?.includes(tax.id);
+                        const isDefault = isTaxDefault(tax);
                         return (
                           <div
                             key={tax.id || `${tax.tax_name}-${tax.tax_rate}`}
