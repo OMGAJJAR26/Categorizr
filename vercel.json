@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "installCommand": "rm -rf Frontend/node_modules && npm install",
+  "installCommand": "rm -rf node_modules Frontend/node_modules && npm install --include=optional",
   "buildCommand": "npm run build",
   "outputDirectory": "Frontend/dist",
   "rewrites": [
