@@ -2013,12 +2013,18 @@ useEffect(() => {
       // (Add Receipt stores the same URL in both fields, so one slot is effectively free)
       const hasAttachment = !emptyVals.has(curEmailAttach) && curEmailAttach !== curReceiptImg;
 
+      // When receipt_image slot is taken but emailAttachment is free:
+      // put NEW photo into receipt_image (mobile reads this field only) and
+      // move the OLD receipt_image URL into emailAttachment so it is preserved for web.
       const patch = hasImage
-        ? hasAttachment ? {} : { emailAttachment: normalizedUrl }
+        ? hasAttachment ? {} : {
+            receipt_image: normalizedUrl,   // new photo → receipt_image (mobile sees this)
+            emailAttachment: curReceiptImg  // old photo → emailAttachment (preserved for web)
+          }
         : { receipt_image: normalizedUrl };
 
       if (Object.keys(patch).length > 0) {
-        handleFieldChange(Object.keys(patch)[0], normalizedUrl);
+        Object.entries(patch).forEach(([key, val]) => handleFieldChange(key, val));
       } else {
         setAdditionalPhotoUrls((prev) => {
           if (prev.some((u) => normalizeMediaUrl(u) === normalizedUrl))
