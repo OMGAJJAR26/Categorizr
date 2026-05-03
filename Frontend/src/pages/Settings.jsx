@@ -51,6 +51,7 @@ import { QRCodeSVG } from "qrcode.react";
 import Header from "../components/Header";
 import LogoutConfirmationDialog from "../components/LogoutConfirmationDialog";
 import ForgotPasswordModal from "./ForgotPasswordModel";
+import MerchantAvatar from "../components/MerchantAvatar";
 import { useNavigate } from "react-router-dom";
 import { useData } from "../context/DataContext";
 
@@ -127,9 +128,10 @@ const ItemLogo = ({ logo, name }) => {
 };
 
 /* ─── ItemRow ──────────────────────────────────────────── */
-const ItemRow = ({ logo, name, sublabel, badge, badgeCls, actions, showIcon = true }) => (
+// logoNode: optional pre-built React node that replaces ItemLogo (e.g. MerchantAvatar for merchants)
+const ItemRow = ({ logo, logoNode, name, sublabel, badge, badgeCls, actions, showIcon = true }) => (
   <div className="flex items-center gap-3 bg-white rounded-xl px-3 py-2.5 border border-slate-200/80 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:shadow-[0_4px_14px_rgba(15,23,42,0.08)] transition-all">
-    {showIcon && <ItemLogo logo={logo} name={name} />}
+    {showIcon && (logoNode ?? <ItemLogo logo={logo} name={name} />)}
     <div className="flex-1 min-w-0">
       <p className="text-sm font-semibold text-slate-900 truncate">{name}</p>
       {sublabel && <p className="text-xs text-slate-400 truncate">{sublabel}</p>}
@@ -643,7 +645,12 @@ const ManageModal = ({ type, onClose }) => {
                               <button onClick={() => setEditReceiptKey(null)} className="px-3 py-1 bg-gray-100 text-gray-600 text-xs font-semibold rounded-lg">Cancel</button>
                             </div>
                           ) : (
-                            <ItemRow logo={item.logo} name={item.name} badgeCls={colors.badge}
+                            <ItemRow
+                              logo={item.logo}
+                              logoNode={type === "merchants"
+                                ? <MerchantAvatar name={item.name} explicitUrl={item.logo} className="w-9 h-9 flex-shrink-0" />
+                                : undefined}
+                              name={item.name} badgeCls={colors.badge}
                               actions={<>
                                 {ab("bg-blue-500 hover:bg-blue-600", () => { setEditReceiptKey(item.key); setEditReceiptVal(item.name); }, <Pencil size={13}/>)}
                                 {ab("bg-red-400 hover:bg-red-500", () => handleDelete(item), <Trash2 size={13}/>)}
@@ -671,7 +678,12 @@ const ManageModal = ({ type, onClose }) => {
                               <button onClick={() => setEditKey(null)} className="px-3 py-1 bg-gray-100 text-gray-600 text-xs font-semibold rounded-lg">Cancel</button>
                             </div>
                           ) : (
-                            <ItemRow logo={item.logo} name={item.name} badgeCls={colors.badge}
+                            <ItemRow
+                              logo={item.logo}
+                              logoNode={type === "merchants"
+                                ? <MerchantAvatar name={item.name} explicitUrl={item.logo} className="w-9 h-9 flex-shrink-0" />
+                                : undefined}
+                              name={item.name} badgeCls={colors.badge}
                               actions={<>
                                 {ab("bg-blue-500 hover:bg-blue-600", () => { setEditKey(item.key); setEditVal(item.name); }, <Pencil size={13}/>)}
                                 {ab("bg-red-400 hover:bg-red-500", () => handleDelete(item), <Trash2 size={13}/>)}
@@ -2672,9 +2684,10 @@ const sanitizeTaxRate = (raw) => {
                         <div className="flex items-center gap-2">
                           {/* Show current/new logo preview */}
                           {type === "merchants" && (
-                            <ItemLogo
-                              logo={editLogoSel !== null ? (editLogoOpts[editLogoSel]?.displayUrl || editLogoOpts[editLogoSel]?.storeUrl) : editOrigLogo}
+                            <MerchantAvatar
                               name={editVal || item.name}
+                              explicitUrl={editLogoSel !== null ? (editLogoOpts[editLogoSel]?.displayUrl || editLogoOpts[editLogoSel]?.storeUrl) : editOrigLogo}
+                              className="w-9 h-9 flex-shrink-0"
                             />
                           )}
                           <input className={mInput} value={editVal} onChange={e => setEditVal(e.target.value)} placeholder={item.name} />
@@ -2696,7 +2709,12 @@ const sanitizeTaxRate = (raw) => {
                         {type === "merchants" && <LogoGrid options={editLogoOpts} selectedIndex={editLogoSel} onSelect={setEditLogoSel} />}
                       </div>
                     ) : (
-                      <ItemRow logo={displayLogo} name={item.name} badgeCls={colors.badge}
+                      <ItemRow
+                        logo={displayLogo}
+                        logoNode={type === "merchants"
+                          ? <MerchantAvatar name={item.name} explicitUrl={displayLogo} className="w-9 h-9 flex-shrink-0" />
+                          : undefined}
+                        name={item.name} badgeCls={colors.badge}
                         showIcon={type !== "categories"}
                         actions={<>
                           {!(type === "payments" && isCashMethod(item.name)) && (
