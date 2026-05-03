@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "installCommand": "rm -rf node_modules Frontend/node_modules Frontend/package-lock.json && npm install && cd Frontend && npm install @rollup/rollup-linux-x64-gnu --no-save",
+  "installCommand": "rm -rf node_modules Frontend/node_modules Frontend/package-lock.json && npm install && cd Frontend && npm install @rollup/rollup-linux-x64-gnu @swc/core-linux-x64-gnu --no-save",
   "buildCommand": "npm run build",
   "outputDirectory": "Frontend/dist",
   "rewrites": [
