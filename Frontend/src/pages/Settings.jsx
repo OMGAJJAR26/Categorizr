@@ -214,7 +214,7 @@ const ManageModal = ({ type, onClose }) => {
         ...(apiMerchants || []).map((m) => m?.store_name || ""),
       ].some((m) => normalizeMatchKey(m) === normalizeMatchKey(merchantName));
       if (duplicate) {
-        toast("error", "Merchant already exists");
+        toast("error", "Merchant name already exists");
         return;
       }
       try {
@@ -228,7 +228,18 @@ const ManageModal = ({ type, onClose }) => {
       setAddVal("");
       return;
     }
-    if (type === "categories") addCustomCategory(addVal);
+    if (type === "categories") {
+      const categoryName = addVal.trim();
+      const duplicate = [
+        ...(receiptCategoriesRaw || []),
+        ...(customCategories || [])
+      ].some((c) => normalizeMatchKey(c) === normalizeMatchKey(categoryName));
+      if (duplicate) {
+        toast("error", "Expense Category already exists");
+        return;
+      }
+      addCustomCategory(categoryName);
+    }
     if (type === "payments")   addCustomPaymentMethod(addVal);
     setAddVal("");
   };
@@ -259,7 +270,7 @@ const ManageModal = ({ type, onClose }) => {
         ...(apiMerchants || []).map((m) => m?.store_name || ""),
       ].some((m) => normalizeMatchKey(m) === normalizeMatchKey(nextName) && normalizeMatchKey(m) !== normalizeMatchKey(item?.name));
       if (duplicate) {
-        toast("error", "Merchant already exists");
+        toast("error", "Merchant name already exists");
         return;
       }
       try {
@@ -287,8 +298,35 @@ const ManageModal = ({ type, onClose }) => {
       setEditKey(null);
       return;
     }
-    if (type === "categories") editCustomCategory(item.key, editVal);
-    if (type === "payments")   editCustomPaymentMethod(item.key, editVal);
+    if (type === "categories") {
+      const nextName = editVal.trim();
+      const duplicate = [
+        ...(receiptCategoriesRaw || []),
+        ...(customCategories || [])
+      ].some((c) => normalizeMatchKey(c) === normalizeMatchKey(nextName) && normalizeMatchKey(c) !== normalizeMatchKey(item?.name));
+      if (duplicate) {
+        toast("error", "Expense Category already exists");
+        return;
+      }
+      editCustomCategory(item.key, nextName);
+    }
+    if (type === "payments") {
+      const nextName = editVal.trim();
+      const duplicate = [
+        ...(receiptPaymentsRaw || []),
+        ...(customPaymentMethods || []),
+        ...(apiPaymentMethods || []).map((m) => m?.card_number || ""),
+      ].some(
+        (p) =>
+          normalizeMatchKey(p) === normalizeMatchKey(nextName) &&
+          normalizeMatchKey(p) !== normalizeMatchKey(item?.name)
+      );
+      if (duplicate) {
+        toast("error", "Payment Method already exists");
+        return;
+      }
+      editCustomPaymentMethod(item.key, nextName);
+    }
     setEditKey(null);
   };
 
@@ -370,7 +408,7 @@ const ManageModal = ({ type, onClose }) => {
     const allCustomItems = buildCustomItems();
     const dupCheck = [...allReceiptItems, ...allCustomItems].some(i => i.key !== key && i.name.toLowerCase() === newName.toLowerCase());
     if (dupCheck) {
-      if (type === "merchants") return toast("error", "Merchant already exists");
+      if (type === "merchants") return toast("error", "Merchant name already exists");
       if (type === "categories") return toast("error", "Expense Category already exists");
     }
     if (type === "merchants")  {
@@ -393,7 +431,21 @@ const ManageModal = ({ type, onClose }) => {
       }
     }
     if (type === "categories") { hideCategory(key);      addCustomCategory(newName); }
-    if (type === "payments")   { hidePaymentMethod(key); addCustomPaymentMethod(newName); }
+    if (type === "payments") {
+      const allPayNames = [
+        ...(receiptPaymentsRaw || []),
+        ...(customPaymentMethods || []),
+        ...(apiPaymentMethods || []).map((m) => m?.card_number || ""),
+      ];
+      const isDup = allPayNames.some(
+        (p) =>
+          normalizeMatchKey(p) === normalizeMatchKey(newName) &&
+          normalizeMatchKey(p) !== normalizeMatchKey(currentName)
+      );
+      if (isDup) { toast("error", "Payment Method already exists"); return; }
+      hidePaymentMethod(key);
+      addCustomPaymentMethod(newName);
+    }
     setEditReceiptKey(null); setEditReceiptVal("");
   };
 

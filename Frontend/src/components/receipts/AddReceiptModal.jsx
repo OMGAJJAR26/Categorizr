@@ -37,8 +37,8 @@ import lockedImg from "../../assets/receipttags/locked.png";
 import unlockedImg from "../../assets/receipttags/unlocked.png";
 
 const AddReceiptModal = ({ onClose, onReceiptAdded }) => {
-  const MAX_NOTES_LENGTH = 100;
-  const MAX_DESCRIPTION_LENGTH = 500;
+  const MAX_NOTES_LENGTH = 500;
+  const MAX_DESCRIPTION_LENGTH = 100;
   const MAX_TAX_TYPES = 2;
   const {
     merchants,
@@ -206,8 +206,10 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const TAX_RATE_MAX   = 99.999;
   const TAX_NUMBER_MAX = 35;
 
-  const [taxNameOverflow, setTaxNameOverflow]     = useState(false);
-  const [taxNumberOverflow, setTaxNumberOverflow] = useState(false);
+  const [taxNameOverflow, setTaxNameOverflow]           = useState(false);
+  const [taxNumberOverflow, setTaxNumberOverflow]       = useState(false);
+  const [descriptionOverflow, setDescriptionOverflow]   = useState(false);
+  const [notesOverflow, setNotesOverflow]               = useState(false);
 
   // IMPORTANT: allTaxTypes must be declared HERE — before isDuplicateTaxName and taxNameError —
   // to avoid a Temporal Dead Zone crash when the user types in the tax name field.
@@ -372,7 +374,24 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const normalizeMediaUrl = (url) => {
     const raw = (url || "").toString().trim();
     if (!raw) return "0";
-    return encodeURI(raw);
+    try {
+      // Repair double-encoding (%2520 → %20) that happens when encodeURI is applied
+      // to an already-percent-encoded URL (e.g. one returned by Google Cloud Storage).
+      const fixed = raw.replace(/%25([0-9A-Fa-f]{2})/g, '%$1');
+      // decode-then-encode is idempotent: prevents further double-encoding on subsequent calls.
+      return encodeURI(decodeURI(fixed));
+    } catch {
+      return encodeURI(raw);
+    }
+  };
+
+  // Returns null for values that should not be sent to the API as an image URL:
+  // blob: URLs (ephemeral, invalid after page refresh), the "0" sentinel, and empty strings.
+  // Use in || chains so these values are skipped in favour of the next candidate.
+  const nonEmptyUrl = (url) => {
+    if (!url || typeof url !== "string") return null;
+    const s = url.trim();
+    return (s && s !== "0" && !s.startsWith("blob:")) ? s : null;
   };
 
   // Get proper payment display name (handles 0*0 type issues)
@@ -890,8 +909,16 @@ const [localMerchants, setLocalMerchants] = useState([]);
 
   // Handle form field changes with auto-calculation
 const handleFieldChange = (field, value) => {
-  if (field === "notes") value = (value || "").toString().slice(0, MAX_NOTES_LENGTH);
-  if (field === "product_name") value = (value || "").toString().slice(0, MAX_DESCRIPTION_LENGTH);
+  if (field === "notes") {
+    const raw = (value || "").toString();
+    setNotesOverflow(raw.length > MAX_NOTES_LENGTH);
+    value = raw.slice(0, MAX_NOTES_LENGTH);
+  }
+  if (field === "product_name") {
+    const raw = (value || "").toString();
+    setDescriptionOverflow(raw.length > MAX_DESCRIPTION_LENGTH);
+    value = raw.slice(0, MAX_DESCRIPTION_LENGTH);
+  }
   if (field === "subtotal" || field === "purchasePrice" || field === "tip") {
     value = sanitizeMoneyInput(value);
   }
@@ -2081,10 +2108,10 @@ const handleFieldChange = (field, value) => {
         product_name: formData.product_name || "",
         emailAttachment:
           normalizeMediaUrl(
-            (uploadedMediaUrls.length > 0 ? uploadedMediaUrls[0] : null) ||
-            uploadedImageUrl ||
-            uploadedReceiptData?.emailAttachment ||
-            uploadedReceiptData?.receipt_image ||
+            nonEmptyUrl(uploadedMediaUrls.length > 0 ? uploadedMediaUrls[0] : null) ||
+            nonEmptyUrl(uploadedImageUrl) ||
+            nonEmptyUrl(uploadedReceiptData?.emailAttachment) ||
+            nonEmptyUrl(uploadedReceiptData?.receipt_image) ||
             "0",
           ),
         purchasePrice: purchasePrice.toString(),
@@ -2103,10 +2130,10 @@ const handleFieldChange = (field, value) => {
         expense_type: formData.expense_type || "",
         receipt_image:
           normalizeMediaUrl(
-            uploadedReceiptData?.receipt_image ||
-            uploadedReceiptData?.emailAttachment ||
-            uploadedImageUrl ||
-            uploadedMediaUrls[0] ||
+            nonEmptyUrl(uploadedReceiptData?.receipt_image) ||
+            nonEmptyUrl(uploadedReceiptData?.emailAttachment) ||
+            nonEmptyUrl(uploadedImageUrl) ||
+            nonEmptyUrl(uploadedMediaUrls[0]) ||
             "0",
           ),
         store_image:
@@ -2344,9 +2371,9 @@ const handleFieldChange = (field, value) => {
           ...savePayload,
           receipt_image:
             normalizeMediaUrl(
-              savePayload.receipt_image ||
-              uploadedImageUrl ||
-              uploadedReceiptData?.receipt_image ||
+              nonEmptyUrl(savePayload.receipt_image) ||
+              nonEmptyUrl(uploadedImageUrl) ||
+              nonEmptyUrl(uploadedReceiptData?.receipt_image) ||
               "0",
             ),
         });
@@ -2397,7 +2424,7 @@ const handleFieldChange = (field, value) => {
       id: baseId,
       storeName: formData.storeName || "",
       product_name: formData.product_name || "",
-      emailAttachment: normalizeMediaUrl(uploadedMediaUrls[0] || uploadedImageUrl || uploadedReceiptData?.emailAttachment || "0"),
+      emailAttachment: normalizeMediaUrl(nonEmptyUrl(uploadedMediaUrls[0]) || nonEmptyUrl(uploadedImageUrl) || nonEmptyUrl(uploadedReceiptData?.emailAttachment) || "0"),
       purchasePrice: (parseFloat(formData.purchasePrice) || 0).toString(),
       total_amount: (parseFloat(formData.purchasePrice) || 0).toString(),
       payment_category_type: parseInt(formData.receipt_category) || 0,
@@ -2410,7 +2437,7 @@ const handleFieldChange = (field, value) => {
       receipt_category: parseInt(formData.receipt_category) || 0,
       product_date: productDate,
       expense_type: formData.expense_type || "",
-      receipt_image: normalizeMediaUrl(uploadedReceiptData?.receipt_image || uploadedImageUrl || "0"),
+      receipt_image: normalizeMediaUrl(nonEmptyUrl(uploadedReceiptData?.receipt_image) || nonEmptyUrl(uploadedImageUrl) || nonEmptyUrl(uploadedMediaUrls[0]) || "0"),
       store_image: getMerchantImage(formData.storeName) || detectedMerchantLogo || uploadedReceiptData?.store_image || "",
       notes: formData.notes || "",
       receipt_forwarded: uploadedReceiptData?.receipt_forwarded || "0",
@@ -2703,7 +2730,7 @@ const handleFieldChange = (field, value) => {
         id: 0,
         storeName: formData.storeName || "",
         product_name: productName || "",
-        emailAttachment: normalizeMediaUrl(uploadedMediaUrls[0] || uploadedImageUrl || uploadedReceiptData?.emailAttachment || "0"),
+        emailAttachment: normalizeMediaUrl(nonEmptyUrl(uploadedMediaUrls[0]) || nonEmptyUrl(uploadedImageUrl) || nonEmptyUrl(uploadedReceiptData?.emailAttachment) || "0"),
         purchasePrice: total.toString(),
         total_amount: total.toString(),
         payment_category_type: parseInt(category) || 0,
@@ -2716,7 +2743,7 @@ const handleFieldChange = (field, value) => {
         receipt_category: parseInt(category) || 0,
         product_date: productDate,
         expense_type: expenseType || formData.expense_type || "",
-        receipt_image: normalizeMediaUrl(uploadedReceiptData?.receipt_image || uploadedImageUrl || "0"),
+        receipt_image: normalizeMediaUrl(nonEmptyUrl(uploadedReceiptData?.receipt_image) || nonEmptyUrl(uploadedImageUrl) || nonEmptyUrl(uploadedMediaUrls[0]) || "0"),
         store_image: getMerchantImage(formData.storeName) || detectedMerchantLogo || "",
         notes: "",
         receipt_forwarded: "0",
@@ -2823,6 +2850,10 @@ const handleFieldChange = (field, value) => {
   const handleSaveEditMerchant = async () => {
     if (!editMerchantName.trim()) {
       setEditMerchantError("Merchant name is required.");
+      return;
+    }
+    if (merchantExists(editMerchantName, editingMerchant.name)) {
+      setEditMerchantError("Merchant name already exists");
       return;
     }
     setIsSavingEditMerchant(true);
@@ -3170,12 +3201,8 @@ const handleSelectLogo = (index) => {
     }
 
     // 2. Duplicate check (case-insensitive, against global list)
-    const normalizedName = name.toLowerCase();
-    const exists = allMerchantsWithImages.some(
-      (m) => (m.name || "").toLowerCase() === normalizedName,
-    );
-    if (exists) {
-      setError("Merchant already exists");
+    if (merchantExists(name)) {
+      setError("Merchant name already exists");
       return;
     }
 
@@ -3556,6 +3583,16 @@ const handleSelectLogo = (index) => {
     });
 
     return Array.from(methodMap.values());
+  };
+
+  const merchantExists = (name, excludeName = "") => {
+    const normalized = (name || "").trim().toLowerCase();
+    const excluded = (excludeName || "").trim().toLowerCase();
+    if (!normalized) return false;
+    return allMerchantsWithImages.some((m) => {
+      const mn = (m.name || "").trim().toLowerCase();
+      return mn === normalized && mn !== excluded;
+    });
   };
 
   const expenseCategoryExists = (name, excludeName = "") => {
@@ -5450,26 +5487,36 @@ const handleSelectLogo = (index) => {
                         Describe Purchase
                       </h3>
                       <textarea
-                        className="w-full border border-blue-400 rounded-md p-2 mb-2 text-sm"
+                        className={`w-full border rounded-md p-2 mb-1 text-sm ${descriptionOverflow ? "border-red-400 bg-red-50" : "border-blue-400"}`}
                         value={formData.product_name || ""}
                         onChange={(e) =>
                           handleFieldChange("product_name", e.target.value)
                         }
-                        maxLength={MAX_DESCRIPTION_LENGTH}
                         placeholder="e.g., Nespresso VertuoPlus Espresso Maker"
+                        rows={2}
                       />
+                      {descriptionOverflow && (
+                        <div className="mb-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-red-600 text-xs flex items-center gap-1.5">
+                          <span className="font-bold">!</span> Character limit of {MAX_DESCRIPTION_LENGTH} exceeded
+                        </div>
+                      )}
                       <h3 className="font-semibold mb-2 text-gray-900">
                         Notes
                       </h3>
                       <textarea
-                        className="w-full border border-blue-400 rounded-md p-2 mb-2 text-sm"
+                        className={`w-full border rounded-md p-2 mb-1 text-sm ${notesOverflow ? "border-red-400 bg-red-50" : "border-blue-400"}`}
                         value={formData.notes || ""}
                         onChange={(e) =>
                           handleFieldChange("notes", e.target.value)
                         }
-                        maxLength={MAX_NOTES_LENGTH}
                         placeholder="e.g., Birthday gift for Mom"
+                        rows={6}
                       />
+                      {notesOverflow && (
+                        <div className="mb-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-red-600 text-xs flex items-center gap-1.5">
+                          <span className="font-bold">!</span> Character limit of {MAX_NOTES_LENGTH} exceeded
+                        </div>
+                      )}
 
                       {/* Tags Section - Same as ReceiptDetail */}
                       <h3 className="font-semibold mb-2 text-gray-900">Tags</h3>

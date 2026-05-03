@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { NODE_API_URL } from "../api/Axios";
 import { formatTaxRate } from "../utils/receiptFormatters";
 import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine,} from "lucide-react";
@@ -456,6 +456,27 @@ const ReceiptDetail = ({
 
   return Array.from(taxMap.values());
 }, [taxData, taxRefreshKey, localTaxTypes]);
+
+  // IDs of taxes marked as default (is_default_tax === 1)
+  const defaultTaxIds = useMemo(() => {
+    return (taxData || []).filter(t => parseInt(t.is_default_tax) === 1).map(t => t.id);
+  }, [taxData]);
+
+  // Toggle a tax's default status (max 2 defaults allowed)
+  const toggleDefaultTax = async (taxId) => {
+    const taxToToggle = (taxData || []).find(t => t.id === taxId);
+    if (!taxToToggle) return;
+    const isCurrentlyDefault = parseInt(taxToToggle.is_default_tax) === 1;
+    if (!isCurrentlyDefault && defaultTaxIds.length >= 2) {
+      alert("You can only set up to 2 Default Tax Types.");
+      return;
+    }
+    try {
+      await updateTax({ ...taxToToggle, is_default_tax: isCurrentlyDefault ? 0 : 1 });
+    } catch (e) {
+      console.error("Failed to update default tax", e);
+    }
+  };
 
 // Add this useEffect to fetch taxes when component mounts
 useEffect(() => {
@@ -985,9 +1006,16 @@ useEffect(() => {
   const normalizeMediaUrl = (url) => {
     const raw = (url || "").toString().trim();
     if (!raw) return "";
-    // Keep URLs encoded for backend storage (e.g. spaces => %20).
-    // Do not decode existing encoded values.
-    return encodeURI(raw);
+    // blob: URLs are ephemeral and invalid after page refresh — treat as empty.
+    if (raw.startsWith("blob:")) return "";
+    try {
+      // Repair double-encoding (%2520 → %20) that may have been stored in the DB,
+      // then decode-then-encode to canonicalize (idempotent on subsequent calls).
+      const fixed = raw.replace(/%25([0-9A-Fa-f]{2})/g, '%$1');
+      return encodeURI(decodeURI(fixed));
+    } catch {
+      return encodeURI(raw);
+    }
   };
   const normalizeMatchKey = (value) =>
     String(value || "")
@@ -5638,6 +5666,7 @@ Thank you for using our receipt management system.
                               "content://",
                               "file://",
                               "resource://",
+                              "blob:",
                             ];
                             return !invalidPatterns.some((p) =>
                               trimmed.startsWith(p)
@@ -6417,6 +6446,7 @@ Thank you for using our receipt management system.
                     {[...allTaxTypes]
                       .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""))
                       .map(tax => {
+                        const isDefault = defaultTaxIds?.includes(tax.id);
                         return (
                           <div
                             key={tax.id || `${tax.tax_name}-${tax.tax_rate}`}
@@ -6431,6 +6461,18 @@ Thank you for using our receipt management system.
                               </div>
                             </div>
                             <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => toggleDefaultTax(tax.id)}
+                                title={isDefault ? "Remove as default" : "Set as default"}
+                                className={`px-2.5 py-1 text-xs rounded-lg border font-medium transition-colors ${
+                                  isDefault
+                                    ? "border-yellow-400 bg-yellow-50 text-yellow-600"
+                                    : "border-gray-300 bg-white text-gray-500 hover:border-gray-400"
+                                }`}
+                              >
+                                {isDefault ? "★ Default" : "Default"}
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => handleEditTax(tax)}
