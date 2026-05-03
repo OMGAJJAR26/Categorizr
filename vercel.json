@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "installCommand": "rm -rf node_modules Frontend/node_modules && npm install --include=optional",
+  "installCommand": "rm -rf node_modules Frontend/node_modules Frontend/package-lock.json && npm install",
   "buildCommand": "npm run build",
   "outputDirectory": "Frontend/dist",
   "rewrites": [
