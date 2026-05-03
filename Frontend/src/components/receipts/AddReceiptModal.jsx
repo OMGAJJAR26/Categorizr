@@ -2102,8 +2102,10 @@ const handleFieldChange = (field, value) => {
       // the Save step UPDATES that same receipt instead of creating a duplicate.
       // If no image was uploaded, id stays 0 and addReceiptv1 will create the receipt.
       const uploadedId = parseInt(uploadedReceiptData?.id) || 0;
+      const fkUserId = parseInt(localStorage.getItem("fk_user_id")) || 0;
       const savePayload = {
         id: uploadedId, // Use uploaded receipt ID to update, or 0 to create new
+        fk_user_id: fkUserId,
         storeName: formData.storeName || "",
         product_name: formData.product_name || "",
         emailAttachment:
@@ -2268,15 +2270,11 @@ const handleFieldChange = (field, value) => {
             });
 
             if (response.ok) {
-              const updateData = await response.json();
-              console.log(
-                `=== API RESPONSE - Receipt Updated Successfully via ${endpoint} ===`,
-              );
-              console.log(
-                "Full Update Response:",
-                JSON.stringify(updateData, null, 2),
-              );
-              console.log(`Receipt updated successfully via ${endpoint}`);
+              const rawUpdate = await response.text();
+              let updateData = {};
+              try { updateData = JSON.parse(rawUpdate); } catch { /* non-JSON 200 OK is fine */ }
+              console.log(`=== API RESPONSE - Receipt Updated Successfully via ${endpoint} ===`);
+              console.log("Full Update Response:", rawUpdate);
               updateSuccess = true;
               break;
             }
@@ -2315,40 +2313,34 @@ const handleFieldChange = (field, value) => {
           });
 
           if (createResponse.ok) {
-            const createdData = await createResponse.json();
+            const rawText = await createResponse.text();
+            let createdData = {};
+            try {
+              createdData = JSON.parse(rawText);
+            } catch {
+              // Backend returned HTTP 200 with non-JSON body (e.g. "Invalid query").
+              // Log it and continue — the receipt may still have been created.
+              console.warn("addReceiptv1 non-JSON response:", rawText);
+              if (/^Invalid\s/i.test(rawText.trim())) {
+                throw new Error(rawText.trim());
+              }
+            }
             console.log("=== API RESPONSE - Receipt Created Successfully ===");
-            console.log(
-              "Full API Response:",
-              JSON.stringify(createdData, null, 2),
-            );
+            console.log("Full API Response:", rawText);
             console.log(
               "Created Receipt ID:",
-              createdData?.id ||
-                createdData?.receipt?.id ||
-                createdData?.data?.id,
-            );
-            console.log(
-              "Created Receipt Data:",
-              createdData?.receipt || createdData?.data || createdData,
+              createdData?.id || createdData?.receipt?.id || createdData?.data?.id,
             );
             // Update savePayload with the created receipt ID if returned
-            if (
-              createdData?.id ||
-              createdData?.receipt?.id ||
-              createdData?.data?.id
-            ) {
-              savePayload.id =
-                createdData?.id ||
-                createdData?.receipt?.id ||
-                createdData?.data?.id;
-            }
+            const newId = createdData?.id || createdData?.receipt?.id || createdData?.data?.id;
+            if (newId) savePayload.id = newId;
           } else {
             const errorText = await createResponse.text();
             console.error("=== API ERROR - Failed to create receipt ===");
             console.error("Error Status:", createResponse.status);
             console.error("Error Response:", errorText);
             throw new Error(
-              `Failed to create receipt: ${createResponse.status}`,
+              `Failed to create receipt: ${createResponse.status} — ${errorText}`,
             );
           }
         } catch (createErr) {
