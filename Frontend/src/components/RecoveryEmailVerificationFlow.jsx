@@ -120,8 +120,10 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
 
       const msg = (data?.message || text || "").toLowerCase().trim();
 
-      // Detect success: HTTP 2xx OR response message contains success keywords
-      const isSuccess = res.ok || msg.includes("success") || msg.includes("verif");
+      // Backend always returns HTTP 200 — rely solely on the response message.
+      // Only treat as success when the message explicitly contains "success".
+      // Do NOT use res.ok (always true) or "verif" (matches "verification failed").
+      const isSuccess = msg.includes("success");
 
       if (isSuccess) {
         // Close immediately and notify parent to show toast
@@ -129,7 +131,8 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
         setVerified(true);
         setTimeout(() => onDone(true), 300);
       } else {
-        setError(data?.message || text || "Verification failed. Please check the code.");
+        // Show the server's own error message (e.g. "Invalid OTP", "OTP expired")
+        setError(data?.message || text || "Invalid OTP. Please check the code and try again.");
       }
     } catch (err) {
       setError(err.message || "Could not verify. Please try again.");
