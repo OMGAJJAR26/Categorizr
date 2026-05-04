@@ -32,6 +32,7 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
   const [verifying, setVerifying] = useState(false);
   const [sent, setSent]           = useState(false);
   const [error, setError]         = useState("");
+  const [verified, setVerified]   = useState(false); // local success flag
   const [cooldown, setCooldown]   = useState(0);
   const inputRefs                 = useRef([]);
   const timerRef                  = useRef(null);
@@ -117,18 +118,21 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
       let data = {};
       try { data = JSON.parse(text); } catch { /* plain-text response is fine */ }
 
-      const msg = (data?.message || text || "").toLowerCase();
-      // Treat as success if HTTP ok OR message contains "success"/"verified"
-      const isSuccess = res.ok || msg.includes("success") || msg.includes("verif");
-      if (!isSuccess) {
-        throw new Error(data?.message || text || "Verification failed. Please check the code.");
-      }
+      const msg = (data?.message || text || "").toLowerCase().trim();
 
-      // Clear timestamp and close immediately — parent shows the toast
-      localStorage.removeItem("cat_confirmEmailPopupTs");
-      onDone(true); // true = verified successfully
+      // Detect success: HTTP 2xx OR response message contains success keywords
+      const isSuccess = res.ok || msg.includes("success") || msg.includes("verif");
+
+      if (isSuccess) {
+        // Close immediately and notify parent to show toast
+        localStorage.removeItem("cat_confirmEmailPopupTs");
+        setVerified(true);
+        setTimeout(() => onDone(true), 300);
+      } else {
+        setError(data?.message || text || "Verification failed. Please check the code.");
+      }
     } catch (err) {
-      setError(err.message || "Invalid code. Please try again.");
+      setError(err.message || "Could not verify. Please try again.");
     } finally {
       setVerifying(false);
     }
@@ -188,7 +192,13 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
                   />
                 ))}
               </div>
-              {error && (
+              {/* Show success in green, errors in red */}
+              {verified && (
+                <p className="mt-2 text-xs text-green-600 text-center font-medium">
+                  ✓ Email verified successfully!
+                </p>
+              )}
+              {error && !verified && (
                 <p className="mt-2 text-xs text-red-500 text-center">
                   <span className="font-bold">! </span>{error}
                 </p>
@@ -198,12 +208,14 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
             {/* Verify */}
             <button
               onClick={handleVerify}
-              disabled={verifying || otp.join("").length < OTP_LENGTH}
+              disabled={verifying || verified || otp.join("").length < OTP_LENGTH}
               className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold text-sm rounded-xl py-2.5 flex items-center justify-center gap-2 transition-colors"
             >
               {verifying
                 ? <><Loader2 size={15} className="animate-spin" /> Verifying…</>
-                : "Verify Email"}
+                : verified
+                  ? <><Loader2 size={15} className="animate-spin" /> Done!</>
+                  : "Verify Email"}
             </button>
 
             {/* Resend */}
