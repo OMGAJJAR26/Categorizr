@@ -9,7 +9,6 @@
  */
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import { X, Undo2, Trash2, Pen, Eraser, Download, Loader2 } from "lucide-react";
-import { NODE_API_URL } from "../../api/Axios";
 
 const COLORS = ["#EF4444", "#3B82F6", "#000000", "#16A34A", "#F97316", "#7C3AED"];
 
@@ -147,13 +146,22 @@ const ReceiptAnnotator = ({ imageUrl, onSave, onClose }) => {
       output.height = h || annotationCanvas.height;
       const ctx = output.getContext("2d");
 
-      // 1. Try fetching background via proxy with a 6-second timeout
+      // 1. Try fetching background via the same-origin /api/imageproxy route.
+      //    We intentionally avoid NODE_API_URL (Render.com) here because a
+      //    cross-origin fetch() requires CORS headers on the response — which
+      //    the image proxy doesn't provide — and would silently fail, causing
+      //    the canvas taint fallback to fire. The Vercel same-origin rewrite
+      //    (/api/* → PHP backend) handles imageproxy correctly and is CORS-free.
       let backgroundDrawn = false;
       if (imageUrl && !imageUrl.startsWith("data:")) {
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 6000);
-          const proxyUrl = `${NODE_API_URL}/api/imageproxy?url=${encodeURIComponent(imageUrl)}`;
+          const timeoutId = setTimeout(() => controller.abort(), 10000);
+          // Strip any existing proxy wrapper so we never double-encode the URL
+          const rawUrl = imageUrl.includes("/api/imageproxy?url=")
+            ? (() => { try { return decodeURIComponent(imageUrl.split("/api/imageproxy?url=")[1]); } catch { return imageUrl; } })()
+            : imageUrl;
+          const proxyUrl = `/api/imageproxy?url=${encodeURIComponent(rawUrl)}`;
           const resp = await fetch(proxyUrl, { signal: controller.signal });
           clearTimeout(timeoutId);
 
@@ -194,16 +202,14 @@ const ReceiptAnnotator = ({ imageUrl, onSave, onClose }) => {
         });
       }
 
-      // 3. Fallback: draw the displayed <img> directly (works if same-origin or
-      //    already loaded without crossOrigin; silently skipped if tainted)
+      // 3. Fallback: white background.
+      //    We must NEVER draw imgRef.current here — even though it displays fine
+      //    as an <img>, drawing a cross-origin image onto a canvas silently
+      //    marks it as "tainted" (drawImage does NOT throw). Any subsequent
+      //    toDataURL() call on a tainted canvas throws a SecurityError.
       if (!backgroundDrawn) {
-        try {
-          ctx.drawImage(imgRef.current, 0, 0, output.width, output.height);
-        } catch {
-          // tainted — will save annotations-only on a white background
-          ctx.fillStyle = "#ffffff";
-          ctx.fillRect(0, 0, output.width, output.height);
-        }
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, output.width, output.height);
       }
 
       // 4. Always overlay the transparent annotation layer on top
