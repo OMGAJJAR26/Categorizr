@@ -9,7 +9,7 @@
  * Everything else (finding the address, sending the email) is handled server-side.
  */
 import { useState, useEffect, useRef } from "react";
-import { X, ShieldCheck, Loader2, CheckCircle, RefreshCw } from "lucide-react";
+import { X, ShieldCheck, Loader2, RefreshCw } from "lucide-react";
 
 const BASE_URL = "/api";
 const OTP_LENGTH = 4;
@@ -32,7 +32,6 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
   const [verifying, setVerifying] = useState(false);
   const [sent, setSent]           = useState(false);
   const [error, setError]         = useState("");
-  const [success, setSuccess]     = useState(false);
   const [cooldown, setCooldown]   = useState(0);
   const inputRefs                 = useRef([]);
   const timerRef                  = useRef(null);
@@ -118,14 +117,16 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
       let data = {};
       try { data = JSON.parse(text); } catch { /* plain-text response is fine */ }
 
-      if (!res.ok || (data?.code && data.code !== 0 && data.code !== 200)) {
+      const msg = (data?.message || text || "").toLowerCase();
+      // Treat as success if HTTP ok OR message contains "success"/"verified"
+      const isSuccess = res.ok || msg.includes("success") || msg.includes("verif");
+      if (!isSuccess) {
         throw new Error(data?.message || text || "Verification failed. Please check the code.");
       }
 
-      setSuccess(true);
-      // Clear timestamps so the popup resets if the user somehow becomes unverified again
+      // Clear timestamp and close immediately — parent shows the toast
       localStorage.removeItem("cat_confirmEmailPopupTs");
-      setTimeout(() => onDone(), 1200);
+      onDone(true); // true = verified successfully
     } catch (err) {
       setError(err.message || "Invalid code. Please try again.");
     } finally {
@@ -148,26 +149,19 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
           </button>
 
           <div className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center mx-auto mb-3">
-            {success
-              ? <CheckCircle size={28} className="text-white" />
-              : <ShieldCheck size={28} className="text-white" />}
+            <ShieldCheck size={28} className="text-white" />
           </div>
 
-          <h2 className="text-lg font-bold">
-            {success ? "Email Verified!" : "Verify Your Email"}
-          </h2>
+          <h2 className="text-lg font-bold">Verify Your Email</h2>
           <p className="text-sm text-blue-100 mt-1">
-            {success
-              ? "Your recovery email is now verified."
-              : sent
-                ? "We sent a verification code to your recovery email."
-                : "Sending verification code…"}
+            {sent
+              ? "We sent a verification code to your recovery email."
+              : "Sending verification code…"}
           </p>
         </div>
 
         {/* Body */}
-        {!success && (
-          <div className="px-6 py-5 flex flex-col gap-4">
+        <div className="px-6 py-5 flex flex-col gap-4">
 
             {/* OTP boxes */}
             <div>
@@ -235,14 +229,6 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
               Skip for now
             </button>
           </div>
-        )}
-
-        {/* Success state */}
-        {success && (
-          <div className="px-6 py-8 flex flex-col items-center gap-2">
-            <Loader2 size={18} className="animate-spin text-blue-500" />
-          </div>
-        )}
       </div>
     </div>
   );

@@ -1174,7 +1174,18 @@ const HomePage = () => {
       {/* ── Recovery-email OTP verification popup ── */}
       {showRecoveryEmailFlow && (
         <RecoveryEmailVerificationFlow
-          onDone={() => setShowRecoveryEmailFlow(false)}
+          onDone={(verified) => {
+            setShowRecoveryEmailFlow(false);
+            if (verified) {
+              setToast({
+                isVisible: true,
+                message: "Email verified successfully!",
+                type: "success",
+                actionUrl: null,
+                actionLabel: null,
+              });
+            }
+          }}
         />
       )}
     </div>
