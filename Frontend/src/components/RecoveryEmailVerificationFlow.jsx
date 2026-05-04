@@ -59,7 +59,7 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
     setError("");
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch(`${BASE_URL}/user/sendmailotptoverify`, {
+      const res = await fetch(`${BASE_URL}/user/sendmailotptoverifyv1`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accesstoken: token },
       });
