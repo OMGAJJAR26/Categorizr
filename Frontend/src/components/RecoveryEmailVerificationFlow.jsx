@@ -110,7 +110,7 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
     try {
       const token  = localStorage.getItem("token");
       const params = new URLSearchParams({ code }).toString();
-      const res    = await fetch(`${BASE_URL}/user/verifymailotpforemailv1?${params}`, {
+      const res    = await fetch(`${BASE_URL}/user/verifymailotpforemail?${params}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accesstoken: token },
       });
