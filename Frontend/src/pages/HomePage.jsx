@@ -30,7 +30,8 @@ import { usePaymentDisplay } from "../hooks/usePaymentDisplay";
 import { useChatAssistant } from "../hooks/useChatAssistant";
 import ChatButton from "../components/chat/ChatButton";
 import ChatPanel from "../components/chat/ChatPanel";
-import RecoveryEmailVerificationFlow, { isTimestampFromToday } from "../components/RecoveryEmailVerificationFlow";
+import RecoveryEmailVerificationFlow from "../components/RecoveryEmailVerificationFlow";
+import { isTimestampFromToday } from "../components/RecoveryEmailVerificationFlow";
 import "./HomePage.css";
 
 const HomePage = () => {
@@ -88,10 +89,8 @@ const HomePage = () => {
   const [linkingSageReceiptId, setLinkingSageReceiptId] = useState(null);
   const [xeroConnected, setXeroConnected] = useState(false);
 
-  // ── Recovery-email verification popup (mirrors iOS home-screen logic) ──
-  // null = don't show; "update" = prompt to add email; "verify" = OTP step
-  const [recoveryEmailFlow, setRecoveryEmailFlow] = useState(null);
-  const [recoveryEmailForFlow, setRecoveryEmailForFlow] = useState("");
+  // ── Recovery-email verification popup ──
+  const [showRecoveryEmailFlow, setShowRecoveryEmailFlow] = useState(false);
   const [linkingXeroReceiptId, setLinkingXeroReceiptId] = useState(null);
   const [linkedQuickbooksReceiptIds, setLinkedQuickbooksReceiptIds] = useState(() => {
     try {
@@ -149,41 +148,23 @@ const HomePage = () => {
     }
   }, [navigate]);
 
-  // ── Recovery-email verification popup (mirrors iOS home-screen logic) ──
-  // Runs once per session when the user object is first available.
-  // Shows at most once per calendar day per popup type (timestamp saved to localStorage).
+  // ── Recovery-email verification popup ──
+  // Show once per day when the user's recovery email is not yet verified.
   useEffect(() => {
     if (!user) return;
 
-    // Support both camelCase (web API) and snake_case (iOS/Android API) field names
     const isVerified =
       user.isRecoveryEmailVerified ??
       user.is_recovery_email_verified ??
       false;
 
-    if (isVerified) return; // email already verified — nothing to do
+    if (isVerified) return;
 
-    const recoveryEmail = (
-      user.recoveryEmail ??
-      user.recovery_email ??
-      ""
-    ).toString().trim();
+    const ts = localStorage.getItem("cat_confirmEmailPopupTs");
+    if (isTimestampFromToday(ts)) return; // already shown today
 
-    if (!recoveryEmail) {
-      // No recovery email set → show "Add Email" popup (once per day)
-      const ts = localStorage.getItem("cat_updateEmailPopupTs");
-      if (isTimestampFromToday(ts)) return; // already shown today
-      localStorage.setItem("cat_updateEmailPopupTs", Date.now().toString());
-      setRecoveryEmailForFlow("");
-      setRecoveryEmailFlow("update");
-    } else {
-      // Recovery email exists but not verified → show OTP popup (once per day)
-      const ts = localStorage.getItem("cat_confirmEmailPopupTs");
-      if (isTimestampFromToday(ts)) return; // already shown today
-      localStorage.setItem("cat_confirmEmailPopupTs", Date.now().toString());
-      setRecoveryEmailForFlow(recoveryEmail);
-      setRecoveryEmailFlow("verify");
-    }
+    localStorage.setItem("cat_confirmEmailPopupTs", Date.now().toString());
+    setShowRecoveryEmailFlow(true);
   }, [user]);
 
   // Handle QuickBooks OAuth callback
@@ -1190,12 +1171,10 @@ const HomePage = () => {
         </>
       )}
 
-      {/* ── Recovery-email verification popup chain ── */}
-      {recoveryEmailFlow && (
+      {/* ── Recovery-email OTP verification popup ── */}
+      {showRecoveryEmailFlow && (
         <RecoveryEmailVerificationFlow
-          initialStep={recoveryEmailFlow}
-          recoveryEmail={recoveryEmailForFlow}
-          onDone={() => setRecoveryEmailFlow(null)}
+          onDone={() => setShowRecoveryEmailFlow(false)}
         />
       )}
     </div>
