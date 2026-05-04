@@ -12,7 +12,7 @@ import { useState, useEffect, useRef } from "react";
 import { X, ShieldCheck, Loader2, CheckCircle, RefreshCw } from "lucide-react";
 
 const BASE_URL = "/api";
-const OTP_LENGTH = 6;
+const OTP_LENGTH = 4;
 
 /** Returns true if a stored ms-timestamp is from today's calendar day */
 export const isTimestampFromToday = (ts) => {
