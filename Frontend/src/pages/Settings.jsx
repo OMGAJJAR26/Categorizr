@@ -56,6 +56,24 @@ import { useNavigate } from "react-router-dom";
 import { useData } from "../context/DataContext";
 
 /* ─── Helpers ─────────────────────────────────────────── */
+
+/**
+ * The backend sometimes constructs the unique Categorizr inbox address as
+ * "{realEmail}@categorizr.com" (e.g. "john@gmail.com@categorizr.com").
+ * This strips the intermediate provider so only "john@categorizr.com" is shown.
+ * Emails that don't end in @categorizr.com are returned unchanged.
+ */
+const sanitizeCategorizrEmail = (email) => {
+  if (!email) return "";
+  const suffix = "@categorizr.com";
+  if (!email.endsWith(suffix)) return email;
+  const localPart = email.slice(0, email.length - suffix.length);
+  // If the local part itself contains "@", strip the provider domain
+  // e.g. "john@gmail.com" → "john"
+  const cleanLocal = localPart.includes("@") ? localPart.split("@")[0] : localPart;
+  return `${cleanLocal}@categorizr.com`;
+};
+
 const getPaymentLogo = (name) => {
   const n = (name || "").toLowerCase();
   if (n.includes("visa"))                                return visaLogo;
@@ -716,7 +734,7 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
 
   const [profile, setProfile] = useState({
     firstName: user?.firstName || "", lastName: user?.lastName || "",
-    recoveryEmail: user?.email || "", receiptEmail: "", sameAsRecovery: false,
+    recoveryEmail: sanitizeCategorizrEmail(user?.email || ""), receiptEmail: "", sameAsRecovery: false,
   });
   const [profileMsg, setProfileMsg] = useState(null);
 
@@ -727,7 +745,7 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
         ...p,
         firstName:     p.firstName     || user.firstName || "",
         lastName:      p.lastName      || user.lastName  || "",
-        recoveryEmail: p.recoveryEmail || user.email     || "",
+        recoveryEmail: p.recoveryEmail || sanitizeCategorizrEmail(user.email || ""),
       }));
     }
   }, [user]);
@@ -984,7 +1002,7 @@ const ReceiptInfoPanel = ({ type, merchants, expenseCategories, paymentMethods, 
 
 /* My Information panel */
 const MyInformationPanel = ({ user }) => {
-  const email       = user?.email || "";
+  const email       = sanitizeCategorizrEmail(user?.email || "");
   const displayName = user?.userName || user?.username || user?.firstName || email.split("@")[0] || "User";
   return (
     <div className="flex flex-col gap-6 max-w-lg">
