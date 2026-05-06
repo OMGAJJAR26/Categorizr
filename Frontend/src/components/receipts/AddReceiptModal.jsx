@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { formatTaxRate } from "../../utils/receiptFormatters";
-import { containsEmoji } from "../../utils/emojiUtils";
+import { containsEmoji, stripEmoji } from "../../utils/emojiUtils";
 import SimpleAlertModal from "../SimpleAlertModal";
 import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus, MoreHorizontal, Minus, ChevronLeft, ChevronRight, Pencil, Camera, PenLine } from "lucide-react";
 import ReceiptAnnotator from "./ReceiptAnnotator";
@@ -4422,7 +4422,7 @@ const handleSelectLogo = (index) => {
         className={`${inputClass} ${formData.storeName ? "pl-8" : "pl-3"}`}
         value={formData.storeName}
         onChange={(e) => {
-          const newMerchantName = e.target.value;
+          const newMerchantName = stripEmoji(e.target.value);
           handleFieldChange("storeName", newMerchantName);
           // Clear detected logo when merchant changes manually
           if (
@@ -6130,7 +6130,7 @@ const handleSelectLogo = (index) => {
                     className={`${inputClass} w-full`}
                     value={newMerchantName}
                     onChange={(e) => {
-                      setNewMerchantName(e.target.value);
+                      setNewMerchantName(stripEmoji(e.target.value));
                       setLogoOptions([]);
                       setSelectedLogoIndex(null);
                       setNewMerchantLogo("");

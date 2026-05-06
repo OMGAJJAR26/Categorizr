@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { containsEmoji } from "../utils/emojiUtils";
+import { containsEmoji, stripEmoji } from "../utils/emojiUtils";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Settings as SettingsIcon,
@@ -581,7 +581,7 @@ const ManageModal = ({ type, onClose }) => {
             </div>
           ) : (
             <div className="flex gap-2">
-              <input className={mInput} placeholder={cfg.addPlaceholder} value={addVal} onChange={e => setAddVal(e.target.value)} onKeyDown={e => e.key === "Enter" && handleAdd()} />
+              <input className={mInput} placeholder={cfg.addPlaceholder} value={addVal} onChange={e => setAddVal(stripEmoji(e.target.value))} onKeyDown={e => e.key === "Enter" && handleAdd()} />
               <button onClick={handleAdd} className={`px-4 py-2 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn}`}>Add</button>
             </div>
           )}
@@ -693,7 +693,7 @@ const ManageModal = ({ type, onClose }) => {
                         <div key={item.key}>
                           {isEd ? (
                             <div className="flex gap-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
-                              <input className={mInput} value={editVal} onChange={e => setEditVal(e.target.value)} placeholder={item.name} />
+                              <input className={mInput} value={editVal} onChange={e => setEditVal(stripEmoji(e.target.value))} placeholder={item.name} />
                               <button onClick={() => handleEdit(item)} className="px-3 py-1 bg-blue-600 text-white text-xs font-semibold rounded-lg">Save</button>
                               <button onClick={() => setEditKey(null)} className="px-3 py-1 bg-gray-100 text-gray-600 text-xs font-semibold rounded-lg">Cancel</button>
                             </div>
@@ -2551,7 +2551,7 @@ const sanitizeTaxRate = (raw) => {
 
         {type === "categories" && (
           <div className="flex gap-2">
-            <input className={mInput} placeholder={cfg.addPlaceholder} value={addVal} onChange={e => setAddVal(e.target.value)} onKeyDown={e => e.key === "Enter" && handleAdd()} />
+            <input className={mInput} placeholder={cfg.addPlaceholder} value={addVal} onChange={e => setAddVal(stripEmoji(e.target.value))} onKeyDown={e => e.key === "Enter" && handleAdd()} />
             <button type="button" onClick={handleAdd}  className={`px-4 py-2 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn}`}>Add</button>
           </div>
         )}
@@ -2712,7 +2712,7 @@ const sanitizeTaxRate = (raw) => {
                               className="w-9 h-9 flex-shrink-0"
                             />
                           )}
-                          <input className={mInput} value={editVal} onChange={e => setEditVal(e.target.value)} placeholder={item.name} />
+                          <input className={mInput} value={editVal} onChange={e => setEditVal(stripEmoji(e.target.value))} placeholder={item.name} />
                           {/* Logo search button (merchants only) */}
                           {type === "merchants" && (
                             <button type="button" style={{ margin: 0 }}
