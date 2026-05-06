@@ -1,5 +1,6 @@
 import { useState } from "react";
 import html2pdf from "html2pdf.js";
+import SimpleAlertModal from "../components/SimpleAlertModal";
 
 const iconSVG = `
   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="16" viewBox="0 0 14 16">
@@ -10,6 +11,7 @@ const iconSVG = `
 
 const SummaryReport = ({ receipts }) => {
   const [showPopup, setShowPopup] = useState(false);
+  const [alertMsg, setAlertMsg] = useState(null);
 
   const generateSummaryHTML = (includeActions = false) => {
     const sortedReceipts = [...receipts].sort((a, b) => {
@@ -296,7 +298,7 @@ const SummaryReport = ({ receipts }) => {
         if (newWindow) {
           newWindow.close();
         }
-        alert("Failed to generate report. Please try again.");
+        setAlertMsg("Failed to generate report. Please try again.");
       }
     }
     setShowPopup(false);
@@ -346,6 +348,7 @@ const SummaryReport = ({ receipts }) => {
           </div>
         </div>
       )}
+      {alertMsg && <SimpleAlertModal message={alertMsg} onClose={() => setAlertMsg(null)} />}
     </>
   );
 };

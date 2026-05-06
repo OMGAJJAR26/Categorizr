@@ -1,5 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { formatTaxRate } from "../../utils/receiptFormatters";
+import { containsEmoji } from "../../utils/emojiUtils";
+import SimpleAlertModal from "../SimpleAlertModal";
 import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus, MoreHorizontal, Minus, ChevronLeft, ChevronRight, Pencil, Camera, PenLine } from "lucide-react";
 import ReceiptAnnotator from "./ReceiptAnnotator";
 import { motion, AnimatePresence } from "framer-motion";
@@ -74,6 +76,7 @@ const AddReceiptModal = ({ onClose, onReceiptAdded }) => {
   } = useData();
   const { getPaymentLogo, getPaymentDisplay } = usePaymentDisplay();
 
+  const [alertMsg, setAlertMsg] = useState(null);
   const [files, setFiles] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -308,7 +311,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
     const isCurrentlyDefault = parseInt(taxToToggle.is_default_tax) === 1;
     
     if (!isCurrentlyDefault && defaultTaxIds.length >= 2) {
-      alert("You can only set up to 2 Default Tax Types.");
+      setAlertMsg("You can only set up to 2 Default Tax Types.");
       return;
     }
     
@@ -1858,6 +1861,11 @@ const handleFieldChange = (field, value) => {
         setIsSaving(false);
         return;
       }
+      if (containsEmoji(formData.storeName)) {
+        setAlertMsg("Emojis are not allowed in merchant names. Please use plain text.");
+        setIsSaving(false);
+        return;
+      }
 
       // Build receipt_tax_values array including tip if present
       console.log("=== Building receipt_tax_values payload ===");
@@ -2575,14 +2583,14 @@ const handleFieldChange = (field, value) => {
     if (field === "subtotal") {
       const sub = parseFloat(value) || 0;
       if (mainSubtotal > 0 && sub > mainSubtotal) {
-        alert(`Subtotal cannot exceed $${mainSubtotal.toFixed(2)}`);
+        setAlertMsg(`Subtotal cannot exceed $${mainSubtotal.toFixed(2)}`);
         return;
       }
     }
     if (field === "purchasePrice") {
       const total = parseFloat(value) || 0;
       if (mainTotal > 0 && total > mainTotal) {
-        alert(`Total cannot exceed $${mainTotal.toFixed(2)}`);
+        setAlertMsg(`Total cannot exceed $${mainTotal.toFixed(2)}`);
         return;
       }
     }
@@ -3189,6 +3197,12 @@ const handleSelectLogo = (index) => {
     // 1. Empty name check
     if (!name) {
       setError("Please enter Merchant Name");
+      return;
+    }
+
+    // 1b. Emoji check
+    if (containsEmoji(name)) {
+      setAlertMsg("Emojis are not allowed in merchant names. Please use plain text.");
       return;
     }
 
@@ -3993,7 +4007,7 @@ const handleSelectLogo = (index) => {
                                       onChange={(e) => {
                                         const v = parseFloat(e.target.value) || 0;
                                         if (maxTax > 0 && v > maxTax) {
-                                          alert(`${t.tax_name} cannot exceed $${maxTax.toFixed(2)}`);
+                                          setAlertMsg(`${t.tax_name} cannot exceed $${maxTax.toFixed(2)}`);
                                           return;
                                         }
                                         const updatedTaxes = split.receipt_tax_values.map((tv, tvi) =>
@@ -6832,6 +6846,9 @@ const handleSelectLogo = (index) => {
           }}
         />
       )}
+
+      {/* Custom alert (replaces browser alert()) */}
+      {alertMsg && <SimpleAlertModal message={alertMsg} onClose={() => setAlertMsg(null)} />}
     </AnimatePresence>
   );
 };

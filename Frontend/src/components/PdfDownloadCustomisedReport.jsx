@@ -6,7 +6,7 @@ import autoTable from "jspdf-autotable";
 // Do NOT use hooks here - it's called directly as a function
 export default function PdfDownload({ receipts, groupByCategory = false, groupByMonth = false }) {
   if (!receipts || receipts.length === 0) {
-    alert("No data available for PDF");
+    console.warn("No data available for PDF");
     return;
   }
 

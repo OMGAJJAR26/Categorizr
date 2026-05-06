@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { containsEmoji } from "../utils/emojiUtils";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Settings as SettingsIcon,
@@ -226,6 +227,7 @@ const ManageModal = ({ type, onClose }) => {
       return;
     }
     if (!addVal.trim()) return;
+    if (containsEmoji(addVal)) return toast("error", "Emojis are not allowed in names. Please use plain text.");
     if (type === "merchants") {
       const merchantName = addVal.trim();
       const duplicate = [
@@ -2124,6 +2126,7 @@ const sanitizeTaxRate = (raw) => {
   const handleSaveEdit = async (item) => {
     const newName = editVal.trim();
     if (!newName) return;
+    if (containsEmoji(newName)) return toast("error", "Emojis are not allowed in names. Please use plain text.");
     if (type === "payments" && (item.name || "").trim().toLowerCase() === "cash") {
       toast("error", "Cash payment method cannot be edited");
       closeEdit();
@@ -2690,13 +2693,14 @@ const sanitizeTaxRate = (raw) => {
             ? <p className="text-sm text-slate-400 text-center py-8">No {cfg.label.toLowerCase()} yet.</p>
             : allItems.map(item => {
                 const isEd = editKey === item.key;
+                const isMisc = type === "merchants" && (item.name || "").toLowerCase().trim() === "miscellaneous";
                 // resolve logo shown in list: prefer merchant logo map, then item logo
                 const displayLogo = type === "merchants"
                   ? (merchLogos[item.name] || item.logo)
                   : item.logo;
                 return (
                   <div key={item.key}>
-                    {isEd ? (
+                    {isEd && !isMisc ? (
                       <div className="flex flex-col gap-2 bg-blue-50 border border-blue-200 rounded-xl p-3">
                         {/* Edit row */}
                         <div className="flex items-center gap-2">
@@ -2735,7 +2739,7 @@ const sanitizeTaxRate = (raw) => {
                         name={item.name} badgeCls={colors.badge}
                         showIcon={type !== "categories"}
                         actions={<>
-                          {!(type === "payments" && isCashMethod(item.name)) && (
+                          {!isMisc && !(type === "payments" && isCashMethod(item.name)) && (
                             <Btn color="bg-blue-500 hover:bg-blue-600" onClick={() => {
                               if (type === "payments") {
                                 // Open Add form prefilled for edit
@@ -2763,7 +2767,7 @@ const sanitizeTaxRate = (raw) => {
                               }
                             }}><Pencil size={13}/></Btn>
                           )}
-                          {!(type === "payments" && isCashMethod(item.name)) && (
+                          {!isMisc && !(type === "payments" && isCashMethod(item.name)) && (
                             <Btn color="bg-red-400 hover:bg-red-500" onClick={() => handleDelete(item)}><Trash2 size={13}/></Btn>
                           )}
                         </>}

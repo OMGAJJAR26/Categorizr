@@ -1,12 +1,14 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useCurrency } from "../context/CurrencyContext";
 import { usePaymentDisplay } from "../hooks/usePaymentDisplay";
 import { formatTaxRate } from "../utils/receiptFormatters";
+import SimpleAlertModal from "./SimpleAlertModal";
 
 const ViewReport = ({ receipt, onClose }) => {
   const { currency, language } = useCurrency();
   const { getDetailedPaymentDisplay } = usePaymentDisplay();
   const hasRun = useRef(false);
+  const [alertMsg, setAlertMsg] = useState(null);
 
   useEffect(() => {
     if (!receipt || !onClose || hasRun.current) return;
@@ -22,7 +24,7 @@ const ViewReport = ({ receipt, onClose }) => {
       } catch (error) {
         console.error("Error writing document:", error);
         newTab.close();
-        alert("Failed to generate report. Please try again.");
+        setAlertMsg("Failed to generate report. Please try again.");
       }
     }
     
@@ -603,7 +605,7 @@ const ViewReport = ({ receipt, onClose }) => {
               
             } catch (error) {
               console.error('PDF generation error:', error);
-              alert('Failed to generate PDF. Please use the Print option instead.');
+              setAlertMsg('Failed to generate PDF. Please use the Print option instead.');
             }
           }
           
@@ -641,7 +643,11 @@ const ViewReport = ({ receipt, onClose }) => {
     </html>
   `;
 
-  return null;
+  return (
+    <>
+      {alertMsg && <SimpleAlertModal message={alertMsg} onClose={() => setAlertMsg(null)} />}
+    </>
+  );
 };
 
 export default ViewReport;

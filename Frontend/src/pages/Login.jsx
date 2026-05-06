@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import SimpleAlertModal from "../components/SimpleAlertModal";
 import Logo from "../assets/categorizrLogoSimple.png";
 import FontLogo from "../assets/categorizrFontLogo.png";
 import { Eye, EyeOff } from "lucide-react";
@@ -12,6 +13,7 @@ import { useLoader } from "../context/LoaderContext";
 import ForgotPasswordModal from "./ForgotPasswordModel";
 import ForgotUsernameModal from "./ForgotUsernameModel";
 const Login = () => {
+  const [alertMsg, setAlertMsg] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [showUsernameModel, setShowUsernameModel] = useState(false);
@@ -64,10 +66,10 @@ const Login = () => {
         // Navigate and replace history to prevent back button issues
         navigate("/homepage", { replace: true });
       } else {
-        alert(data.message || "Login failed");
+        setAlertMsg(data.message || "Login failed");
       }
     } catch (err) {
-      alert("Login failed: " + err.message);
+      setAlertMsg("Login failed: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -208,6 +210,7 @@ const Login = () => {
       {showUsernameModel && (
         <ForgotUsernameModal onClose={() => setShowUsernameModel(false)} />
       )}
+      {alertMsg && <SimpleAlertModal message={alertMsg} onClose={() => setAlertMsg(null)} />}
     </div>
   );
 };

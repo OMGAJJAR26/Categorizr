@@ -1,4 +1,6 @@
+import { useState } from "react";
 import html2pdf from "html2pdf.js";
+import SimpleAlertModal from "../SimpleAlertModal";
 
 const ReportModals = ({
   showReportModal,
@@ -13,6 +15,8 @@ const ReportModals = ({
   formatCurrencyFixed2,
   onApplyTaxTypes
 }) => {
+  const [alertMsg, setAlertMsg] = useState(null);
+
   if (!showReportModal) return null;
 
   const handleGenerateReport = async (format) => {
@@ -158,7 +162,7 @@ const ReportModals = ({
           if (newWindow) {
             newWindow.close();
           }
-          alert("Failed to generate report. Please try again.");
+          setAlertMsg("Failed to generate report. Please try again.");
         }
       }
     } else if (format === "pdf") {
@@ -213,6 +217,7 @@ const ReportModals = ({
           </button>
         </div>
       </div>
+      {alertMsg && <SimpleAlertModal message={alertMsg} onClose={() => setAlertMsg(null)} />}
     </div>
   );
 };

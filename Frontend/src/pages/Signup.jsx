@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import SimpleAlertModal from "../components/SimpleAlertModal";
 import { useFormik } from "formik";
 import * as Yup from "yup";
 import Logo from "../assets/categorizrLogoSimple.png";
@@ -37,6 +38,7 @@ const getBrowserCountry = async () => {
 };
 
 const Signup = () => {
+  const [alertMsg, setAlertMsg] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
   const { setLoading } = useLoader();
@@ -119,14 +121,14 @@ const Signup = () => {
             }
           }
 
-          alert(data.message || "Signup successful");
+          setAlertMsg(data.message || "Signup successful");
           navigate("/login");
         } else {
-          alert(data.message || "Signup failed");
+          setAlertMsg(data.message || "Signup failed");
         }
       } catch (err) {
         console.error("Signup failed:", err?.message || err);
-        alert("Signup failed");
+        setAlertMsg("Signup failed");
       } finally {
         setLoading(false);
       }
@@ -282,6 +284,7 @@ const Signup = () => {
           </div>
         </form>
       </div>
+      {alertMsg && <SimpleAlertModal message={alertMsg} onClose={() => setAlertMsg(null)} />}
     </div>
   );
 };

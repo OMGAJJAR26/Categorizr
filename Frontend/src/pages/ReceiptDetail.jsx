@@ -234,6 +234,7 @@ const ReceiptDetail = ({
   const [splitErrors, setSplitErrors] = useState({});
   const [splitError, setSplitError] = useState(null);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
+  const [alertMsg, setAlertMsg] = useState(null);
 
   // Refs for dropdowns
   const merchantInputRef = useRef(null);
@@ -484,7 +485,7 @@ const ReceiptDetail = ({
     if (!taxToToggle) return;
     const isCurrentlyDefault = parseInt(taxToToggle.is_default_tax) === 1;
     if (!isCurrentlyDefault && defaultTaxIds.length >= 2) {
-      alert("You can only set up to 2 Default Tax Types.");
+      setAlertMsg("You can only set up to 2 Default Tax Types.");
       return;
     }
     try {
@@ -2217,11 +2218,11 @@ useEffect(() => {
     const mainTotal    = parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0;
 
     if (field === "subtotal" && mainSubtotal > 0 && (parseFloat(value) || 0) > mainSubtotal) {
-      alert(`Subtotal cannot exceed $${mainSubtotal.toFixed(2)}`);
+      setAlertMsg(`Subtotal cannot exceed $${mainSubtotal.toFixed(2)}`);
       return;
     }
     if (field === "purchasePrice" && mainTotal > 0 && (parseFloat(value) || 0) > mainTotal) {
-      alert(`Total cannot exceed $${mainTotal.toFixed(2)}`);
+      setAlertMsg(`Total cannot exceed $${mainTotal.toFixed(2)}`);
       return;
     }
 
@@ -2562,11 +2563,11 @@ useEffect(() => {
       } else {
         console.error("Failed to delete receipt - API call failed");
         // Show error message to user
-        alert("Failed to delete receipt. Please try again.");
+        setAlertMsg("Failed to delete receipt. Please try again.");
       }
     } catch (error) {
       console.error("Error deleting receipt:", error);
-      alert("Error deleting receipt. Please try again.");
+      setAlertMsg("Error deleting receipt. Please try again.");
     } finally {
       setIsDeleting(false);
     }
@@ -3491,7 +3492,7 @@ useEffect(() => {
       await html2pdf().from(element).set(options).save();
     } catch (error) {
       console.error("Error generating PDF:", error);
-      alert("Failed to generate PDF. Please try again.");
+      setAlertMsg("Failed to generate PDF. Please try again.");
     }
   };
 
@@ -4072,7 +4073,7 @@ Thank you for using our receipt management system.
       URL.revokeObjectURL(url);
     } catch (error) {
       console.error("Error generating ZIP file:", error);
-      alert("Error generating ZIP file. Please try again.");
+      setAlertMsg("Error generating ZIP file. Please try again.");
     }
   };
 
@@ -4489,7 +4490,7 @@ Thank you for using our receipt management system.
                                       value={t.tax_amount ?? ""}
                                       onChange={(e) => {
                                         const v = parseFloat(e.target.value) || 0;
-                                        if (maxTax > 0 && v > maxTax) { alert(`${t.tax_name} cannot exceed $${maxTax.toFixed(2)}`); return; }
+                                        if (maxTax > 0 && v > maxTax) { setAlertMsg(`${t.tax_name} cannot exceed $${maxTax.toFixed(2)}`); return; }
                                         const updatedTaxes = split.receipt_tax_values.map((tv, tvi) => tvi === ti ? { ...tv, tax_amount: e.target.value } : tv);
                                         updateSplitField(activeSplitIndex, "receipt_tax_values", updatedTaxes);
                                       }}
@@ -7003,6 +7004,23 @@ Thank you for using our receipt management system.
             setAnnotatorSource(null);
           }}
         />
+      )}
+
+      {alertMsg && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs mx-auto p-6 text-center">
+            <div className="w-12 h-12 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </div>
+            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{alertMsg}</p>
+            <button
+              onClick={() => setAlertMsg(null)}
+              className="mt-5 w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl transition-colors"
+            >
+              OK
+            </button>
+          </div>
+        </div>
       )}
     </>
   );

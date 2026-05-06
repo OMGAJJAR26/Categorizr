@@ -2,6 +2,7 @@ import { useState } from "react";
 import html2pdf from "html2pdf.js";
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
+import SimpleAlertModal from "../SimpleAlertModal";
 
 const ReportModals = ({
   showReportModal,
@@ -17,6 +18,7 @@ const ReportModals = ({
   onApplyTaxTypes
 }) => {
   const [isGenerating, setIsGenerating] = useState(false);
+  const [alertMsg, setAlertMsg] = useState(null);
 
   if (!showReportModal) return null;
 
@@ -127,7 +129,7 @@ const ReportModals = ({
       setShowReportModal(false);
     } catch (error) {
       console.error("Error generating CSV:", error);
-      alert("Failed to generate CSV. Please try again.");
+      setAlertMsg("Failed to generate CSV. Please try again.");
     } finally {
       setIsGenerating(false);
     }
@@ -199,7 +201,7 @@ const ReportModals = ({
       setShowReportModal(false);
     } catch (error) {
       console.error("Error generating ZIP:", error);
-      alert("Failed to generate ZIP. Please try again.");
+      setAlertMsg("Failed to generate ZIP. Please try again.");
     } finally {
       setIsGenerating(false);
     }
@@ -350,7 +352,7 @@ const ReportModals = ({
             if (newWindow) {
               newWindow.close();
             }
-            alert("Failed to generate report. Please try again.");
+            setAlertMsg("Failed to generate report. Please try again.");
           }
         }
 
@@ -373,7 +375,7 @@ const ReportModals = ({
       setShowReportModal(false);
     } catch (error) {
       console.error("Error generating report:", error);
-      alert("Failed to generate report. Please try again.");
+      setAlertMsg("Failed to generate report. Please try again.");
     } finally {
       setIsGenerating(false);
     }
@@ -443,6 +445,7 @@ const ReportModals = ({
           </div>
         )}
       </div>
+      {alertMsg && <SimpleAlertModal message={alertMsg} onClose={() => setAlertMsg(null)} />}
     </div>
   );
 };

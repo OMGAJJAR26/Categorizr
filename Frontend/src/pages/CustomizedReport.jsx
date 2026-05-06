@@ -3,6 +3,7 @@ import { useState, forwardRef, useImperativeHandle, useEffect } from "react";
 import { useDisableToggle } from "../hooks/useDisableToggle";
 import CsvExportModal from "../components/CsvExportModal";
 import PdfDownload from "../components/PdfDownloadCustomisedReport";
+import SimpleAlertModal from "../components/SimpleAlertModal";
 // import * as XLSX from "xlsx";
 
 // All Hooks
@@ -24,6 +25,7 @@ const CustomizedReport = forwardRef((props, ref) => {
   const [showTotalPopup, setShowTotalPopup] = useState(false);
   const [groupByCategory, setGroupByCategory] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [alertMsg, setAlertMsg] = useState(null);
   const [exportData, setExportData] = useState([]);
   const [reportType, setReportType] = useState("");
   const [showTaxType1Popup, setShowTaxType1Popup] = useState(false);
@@ -359,7 +361,7 @@ const CustomizedReport = forwardRef((props, ref) => {
       setShowExportModal(true);
     } else if (reportType === "pdf") {
       if (filteredReceipts.length === 0) {
-        alert("No data found for selected filters!");
+        setAlertMsg("No data found for selected filters!");
         return;
       }
 
@@ -1706,6 +1708,7 @@ const CustomizedReport = forwardRef((props, ref) => {
       >
         Create Report
       </button>
+      {alertMsg && <SimpleAlertModal message={alertMsg} onClose={() => setAlertMsg(null)} />}
     </>
   );
 });

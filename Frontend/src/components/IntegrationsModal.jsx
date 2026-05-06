@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { NODE_API_URL } from "../api/Axios";
+import SimpleAlertModal from "./SimpleAlertModal";
 
 const QB_APP_URL = "https://app.qbo.intuit.com/app/homepage";
 const SAGE_APP_URL = "https://www.sageone.com/";
@@ -55,6 +56,7 @@ const getConnectUrl = (id) => {
 };
 
 const IntegrationsModal = ({ open, onClose }) => {
+  const [alertMsg, setAlertMsg] = useState(null);
   const [quickbooksConnected, setQuickbooksConnected] = useState(false);
   const [quickbooksRealmId, setQuickbooksRealmId] = useState(null);
   const [quickbooksLoading, setQuickbooksLoading] = useState(false);
@@ -143,11 +145,11 @@ const IntegrationsModal = ({ open, onClose }) => {
         setQuickbooksRealmId(null);
         // Optionally show a toast notification
       } else {
-        alert(data.error || "Failed to disconnect QuickBooks");
+        setAlertMsg(data.error || "Failed to disconnect QuickBooks");
       }
     } catch (err) {
       console.error("Disconnect error:", err);
-      alert("Failed to disconnect QuickBooks. Please try again.");
+      setAlertMsg("Failed to disconnect QuickBooks. Please try again.");
     } finally {
       setQuickbooksLoading(false);
     }
@@ -176,6 +178,8 @@ const IntegrationsModal = ({ open, onClose }) => {
             Business Accounting
           </p>
         </div>
+
+        {alertMsg && <SimpleAlertModal message={alertMsg} onClose={() => setAlertMsg(null)} />}
 
         {/* Providers list */}
         <div className="px-4 pb-5 space-y-2">
