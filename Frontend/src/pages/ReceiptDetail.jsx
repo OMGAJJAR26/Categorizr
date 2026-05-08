@@ -1539,6 +1539,33 @@ useEffect(() => {
     return dot !== -1 && str.length - dot - 1 > 3;
   };
 
+  const [taxRateOverflow, setTaxRateOverflow] = useState(false);
+
+  const preventInvalidTaxRateKey = (e) => {
+    if (e.ctrlKey || e.metaKey) return;
+    const allowed = ["Backspace","Delete","ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Tab","Enter","Home","End"];
+    if (allowed.includes(e.key)) return;
+    if (/^\d$/.test(e.key)) return;
+    if (e.key === ".") return;
+    e.preventDefault();
+  };
+
+  const parseTaxRateInput = (raw) => {
+    let v = String(raw).replace(/%/g, "").replace(/[^\d.]/g, "");
+    const dotIdx = v.indexOf(".");
+    let overflow = false;
+    if (dotIdx !== -1) {
+      v = v.slice(0, dotIdx + 1) + v.slice(dotIdx + 1).replace(/\./g, "");
+      const [whole = "", dec = ""] = v.split(".");
+      overflow = whole.length > 2 || dec.length > 3;
+      v = whole.slice(0, 2) + "." + dec.slice(0, 3);
+    } else {
+      overflow = v.length > 2;
+      v = v.slice(0, 2);
+    }
+    return { value: v, overflow };
+  };
+
   const isBlockedTaxRateInput = (val) => {
     const str = String(val).replace(/%/g, "").trim();
     return str === "99.999" || str === "999";
@@ -1550,13 +1577,15 @@ useEffect(() => {
       ? `"${newTaxName.trim()}" already exists. Please use a different name.`
       : "");
 
-  const taxRateError = newTaxRate !== "" && isBlockedTaxRateInput(newTaxRate)
+  const taxRateError = taxRateOverflow
+    ? "Tax Rate allows max 2 digits before decimal and 3 digits after decimal."
+    : (newTaxRate !== "" && isBlockedTaxRateInput(newTaxRate)
     ? "Tax Rate cannot be 99.999 or 999."
     : (newTaxRate !== "" && parseFloat(newTaxRate) > TAX_RATE_MAX
     ? `Tax Rate cannot exceed ${TAX_RATE_MAX}%`
     : (newTaxRate !== "" && hasMoreThan3Decimals(newTaxRate)
       ? "Tax Rate can have a maximum of 3 decimal places (e.g. 10.894%)"
-      : ""));
+      : "")));
 
   const taxNumberError = newTaxNumber.length > TAX_NUMBER_MAX
     ? `Tax Number cannot exceed ${TAX_NUMBER_MAX} characters (${newTaxNumber.length}/${TAX_NUMBER_MAX})`
@@ -1613,6 +1642,7 @@ useEffect(() => {
       setNewTaxName("");
       setNewTaxRate("");
       setNewTaxNumber("");
+      setTaxRateOverflow(false);
       setShowAddTaxForm(false);
       
       if (savedTax) {
@@ -1686,6 +1716,7 @@ useEffect(() => {
       setNewTaxName("");
       setNewTaxRate("");
       setNewTaxNumber("");
+      setTaxRateOverflow(false);
       setEditingTaxId(null);
       setShowAddTaxForm(false);
     } catch (err) {
@@ -1722,6 +1753,7 @@ useEffect(() => {
       });
       await fetchTaxes();
       setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber(""); setEditingTaxId(null);
+      setTaxRateOverflow(false);
       setShowAddTaxForm(false); setTaxError(null);
     } catch (err) {
       setTaxError(err.message || "Failed to update tax type.");
@@ -1758,6 +1790,7 @@ useEffect(() => {
     setNewTaxName(tax.tax_name || "");
     setNewTaxRate(tax.tax_rate || "");
     setNewTaxNumber(tax.tax_number || "");
+    setTaxRateOverflow(false);
     setShowAddTaxForm(true);
     setTaxError(null);
   };
@@ -1767,6 +1800,7 @@ useEffect(() => {
     setNewTaxName("");
     setNewTaxRate("");
     setNewTaxNumber("");
+    setTaxRateOverflow(false);
   };
 
   const closeTaxModal = () => {
@@ -1774,6 +1808,7 @@ useEffect(() => {
     setShowAddTaxForm(false);
     setTaxRateFocused(false);
     setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber("");
+    setTaxRateOverflow(false);
     setEditingTaxId(null);
     setTaxError(null);
   };
@@ -6512,6 +6547,7 @@ Thank you for using our receipt management system.
                       onClick={() => {
                         setShowAddTaxForm(true);
                         setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber("");
+                        setTaxRateOverflow(false);
                         setTaxError(null);
                       }}
                       className="px-4 py-1.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors"
@@ -6640,7 +6676,12 @@ Thank you for using our receipt management system.
                             taxRateError ? "border-red-400 bg-red-50" : "border-gray-200"
                           }`}
                           value={newTaxRate}
-                          onChange={e => setNewTaxRate(e.target.value.replace(/%/g, ""))}
+                          onKeyDown={preventInvalidTaxRateKey}
+                          onChange={e => {
+                            const parsed = parseTaxRateInput(e.target.value);
+                            setNewTaxRate(parsed.value);
+                            setTaxRateOverflow(parsed.overflow);
+                          }}
                           placeholder="Enter Tax Rate"
                         />
                         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">%</span>
@@ -6682,6 +6723,7 @@ Thank you for using our receipt management system.
                           setShowAddTaxForm(false);
                           setEditingTaxId(null);
                           setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber("");
+                          setTaxRateOverflow(false);
                           setTaxRateFocused(false);
                           setTaxError(null);
                         }}

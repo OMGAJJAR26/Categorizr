@@ -216,6 +216,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const TAX_NUMBER_MAX = 35;
 
   const [taxNameOverflow, setTaxNameOverflow]           = useState(false);
+  const [taxRateOverflow, setTaxRateOverflow]           = useState(false);
   const [taxNumberOverflow, setTaxNumberOverflow]       = useState(false);
   const [descriptionOverflow, setDescriptionOverflow]   = useState(false);
   const [notesOverflow, setNotesOverflow]               = useState(false);
@@ -276,16 +277,23 @@ const [localMerchants, setLocalMerchants] = useState([]);
     e.preventDefault();
   };
 
-  // Sanitizes pasted / typed values: digits + 1 decimal point only.
-  // Do not auto-cap/truncate to 99.999; validation should show alerts instead.
-  const sanitizeTaxRate = (raw) => {
+  // Restrict to max 2 digits before decimal and max 3 after decimal.
+  // Keep input blocked at typing time and show inline alert.
+  const parseTaxRateInput = (raw) => {
     let v = String(raw).replace(/%/g, "").replace(/[^\d.]/g, "");
     const dotIdx = v.indexOf(".");
+    let overflow = false;
     if (dotIdx !== -1) {
       // Remove any extra dots after the first
       v = v.slice(0, dotIdx + 1) + v.slice(dotIdx + 1).replace(/\./g, "");
+      const [whole = "", dec = ""] = v.split(".");
+      overflow = whole.length > 2 || dec.length > 3;
+      v = whole.slice(0, 2) + "." + dec.slice(0, 3);
+    } else {
+      overflow = v.length > 2;
+      v = v.slice(0, 2);
     }
-    return v;
+    return { value: v, overflow };
   };
 
   const taxNameError = taxNameOverflow
@@ -294,13 +302,15 @@ const [localMerchants, setLocalMerchants] = useState([]);
       ? `"${newTaxName.trim()}" already exists. Please use a different name.`
       : "");
 
-  const taxRateError = newTaxRate !== "" && isBlockedTaxRateInput(newTaxRate)
+  const taxRateError = taxRateOverflow
+    ? "Tax Rate allows max 2 digits before decimal and 3 digits after decimal."
+    : (newTaxRate !== "" && isBlockedTaxRateInput(newTaxRate)
     ? "Tax Rate cannot be 99.999 or 999."
     : (newTaxRate !== "" && parseFloat(newTaxRate) > TAX_RATE_MAX
     ? `Maximum tax rate of ${TAX_RATE_MAX}% exceeded`
     : (newTaxRate !== "" && hasMoreThan3Decimals(newTaxRate)
       ? "Tax Rate can have a maximum of 3 decimal places (e.g. 10.894%)"
-      : ""));
+      : "")));
 
   const taxNumberError = taxNumberOverflow
     ? `Character limit of ${TAX_NUMBER_MAX} exceeded`
@@ -1308,6 +1318,7 @@ const handleFieldChange = (field, value) => {
       const addedTaxNumber = newTaxNumber.trim();
       setNewTaxName("");
       setNewTaxRate("");
+      setTaxRateOverflow(false);
       setNewTaxNumber("");
       setTaxNameOverflow(false);
       setTaxNumberOverflow(false);
@@ -1427,6 +1438,7 @@ const handleFieldChange = (field, value) => {
       // Reset form
       setNewTaxName("");
       setNewTaxRate("");
+      setTaxRateOverflow(false);
       setNewTaxNumber("");
       setTaxNameOverflow(false);
       setTaxNumberOverflow(false);
@@ -1464,6 +1476,7 @@ const handleFieldChange = (field, value) => {
         udpated: 0,
       });
       setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber(""); setEditingTaxId(null);
+      setTaxRateOverflow(false);
       setTaxNameOverflow(false); setTaxNumberOverflow(false);
       setShowAddTaxForm(false); setError(null);
     } catch (err) {
@@ -1498,6 +1511,7 @@ const handleFieldChange = (field, value) => {
     setNewTaxName(tax.tax_name || "");
     setNewTaxRate(tax.tax_rate || "");
     setNewTaxNumber(tax.tax_number || "");
+    setTaxRateOverflow(false);
     setTaxNameOverflow(false);
     setTaxNumberOverflow(false);
     setShowAddTaxForm(true);
@@ -1510,6 +1524,7 @@ const handleFieldChange = (field, value) => {
     setNewTaxName("");
     setNewTaxRate("");
     setNewTaxNumber("");
+    setTaxRateOverflow(false);
     setTaxNameOverflow(false);
     setTaxNumberOverflow(false);
     setError(null);
@@ -1520,6 +1535,7 @@ const handleFieldChange = (field, value) => {
     setShowAddTaxForm(false);
     setTaxRateFocused(false);
     setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber("");
+    setTaxRateOverflow(false);
     setTaxNameOverflow(false); setTaxNumberOverflow(false);
     setEditingTaxId(null);
     setError(null);
@@ -6369,6 +6385,7 @@ const handleSelectLogo = (index) => {
                       onClick={() => {
                         setShowAddTaxForm(true);
                         setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber("");
+                        setTaxRateOverflow(false);
                         setTaxNameOverflow(false); setTaxNumberOverflow(false);
                         setError(null);
                       }}
@@ -6507,7 +6524,11 @@ const handleSelectLogo = (index) => {
                           }`}
                           value={newTaxRate}
                           onKeyDown={preventInvalidTaxRateKey}
-                          onChange={e => setNewTaxRate(sanitizeTaxRate(e.target.value))}
+                          onChange={e => {
+                            const parsed = parseTaxRateInput(e.target.value);
+                            setNewTaxRate(parsed.value);
+                            setTaxRateOverflow(parsed.overflow);
+                          }}
                           placeholder="Enter Tax Rate"
                         />
                         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">%</span>
@@ -6557,6 +6578,7 @@ const handleSelectLogo = (index) => {
                           setShowAddTaxForm(false);
                           setEditingTaxId(null);
                           setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber("");
+                          setTaxRateOverflow(false);
                           setTaxNameOverflow(false); setTaxNumberOverflow(false);
                           setTaxRateFocused(false);
                           setError(null);
