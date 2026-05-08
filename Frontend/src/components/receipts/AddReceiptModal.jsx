@@ -276,7 +276,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
     e.preventDefault();
   };
 
-  // Sanitizes pasted / typed values: digits + 1 decimal, max 2 whole digits,
+  // Sanitizes pasted / typed values: digits + 1 decimal, max 3 whole digits,
   // max 3 decimal places, value capped at 99.999.
   const sanitizeTaxRate = (raw) => {
     let v = String(raw).replace(/%/g, "").replace(/[^\d.]/g, "");
@@ -285,9 +285,9 @@ const [localMerchants, setLocalMerchants] = useState([]);
       // Remove any extra dots after the first
       v = v.slice(0, dotIdx + 1) + v.slice(dotIdx + 1).replace(/\./g, "");
       const [whole, dec] = v.split(".");
-      v = whole.slice(0, 2) + "." + dec.slice(0, 3);
+      v = whole.slice(0, 3) + "." + dec.slice(0, 3);
     } else {
-      v = v.slice(0, 2);
+      v = v.slice(0, 3);
     }
     const num = parseFloat(v);
     if (!isNaN(num) && num > 99.999) v = "99.999";
