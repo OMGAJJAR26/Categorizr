@@ -1624,20 +1624,14 @@ const preventInvalidTaxRateKey = (e) => {
   e.preventDefault();
 };
 
-// Cleans pasted / typed tax-rate values: only digits + one dot,
-// max 3 whole digits, max 3 decimal places, value capped at 99.999.
+// Cleans pasted / typed tax-rate values: only digits + one dot.
+// Do not auto-cap/truncate to 99.999; validation should show alerts instead.
 const sanitizeTaxRate = (raw) => {
   let v = String(raw).replace(/%/g, "").replace(/[^\d.]/g, "");
   const dotIdx = v.indexOf(".");
   if (dotIdx !== -1) {
     v = v.slice(0, dotIdx + 1) + v.slice(dotIdx + 1).replace(/\./g, "");
-    const [whole, dec] = v.split(".");
-    v = whole.slice(0, 3) + "." + dec.slice(0, 3);
-  } else {
-    v = v.slice(0, 3);
   }
-  const num = parseFloat(v);
-  if (!isNaN(num) && num > 99.999) v = "99.999";
   return v;
 };
 
