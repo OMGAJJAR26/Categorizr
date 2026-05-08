@@ -53,6 +53,7 @@ import Header from "../components/Header";
 import LogoutConfirmationDialog from "../components/LogoutConfirmationDialog";
 import ForgotPasswordModal from "./ForgotPasswordModel";
 import MerchantAvatar from "../components/MerchantAvatar";
+import SimpleAlertModal from "../components/SimpleAlertModal";
 import { useNavigate } from "react-router-dom";
 import { useData } from "../context/DataContext";
 
@@ -222,6 +223,8 @@ const ManageModal = ({ type, onClose }) => {
         const fk_user_id = localStorage.getItem("fk_user_id") || "";
         await addTax({ tax_name: n, tax_rate: r, tax_number: addTaxVal.tax_number.trim(), fk_user_id });
         setAddTaxVal({ tax_name: "", tax_rate: "", tax_number: "" });
+        setAddTaxNameOverflow(false);
+        setAddTaxNumberOverflow(false);
         toast("success", `"${n}" added.`);
       } catch (e) { toast("error", e.message || "Failed."); }
       return;
@@ -279,6 +282,8 @@ const ManageModal = ({ type, onClose }) => {
         const tObj = taxData.find(t => t.id === item.key);
         await updateTax({ ...tObj, tax_name: n, tax_rate: r, tax_number: editTaxVal.tax_number.trim(), is_default_tax: parseInt(tObj?.is_default_tax) || 0, is_tips: parseInt(tObj?.is_tips) || 0 });
         setEditTaxKey(null);
+        setEditTaxNameOverflow(false);
+        setEditTaxNumberOverflow(false);
       }
       catch (e) { toast("error", e.message || "Failed."); }
       return;
@@ -564,16 +569,25 @@ const ManageModal = ({ type, onClose }) => {
                     setAddTaxNameOverflow(false);
                     setAddTaxVal(p => ({ ...p, tax_name: v }));
                   }} />
-                <input className={`${mInput} max-w-[80px]`} placeholder="Tax Rate %" value={addTaxVal.tax_rate} onKeyDown={preventInvalidTaxRateKey} onChange={e => setAddTaxVal(p => ({ ...p, tax_rate: sanitizeTaxRate(e.target.value) }))} />
+                <div className="relative w-[80px] flex-shrink-0">
+                  <input className={`${mInput} pr-6 w-full`} placeholder="Rate" value={addTaxVal.tax_rate} onKeyDown={preventInvalidTaxRateKey} onChange={e => setAddTaxVal(p => ({ ...p, tax_rate: sanitizeTaxRate(e.target.value) }))} />
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">%</span>
+                </div>
               </div>
               {addTaxNameOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NAME_MAX} exceeded</p>}
-              <input className={mInput} placeholder="Tax number (optional)" value={addTaxVal.tax_number}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (v.length > TAX_NUMBER_MAX) { setAddTaxNumberOverflow(true); return; }
-                  setAddTaxNumberOverflow(false);
-                  setAddTaxVal(p => ({ ...p, tax_number: v }));
-                }} />
+              {parseFloat(addTaxVal.tax_rate) >= 99.999 && addTaxVal.tax_rate !== "" && (
+                <p className="text-xs text-red-600 font-medium -mt-1">Maximum tax rate of 99.999% reached</p>
+              )}
+              <div className="flex gap-2">
+                <input className={mInput} placeholder="Tax number (optional)" value={addTaxVal.tax_number}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (v.length > TAX_NUMBER_MAX) { setAddTaxNumberOverflow(true); return; }
+                    setAddTaxNumberOverflow(false);
+                    setAddTaxVal(p => ({ ...p, tax_number: v }));
+                  }} />
+                <div className="w-[80px] flex-shrink-0" />
+              </div>
               {addTaxNumberOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NUMBER_MAX} exceeded</p>}
               <div className="flex justify-end">
                 <button onClick={handleAdd} className={`px-4 py-2 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn}`}>Add</button>
@@ -621,9 +635,15 @@ const ManageModal = ({ type, onClose }) => {
                             setEditTaxNameOverflow(false);
                             setEditTaxVal(p => ({ ...p, tax_name: v }));
                           }} placeholder="Name" />
-                        <input className={`${mInput} max-w-[80px]`} value={editTaxVal.tax_rate} onKeyDown={preventInvalidTaxRateKey} onChange={e => setEditTaxVal(p => ({ ...p, tax_rate: sanitizeTaxRate(e.target.value) }))} placeholder="Tax Rate %" />
+                        <div className="relative w-[80px] flex-shrink-0">
+                          <input className={`${mInput} pr-6 w-full`} value={editTaxVal.tax_rate} onKeyDown={preventInvalidTaxRateKey} onChange={e => setEditTaxVal(p => ({ ...p, tax_rate: sanitizeTaxRate(e.target.value) }))} placeholder="Rate" />
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">%</span>
+                        </div>
                       </div>
                       {editTaxNameOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NAME_MAX} exceeded</p>}
+                      {parseFloat(editTaxVal.tax_rate) >= 99.999 && editTaxVal.tax_rate !== "" && (
+                        <p className="text-xs text-red-600 font-medium -mt-1">Maximum tax rate of 99.999% reached</p>
+                      )}
                       <div className="flex gap-2">
                         <input className={mInput} value={editTaxVal.tax_number}
                           onChange={e => {
@@ -736,7 +756,7 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
 
   const [profile, setProfile] = useState({
     firstName: user?.firstName || "", lastName: user?.lastName || "",
-    recoveryEmail: sanitizeCategorizrEmail(user?.email || ""), receiptEmail: "", sameAsRecovery: false,
+    recoveryEmail: user?.recoveryEmail || user?.emailAdress || user?.email || "", receiptEmail: user?.duplicate_eReciept_email || "", sameAsRecovery: false,
   });
   const [profileMsg, setProfileMsg] = useState(null);
 
@@ -747,7 +767,7 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
         ...p,
         firstName:     p.firstName     || user.firstName || "",
         lastName:      p.lastName      || user.lastName  || "",
-        recoveryEmail: p.recoveryEmail || sanitizeCategorizrEmail(user.email || ""),
+        recoveryEmail: p.recoveryEmail || user?.recoveryEmail || user?.emailAdress || user?.email || "",
       }));
     }
   }, [user]);
@@ -1004,7 +1024,7 @@ const ReceiptInfoPanel = ({ type, merchants, expenseCategories, paymentMethods, 
 
 /* My Information panel */
 const MyInformationPanel = ({ user }) => {
-  const email       = sanitizeCategorizrEmail(user?.email || "");
+  const email       = user?.userName ? `${user.userName}@categorizr.com` : (user?.username ? `${user.username}@categorizr.com` : "");
   const displayName = user?.userName || user?.username || user?.firstName || email.split("@")[0] || "User";
   return (
     <div className="flex flex-col gap-6 max-w-lg">
@@ -1306,6 +1326,7 @@ const ReceiptInfoInline = ({ type }) => {
   const [addVal, setAddVal]     = useState("");
   const [addTaxVal, setAddTaxVal] = useState({ tax_name: "", tax_rate: "", tax_number: "" });
   const [msg, setMsg]           = useState(null);
+  const [showMaxDefaultTaxMsg, setShowMaxDefaultTaxMsg] = useState(false);
 
   const defaultTaxIds = useMemo(() => {
     return (taxData || []).filter(t => parseInt(t.is_default_tax) === 1).map(t => t.id);
@@ -1314,11 +1335,11 @@ const ReceiptInfoInline = ({ type }) => {
   const toggleDefaultTax = async (taxId) => {
     const taxToToggle = (taxData || []).find(t => t.id === taxId);
     if (!taxToToggle) return;
-    
+
     const isCurrentlyDefault = parseInt(taxToToggle.is_default_tax) === 1;
-    
+
     if (!isCurrentlyDefault && defaultTaxIds.length >= 2) {
-      toast("error", "You can only set up to 2 Default Tax Types.");
+      setShowMaxDefaultTaxMsg(true);
       return;
     }
     
@@ -1362,7 +1383,7 @@ const ReceiptInfoInline = ({ type }) => {
   const [showCategoryDeleteConfirm, setShowCategoryDeleteConfirm] = useState(false);
   const [pendingCategoryDelete, setPendingCategoryDelete] = useState(null); // item
   const [showPaymentEditConfirm, setShowPaymentEditConfirm] = useState(false);
-  const [pendingPaymentEdit, setPendingPaymentEdit] = useState(null); // { item, newName }
+  const [pendingPaymentEdit, setPendingPaymentEdit] = useState(null); // { item, newName } | { fn: async () => void }
   const [showPaymentDeleteConfirm, setShowPaymentDeleteConfirm] = useState(false);
   const [pendingPaymentDelete, setPendingPaymentDelete] = useState(null); // item
   const [showTaxRateChangeWarning, setShowTaxRateChangeWarning] = useState(false);
@@ -1716,6 +1737,8 @@ const sanitizeTaxRate = (raw) => {
       try {
         await addTax({ tax_name: n, tax_rate: r, tax_number: addTaxVal.tax_number.trim(), fk_user_id: localStorage.getItem("fk_user_id") || "" });
         setAddTaxVal({ tax_name: "", tax_rate: "", tax_number: "" });
+        setAddTaxNameOverflow(false);
+        setAddTaxNumberOverflow(false);
         toast("success", "Tax Type Added");
       } catch (e) { toast("error", e.message || "Failed."); }
       return;
@@ -1762,32 +1785,39 @@ const sanitizeTaxRate = (raw) => {
           return sig && newSig && sig === newSig;
         });
         if (dupExists) return toast("error", "Payment Method already exists");
-        // Update via API
-        if (targetId != null) {
-          const res = await updateApiPaymentMethod(targetId, payStr, selectedLogoUrl, newExpenseType);
-          if (!res?.ok) throw new Error(res?.error || "Failed to update payment method");
-        }
-        // Propagate to receipts that use old name
-        const matchingReceipts = getReceiptsByPaymentDisplay(oldName);
-        if (matchingReceipts.length > 0) {
-          const { issuer: newIssuer, last4: newL4 } = parsePaymentDisplay(payStr);
-          await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
-            paymentType: ct,
-            card_issuer_name: newIssuer,
-            last_4_digit_card: newL4 || r.last_4_digit_card || "",
-          })));
-        }
-        // Update localStorage mappings
-        savePayCard(payStr, ct);
-        savePayExpenseType(payStr, newExpenseType);
-        // If it was a custom entry, rename it too
-        if (!payEditMode.item.isApiItem) editCustomPaymentMethod(oldName, payStr);
-        // Reset & refresh
-        setPayEditMode(null);
-        setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
-        setShowAddForm(false);
-        await Promise.all([refreshData(), fetchApiPaymentMethods()]);
-        toast("success", "Payment Method Updated");
+
+        // Show confirmation before touching API or receipts
+        setPendingPaymentEdit({
+          fn: async () => {
+            // Update via API
+            if (targetId != null) {
+              const res = await updateApiPaymentMethod(targetId, payStr, selectedLogoUrl, newExpenseType);
+              if (!res?.ok) throw new Error(res?.error || "Failed to update payment method");
+            }
+            // Propagate to receipts that use old name
+            const matchingReceipts = getReceiptsByPaymentDisplay(oldName);
+            if (matchingReceipts.length > 0) {
+              const { issuer: newIssuer, last4: newL4 } = parsePaymentDisplay(payStr);
+              await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
+                paymentType: ct,
+                card_issuer_name: newIssuer,
+                last_4_digit_card: newL4 || r.last_4_digit_card || "",
+              })));
+            }
+            // Update localStorage mappings
+            savePayCard(payStr, ct);
+            savePayExpenseType(payStr, newExpenseType);
+            // If it was a custom entry, rename it too
+            if (!payEditMode.item.isApiItem) editCustomPaymentMethod(oldName, payStr);
+            // Reset & refresh
+            setPayEditMode(null);
+            setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
+            setShowAddForm(false);
+            await Promise.all([refreshData(), fetchApiPaymentMethods()]);
+            toast("success", "Payment Method Updated");
+          },
+        });
+        setShowPaymentEditConfirm(true);
         return;
       }
 
@@ -2007,12 +2037,18 @@ const sanitizeTaxRate = (raw) => {
     setShowPaymentEditConfirm(false);
     if (!pendingPaymentEdit) return;
     try {
-      await applyPaymentEdit(pendingPaymentEdit.item, pendingPaymentEdit.newName);
+      if (typeof pendingPaymentEdit.fn === "function") {
+        // Modal-form edit path — execute the stored callback
+        await pendingPaymentEdit.fn();
+      } else {
+        // Inline edit path
+        await applyPaymentEdit(pendingPaymentEdit.item, pendingPaymentEdit.newName);
+        closeEdit();
+      }
     } catch (e) {
       toast("error", e.message || "Update failed.");
     } finally {
       setPendingPaymentEdit(null);
-      closeEdit();
     }
   };
 
@@ -2476,14 +2512,20 @@ const sanitizeTaxRate = (raw) => {
               </div>
             </div>
             {addTaxNameOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NAME_MAX} exceeded</p>}
+            {parseFloat(addTaxVal.tax_rate) >= 99.999 && addTaxVal.tax_rate !== "" && (
+              <p className="text-xs text-red-600 font-medium -mt-1">Maximum tax rate of 99.999% reached</p>
+            )}
             <div className="flex flex-col gap-1">
-              <input className={mInput} placeholder="Tax Number" value={addTaxVal.tax_number}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (v.length > TAX_NUMBER_MAX) { setAddTaxNumberOverflow(true); return; }
-                  setAddTaxNumberOverflow(false);
-                  setAddTaxVal(p => ({ ...p, tax_number: v }));
-                }} />
+              <div className="flex gap-2">
+                <input className={mInput} placeholder="Tax Number" value={addTaxVal.tax_number}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (v.length > TAX_NUMBER_MAX) { setAddTaxNumberOverflow(true); return; }
+                    setAddTaxNumberOverflow(false);
+                    setAddTaxVal(p => ({ ...p, tax_number: v }));
+                  }} />
+                <div className="max-w-[100px] w-[100px] flex-shrink-0" />
+              </div>
               <p className="mt-1 text-xs text-slate-400">* Required</p>
               {addTaxNumberOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NUMBER_MAX} exceeded</p>}
             </div>
@@ -2611,15 +2653,21 @@ const sanitizeTaxRate = (raw) => {
                           </div>
                         </div>
                         {editTaxNameOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NAME_MAX} exceeded</p>}
+                        {parseFloat(editTaxVal.tax_rate) >= 99.999 && editTaxVal.tax_rate !== "" && (
+                          <p className="text-xs text-red-600 font-medium -mt-1">Maximum tax rate of 99.999% reached</p>
+                        )}
                         <div className="flex gap-2 items-start">
                           <div className="flex-1">
-                            <input className={mInput} value={editTaxVal.tax_number}
-                              onChange={e => {
-                                const v = e.target.value;
-                                if (v.length > TAX_NUMBER_MAX) { setEditTaxNumberOverflow(true); return; }
-                                setEditTaxNumberOverflow(false);
-                                setEditTaxVal(p => ({ ...p, tax_number: v }));
-                              }} placeholder="Tax Number" />
+                            <div className="flex gap-2">
+                              <input className={mInput} value={editTaxVal.tax_number}
+                                onChange={e => {
+                                  const v = e.target.value;
+                                  if (v.length > TAX_NUMBER_MAX) { setEditTaxNumberOverflow(true); return; }
+                                  setEditTaxNumberOverflow(false);
+                                  setEditTaxVal(p => ({ ...p, tax_number: v }));
+                                }} placeholder="Tax Number" />
+                              <div className="max-w-[100px] w-[100px] flex-shrink-0" />
+                            </div>
                             <p className="mt-1 text-xs text-slate-400">* Required</p>
                             {editTaxNumberOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NUMBER_MAX} exceeded</p>}
                           </div>
@@ -2655,9 +2703,11 @@ const sanitizeTaxRate = (raw) => {
                               await updateTax({ ...originalTax, tax_name: n, tax_rate: r, tax_number: num, is_default_tax: parseInt(originalTax?.is_default_tax) || 0, is_tips: parseInt(originalTax?.is_tips) || 0 });
                               toast("success", "Tax Type Updated");
                               setEditTaxKey(null);
+                              setEditTaxNameOverflow(false);
+                              setEditTaxNumberOverflow(false);
                             } catch (e) { toast("error", e.message || "Failed."); }
                           }} className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex-shrink-0">Save</button>
-                          <button type="button" onClick={() => setEditTaxKey(null)} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex-shrink-0">Cancel</button>
+                          <button type="button" onClick={() => { setEditTaxKey(null); setEditTaxNameOverflow(false); setEditTaxNumberOverflow(false); }} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex-shrink-0">Cancel</button>
                         </div>
                       </div>
                     ) : (
@@ -2903,10 +2953,9 @@ const sanitizeTaxRate = (raw) => {
           className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
             className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center border border-slate-200">
-            <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
-              When editing an Payment Method all<br />
-              receipts associated with that Payment<br />
-              Method will also be updated.
+            <h3 className="text-base font-bold text-slate-900 mb-3">Confirmation</h3>
+            <p className="text-sm font-medium text-slate-700 leading-relaxed mb-5">
+              When editing a payment method, all receipts associated with that payment method will also be updated.
             </p>
             <div className="flex gap-3">
               <button type="button"
@@ -2916,7 +2965,7 @@ const sanitizeTaxRate = (raw) => {
               </button>
               <button type="button" onClick={doConfirmPaymentEdit}
                 className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 rounded-xl text-white font-semibold text-sm transition-colors">
-                Okay
+                OK
               </button>
             </div>
           </motion.div>
@@ -2954,6 +3003,15 @@ const sanitizeTaxRate = (raw) => {
         </motion.div>
       )}
     </AnimatePresence>
+
+    {/* Max Default Tax Types Popup */}
+    {showMaxDefaultTaxMsg && (
+      <SimpleAlertModal
+        title="Message"
+        message={"A maximum of two tax types can be selected as Default. Please unselect a tax type before selecting another."}
+        onClose={() => setShowMaxDefaultTaxMsg(false)}
+      />
+    )}
 
     {/* Tax Rate Change Decision Popup */}
     <AnimatePresence>

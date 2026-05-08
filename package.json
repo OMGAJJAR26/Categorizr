@@ -1,0 +1,15 @@
+{
+  "name": "categorizr",
+  "private": true,
+  "workspaces": [
+    "Frontend",
+    "server"
+  ],
+  "scripts": {
+    "build": "npm --workspace Frontend run build",
+    "dev": "npm --workspace Frontend run dev",
+    "lint": "npm --workspace Frontend run lint",
+    "start": "npm --workspace server run start"
+  }
+}
+

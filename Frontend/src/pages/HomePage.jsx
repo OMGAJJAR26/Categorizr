@@ -71,6 +71,7 @@ const HomePage = () => {
   const [selectedIndex, setSelectedIndex] = useState(null);
   const [showCustomizedReport, setShowCustomizedReport] = useState(false);
   const [showAddReceiptModal, setShowAddReceiptModal] = useState(false);
+  const [duplicateInitialData, setDuplicateInitialData] = useState(null);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [receiptToDelete, setReceiptToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -126,6 +127,7 @@ const HomePage = () => {
     showCustomizedReport,
     isChatOpen,
     showIntegrationsModal,
+    duplicateInitialData,
   });
 
   useEffect(() => {
@@ -136,6 +138,7 @@ const HomePage = () => {
       showCustomizedReport,
       isChatOpen,
       showIntegrationsModal,
+      duplicateInitialData,
     };
   });
 
@@ -268,6 +271,11 @@ const HomePage = () => {
         pushHomepage();
         return;
       }
+      if (m.duplicateInitialData) {
+        setDuplicateInitialData(null);
+        pushHomepage();
+        return;
+      }
       if (m.showAddReceiptModal) {
         setShowAddReceiptModal(false);
         pushHomepage();
@@ -362,6 +370,21 @@ const HomePage = () => {
     // A 1.5s delay gives the server time to commit the new receipt before we re-query.
     silentRefreshData(1500);
     setToast({ isVisible: true, message: "Saved successfully!", type: "success" });
+  };
+
+  /**
+   * Called by AddReceiptModal after the original receipt is saved.
+   * Closes the current modal and immediately opens a fresh one pre-filled
+   * with the duplicate snapshot so the user can edit and save as a new receipt.
+   */
+  const handleDuplicate = (snapshot) => {
+    setShowAddReceiptModal(false);          // close the "original" modal
+    setDuplicateInitialData(snapshot);      // triggers the duplicate modal to open
+    setToast({
+      isVisible: true,
+      message: "Your original receipt has been saved successfully. You are now viewing the duplicate receipt.",
+      type: "success",
+    });
   };
 
   const handleDeleteClick = (receipt) => {
@@ -1004,7 +1027,8 @@ const HomePage = () => {
                         {selectedReceipt?.id === receipt.id && (
                           <ReceiptDetail
                             receipt={selectedReceipt}
-                            receiptList={[...draftReceipts, ...filteredReceipts]}
+                            receiptList={draftReceipts}
+                            reversedSwipe={true}
                             selectedIndex={selectedIndex}
                             setSelectedIndex={setSelectedIndex}
                             onSelectReceipt={handleReceiptClick}
@@ -1127,8 +1151,24 @@ const HomePage = () => {
 
           {showAddReceiptModal && (
             <AddReceiptModal
+              key="add-receipt"
               onClose={() => setShowAddReceiptModal(false)}
               onReceiptAdded={handleReceiptAdded}
+              onDuplicate={handleDuplicate}
+            />
+          )}
+
+          {/* Duplicate receipt modal — fresh mount with all original data pre-filled */}
+          {duplicateInitialData && (
+            <AddReceiptModal
+              key="duplicate-receipt"
+              initialData={duplicateInitialData}
+              onClose={() => setDuplicateInitialData(null)}
+              onReceiptAdded={() => {
+                setDuplicateInitialData(null);
+                handleReceiptAdded();
+              }}
+              onDuplicate={handleDuplicate}
             />
           )}
 

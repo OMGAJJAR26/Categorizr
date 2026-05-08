@@ -38,10 +38,9 @@ import warrantedSelect from "../../assets/receipttags/warrantied_select.png";
 import lockedImg from "../../assets/receipttags/locked.png";
 import unlockedImg from "../../assets/receipttags/unlocked.png";
 
-const AddReceiptModal = ({ onClose, onReceiptAdded }) => {
+const AddReceiptModal = ({ onClose, onReceiptAdded, initialData = null, onDuplicate = null }) => {
   const MAX_NOTES_LENGTH = 500;
   const MAX_DESCRIPTION_LENGTH = 100;
-  const MAX_TAX_TYPES = 2;
   const {
     merchants,
     paymentMethods,
@@ -77,6 +76,8 @@ const AddReceiptModal = ({ onClose, onReceiptAdded }) => {
   const { getPaymentLogo, getPaymentDisplay } = usePaymentDisplay();
 
   const [alertMsg, setAlertMsg] = useState(null);
+  const [showMaxDefaultTaxModal, setShowMaxDefaultTaxModal] = useState(false);
+  const [showMaxReceiptTaxMsg, setShowMaxReceiptTaxMsg] = useState(false);
   const [files, setFiles] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -115,10 +116,15 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const optionsMenuRef = useRef(null);
 
+  // ── Payment-method edit confirmation ─────────────────────────────────────
+  const [showPayEditConfirm, setShowPayEditConfirm] = useState(false);
+  const [pendingPayEditFn, setPendingPayEditFn] = useState(null);
+
   // ── Duplicate feature ─────────────────────────────────────────────────────
   const [isDuplicated, setIsDuplicated] = useState(false);       // true = already used once
   const [showDuplicateConfirm, setShowDuplicateConfirm] = useState(false);
   const [isDuplicateMode, setIsDuplicateMode] = useState(false); // banner visible
+  const [isDuplicateSaving, setIsDuplicateSaving] = useState(false); // saving in-progress
 
   // ── Split feature ─────────────────────────────────────────────────────────
   const [showSplitScreen, setShowSplitScreen] = useState(false);
@@ -311,7 +317,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
     const isCurrentlyDefault = parseInt(taxToToggle.is_default_tax) === 1;
     
     if (!isCurrentlyDefault && defaultTaxIds.length >= 2) {
-      setAlertMsg("You can only set up to 2 Default Tax Types.");
+      setShowMaxDefaultTaxModal(true);
       return;
     }
     
@@ -347,6 +353,25 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const [isFetchingEditLogos, setIsFetchingEditLogos] = useState(false);
   const [isSavingEditMerchant, setIsSavingEditMerchant] = useState(false);
   const [editMerchantError, setEditMerchantError] = useState(null);
+
+  // ── Pre-fill from initialData (duplicate mode) ───────────────────────────
+  useEffect(() => {
+    if (!initialData) return;
+    if (initialData.formData)        setFormData(initialData.formData);
+    if (initialData.tags)            setTags(initialData.tags);
+    if (initialData.uploadedMediaUrls) setUploadedMediaUrls(initialData.uploadedMediaUrls);
+    if (initialData.uploadedImageUrl)  setUploadedImageUrl(initialData.uploadedImageUrl);
+    if (initialData.pdfPreviewUrl)     setPdfPreviewUrl(initialData.pdfPreviewUrl);
+    if (initialData.uploadedReceiptData)
+      setUploadedReceiptData({ ...initialData.uploadedReceiptData, id: 0 });
+    // Sync the raw currency display string so the Total field shows the value
+    if (initialData.formData?.purchasePrice)
+      setCurrencyInput("total", String(initialData.formData.purchasePrice));
+    // Jump straight to the form — skip the upload screen
+    setStep("form");
+    setIsDuplicateMode(true);
+    setIsDuplicated(true); // prevent double-duplicate
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const acceptedFileTypes = [
     "image/jpeg",
@@ -1075,11 +1100,19 @@ const handleFieldChange = (field, value) => {
     );
     console.log("Tax already exists:", exists);
 
+    // Block adding a 3rd non-TIP tax type
     if (!exists) {
-      if ((formData.receipt_tax_values || []).length >= MAX_TAX_TYPES) {
-        setError("You can only add up to 2 tax types");
+      const nonTipSelected = formData.receipt_tax_values.filter(
+        (t) => !(t.tax_name || "").toLowerCase().includes("tip")
+      );
+      if (nonTipSelected.length >= 2) {
+        setShowMaxReceiptTaxMsg(true);
+        setShowTaxDropdown(false);
         return;
       }
+    }
+
+    if (!exists) {
       // Use current total and tip to compute subtotal, then tax amounts
       const totalNum = parseFloat(formData.purchasePrice) || 0;
       const tipNum = parseFloat(formData.tip) || 0;
@@ -2489,10 +2522,9 @@ const handleFieldChange = (field, value) => {
     return data;
   };
 
-  /** Save original receipt then enter duplicate mode */
+  /** Save original receipt then open a fresh duplicate modal pre-filled with the same data */
   const handleDuplicateConfirm = async () => {
-    setShowDuplicateConfirm(false);
-    setIsSaving(true);
+    setIsDuplicateSaving(true);
     setError(null);
     try {
       const payload = buildQuickPayload();
@@ -2502,17 +2534,40 @@ const handleFieldChange = (field, value) => {
       } else {
         await postNewReceipt(payload);
       }
-      // Signal parent to refresh data
+
+      // Build the snapshot of all form data to hand to the fresh duplicate modal
+      const duplicateSnapshot = {
+        formData:             { ...formData },
+        tags:                 { ...tags },
+        uploadedMediaUrls:    [...uploadedMediaUrls],
+        uploadedImageUrl:     uploadedImageUrl,
+        pdfPreviewUrl:        pdfPreviewUrl,
+        uploadedReceiptData:  uploadedReceiptData ? { ...uploadedReceiptData, id: 0 } : null,
+      };
+
+      // Close confirmation dialog, notify parent to refresh
+      setShowDuplicateConfirm(false);
       if (onReceiptAdded) onReceiptAdded(payload);
-      // Enter duplicate mode: same form data, blank ID so next Save = new receipt
-      setIsDuplicateMode(true);
-      setIsDuplicated(true);
-      setUploadedReceiptData(prev => prev ? { ...prev, id: 0 } : null);
-      if (refreshData) refreshData();
+
+      // Hand duplicate data to parent → parent closes this modal and opens a fresh one
+      if (onDuplicate) {
+        onDuplicate(duplicateSnapshot);
+      } else {
+        // Fallback (no parent handler): stay in current modal in duplicate mode
+        setIsDuplicateMode(true);
+        setIsDuplicated(true);
+        setUploadedReceiptData(prev => prev ? { ...prev, id: 0 } : null);
+        setToast({
+          isVisible: true,
+          message: "Your original receipt has been saved successfully. You are now viewing the duplicate receipt.",
+          type: "success",
+        });
+      }
     } catch (err) {
-      setError("Failed to save original: " + (err.message || "Unknown error"));
+      setShowDuplicateConfirm(false);
+      setError("Failed to save original receipt: " + (err.message || "Unknown error"));
     } finally {
-      setIsSaving(false);
+      setIsDuplicateSaving(false);
     }
   };
 
@@ -3408,41 +3463,46 @@ const handleSelectLogo = (index) => {
     // ── EDIT MODE ────────────────────────────────────────────────────────────
     if (payModalEditMode) {
       const { name: oldName, apiId } = payModalEditMode;
-      if (apiId != null) {
-        await updateApiPaymentMethod(apiId, paymentMethodString, logoUrl);
-      }
-      // Update receipts that used the old payment method name
-      const matchingReceipts = (receipts || []).filter(
-        (r) => {
-          const issuer = (r.card_issuer_name || r.cardIssuerName || "").toString().trim();
-          const l4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
-          const disp = issuer ? (l4 ? `${issuer} *${l4}` : issuer) : (r.paymentType || "").toString().trim();
-          return disp.toLowerCase() === (oldName || "").toLowerCase();
+
+      // ── Confirmation before updating any API or receipts ──────────────────
+      setPendingPayEditFn(() => async () => {
+        if (apiId != null) {
+          await updateApiPaymentMethod(apiId, paymentMethodString, logoUrl);
         }
-      );
-      if (matchingReceipts.length > 0) {
-        await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
-          paymentType: selectedCardTypeForLogo,
-          card_issuer_name: finalCardIssuerName,
-          last_4_digit_card: last4Final || r.last_4_digit_card || "",
-        })));
-      }
-      const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
-      _pct[paymentMethodString] = selectedCardTypeForLogo;
-      localStorage.setItem("cat_pay_card_types", JSON.stringify(_pct));
-      if (newPaymentCategoryType) {
-        const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
-        _pet[paymentMethodString] = newPaymentCategoryType;
-        localStorage.setItem("cat_pay_expense_type", JSON.stringify(_pet));
-      }
-      editCustomPaymentMethod(oldName, paymentMethodString);
-      await Promise.all([refreshData(), fetchApiPaymentMethods()]);
-      handleFieldChange("paymentType", selectedCardTypeForLogo || paymentMethodString);
-      handleFieldChange("card_issuer_name", finalCardIssuerName);
-      if (last4Final) handleFieldChange("last_4_digit_card", last4Final);
-      handleCloseAddPaymentModal();
-      setShowPaymentDropdown(false);
-      setToast({ isVisible: true, message: "Payment Method Updated", type: "success" });
+        // Update receipts that used the old payment method name
+        const matchingReceipts = (receipts || []).filter(
+          (r) => {
+            const issuer = (r.card_issuer_name || r.cardIssuerName || "").toString().trim();
+            const l4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
+            const disp = issuer ? (l4 ? `${issuer} *${l4}` : issuer) : (r.paymentType || "").toString().trim();
+            return disp.toLowerCase() === (oldName || "").toLowerCase();
+          }
+        );
+        if (matchingReceipts.length > 0) {
+          await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
+            paymentType: selectedCardTypeForLogo,
+            card_issuer_name: finalCardIssuerName,
+            last_4_digit_card: last4Final || r.last_4_digit_card || "",
+          })));
+        }
+        const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
+        _pct[paymentMethodString] = selectedCardTypeForLogo;
+        localStorage.setItem("cat_pay_card_types", JSON.stringify(_pct));
+        if (newPaymentCategoryType) {
+          const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
+          _pet[paymentMethodString] = newPaymentCategoryType;
+          localStorage.setItem("cat_pay_expense_type", JSON.stringify(_pet));
+        }
+        editCustomPaymentMethod(oldName, paymentMethodString);
+        await Promise.all([refreshData(), fetchApiPaymentMethods()]);
+        handleFieldChange("paymentType", selectedCardTypeForLogo || paymentMethodString);
+        handleFieldChange("card_issuer_name", finalCardIssuerName);
+        if (last4Final) handleFieldChange("last_4_digit_card", last4Final);
+        handleCloseAddPaymentModal();
+        setShowPaymentDropdown(false);
+        setToast({ isVisible: true, message: "Payment Method Updated", type: "success" });
+      });
+      setShowPayEditConfirm(true);
       return;
     }
 
@@ -4359,11 +4419,11 @@ const handleSelectLogo = (index) => {
                   <form id="add-receipt-form" onSubmit={handleSaveReceipt}>
                     {/* Duplicate mode banner */}
                     {isDuplicateMode && (
-                      <div className="mx-3 sm:mx-6 mt-3 px-4 py-3 bg-green-50 border border-green-300 rounded-lg flex items-center gap-2 text-green-700 text-sm font-medium">
+                      <div className="mx-3 sm:mx-6 mt-3 px-4 py-3 bg-blue-50 border border-blue-300 rounded-lg flex items-center gap-2 text-blue-700 text-sm font-medium">
                         <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                         </svg>
-                        Your original receipt has been saved. You are now viewing your duplicate receipt.
+                        You are editing a duplicate receipt. Save to create a new entry.
                       </div>
                     )}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 p-3 sm:p-6 text-sm text-gray-800">
@@ -5360,7 +5420,7 @@ const handleSelectLogo = (index) => {
                               }}
                               onBlur={() => {
                                 const num = parseFloat(formData.tip);
-                                handleFieldChange("tip", !num || isNaN(num) ? "" : num.toFixed(2));
+                                handleFieldChange("tip", isNaN(num) ? "" : num.toFixed(2));
                                 setCurrencyInput("tip", "");
                               }}
                               placeholder="$0.00"
@@ -6429,19 +6489,20 @@ const handleSelectLogo = (index) => {
                       <label className="block text-sm font-semibold text-blue-600 mb-1.5">
                         Tax Rate (%) <span className="text-red-500">*</span>
                       </label>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all ${
-                          taxRateError ? "border-red-400 bg-red-50" : "border-gray-200"
-                        }`}
-                        value={taxRateFocused ? newTaxRate : (newTaxRate !== "" ? `${newTaxRate}%` : "")}
-                        onFocus={() => setTaxRateFocused(true)}
-                        onBlur={() => setTaxRateFocused(false)}
-                        onKeyDown={preventInvalidTaxRateKey}
-                        onChange={e => setNewTaxRate(sanitizeTaxRate(e.target.value))}
-                        placeholder="Enter Tax Rate (%)"
-                      />
+                      <div className="relative">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          className={`w-full px-4 py-2.5 pr-8 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all ${
+                            taxRateError ? "border-red-400 bg-red-50" : "border-gray-200"
+                          }`}
+                          value={newTaxRate}
+                          onKeyDown={preventInvalidTaxRateKey}
+                          onChange={e => setNewTaxRate(sanitizeTaxRate(e.target.value))}
+                          placeholder="Enter Tax Rate"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">%</span>
+                      </div>
                       {taxRateError && (
                         <div className="mt-1.5 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-red-600 text-xs flex items-center gap-1.5">
                           <span className="font-bold">!</span> {taxRateError}
@@ -6552,15 +6613,15 @@ const handleSelectLogo = (index) => {
         )}
       </AnimatePresence>
 
-      {/* Duplicate Confirmation Dialog */}
+      {/* Payment Method Edit Confirmation Dialog */}
       <AnimatePresence>
-        {showDuplicateConfirm && (
+        {showPayEditConfirm && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm"
-            onClick={() => setShowDuplicateConfirm(false)}
+            onClick={() => { setShowPayEditConfirm(false); setPendingPayEditFn(null); }}
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -6573,22 +6634,98 @@ const handleSelectLogo = (index) => {
               <div className="p-6">
                 <h3 className="text-lg font-bold text-gray-900 mb-3">Confirmation</h3>
                 <p className="text-sm text-gray-600 mb-6">
-                  Original receipt and related information will now be saved. A duplicate copy will open for you to edit.
+                  When editing a payment method, all receipts associated with that payment method will also be updated.
                 </p>
                 <div className="flex justify-end gap-3">
                   <button
                     type="button"
-                    onClick={() => setShowDuplicateConfirm(false)}
+                    onClick={() => { setShowPayEditConfirm(false); setPendingPayEditFn(null); }}
                     className="px-6 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors"
                   >
                     Cancel
                   </button>
                   <button
                     type="button"
-                    onClick={handleDuplicateConfirm}
+                    onClick={async () => {
+                      setShowPayEditConfirm(false);
+                      if (pendingPayEditFn) {
+                        try { await pendingPayEditFn(); } catch (e) { console.error(e); }
+                        setPendingPayEditFn(null);
+                      }
+                    }}
                     className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
                   >
-                    Ok
+                    OK
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Duplicate Confirmation Dialog */}
+      <AnimatePresence>
+        {showDuplicateConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => { if (!isDuplicateSaving) setShowDuplicateConfirm(false); }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-6">
+                <h3 className="text-lg font-bold text-gray-900 mb-3">Confirmation</h3>
+                <p className="text-sm text-gray-600 mb-6">
+                  The original receipt and its related information will now be saved in the Receipts screen. The next screen will display your duplicate receipt, which you can edit and save.
+                </p>
+
+                {/* Loading bar shown while saving */}
+                {isDuplicateSaving && (
+                  <div className="mb-4">
+                    <div className="flex items-center gap-2 text-blue-600 text-sm font-medium mb-2">
+                      <svg className="w-4 h-4 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                      </svg>
+                      Saving original receipt…
+                    </div>
+                    <div className="w-full h-1.5 bg-blue-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-blue-500 rounded-full animate-pulse w-3/4" />
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowDuplicateConfirm(false)}
+                    disabled={isDuplicateSaving}
+                    className="px-6 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDuplicateConfirm}
+                    disabled={isDuplicateSaving}
+                    className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {isDuplicateSaving && (
+                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                      </svg>
+                    )}
+                    {isDuplicateSaving ? "Saving…" : "OK"}
                   </button>
                 </div>
               </div>
@@ -6849,6 +6986,24 @@ const handleSelectLogo = (index) => {
 
       {/* Custom alert (replaces browser alert()) */}
       {alertMsg && <SimpleAlertModal message={alertMsg} onClose={() => setAlertMsg(null)} />}
+
+      {/* Max default tax types popup */}
+      {showMaxDefaultTaxModal && (
+        <SimpleAlertModal
+          title="Message"
+          message={"A maximum of two tax types can be selected as Default. Please unselect a tax type before selecting another."}
+          onClose={() => setShowMaxDefaultTaxModal(false)}
+        />
+      )}
+
+      {/* Max 2 selected tax types popup */}
+      {showMaxReceiptTaxMsg && (
+        <SimpleAlertModal
+          title="Message"
+          message={"A maximum of two tax types can be selected. Please unselect a tax type before selecting another."}
+          onClose={() => setShowMaxReceiptTaxMsg(false)}
+        />
+      )}
     </AnimatePresence>
   );
 };

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Trash2, Link2, Loader2 } from "lucide-react";
 import MerchantAvatar from "../MerchantAvatar";
 import ReceiptBadges from "../ReceiptBadges";
+import SimpleAlertModal from "../SimpleAlertModal";
 
 const ReceiptsTable = ({
   receipt,
@@ -22,6 +23,7 @@ const ReceiptsTable = ({
   disableDelete = false,
 }) => {
   const [showIntegrateMenu, setShowIntegrateMenu] = useState(false);
+  const [showCloudPopup, setShowCloudPopup] = useState(false);
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -118,6 +120,16 @@ const ReceiptsTable = ({
         </div>
 
         <div className="flex items-center justify-center gap-2">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowCloudPopup(true);
+            }}
+            className="p-1 hover:opacity-70 transition-opacity flex-shrink-0"
+            title="Backed up to cloud"
+          >
+            <img src="/cloudsave.svg" alt="Cloud saved" className="w-5 h-5 object-contain" />
+          </button>
           <button
             onClick={onViewClick}
             className="text-blue-600 font-semibold hover:underline text-sm xl:text-base"
@@ -285,6 +297,16 @@ const ReceiptsTable = ({
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowCloudPopup(true);
+              }}
+              className="p-1 hover:opacity-70 transition-opacity flex-shrink-0"
+              title="Backed up to cloud"
+            >
+              <img src="/cloudsave.svg" alt="Cloud saved" className="w-5 h-5 object-contain" />
+            </button>
+            <button
               onClick={onViewClick}
               className="text-blue-600 font-semibold hover:underline text-sm"
             >
@@ -322,6 +344,12 @@ const ReceiptsTable = ({
           </div>
         </div>
       </div>
+      {showCloudPopup && (
+        <SimpleAlertModal
+          message="Your information has been backed up to the cloud"
+          onClose={() => setShowCloudPopup(false)}
+        />
+      )}
     </>
   );
 };

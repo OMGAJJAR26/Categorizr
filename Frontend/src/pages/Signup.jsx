@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import SimpleAlertModal from "../components/SimpleAlertModal";
+import Toast from "../components/Toast";
 import { useFormik } from "formik";
 import * as Yup from "yup";
 import Logo from "../assets/categorizrLogoSimple.png";
@@ -38,7 +38,7 @@ const getBrowserCountry = async () => {
 };
 
 const Signup = () => {
-  const [alertMsg, setAlertMsg] = useState(null);
+  const [toastConfig, setToastConfig] = useState({ isVisible: false, message: "", type: "error" });
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
   const { setLoading } = useLoader();
@@ -96,10 +96,24 @@ const Signup = () => {
         const data = await res.json();
 
         if (res.ok) {
+          // ── Check for duplicate user — some APIs return HTTP 200 with no token ──
+          if (!data.authenticationToken) {
+            setToastConfig({ isVisible: true, message: data.message || "Username or email already exists", type: "error" });
+            return;
+          }
+
           // ── 3. Update device token (web device) ─────────────────────────
           // deviceId=0, deviceType=2 (web), deviceToken=0, version=-
           const token = data.authenticationToken || "";
           if (token) {
+            localStorage.setItem("token", token);
+            if (data.id) {
+              localStorage.setItem("id", data.id);
+              localStorage.setItem("fk_user_id", data.id);
+            }
+            // Ensure OTP pops up on homepage
+            localStorage.removeItem("cat_confirmEmailPopupTs");
+            
             try {
               const deviceParams = new URLSearchParams({
                 deviceId:    "0",
@@ -121,14 +135,14 @@ const Signup = () => {
             }
           }
 
-          setAlertMsg(data.message || "Signup successful");
-          navigate("/login");
+          setToastConfig({ isVisible: true, message: data.message || "Signup successful", type: "success" });
+          navigate("/homepage", { replace: true });
         } else {
-          setAlertMsg(data.message || "Signup failed");
+          setToastConfig({ isVisible: true, message: data.message || "Signup failed", type: "error" });
         }
       } catch (err) {
         console.error("Signup failed:", err?.message || err);
-        setAlertMsg("Signup failed");
+        setToastConfig({ isVisible: true, message: "Signup failed", type: "error" });
       } finally {
         setLoading(false);
       }
@@ -284,7 +298,12 @@ const Signup = () => {
           </div>
         </form>
       </div>
-      {alertMsg && <SimpleAlertModal message={alertMsg} onClose={() => setAlertMsg(null)} />}
+      <Toast 
+        isVisible={toastConfig.isVisible} 
+        message={toastConfig.message} 
+        type={toastConfig.type} 
+        onClose={() => setToastConfig((prev) => ({ ...prev, isVisible: false }))} 
+      />
     </div>
   );
 };

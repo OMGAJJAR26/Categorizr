@@ -112,10 +112,10 @@ const ReceiptDetail = ({
   receiptList,
   setSelectedIndex,
   onDeleteReceipt,
+  reversedSwipe = false,  // true for draft receipts: swipe right = next, swipe left = previous
 }) => {
   const MAX_NOTES_LENGTH = 500;
   const MAX_DESCRIPTION_LENGTH = 100;
-  const MAX_TAX_TYPES = 2;
   const DEFAULT_TAGS = {
     locked: false,
     starred: false,
@@ -140,6 +140,7 @@ const ReceiptDetail = ({
   const [pendingImageDelete, setPendingImageDelete] = useState(null); // { type: "additional"|"existing", index?: number, field?: string, clearBoth?: boolean }
   const containerRef = useRef(null);
   const dropdownRef = useRef();
+  const scrollContentRef = useRef(null);
   const [showPDFPreview, setShowPDFPreview] = useState(false);
   const [pdfKey, setPdfKey] = useState(0);
   const [isSwiping, setIsSwiping] = useState(false);
@@ -235,6 +236,8 @@ const ReceiptDetail = ({
   const [splitError, setSplitError] = useState(null);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [alertMsg, setAlertMsg] = useState(null);
+  const [showMaxDefaultTaxModal, setShowMaxDefaultTaxModal] = useState(false);
+  const [showMaxReceiptTaxMsg, setShowMaxReceiptTaxMsg] = useState(false);
 
   // Refs for dropdowns
   const merchantInputRef = useRef(null);
@@ -485,7 +488,7 @@ const ReceiptDetail = ({
     if (!taxToToggle) return;
     const isCurrentlyDefault = parseInt(taxToToggle.is_default_tax) === 1;
     if (!isCurrentlyDefault && defaultTaxIds.length >= 2) {
-      setAlertMsg("You can only set up to 2 Default Tax Types.");
+      setShowMaxDefaultTaxModal(true);
       return;
     }
     try {
@@ -869,6 +872,17 @@ useEffect(() => {
     };
   }, []);
 
+  // iOS/Android-style locked: make scrollable content non-interactive without dark overlay
+  useEffect(() => {
+    const el = scrollContentRef.current;
+    if (!el) return;
+    if (editedTags.locked && !showSplitScreen) {
+      el.setAttribute("inert", "");
+    } else {
+      el.removeAttribute("inert");
+    }
+  }, [editedTags.locked, showSplitScreen]);
+
   // Enrich receipt_tax_values with tax_name and tax_rate from taxData for display
   const enrichedReceiptTaxValues = React.useMemo(() => {
     if (
@@ -949,7 +963,10 @@ useEffect(() => {
     const swipeThreshold = 50;
 
     if (Math.abs(diff) > swipeThreshold) {
-      if (diff > 0) {
+      // Normal receipts: swipe left (diff > 0) → next, swipe right (diff < 0) → previous
+      // Draft receipts:  swipe right (diff < 0) → next, swipe left (diff > 0) → previous
+      const goingNext = reversedSwipe ? diff < 0 : diff > 0;
+      if (goingNext) {
         goToNext();
       } else {
         goToPrevious();
@@ -1353,6 +1370,24 @@ useEffect(() => {
 
   // Add a tax type to the current receipt's tax values
   const addTaxToReceipt = (tax) => {
+    // Check 2-tax limit before entering the updater (so we can show popup)
+    const currentTaxValues =
+      editedReceipt.receipt_tax_values ||
+      enrichedReceiptTaxValues.filter(
+        (t) => !(t.tax_name || "").toLowerCase().includes("tip")
+      ) ||
+      [];
+    const nonTipSelected = currentTaxValues.filter(
+      (t) => !(t.tax_name || "").toLowerCase().includes("tip")
+    );
+    const alreadyExistsCheck = currentTaxValues.some(
+      (t) => t.tax_name === tax.tax_name && t.tax_rate === tax.tax_rate
+    );
+    if (!alreadyExistsCheck && nonTipSelected.length >= 2) {
+      setShowMaxReceiptTaxMsg(true);
+      return;
+    }
+
     setEditedReceipt((prev) => {
       const currentTaxValues =
         prev.receipt_tax_values ||
@@ -1366,11 +1401,6 @@ useEffect(() => {
         (t) => t.tax_name === tax.tax_name && t.tax_rate === tax.tax_rate
       );
       if (alreadyExists) return prev;
-      if (currentTaxValues.length >= MAX_TAX_TYPES) {
-        setTaxError("You can only add up to 2 tax types");
-        return prev;
-      }
-
       const total =
         parseFloat(prev.purchasePrice) ||
         parseFloat(r.total) ||
@@ -1531,10 +1561,6 @@ useEffect(() => {
 
     if (!newTaxName.trim()) {
       setTaxError("Please enter Tax Name");
-      return;
-    }
-    if (((editedReceipt.receipt_tax_values || []).length) >= MAX_TAX_TYPES) {
-      setTaxError("You can only add up to 2 tax types");
       return;
     }
     if (!newTaxRate.trim()) {
@@ -4203,8 +4229,9 @@ Thank you for using our receipt management system.
             </div>
 
             <div className="bg-white rounded-xl shadow-2xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-hidden border border-gray-200 relative flex flex-col">
+
               {/* Modal Header */}
-              <div className="receipt-modal-header flex items-center border-b border-gray-200 px-3 sm:px-4 py-2 sm:py-2.5 bg-white sticky top-0 z-20">
+              <div className="receipt-modal-header flex items-center border-b border-gray-200 px-3 sm:px-4 py-2 sm:py-2.5 bg-white sticky top-0 z-40">
                 {/* Left side (fixed width for balance) */}
                 <div className="w-[90px] sm:w-[130px] flex justify-start gap-1">
                   {/* Split screen: back button */}
@@ -4398,28 +4425,7 @@ Thank you for using our receipt management system.
 
               {/* Scrollable Content */}
               <div className="overflow-y-auto flex-1 min-h-0 relative">
-                {/* ── Locked overlay — blocks all form interactions when receipt is locked ── */}
-                {editedTags.locked && !showSplitScreen && (
-                  <div
-                    className="absolute inset-0 z-30 cursor-not-allowed flex flex-col items-center justify-start pt-10 gap-3"
-                    style={{ backgroundColor: "rgba(0,0,0,0.18)" }}
-                    onClick={() =>
-                      setToast({
-                        isVisible: true,
-                        message: "🔒 Receipt is locked. Click the lock icon in the header to unlock before editing.",
-                        type: "error",
-                      })
-                    }
-                  >
-                    <div className="bg-white/95 rounded-xl px-6 py-4 shadow-lg border border-red-200 flex items-center gap-3 max-w-xs mx-4">
-                      <img src={locked} alt="Locked" className="w-6 h-6 object-contain flex-shrink-0" />
-                      <p className="text-sm font-semibold text-gray-800">
-                        Receipt is locked.<br />
-                        <span className="text-red-600 font-bold">Click 🔒 in the header to unlock.</span>
-                      </p>
-                    </div>
-                  </div>
-                )}
+              <div ref={scrollContentRef}>
                 {/* ── Split Screen ─────────────────────────────────────────── */}
                 {showSplitScreen ? (
                   <div className="p-4 sm:p-6">
@@ -5893,11 +5899,12 @@ Thank you for using our receipt management system.
                   </motion.div>
                 </AnimatePresence>
                 )}
-              </div>
+              </div>{/* end inert inner wrapper */}
+              </div>{/* end scrollable content */}
 
-              {/* ── Sticky Save Bar (hidden during split) ── */}
+              {/* ── Sticky Save Bar ── */}
               {!showSplitScreen && (
-              <div className="flex-shrink-0 border-t border-gray-200 bg-white px-4 sm:px-6 py-3 flex flex-col gap-2">
+              <div className="flex-shrink-0 border-t border-gray-200 bg-white px-4 sm:px-6 py-3 flex flex-col gap-2 relative z-40">
                 <button
                   onClick={handleSave}
                   disabled={isSaving}
@@ -6610,18 +6617,19 @@ Thank you for using our receipt management system.
                       <label className="block text-sm font-semibold text-blue-600 mb-1.5">
                         Tax Rate (%) <span className="text-red-500">*</span>
                       </label>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all ${
-                          taxRateError ? "border-red-400 bg-red-50" : "border-gray-200"
-                        }`}
-                        value={taxRateFocused ? newTaxRate : (newTaxRate !== "" ? `${newTaxRate}%` : "")}
-                        onFocus={() => setTaxRateFocused(true)}
-                        onBlur={() => setTaxRateFocused(false)}
-                        onChange={e => setNewTaxRate(e.target.value.replace(/%/g, ""))}
-                        placeholder="Enter Tax Rate (%)"
-                      />
+                      <div className="relative">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          className={`w-full px-4 py-2.5 pr-8 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all ${
+                            taxRateError ? "border-red-400 bg-red-50" : "border-gray-200"
+                          }`}
+                          value={newTaxRate}
+                          onChange={e => setNewTaxRate(e.target.value.replace(/%/g, ""))}
+                          placeholder="Enter Tax Rate"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">%</span>
+                      </div>
                       {taxRateError && (
                         <div className="mt-1.5 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-red-600 text-xs flex items-center gap-1.5">
                           <span className="font-bold">!</span> {taxRateError}
@@ -7015,6 +7023,42 @@ Thank you for using our receipt management system.
             <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{alertMsg}</p>
             <button
               onClick={() => setAlertMsg(null)}
+              className="mt-5 w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl transition-colors"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showMaxDefaultTaxModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs mx-auto p-6 text-center">
+            <div className="w-12 h-12 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </div>
+            <h3 className="text-base font-bold text-slate-900 mb-2">Message</h3>
+            <p className="text-sm text-slate-700 leading-relaxed">A maximum of two tax types can be selected as Default. Please unselect a tax type before selecting another.</p>
+            <button
+              onClick={() => setShowMaxDefaultTaxModal(false)}
+              className="mt-5 w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl transition-colors"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showMaxReceiptTaxMsg && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs mx-auto p-6 text-center">
+            <div className="w-12 h-12 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </div>
+            <h3 className="text-base font-bold text-slate-900 mb-2">Message</h3>
+            <p className="text-sm text-slate-700 leading-relaxed">A maximum of two tax types can be selected. Please unselect a tax type before selecting another.</p>
+            <button
+              onClick={() => setShowMaxReceiptTaxMsg(false)}
               className="mt-5 w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl transition-colors"
             >
               OK

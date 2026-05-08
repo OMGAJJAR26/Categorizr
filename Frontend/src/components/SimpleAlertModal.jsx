@@ -6,7 +6,7 @@
  *   setAlertMsg("Your message here");   // ← replaces alert("…")
  *   {alertMsg && <SimpleAlertModal message={alertMsg} onClose={() => setAlertMsg(null)} />}
  */
-const SimpleAlertModal = ({ message, onClose }) => (
+const SimpleAlertModal = ({ message, title, onClose }) => (
   <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4">
     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs mx-auto p-6 text-center">
       <div className="w-12 h-12 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4">
@@ -19,6 +19,7 @@ const SimpleAlertModal = ({ message, onClose }) => (
           <line x1="12" y1="16" x2="12.01" y2="16"/>
         </svg>
       </div>
+      {title && <h3 className="text-base font-bold text-slate-900 mb-2">{title}</h3>}
       <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{message}</p>
       <button
         onClick={onClose}

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Trash2, Link2, Loader2 } from "lucide-react";
 import MerchantAvatar from "../MerchantAvatar";
+import SimpleAlertModal from "../SimpleAlertModal";
 
 const ReceiptsMobileView = ({
   receipt,
@@ -21,6 +22,7 @@ const ReceiptsMobileView = ({
   disableDelete = false,
 }) => {
   const [showIntegrateMenu, setShowIntegrateMenu] = useState(false);
+  const [showCloudPopup, setShowCloudPopup] = useState(false);
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -65,6 +67,7 @@ const ReceiptsMobileView = ({
   const isUnread = receipt.status === "0";
 
   return (
+    <>
     <div className={`md:hidden flex flex-col gap-3 border rounded-2xl p-4 bg-white shadow-sm ${isToBeVerified ? 'border-amber-400 border-2 bg-amber-50/30' : isUnread ? 'border-blue-500 border-2' : 'border-gray-200'}`}>
       {isToBeVerified && (
         <span className="self-start bg-amber-50 text-amber-600 text-xs font-bold px-2 py-1 rounded-full border border-amber-400 uppercase tracking-wide">
@@ -75,8 +78,20 @@ const ReceiptsMobileView = ({
         <div className={`font-semibold ${isUnread ? 'text-gray-400' : ''}`}>
           {getFormattedDate()}
         </div>
-        <div className={`font-bold text-base ${getTotalColor()}`}>
-          {formatCurrency(receipt.purchasePrice || 0)}
+        <div className="flex items-center gap-2">
+          <div className={`font-bold text-base ${getTotalColor()}`}>
+            {formatCurrency(receipt.purchasePrice || 0)}
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowCloudPopup(true);
+            }}
+            className="p-1 hover:opacity-70 transition-opacity flex-shrink-0"
+            title="Backed up to cloud"
+          >
+            <img src="/cloudsave.svg" alt="Cloud saved" className="w-5 h-5 object-contain" />
+          </button>
         </div>
       </div>
       
@@ -251,6 +266,13 @@ const ReceiptsMobileView = ({
         </button>
       </div>
     </div>
+    {showCloudPopup && (
+      <SimpleAlertModal
+        message="Your information has been backed up to the cloud"
+        onClose={() => setShowCloudPopup(false)}
+      />
+    )}
+    </>
   );
 };
 
