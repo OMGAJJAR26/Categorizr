@@ -2379,7 +2379,20 @@ useEffect(() => {
       const storeName  = editedReceipt.storeName || selectedReceipt?.storeName || "";
       const storeImage = editedReceipt.store_image || selectedReceipt?.store_image || "";
       const paymentType = editedReceipt.paymentType || selectedReceipt?.paymentType || "";
-      const last4      = selectedReceipt?.last_4_digit_card?.toString?.().trim() || "";
+      const last4 =
+        (editedReceipt?.last_4_digit_card ?? editedReceipt?.last4DigitCard ?? "")
+          .toString()
+          .trim() ||
+        (selectedReceipt?.last_4_digit_card ?? selectedReceipt?.last4DigitCard ?? "")
+          .toString()
+          .trim();
+      const cardIssuerName =
+        (editedReceipt?.card_issuer_name ?? editedReceipt?.cardIssuerName ?? "")
+          .toString()
+          .trim() ||
+        (selectedReceipt?.card_issuer_name ?? selectedReceipt?.cardIssuerName ?? "")
+          .toString()
+          .trim();
       let productDate  = 0;
       const dateVal    = editedReceipt.product_date || selectedReceipt?.product_date;
       if (dateVal) {
@@ -2412,7 +2425,7 @@ useEffect(() => {
           status: 0,
           paymentType,
           last_4_digit_card: last4,
-          card_issuer_name: selectedReceipt?.card_issuer_name || "",
+          card_issuer_name: cardIssuerName,
           fk_original_receipt_id: "0",
           fk_forward_from_receipt_id: "0",
           receipt_category: parseInt(split.receipt_category) || 0,
@@ -2542,7 +2555,13 @@ useEffect(() => {
         "";
 
       // Determine card_issuer_name and last4 from payment type
-      let last4 = selectedReceipt.last_4_digit_card?.toString?.().trim() || "";
+      let last4 =
+        (editedReceipt.last_4_digit_card ?? editedReceipt.last4DigitCard ?? "")
+          .toString()
+          .trim() ||
+        (selectedReceipt.last_4_digit_card ?? selectedReceipt.last4DigitCard ?? "")
+          .toString()
+          .trim();
       const paymentType = editedReceipt.paymentType || "";
 
       // Extract last4 from paymentType if present (e.g. "Diners Club *9999" → "9999")
@@ -2796,7 +2815,13 @@ useEffect(() => {
       "";
 
     // Determine card_issuer_name and last4 from payment type
-    let last4 = selectedReceipt.last_4_digit_card?.toString?.().trim() || "";
+    let last4 =
+      (editedReceipt.last_4_digit_card ?? editedReceipt.last4DigitCard ?? "")
+        .toString()
+        .trim() ||
+      (selectedReceipt.last_4_digit_card ?? selectedReceipt.last4DigitCard ?? "")
+        .toString()
+        .trim();
     const paymentType = editedReceipt.paymentType || "";
 
     // Extract last4 from paymentType if present
