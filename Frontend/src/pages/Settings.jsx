@@ -1609,6 +1609,11 @@ const hasMoreThan3Decimals = (val) => {
   return dot !== -1 && str.length - dot - 1 > 3;
 };
 
+const isBlockedTaxRateInput = (val) => {
+  const str = String(val).replace(/%/g, "").trim();
+  return str === "99.999" || str === "999";
+};
+
 // ── Tax-rate input helpers (shared by both ManageModal and ReceiptInfoInline) ──
 const preventInvalidTaxRateKey = (e) => {
   if (e.ctrlKey || e.metaKey) return;
@@ -1728,6 +1733,9 @@ const sanitizeTaxRate = (raw) => {
       }
       if (hasMoreThan3Decimals(r)) {
         return toast("error", "Tax Rate can have a maximum of 3 decimal places (e.g. 10.894%)");
+      }
+      if (isBlockedTaxRateInput(r)) {
+        return toast("error", "Tax Rate cannot be 99.999 or 999");
       }
       if (num.length > TAX_NUMBER_MAX) return toast("error", `Tax Number cannot exceed ${TAX_NUMBER_MAX} characters`);
       const duplicateTaxName = (taxData || []).some(
@@ -2201,6 +2209,9 @@ const sanitizeTaxRate = (raw) => {
       if (hasMoreThan3Decimals(r)) {
         return toast("error", "Tax Rate can have a maximum of 3 decimal places (e.g. 10.894%)");
       }
+      if (isBlockedTaxRateInput(r)) {
+        return toast("error", "Tax Rate cannot be 99.999 or 999");
+      }
       if (num.length > TAX_NUMBER_MAX) return toast("error", `Tax Number cannot exceed ${TAX_NUMBER_MAX} characters`);
       const originalTax = (taxData || []).find((t) => t.id === editKey);
       const duplicateTaxName = (taxData || []).some(
@@ -2512,8 +2523,8 @@ const sanitizeTaxRate = (raw) => {
               </div>
             </div>
             {addTaxNameOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NAME_MAX} exceeded</p>}
-            {parseFloat(addTaxVal.tax_rate) >= 99.999 && addTaxVal.tax_rate !== "" && (
-              <p className="text-xs text-red-600 font-medium -mt-1">Maximum tax rate of 99.999% reached</p>
+            {isBlockedTaxRateInput(addTaxVal.tax_rate) && (
+              <p className="text-xs text-red-600 font-medium -mt-1">Tax Rate cannot be 99.999 or 999</p>
             )}
             <div className="flex flex-col gap-1">
               <div className="flex gap-2">
@@ -2653,8 +2664,8 @@ const sanitizeTaxRate = (raw) => {
                           </div>
                         </div>
                         {editTaxNameOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NAME_MAX} exceeded</p>}
-                        {parseFloat(editTaxVal.tax_rate) >= 99.999 && editTaxVal.tax_rate !== "" && (
-                          <p className="text-xs text-red-600 font-medium -mt-1">Maximum tax rate of 99.999% reached</p>
+                        {isBlockedTaxRateInput(editTaxVal.tax_rate) && (
+                          <p className="text-xs text-red-600 font-medium -mt-1">Tax Rate cannot be 99.999 or 999</p>
                         )}
                         <div className="flex gap-2 items-start">
                           <div className="flex-1">
@@ -2681,6 +2692,9 @@ const sanitizeTaxRate = (raw) => {
                             }
                             if (hasMoreThan3Decimals(r)) {
                               return toast("error", "Tax Rate can have a maximum of 3 decimal places (e.g. 10.894%)");
+                            }
+                            if (isBlockedTaxRateInput(r)) {
+                              return toast("error", "Tax Rate cannot be 99.999 or 999");
                             }
                             if (num.length > TAX_NUMBER_MAX) return toast("error", `Tax Number cannot exceed ${TAX_NUMBER_MAX} characters`);
                             const duplicateTaxName = (taxData || []).some(

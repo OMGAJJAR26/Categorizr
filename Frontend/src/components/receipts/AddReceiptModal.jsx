@@ -260,6 +260,11 @@ const [localMerchants, setLocalMerchants] = useState([]);
     return dot !== -1 && str.length - dot - 1 > 3;
   };
 
+  const isBlockedTaxRateInput = (val) => {
+    const str = String(val).replace(/%/g, "").trim();
+    return str === "99.999" || str === "999";
+  };
+
   // ── Tax rate input helpers ────────────────────────────────────────────────
   // Blocks letters and symbols at the keyboard level (paste handled by sanitizeTaxRate)
   const preventInvalidTaxRateKey = (e) => {
@@ -295,11 +300,13 @@ const [localMerchants, setLocalMerchants] = useState([]);
       ? `"${newTaxName.trim()}" already exists. Please use a different name.`
       : "");
 
-  const taxRateError = newTaxRate !== "" && parseFloat(newTaxRate) > TAX_RATE_MAX
+  const taxRateError = newTaxRate !== "" && isBlockedTaxRateInput(newTaxRate)
+    ? "Tax Rate cannot be 99.999 or 999."
+    : (newTaxRate !== "" && parseFloat(newTaxRate) > TAX_RATE_MAX
     ? `Maximum tax rate of ${TAX_RATE_MAX}% exceeded`
     : (newTaxRate !== "" && hasMoreThan3Decimals(newTaxRate)
       ? "Tax Rate can have a maximum of 3 decimal places (e.g. 10.894%)"
-      : "");
+      : ""));
 
   const taxNumberError = taxNumberOverflow
     ? `Character limit of ${TAX_NUMBER_MAX} exceeded`
@@ -1257,6 +1264,10 @@ const handleFieldChange = (field, value) => {
       setError("Tax Rate can have a maximum of 3 decimal places (e.g. 10.894%).");
       return;
     }
+    if (isBlockedTaxRateInput(newTaxRate)) {
+      setError("Tax Rate cannot be 99.999 or 999.");
+      return;
+    }
     if (newTaxName.trim().length > TAX_NAME_MAX) {
       setError(`Tax Name cannot exceed ${TAX_NAME_MAX} characters.`);
       return;
@@ -1379,6 +1390,10 @@ const handleFieldChange = (field, value) => {
     }
     if (isDuplicateTaxName(newTaxName.trim(), editingTaxId)) {
       setError("Tax Type already exists");
+      return;
+    }
+    if (isBlockedTaxRateInput(newTaxRate)) {
+      setError("Tax Rate cannot be 99.999 or 999.");
       return;
     }
     if (hasMoreThan3Decimals(newTaxRate)) {

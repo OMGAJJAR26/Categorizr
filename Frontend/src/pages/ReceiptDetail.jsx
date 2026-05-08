@@ -1539,17 +1539,24 @@ useEffect(() => {
     return dot !== -1 && str.length - dot - 1 > 3;
   };
 
+  const isBlockedTaxRateInput = (val) => {
+    const str = String(val).replace(/%/g, "").trim();
+    return str === "99.999" || str === "999";
+  };
+
   const taxNameError = newTaxName.length > TAX_NAME_MAX
     ? `Tax Name cannot exceed ${TAX_NAME_MAX} characters (${newTaxName.length}/${TAX_NAME_MAX})`
     : (newTaxName.trim() && isDuplicateTaxName(newTaxName.trim(), editingTaxId || null)
       ? `"${newTaxName.trim()}" already exists. Please use a different name.`
       : "");
 
-  const taxRateError = newTaxRate !== "" && parseFloat(newTaxRate) > TAX_RATE_MAX
+  const taxRateError = newTaxRate !== "" && isBlockedTaxRateInput(newTaxRate)
+    ? "Tax Rate cannot be 99.999 or 999."
+    : (newTaxRate !== "" && parseFloat(newTaxRate) > TAX_RATE_MAX
     ? `Tax Rate cannot exceed ${TAX_RATE_MAX}%`
     : (newTaxRate !== "" && hasMoreThan3Decimals(newTaxRate)
       ? "Tax Rate can have a maximum of 3 decimal places (e.g. 10.894%)"
-      : "");
+      : ""));
 
   const taxNumberError = newTaxNumber.length > TAX_NUMBER_MAX
     ? `Tax Number cannot exceed ${TAX_NUMBER_MAX} characters (${newTaxNumber.length}/${TAX_NUMBER_MAX})`
@@ -1573,6 +1580,10 @@ useEffect(() => {
     }
     if (hasMoreThan3Decimals(newTaxRate)) {
       setTaxError("Tax Rate can have a maximum of 3 decimal places (e.g. 10.894%).");
+      return;
+    }
+    if (isBlockedTaxRateInput(newTaxRate)) {
+      setTaxError("Tax Rate cannot be 99.999 or 999.");
       return;
     }
     setIsSavingTax(true);
@@ -1635,6 +1646,10 @@ useEffect(() => {
     }
     if (isDuplicateTaxName(newTaxName.trim(), editingTaxId)) {
       setTaxError("Tax Type already exists");
+      return;
+    }
+    if (isBlockedTaxRateInput(newTaxRate)) {
+      setTaxError("Tax Rate cannot be 99.999 or 999.");
       return;
     }
     if (hasMoreThan3Decimals(newTaxRate)) {
