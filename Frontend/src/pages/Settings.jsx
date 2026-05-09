@@ -1318,12 +1318,7 @@ const ReceiptInfoInline = ({ type }) => {
   useEffect(() => { if (type === "categories") fetchApiExpenseCategories(); }, [type]);
   useEffect(() => { 
     setShowAddForm(false); 
-    setAddVal("");
-    setAddTaxVal({ tax_name: "", tax_rate: "", tax_number: "" });
-    setAddTaxRateOverflow(false);
-    setNewMerchantName(""); setAddLogoOpts([]); setAddLogoSel(null);
-    setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
-    setPayEditMode(null);
+    resetAddFormState();
     setEditTaxKey(null);
     setEditTaxRateOverflow(false);
   }, [type]);
@@ -1420,6 +1415,23 @@ const ReceiptInfoInline = ({ type }) => {
   // localStorage: payment display string → "Personal" or "Business"
   // payEditMode: null = add mode, { item, apiId } = edit an existing payment method via the Add form
   const [payEditMode, setPayEditMode] = useState(null);
+
+  const resetAddFormState = () => {
+    setAddVal("");
+    setAddTaxVal({ tax_name: "", tax_rate: "", tax_number: "" });
+    setAddTaxNameOverflow(false);
+    setAddTaxRateOverflow(false);
+    setAddTaxNumberOverflow(false);
+    setNewMerchantName("");
+    setAddLogoOpts([]);
+    setAddLogoSel(null);
+    setIsFetchAddLogo(false);
+    setNewCardType("");
+    setNewIssuerName("");
+    setNewLast4("");
+    setNewExpenseType("Personal");
+    setPayEditMode(null);
+  };
 
   const [payExpenseTypeMap, setPayExpenseTypeMap] = useState(() => {
     try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; }
@@ -1733,6 +1745,33 @@ const parseTaxRateInput = (raw) => {
     setEditOrigLogo(null); setEditLogoOpts([]); setEditLogoSel(null);
   };
 
+  const getInlineEditDuplicateMessage = (item, nextValue) => {
+    const nextName = (nextValue || "").trim();
+    if (!nextName) return "";
+    if (type === "merchants") {
+      const exists = buildAllItems().some(
+        (i) => normalizeMatchKey(i.name) === normalizeMatchKey(nextName) && i.key !== item.key
+      );
+      return exists ? "Merchant name already exists" : "";
+    }
+    if (type === "categories") {
+      const exists = buildAllItems().some(
+        (i) => normalizeMatchKey(i.name) === normalizeMatchKey(nextName) && i.key !== item.key
+      );
+      return exists ? "Expense Category already exists" : "";
+    }
+    return "";
+  };
+
+  const getInlineTaxDuplicateMessage = (taxId, taxName) => {
+    const nextName = (taxName || "").trim();
+    if (!nextName) return "";
+    const exists = (taxData || []).some(
+      (t) => t.id !== taxId && normalizeMatchKey(t.tax_name) === normalizeMatchKey(nextName)
+    );
+    return exists ? "Tax Type already exists" : "";
+  };
+
   // ── ADD ──
   const handleAdd = async () => {
     if (type === "taxes") {
@@ -1756,10 +1795,7 @@ const parseTaxRateInput = (raw) => {
       if (duplicateTaxName) return toast("error", "Tax Type already exists");
       try {
         await addTax({ tax_name: n, tax_rate: r, tax_number: addTaxVal.tax_number.trim(), fk_user_id: localStorage.getItem("fk_user_id") || "" });
-        setAddTaxVal({ tax_name: "", tax_rate: "", tax_number: "" });
-        setAddTaxNameOverflow(false);
-        setAddTaxRateOverflow(false);
-        setAddTaxNumberOverflow(false);
+        resetAddFormState();
         toast("success", "Tax Type Added");
       } catch (e) { toast("error", e.message || "Failed."); }
       return;
@@ -1777,7 +1813,7 @@ const parseTaxRateInput = (raw) => {
       if (selectedUrl) saveMerchLogo(name, selectedUrl);
       const addMerchantResult = await addApiMerchant(name, selectedUrl || "");
       if (!addMerchantResult?.ok) throw new Error(addMerchantResult?.error || "Failed to add merchant");
-      setNewMerchantName(""); setAddLogoOpts([]); setAddLogoSel(null);
+      resetAddFormState();
       toast("success", "Merchant Added");
       return;
     }
@@ -1860,8 +1896,7 @@ const parseTaxRateInput = (raw) => {
       const addPaymentResult = await addApiPaymentMethod(payStr, selectedLogoUrl, newExpenseType);
       if (!addPaymentResult?.ok) throw new Error(addPaymentResult?.error || "Failed to add payment method");
       // Reset form fields and edit mode; keep the form OPEN so user can add the next method
-      setPayEditMode(null);
-      setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
+      resetAddFormState();
       await Promise.all([refreshData(), fetchApiPaymentMethods()]);
       toast("success", "Payment Method Added");
       return;
@@ -1874,7 +1909,7 @@ const parseTaxRateInput = (raw) => {
       // which lets edit and delete work correctly via the API on the first try.
       const addCategoryResult = await addApiExpenseCategory(catName);
       if (!addCategoryResult?.ok) throw new Error(addCategoryResult?.error || "Failed to add expense category");
-      setAddVal("");
+      resetAddFormState();
       toast("success", "Expense Category Added");
       return;
     }
@@ -2256,7 +2291,7 @@ const parseTaxRateInput = (raw) => {
     if (type === "merchants") {
       const allExisting = buildAllItems();
       if (allExisting.some(i => i.name.toLowerCase() === newName.toLowerCase() && i.key !== item.key)) {
-        return toast("error", "Merchant already exists");
+        return toast("error", "Merchant name already exists");
       }
       setPendingMerchantEdit({ item, newName, keepLogo });
       setShowMerchantEditConfirm(true);
@@ -2499,11 +2534,7 @@ const parseTaxRateInput = (raw) => {
           type="button"
           onClick={() => {
             if (showAddForm) {
-              setAddVal("");
-              setAddTaxVal({ tax_name: "", tax_rate: "", tax_number: "" });
-              setAddTaxRateOverflow(false);
-              setNewMerchantName(""); setAddLogoOpts([]); setAddLogoSel(null);
-              setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
+              resetAddFormState();
             }
             setShowAddForm((prev) => !prev); setPayEditMode(null); setEditTaxKey(null); setEditTaxRateOverflow(false);
           }}
@@ -2665,6 +2696,7 @@ const parseTaxRateInput = (raw) => {
             ? <p className="text-sm text-slate-400 text-center py-8">No tax types yet.</p>
             : [...taxItems].sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || "")).map(tax => {
                 const isEd = editTaxKey === tax.id;
+                const inlineTaxDuplicateMsg = isEd ? getInlineTaxDuplicateMessage(tax.id, editTaxVal.tax_name) : "";
                 return (
                   <div key={tax.id} className="flex items-center justify-between px-4 py-3 bg-white border border-slate-200/80 rounded-xl shadow-sm hover:shadow-md transition-all">
                     {isEd ? (
@@ -2687,6 +2719,7 @@ const parseTaxRateInput = (raw) => {
                           </div>
                         </div>
                         {editTaxNameOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NAME_MAX} exceeded</p>}
+                        {!!inlineTaxDuplicateMsg && <p className="text-xs text-red-600 -mt-1">{inlineTaxDuplicateMsg}</p>}
                         {editTaxRateOverflow && (
                           <p className="text-xs text-red-600 font-medium -mt-1">Tax Rate allows max 2 digits before decimal and 3 after decimal</p>
                         )}
@@ -2705,7 +2738,7 @@ const parseTaxRateInput = (raw) => {
                             <p className="mt-1 text-xs text-slate-400">* Required</p>
                             {editTaxNumberOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NUMBER_MAX} exceeded</p>}
                           </div>
-                          <button type="button" onClick={async () => {
+                          <button type="button" disabled={!!inlineTaxDuplicateMsg} onClick={async () => {
                             const n = editTaxVal.tax_name.trim(), r = editTaxVal.tax_rate.toString().trim(), num = editTaxVal.tax_number.trim();
                             if (!n) return toast("error", "Please enter Tax Name");
                             if (n.length > TAX_NAME_MAX) return toast("error", `Tax Name cannot exceed ${TAX_NAME_MAX} characters`);
@@ -2744,7 +2777,7 @@ const parseTaxRateInput = (raw) => {
                               setEditTaxNameOverflow(false);
                               setEditTaxNumberOverflow(false);
                             } catch (e) { toast("error", e.message || "Failed."); }
-                          }} className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex-shrink-0">Save</button>
+                          }} className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg flex-shrink-0">Save</button>
                           <button type="button" onClick={() => { setEditTaxKey(null); setEditTaxRateOverflow(false); setEditTaxNameOverflow(false); setEditTaxNumberOverflow(false); }} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex-shrink-0">Cancel</button>
                         </div>
                       </div>
@@ -2782,6 +2815,7 @@ const parseTaxRateInput = (raw) => {
             : allItems.map(item => {
                 const isEd = editKey === item.key;
                 const isMisc = type === "merchants" && (item.name || "").toLowerCase().trim() === "miscellaneous";
+                const inlineEditDuplicateMsg = isEd ? getInlineEditDuplicateMessage(item, editVal) : "";
                 // resolve logo shown in list: prefer merchant logo map, then item logo
                 const displayLogo = type === "merchants"
                   ? (merchLogos[item.name] || item.logo)
@@ -2812,9 +2846,10 @@ const parseTaxRateInput = (raw) => {
                                 : <Search size={13} />}
                             </button>
                           )}
-                          <button type="button" onClick={() => handleSaveEdit(item)} style={{ margin: 0 }} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex-shrink-0">Save</button>
+                          <button type="button" disabled={!!inlineEditDuplicateMsg} onClick={() => handleSaveEdit(item)} style={{ margin: 0 }} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg flex-shrink-0">Save</button>
                           <button type="button" onClick={closeEdit} style={{ margin: 0 }} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex-shrink-0">Cancel</button>
                         </div>
+                        {!!inlineEditDuplicateMsg && <p className="text-xs text-red-600">{inlineEditDuplicateMsg}</p>}
                         {/* Logo search results (edit mode, merchants) */}
                         {type === "merchants" && <LogoGrid options={editLogoOpts} selectedIndex={editLogoSel} onSelect={setEditLogoSel} />}
                       </div>

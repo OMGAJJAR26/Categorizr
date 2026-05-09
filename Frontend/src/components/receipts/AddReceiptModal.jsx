@@ -722,14 +722,19 @@ const [localMerchants, setLocalMerchants] = useState([]);
     const data = await response.json();
     console.log("uploadmediaV1 response:", data);
 
+    const isHttpUrl = (value) =>
+      typeof value === "string" && /^https?:\/\//i.test(value.trim());
+
     // API returns array of { fullImageUrl: "string" }
     if (Array.isArray(data)) {
-      return data.map((item) => item.fullImageUrl).filter(Boolean);
+      return data
+        .map((item) => (item?.fullImageUrl || "").toString().trim())
+        .filter((url) => isHttpUrl(url));
     }
 
     // Fallback: single object
-    if (data?.fullImageUrl) {
-      return [data.fullImageUrl];
+    if (isHttpUrl(data?.fullImageUrl)) {
+      return [data.fullImageUrl.toString().trim()];
     }
 
     return [];
@@ -1686,9 +1691,10 @@ const handleFieldChange = (field, value) => {
       setUploadProgress(80);
 
       // ─── STEP 4: Determine image URL ─────────────────────────────────────
-      // Priority: uploadmediaV1 URL > local object URL
+      // Priority: uploadmediaV1 URL > local object URL (preview only)
+      const primaryRemoteMediaUrl = nonEmptyUrl(mediaUrls[0]) || null;
       const imageUrl =
-        mediaUrls[0] ||
+        primaryRemoteMediaUrl ||
         URL.createObjectURL(file);
 
       setUploadedImageUrl(imageUrl);
@@ -1697,8 +1703,10 @@ const handleFieldChange = (field, value) => {
       // this is a brand-new receipt and calls addReceiptv1 exactly once.
       setUploadedReceiptData({
         id: 0,
-        receipt_image: normalizeMediaUrl(imageUrl),
-        emailAttachment: normalizeMediaUrl(mediaUrls[0] || "0"),
+        // Keep backend payload URL-only; blob: URLs are preview-only and can trigger
+        // server-side "Invalid URL" validation errors.
+        receipt_image: normalizeMediaUrl(primaryRemoteMediaUrl || "0"),
+        emailAttachment: normalizeMediaUrl(primaryRemoteMediaUrl || "0"),
       });
 
       setUploadProgress(100);
@@ -3307,6 +3315,7 @@ const handleSelectLogo = (index) => {
   // Handle adding new merchant
   const handleAddMerchant = async () => {
     const name = (newMerchantName || "").trim();
+    const normalizedName = name.toLowerCase();
 
     // 1. Empty name check
     if (!name) {
