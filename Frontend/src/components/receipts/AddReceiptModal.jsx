@@ -38,6 +38,36 @@ import warrantedSelect from "../../assets/receipttags/warrantied_select.png";
 import lockedImg from "../../assets/receipttags/locked.png";
 import unlockedImg from "../../assets/receipttags/unlocked.png";
 
+/**
+ * Duplicate flow: required fields in order (date → merchant → total).
+ * Returns the first user-facing error message, or null if valid.
+ */
+function getDuplicateReceiptValidationMessage(formData) {
+  if (formData?.product_date == null || String(formData.product_date).trim() === "") {
+    return "Please select date";
+  }
+  if (formData?.storeName == null || String(formData.storeName).trim() === "") {
+    return "Please select merchant";
+  }
+  const rawTotal = formData?.purchasePrice;
+  if (rawTotal == null || String(rawTotal).trim() === "") {
+    return "Please enter total";
+  }
+  const total = parseFloat(String(rawTotal).trim());
+  if (!Number.isFinite(total) || total === 0) {
+    return "Please enter total";
+  }
+  return null;
+}
+
+/** Describe Purchase (`product_name`): default to "Duplicate" when blank on the duplicated receipt. */
+function withDuplicateDefaultProductName(formData) {
+  if (!formData) return formData;
+  const trimmed = String(formData.product_name ?? "").trim();
+  if (trimmed) return { ...formData };
+  return { ...formData, product_name: "Duplicate" };
+}
+
 const AddReceiptModal = ({ onClose, onReceiptAdded, initialData = null, onDuplicate = null }) => {
   const MAX_NOTES_LENGTH = 500;
   const MAX_DESCRIPTION_LENGTH = 100;
@@ -2654,6 +2684,11 @@ const handleFieldChange = (field, value) => {
 
   /** Save original receipt then open a fresh duplicate modal pre-filled with the same data */
   const handleDuplicateConfirm = async () => {
+    const validationMsg = getDuplicateReceiptValidationMessage(formData);
+    if (validationMsg) {
+      setAlertMsg(validationMsg);
+      return;
+    }
     setIsDuplicateSaving(true);
     setError(null);
     try {
@@ -2667,7 +2702,7 @@ const handleFieldChange = (field, value) => {
 
       // Build the snapshot of all form data to hand to the fresh duplicate modal
       const duplicateSnapshot = {
-        formData:             { ...formData },
+        formData:             withDuplicateDefaultProductName(formData),
         tags:                 { ...tags },
         uploadedMediaUrls:    [...uploadedMediaUrls],
         uploadedImageUrl:     uploadedImageUrl,
@@ -2684,6 +2719,7 @@ const handleFieldChange = (field, value) => {
         onDuplicate(duplicateSnapshot);
       } else {
         // Fallback (no parent handler): stay in current modal in duplicate mode
+        setFormData((prev) => withDuplicateDefaultProductName(prev));
         setIsDuplicateMode(true);
         setIsDuplicated(true);
         setUploadedReceiptData(prev => prev ? { ...prev, id: 0 } : null);
@@ -4051,7 +4087,16 @@ const handleSelectLogo = (index) => {
                             <button
                               type="button"
                               className={`w-full text-left px-4 py-3 text-sm font-medium border-b border-gray-100 transition-colors ${isDuplicated ? "text-gray-400 cursor-not-allowed" : "hover:bg-gray-50 text-gray-800"}`}
-                              onClick={() => { if (!isDuplicated) { setShowOptionsMenu(false); setShowDuplicateConfirm(true); } }}
+                              onClick={() => {
+                                if (isDuplicated) return;
+                                setShowOptionsMenu(false);
+                                const validationMsg = getDuplicateReceiptValidationMessage(formData);
+                                if (validationMsg) {
+                                  setAlertMsg(validationMsg);
+                                  return;
+                                }
+                                setShowDuplicateConfirm(true);
+                              }}
                               disabled={isDuplicated}
                             >
                               {isDuplicated ? "Duplicate (done)" : "Duplicate"}
