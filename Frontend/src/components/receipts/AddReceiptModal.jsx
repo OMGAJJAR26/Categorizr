@@ -433,6 +433,35 @@ const [localMerchants, setLocalMerchants] = useState([]);
     return (s && s !== "0" && !s.startsWith("blob:")) ? s : null;
   };
 
+  const splitMediaField = (value) => {
+    if (!value || typeof value !== "string") return [];
+    return value
+      .split(",")
+      .map((part) => nonEmptyUrl(part))
+      .filter(Boolean);
+  };
+
+  const buildCombinedMediaField = (sources) => {
+    const urls = [];
+    const pushUrl = (candidate) => {
+      const normalized = normalizeMediaUrl(nonEmptyUrl(candidate) || "");
+      if (!normalized || normalized === "0" || urls.includes(normalized)) return;
+      urls.push(normalized);
+    };
+
+    sources.forEach((source) => {
+      if (Array.isArray(source)) {
+        source.forEach((item) => pushUrl(item));
+        return;
+      }
+      splitMediaField(source).forEach((item) => pushUrl(item));
+      pushUrl(source);
+    });
+
+    if (urls.length === 0) return "0";
+    return urls.join(",");
+  };
+
   // Get proper payment display name (handles 0*0 type issues)
   const getPaymentDisplayName = (paymentType) => {
     if (!paymentType) return "";
@@ -2169,19 +2198,18 @@ const handleFieldChange = (field, value) => {
       // If no image was uploaded, id stays 0 and addReceiptv1 will create the receipt.
       const uploadedId = parseInt(uploadedReceiptData?.id) || 0;
       const fkUserId = parseInt(localStorage.getItem("fk_user_id")) || 0;
+      const combinedImageUrls = buildCombinedMediaField([
+        uploadedMediaUrls,
+        uploadedImageUrl,
+        uploadedReceiptData?.receipt_image,
+        uploadedReceiptData?.emailAttachment,
+      ]);
       const savePayload = {
         id: uploadedId, // Use uploaded receipt ID to update, or 0 to create new
         fk_user_id: fkUserId,
         storeName: formData.storeName || "",
         product_name: formData.product_name || "",
-        emailAttachment:
-          normalizeMediaUrl(
-            nonEmptyUrl(uploadedMediaUrls.length > 0 ? uploadedMediaUrls[0] : null) ||
-            nonEmptyUrl(uploadedImageUrl) ||
-            nonEmptyUrl(uploadedReceiptData?.emailAttachment) ||
-            nonEmptyUrl(uploadedReceiptData?.receipt_image) ||
-            "0",
-          ),
+        emailAttachment: combinedImageUrls,
         purchasePrice: purchasePrice.toString(),
         total_amount: purchasePrice.toString(),
         payment_category_type: paymentCategoryType,
@@ -2196,14 +2224,7 @@ const handleFieldChange = (field, value) => {
         receipt_category: parseInt(formData.receipt_category) || 0,
         product_date: productDate,
         expense_type: formData.expense_type || "",
-        receipt_image:
-          normalizeMediaUrl(
-            nonEmptyUrl(uploadedReceiptData?.receipt_image) ||
-            nonEmptyUrl(uploadedReceiptData?.emailAttachment) ||
-            nonEmptyUrl(uploadedImageUrl) ||
-            nonEmptyUrl(uploadedMediaUrls[0]) ||
-            "0",
-          ),
+        receipt_image: combinedImageUrls,
         store_image:
           getMerchantImage(formData.storeName) ||
           detectedMerchantLogo ||
@@ -2427,13 +2448,14 @@ const handleFieldChange = (field, value) => {
       if (onReceiptAdded) {
         onReceiptAdded({
           ...savePayload,
-          receipt_image:
-            normalizeMediaUrl(
-              nonEmptyUrl(savePayload.receipt_image) ||
-              nonEmptyUrl(uploadedImageUrl) ||
-              nonEmptyUrl(uploadedReceiptData?.receipt_image) ||
-              "0",
-            ),
+          receipt_image: buildCombinedMediaField([
+            savePayload.receipt_image,
+            savePayload.emailAttachment,
+            uploadedMediaUrls,
+            uploadedImageUrl,
+            uploadedReceiptData?.receipt_image,
+            uploadedReceiptData?.emailAttachment,
+          ]),
         });
       } else {
         // If no callback, we still need to refresh data
@@ -2477,12 +2499,18 @@ const handleFieldChange = (field, value) => {
 
     const fkUserId = parseInt(localStorage.getItem("fk_user_id")) || 0;
     const baseId = overrideId !== null ? overrideId : (parseInt(uploadedReceiptData?.id) || 0);
+    const combinedImageUrls = buildCombinedMediaField([
+      uploadedMediaUrls,
+      uploadedImageUrl,
+      uploadedReceiptData?.receipt_image,
+      uploadedReceiptData?.emailAttachment,
+    ]);
 
     return {
       id: baseId,
       storeName: formData.storeName || "",
       product_name: formData.product_name || "",
-      emailAttachment: normalizeMediaUrl(nonEmptyUrl(uploadedMediaUrls[0]) || nonEmptyUrl(uploadedImageUrl) || nonEmptyUrl(uploadedReceiptData?.emailAttachment) || "0"),
+      emailAttachment: combinedImageUrls,
       purchasePrice: (parseFloat(formData.purchasePrice) || 0).toString(),
       total_amount: (parseFloat(formData.purchasePrice) || 0).toString(),
       payment_category_type: parseInt(formData.receipt_category) || 0,
@@ -2495,7 +2523,7 @@ const handleFieldChange = (field, value) => {
       receipt_category: parseInt(formData.receipt_category) || 0,
       product_date: productDate,
       expense_type: formData.expense_type || "",
-      receipt_image: normalizeMediaUrl(nonEmptyUrl(uploadedReceiptData?.receipt_image) || nonEmptyUrl(uploadedImageUrl) || nonEmptyUrl(uploadedMediaUrls[0]) || "0"),
+      receipt_image: combinedImageUrls,
       store_image: getMerchantImage(formData.storeName) || detectedMerchantLogo || uploadedReceiptData?.store_image || "",
       notes: formData.notes || "",
       receipt_forwarded: uploadedReceiptData?.receipt_forwarded || "0",
@@ -2804,13 +2832,19 @@ const handleFieldChange = (field, value) => {
       }
       if (!productDate) productDate = Math.floor(Date.now() / 1000);
       const receiptTag = ["0","0","0","0","0","0","0"].join(",");
+      const combinedImageUrls = buildCombinedMediaField([
+        uploadedMediaUrls,
+        uploadedImageUrl,
+        uploadedReceiptData?.receipt_image,
+        uploadedReceiptData?.emailAttachment,
+      ]);
 
       // Helper: build a receipt payload from a set of amounts + metadata
       const buildSplitPayload = ({ total, subtotalVal, taxVals, category, expenseType, productName }) => ({
         id: 0,
         storeName: formData.storeName || "",
         product_name: productName || "",
-        emailAttachment: normalizeMediaUrl(nonEmptyUrl(uploadedMediaUrls[0]) || nonEmptyUrl(uploadedImageUrl) || nonEmptyUrl(uploadedReceiptData?.emailAttachment) || "0"),
+        emailAttachment: combinedImageUrls,
         purchasePrice: total.toString(),
         total_amount: total.toString(),
         payment_category_type: parseInt(category) || 0,
@@ -2823,7 +2857,7 @@ const handleFieldChange = (field, value) => {
         receipt_category: parseInt(category) || 0,
         product_date: productDate,
         expense_type: expenseType || formData.expense_type || "",
-        receipt_image: normalizeMediaUrl(nonEmptyUrl(uploadedReceiptData?.receipt_image) || nonEmptyUrl(uploadedImageUrl) || nonEmptyUrl(uploadedMediaUrls[0]) || "0"),
+        receipt_image: combinedImageUrls,
         store_image: getMerchantImage(formData.storeName) || detectedMerchantLogo || "",
         notes: "",
         receipt_forwarded: "0",

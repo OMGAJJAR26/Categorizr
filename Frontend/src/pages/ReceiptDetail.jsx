@@ -1051,6 +1051,31 @@ useEffect(() => {
       return encodeURI(raw);
     }
   };
+  const splitMediaField = (value) => {
+    if (!value || typeof value !== "string") return [];
+    return value
+      .split(",")
+      .map((part) => normalizeMediaUrl(part))
+      .filter(Boolean);
+  };
+  const buildCombinedMediaField = (sources) => {
+    const urls = [];
+    const pushUrl = (candidate) => {
+      const normalized = normalizeMediaUrl(candidate);
+      if (!normalized || urls.includes(normalized)) return;
+      urls.push(normalized);
+    };
+    sources.forEach((source) => {
+      if (Array.isArray(source)) {
+        source.forEach((item) => pushUrl(item));
+        return;
+      }
+      splitMediaField(source).forEach((item) => pushUrl(item));
+      pushUrl(source);
+    });
+    if (urls.length === 0) return "0";
+    return urls.join(",");
+  };
   const normalizeMatchKey = (value) =>
     String(value || "")
       .trim()
@@ -2604,12 +2629,17 @@ useEffect(() => {
         finalEmailAttach = normalizeMediaUrl(remainingAdditional[0]) || mergedEmailAttach;
         remainingAdditional = remainingAdditional.slice(1);
       }
+      const combinedReceiptImages = buildCombinedMediaField([
+        mergedReceiptImg,
+        finalEmailAttach,
+        ...remainingAdditional,
+      ]);
 
       const updatedData = {
         ...selectedReceipt, // Include all original fields
         ...editedReceipt, // Override with edited fields
-        receipt_image:   mergedReceiptImg,
-        emailAttachment: finalEmailAttach,
+        receipt_image: combinedReceiptImages,
+        emailAttachment: combinedReceiptImages,
         receipt_tag: receiptTag,
         receipt_tax_values: receiptTaxValuesPayload,
         store_image: storeImageToSave,
@@ -5799,8 +5829,8 @@ Thank you for using our receipt management system.
                           // a server round-trip.
                           const urls = [
                             ...new Set([
-                              editedReceipt.emailAttachment ?? r.emailAttachment,
-                              editedReceipt.receipt_image ?? r.receipt_image,
+                              ...(splitMediaField(editedReceipt.emailAttachment ?? r.emailAttachment)),
+                              ...(splitMediaField(editedReceipt.receipt_image ?? r.receipt_image)),
                             ]),
                           ].filter((url) => {
                             if (!url || typeof url !== "string") return false;
