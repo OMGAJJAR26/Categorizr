@@ -10,6 +10,10 @@
 // PHP_API_BASE is always the live PHP server; its /api/* requests are
 // already proxied by vercel.json in staging/production, so this constant
 // is only needed if you ever want to reference it explicitly.
+//
+// /api/imageproxy is routed separately (Vite dev → Render by default; Vercel
+// rewrite → Render) so ReceiptAnnotator can fetch receipt images without a
+// local Node server. Set VITE_NODE_API_URL to override the proxy host.
 
 export const NODE_API_URL = import.meta.env.VITE_NODE_API_URL ?? "";
 export const PHP_API_BASE = "https://categorizr.com/emailserver";

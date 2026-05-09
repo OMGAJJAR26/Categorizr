@@ -384,6 +384,32 @@ const [localMerchants, setLocalMerchants] = useState([]);
     setIsDuplicated(true); // prevent double-duplicate
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Ensure all media URLs from receipt payload are represented in the gallery.
+  // Older flows may provide multiple URLs only in receipt_image/emailAttachment.
+  useEffect(() => {
+    if (!uploadedReceiptData) return;
+    const receiptFieldUrls = [
+      ...splitMediaField(uploadedReceiptData.receipt_image),
+      ...splitMediaField(uploadedReceiptData.emailAttachment),
+    ];
+    if (receiptFieldUrls.length === 0) return;
+    setUploadedMediaUrls((prev) => {
+      const seen = new Set(
+        (prev || [])
+          .map((u) => normalizeMediaUrl(nonEmptyUrl(u) || ""))
+          .filter((u) => u && u !== "0"),
+      );
+      const next = [...(prev || [])];
+      receiptFieldUrls.forEach((u) => {
+        const normalized = normalizeMediaUrl(nonEmptyUrl(u) || "");
+        if (!normalized || normalized === "0" || seen.has(normalized)) return;
+        seen.add(normalized);
+        next.push(u);
+      });
+      return next;
+    });
+  }, [uploadedReceiptData]);
+
   const acceptedFileTypes = [
     "image/jpeg",
     "image/png",
@@ -460,6 +486,27 @@ const [localMerchants, setLocalMerchants] = useState([]);
 
     if (urls.length === 0) return "0";
     return urls.join(",");
+  };
+
+  /** Replace one normalized URL in a comma-separated receipt_image / emailAttachment value. */
+  const replaceNormalizedUrlInMediaCsvModal = (csv, normalizedOld, replacement) => {
+    if (!csv || typeof csv !== "string" || csv === "0") return csv;
+    const parts = csv
+      .split(",")
+      .map((p) => p.trim())
+      .filter((p) => p && !["0", "null", ""].includes(p));
+    let hit = false;
+    const next = parts.map((p) => {
+      const nePart = nonEmptyUrl(p);
+      const n = nePart ? normalizeMediaUrl(nePart) : null;
+      if (n && normalizedOld && n === normalizedOld) {
+        hit = true;
+        return replacement;
+      }
+      return p;
+    });
+    if (!hit) return csv;
+    return next.join(",");
   };
 
   // Get proper payment display name (handles 0*0 type issues)
@@ -802,15 +849,37 @@ const [localMerchants, setLocalMerchants] = useState([]);
 
   // ── Annotation save handler ──────────────────────────────────────────────
   const handleAnnotationSave = (dataUrl) => {
+    const rawReplaced =
+      annotatorIndex !== null && annotatorIndex >= 0
+        ? uploadedMediaUrls[annotatorIndex]
+        : annotatorUrl;
+    const neReplaced = nonEmptyUrl(rawReplaced);
+    const normOld = neReplaced ? normalizeMediaUrl(neReplaced) : "";
+
     if (annotatorIndex !== null && annotatorIndex >= 0) {
-      // Replace existing image
       setUploadedMediaUrls((prev) =>
         prev.map((url, i) => (i === annotatorIndex ? dataUrl : url))
       );
     } else {
-      // Add as new image
       setUploadedMediaUrls((prev) => [...prev, dataUrl]);
     }
+
+    if (normOld && normOld !== "0") {
+      setUploadedReceiptData((prev) => {
+        if (!prev) return prev;
+        const email0 = (prev.emailAttachment ?? "").toString();
+        const receipt0 = (prev.receipt_image ?? "").toString();
+        const mergedEmail = replaceNormalizedUrlInMediaCsvModal(email0, normOld, dataUrl);
+        const mergedReceipt = replaceNormalizedUrlInMediaCsvModal(receipt0, normOld, dataUrl);
+        if (mergedEmail === email0 && mergedReceipt === receipt0) return prev;
+        return {
+          ...prev,
+          emailAttachment: normalizeMediaUrl(mergedEmail) || "0",
+          receipt_image: normalizeMediaUrl(mergedReceipt) || "0",
+        };
+      });
+    }
+
     setAnnotatorUrl(null);
     setAnnotatorIndex(null);
   };
@@ -5723,19 +5792,46 @@ const handleSelectLogo = (index) => {
                       </div>
                       <div className="border border-dashed border-blue-400 rounded-lg p-3 flex gap-4 flex-wrap">
                         {uploadedMediaUrls.length > 0 ? (
-                          // Show all uploaded media - use local preview for PDFs since CDN URLs can't render in <img>
+                          // Show all uploaded media.
                           uploadedMediaUrls.map((url, idx) => {
-                            // Determine display URL: for PDFs use pdfPreviewUrl, for images use the CDN url
+                            const safeUrl = (url || "").toString().trim();
+                            // Detect PDF per media item URL only.
+                            // Do not infer from localImageFile type, otherwise an
+                            // annotated PNG can be incorrectly treated as PDF and disappear.
+                            const lowerSafeUrl = safeUrl.toLowerCase();
                             const isPdfUrl =
-                              url.toLowerCase().includes(".pdf") ||
-                              (localImageFile &&
-                                (localImageFile.type === "application/pdf" ||
-                                  localImageFile.name
-                                    .toLowerCase()
-                                    .endsWith(".pdf")));
+                              lowerSafeUrl.includes(".pdf") ||
+                              lowerSafeUrl.startsWith("data:application/pdf");
                             const displayUrl = isPdfUrl
                               ? pdfPreviewUrl || getImagePreviewUrl()
-                              : url;
+                              : safeUrl;
+
+                            if (isPdfUrl && !displayUrl) {
+                              return (
+                                <div key={idx} className="relative group">
+                                  <button
+                                    type="button"
+                                    onClick={() => window.open(safeUrl, "_blank")}
+                                    className="w-24 h-[118px] rounded border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors flex flex-col items-center justify-center text-gray-600"
+                                    title="Open PDF"
+                                  >
+                                    <FileText size={26} />
+                                    <span className="mt-1 text-[11px] font-semibold">PDF</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      removeUploadedMediaAt(idx);
+                                    }}
+                                    className="absolute top-1 right-1 bg-white/90 hover:bg-red-600 hover:text-white text-red-600 rounded p-1 opacity-0 group-hover:opacity-100 transition-all shadow"
+                                    title="Delete image"
+                                  >
+                                    <Trash2 size={11} />
+                                  </button>
+                                </div>
+                              );
+                            }
 
                             if (!displayUrl) return null;
 
@@ -5745,7 +5841,7 @@ const handleSelectLogo = (index) => {
                                   src={displayUrl}
                                   alt={`Receipt ${idx + 1}`}
                                   className="w-24 h-auto rounded cursor-pointer border border-gray-200"
-                                  onClick={() => window.open(url, "_blank")}
+                                  onClick={() => window.open(safeUrl, "_blank")}
                                 />
                                 <button
                                   type="button"

@@ -5,6 +5,10 @@
   "outputDirectory": "Frontend/dist",
   "rewrites": [
     {
+      "source": "/api/imageproxy",
+      "destination": "https://categorizr-chatbot.onrender.com/api/imageproxy"
+    },
+    {
       "source": "/api/:path*",
       "destination": "https://categorizr.com/emailserver/api/:path*"
     },

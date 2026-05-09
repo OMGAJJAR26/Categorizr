@@ -209,7 +209,18 @@ const chatHandler = async (req, res) => {
   return false;
 };
 
-export default defineConfig({
+// Local dev: proxy /api/imageproxy to Render when VITE_NODE_API_URL is unset
+// (avoids 500 if Node is not running on :3000). Override with .env VITE_NODE_API_URL.
+const trimTrailingSlash = (s) => (s || '').replace(/\/$/, '');
+
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, __dirname, '');
+  const imageProxyTarget =
+    trimTrailingSlash(env.VITE_NODE_API_URL) ||
+    trimTrailingSlash(env.VITE_IMAGEPROXY_TARGET) ||
+    'https://categorizr-chatbot.onrender.com';
+
+  return {
   plugins: [
     react(),
     {
@@ -239,9 +250,9 @@ export default defineConfig({
           });
         },
       },
-      // Image proxy — routes to Node server so it can add CORS headers
+      // Image proxy — Node (local :3000, or Render via env / default above)
       '/api/imageproxy': {
-        target: 'http://localhost:3000',
+        target: imageProxyTarget,
         changeOrigin: true,
       },
       // Existing emailserver APIs stay proxied to production backend
@@ -287,4 +298,5 @@ export default defineConfig({
       },
     },
   },
-})
+};
+});

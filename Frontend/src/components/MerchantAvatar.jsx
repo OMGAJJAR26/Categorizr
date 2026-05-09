@@ -65,7 +65,10 @@ const buildClearbitUrl = (name) => {
   const normalized = normalizeKey(name);
   if (normalized.includes("shell")) return SHELL_LOGO_URL;
   const domain = name.toString().replace(/\s+/g, "").toLowerCase();
-  return domain ? `https://logo.clearbit.com/${domain}.com` : null;
+  if (!domain) return null;
+  // Hostname/path must be safe; "&" (e.g. "T&T") produces invalid Clearbit URLs and 500s via imageproxy.
+  if (!/^[a-z0-9.-]+$/i.test(domain)) return null;
+  return `https://logo.clearbit.com/${domain}.com`;
 };
 
 // ─── Miscellaneous "M" badge ─────────────────────────────────────────────────

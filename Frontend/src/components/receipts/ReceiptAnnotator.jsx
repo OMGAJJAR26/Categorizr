@@ -3,12 +3,14 @@
  *
  * Displays the receipt as a plain <img> (always works, even cross-origin).
  * A transparent <canvas> overlay sits on top for drawing annotations.
- * On save, we fetch the image through the existing /api/imageproxy endpoint
- * (same-origin blob) so we can compose background + annotations into a single
- * PNG without the canvas being "tainted" by cross-origin data.
+ * On save, we prefer the same-origin /api/imageproxy blob, then fall back to
+ * a direct CORS fetch or a CORS-enabled Image load so the receipt background
+ * is still composed when the proxy is down. Only if all paths fail do we use
+ * a white background (strokes-only), which we try hard to avoid.
  */
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import { X, Undo2, Trash2, Pen, Eraser, Download, Loader2 } from "lucide-react";
+import { proxyImageUrl } from "../../api/Axios";
 
 const COLORS = ["#EF4444", "#3B82F6", "#000000", "#16A34A", "#F97316", "#7C3AED"];
 
@@ -146,55 +148,82 @@ const ReceiptAnnotator = ({ imageUrl, onSave, onClose }) => {
       output.height = h || annotationCanvas.height;
       const ctx = output.getContext("2d");
 
-      // 1. Try fetching background via the same-origin /api/imageproxy route.
-      //    We intentionally avoid NODE_API_URL (Render.com) here because a
-      //    cross-origin fetch() requires CORS headers on the response — which
-      //    the image proxy doesn't provide — and would silently fail, causing
-      //    the canvas taint fallback to fire. The Vercel same-origin rewrite
-      //    (/api/* → PHP backend) handles imageproxy correctly and is CORS-free.
+      const rawUrl =
+        imageUrl && imageUrl.includes("/api/imageproxy?url=")
+          ? (() => {
+              try {
+                return decodeURIComponent(
+                  imageUrl.split("/api/imageproxy?url=")[1]
+                );
+              } catch {
+                return imageUrl;
+              }
+            })()
+          : imageUrl || "";
+
       let backgroundDrawn = false;
-      if (imageUrl && !imageUrl.startsWith("data:")) {
+
+      const drawBlobToOutput = (blob) =>
+        new Promise((resolve) => {
+          const blobUrl = URL.createObjectURL(blob);
+          const bg = new Image();
+          bg.onload = () => {
+            try {
+              ctx.drawImage(bg, 0, 0, output.width, output.height);
+              URL.revokeObjectURL(blobUrl);
+              resolve(true);
+            } catch {
+              URL.revokeObjectURL(blobUrl);
+              resolve(false);
+            }
+          };
+          bg.onerror = () => {
+            URL.revokeObjectURL(blobUrl);
+            resolve(false);
+          };
+          bg.src = blobUrl;
+        });
+
+      const isImageBlob = (blob, resp) => {
+        const ct = (blob?.type || resp?.headers?.get("content-type") || "").toLowerCase();
+        return (
+          ct.startsWith("image/") ||
+          ct === "application/octet-stream" ||
+          (!ct && (blob?.size || 0) > 512)
+        );
+      };
+
+      // 1. Image proxy — same URL rules as proxyImageUrl() (Vite → Render locally,
+      //    Vercel rewrite → Render, or VITE_NODE_API_URL absolute on staging).
+      if (imageUrl && !imageUrl.startsWith("data:") && !imageUrl.startsWith("blob:")) {
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 10000);
-          // Strip any existing proxy wrapper so we never double-encode the URL
-          const rawUrl = imageUrl.includes("/api/imageproxy?url=")
-            ? (() => { try { return decodeURIComponent(imageUrl.split("/api/imageproxy?url=")[1]); } catch { return imageUrl; } })()
-            : imageUrl;
-          const proxyUrl = `/api/imageproxy?url=${encodeURIComponent(rawUrl)}`;
+          const proxyUrl = proxyImageUrl(rawUrl);
           const resp = await fetch(proxyUrl, { signal: controller.signal });
           clearTimeout(timeoutId);
-
           if (resp.ok) {
             const blob = await resp.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            await new Promise((resolve) => {
-              const bg = new Image();
-              bg.onload = () => {
-                ctx.drawImage(bg, 0, 0, output.width, output.height);
-                URL.revokeObjectURL(blobUrl);
-                backgroundDrawn = true;
-                resolve();
-              };
-              bg.onerror = () => {
-                URL.revokeObjectURL(blobUrl);
-                resolve(); // don't reject — fall through
-              };
-              bg.src = blobUrl;
-            });
+            if (isImageBlob(blob, resp)) {
+              backgroundDrawn = await drawBlobToOutput(blob);
+            }
           }
         } catch {
-          // timeout or network error — fall through to direct draw
+          /* fall through */
         }
       }
 
-      // 2. Fallback: data URI — always safe for canvas
+      // 2. data: URI — always safe for canvas
       if (!backgroundDrawn && imageUrl.startsWith("data:")) {
         await new Promise((resolve) => {
           const bg = new Image();
           bg.onload = () => {
-            ctx.drawImage(bg, 0, 0, output.width, output.height);
-            backgroundDrawn = true;
+            try {
+              ctx.drawImage(bg, 0, 0, output.width, output.height);
+              backgroundDrawn = true;
+            } catch {
+              /* noop */
+            }
             resolve();
           };
           bg.onerror = resolve;
@@ -202,22 +231,108 @@ const ReceiptAnnotator = ({ imageUrl, onSave, onClose }) => {
         });
       }
 
-      // 3. Fallback: white background.
-      //    We must NEVER draw imgRef.current here — even though it displays fine
-      //    as an <img>, drawing a cross-origin image onto a canvas silently
-      //    marks it as "tainted" (drawImage does NOT throw). Any subsequent
-      //    toDataURL() call on a tainted canvas throws a SecurityError.
+      // 3. blob: URL (e.g. local file preview)
+      if (!backgroundDrawn && typeof imageUrl === "string" && imageUrl.startsWith("blob:")) {
+        await new Promise((resolve) => {
+          const bg = new Image();
+          bg.onload = () => {
+            try {
+              ctx.drawImage(bg, 0, 0, output.width, output.height);
+              backgroundDrawn = true;
+            } catch {
+              /* noop */
+            }
+            resolve();
+          };
+          bg.onerror = resolve;
+          bg.src = imageUrl;
+        });
+      }
+
+      // 4. Direct CORS fetch to the receipt CDN (works when proxy is broken but CDN allows CORS)
+      if (!backgroundDrawn && rawUrl && /^https?:\/\//i.test(rawUrl)) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 12000);
+          const resp = await fetch(rawUrl, {
+            method: "GET",
+            mode: "cors",
+            credentials: "omit",
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+          if (resp.ok) {
+            const blob = await resp.blob();
+            if (isImageBlob(blob, resp)) {
+              backgroundDrawn = await drawBlobToOutput(blob);
+            }
+          }
+        } catch {
+          /* fall through */
+        }
+      }
+
+      // 5. CORS-enabled Image (some hosts allow img crossOrigin but not fetch)
+      if (!backgroundDrawn && rawUrl && /^https?:\/\//i.test(rawUrl)) {
+        const ok = await new Promise((resolve) => {
+          const bg = new Image();
+          bg.crossOrigin = "anonymous";
+          bg.onload = () => {
+            try {
+              const probe = document.createElement("canvas");
+              probe.width = output.width;
+              probe.height = output.height;
+              const pctx = probe.getContext("2d");
+              pctx.drawImage(bg, 0, 0, output.width, output.height);
+              probe.toDataURL("image/png");
+              ctx.drawImage(bg, 0, 0, output.width, output.height);
+              resolve(true);
+            } catch {
+              resolve(false);
+            }
+          };
+          bg.onerror = () => resolve(false);
+          bg.src = rawUrl;
+        });
+        backgroundDrawn = ok;
+      }
+
+      // 6. Same <img> as on screen — only if pixels are readable (same-origin or CORS-clean)
+      if (!backgroundDrawn && imgRef.current?.complete && imgRef.current.naturalWidth) {
+        try {
+          const probe = document.createElement("canvas");
+          probe.width = output.width;
+          probe.height = output.height;
+          const pctx = probe.getContext("2d");
+          pctx.drawImage(imgRef.current, 0, 0, output.width, output.height);
+          probe.toDataURL("image/png");
+          ctx.drawImage(imgRef.current, 0, 0, output.width, output.height);
+          backgroundDrawn = true;
+        } catch {
+          /* cross-origin taint — cannot export */
+        }
+      }
+
+      // 7. Last resort: white (strokes only) — avoids crashing but looks wrong
       if (!backgroundDrawn) {
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(0, 0, output.width, output.height);
       }
 
-      // 4. Always overlay the transparent annotation layer on top
+      // 8. Overlay the transparent annotation layer on top
       ctx.drawImage(annotationCanvas, 0, 0);
 
-      const dataUrl = output.toDataURL("image/png");
+      let dataUrl;
+      try {
+        dataUrl = output.toDataURL("image/png");
+      } catch (exportErr) {
+        console.error("ReceiptAnnotator export error:", exportErr);
+        throw new Error(
+          "Could not export the annotated image (browser security). Try again after the image finishes loading, or use a receipt image hosted with CORS."
+        );
+      }
 
-      // 5. Upload annotated PNG to CDN so the drawing persists permanently.
+      // 9. Upload annotated PNG to CDN so the drawing persists permanently.
       //    Fall back to the data URL if the upload fails for any reason.
       let finalUrl = dataUrl;
       try {

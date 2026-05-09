@@ -256,7 +256,7 @@ const ReceiptDetail = ({
   const [isAddingPhoto, setIsAddingPhoto] = useState(false);
   const [additionalPhotoUrls, setAdditionalPhotoUrls] = useState([]);
   const [annotatorUrl, setAnnotatorUrl] = useState(null);
-  const [annotatorSource, setAnnotatorSource] = useState(null); // { type: 'existing'|'additional', index: number }
+  const [annotatorSource, setAnnotatorSource] = useState(null); // { type: 'additional', index } | { type: 'existing', sourceUrl }
 
   // Editable tags state
   const [editedTags, setEditedTags] = useState(DEFAULT_TAGS);
@@ -1075,6 +1075,26 @@ useEffect(() => {
     });
     if (urls.length === 0) return "0";
     return urls.join(",");
+  };
+
+  /** Replace one normalized URL inside a comma-separated media field (both slots, all segments). */
+  const replaceNormalizedUrlInMediaCsv = (csv, normalizedOld, replacement) => {
+    if (!csv || typeof csv !== "string" || csv === "0") return csv;
+    const parts = csv
+      .split(",")
+      .map((p) => p.trim())
+      .filter((p) => p && !["0", "null", ""].includes(p));
+    let hit = false;
+    const next = parts.map((p) => {
+      const n = normalizeMediaUrl(p);
+      if (n && normalizedOld && n === normalizedOld) {
+        hit = true;
+        return replacement;
+      }
+      return p;
+    });
+    if (!hit) return csv;
+    return next.join(",");
   };
   const normalizeMatchKey = (value) =>
     String(value || "")
@@ -2147,17 +2167,29 @@ useEffect(() => {
         prev.map((u, i) => (i === annotatorSource.index ? dataUrl : u))
       );
     } else if (annotatorSource?.type === "existing") {
-      // Replace via editedReceipt fields
-      const idx = annotatorSource.index;
-      const r = selectedReceipt;
-      const existingUrls = [r?.emailAttachment, r?.receipt_image].filter(
-        (u) => u && typeof u === "string" && !["0", "null", ""].includes(u.trim())
-      );
-      if (existingUrls[idx] === r?.emailAttachment) {
-        handleFieldChange("emailAttachment", dataUrl);
-      } else {
-        handleFieldChange("receipt_image", dataUrl);
+      if (editedTags.locked) {
+        setAnnotatorUrl(null);
+        setAnnotatorSource(null);
+        return;
       }
+      const rawTarget = annotatorSource.sourceUrl || annotatorUrl || "";
+      const normOld = normalizeMediaUrl(rawTarget);
+      if (!normOld) {
+        setAnnotatorUrl(null);
+        setAnnotatorSource(null);
+        return;
+      }
+      setEditedReceipt((prev) => {
+        const email0 = prev.emailAttachment ?? selectedReceipt.emailAttachment ?? "0";
+        const receipt0 = prev.receipt_image ?? selectedReceipt.receipt_image ?? "0";
+        const mergedEmail = replaceNormalizedUrlInMediaCsv(email0, normOld, dataUrl);
+        const mergedReceipt = replaceNormalizedUrlInMediaCsv(receipt0, normOld, dataUrl);
+        return {
+          ...prev,
+          emailAttachment: normalizeMediaUrl(mergedEmail) || "0",
+          receipt_image: normalizeMediaUrl(mergedReceipt) || "0",
+        };
+      });
     }
     setAnnotatorUrl(null);
     setAnnotatorSource(null);
@@ -5972,7 +6004,7 @@ Thank you for using our receipt management system.
                                       setAnnotatorSource(
                                         isAdditional
                                           ? { type: "additional", index: idx - urls.length }
-                                          : { type: "existing", index: idx }
+                                          : { type: "existing", sourceUrl: u }
                                       );
                                     }}
                                     className="absolute top-1 right-8 bg-white/90 hover:bg-blue-600 hover:text-white text-gray-700 rounded p-1 opacity-0 group-hover:opacity-100 transition-all shadow"
