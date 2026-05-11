@@ -1,12 +1,10 @@
 import { useState } from "react";
-import { useData } from "../../context/DataContext";
 
 const ReceiptCategoryFilterModel = ({
   onClose,
   onApply,
   initialSelected = [],
 }) => {
-  const { expenseType } = useData();
   const [selectedReceiptCategories, setSelectedReceiptCategories] =
     useState(initialSelected);
 
@@ -14,6 +12,7 @@ const ReceiptCategoryFilterModel = ({
     0: "Personal",
     1: "Business",
   };
+  const fixedCategories = ["0", "1"];
 
   const toggleCategory = (cat) => {
     setSelectedReceiptCategories((prev) =>
@@ -38,23 +37,20 @@ const ReceiptCategoryFilterModel = ({
         <h2 className="text-lg font-semibold mb-4">Select Expense Type</h2>
 
         <div className="max-h-48 overflow-y-auto">
-          {expenseType
-            ?.slice()
-            .sort((a, b) => a.localeCompare(b))
-            .map((cat) => (
-              <label
-                key={cat}
-                className="flex items-center space-x-2 mb-2 cursor-pointer"
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedReceiptCategories.includes(cat)}
-                  onChange={() => toggleCategory(cat)}
-                  style={{ width: "auto" }}
-                />
-                <span>{categoryLabels[cat] ?? cat}</span>
-              </label>
-            ))}
+          {fixedCategories.map((cat) => (
+            <label
+              key={cat}
+              className="flex items-center space-x-2 mb-2 cursor-pointer"
+            >
+              <input
+                type="checkbox"
+                checked={selectedReceiptCategories.includes(cat)}
+                onChange={() => toggleCategory(cat)}
+                style={{ width: "auto" }}
+              />
+              <span>{categoryLabels[cat] ?? cat}</span>
+            </label>
+          ))}
         </div>
 
         <div className="mt-4 flex justify-end space-x-2">
