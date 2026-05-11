@@ -833,17 +833,21 @@ useEffect(() => {
   };
 
   useEffect(() => {
-    const receiptsToUse =
-      receiptList && receiptList.length > 0 ? receiptList : receipts;
+    const hasExplicitList = Array.isArray(receiptList) && receiptList.length > 0;
+    const receiptsToUse = hasExplicitList ? receiptList : receipts;
 
     if (receiptsToUse && receiptsToUse.length > 0) {
-      const sorted = [...receiptsToUse].sort(
-        (a, b) => new Date(b.product_date) - new Date(a.product_date)
-      );
-      setSortedReceipts(sorted);
-      const initialIndex = sorted.findIndex((r) => r.id === receipt?.id);
+      // Preserve caller order when receiptList is provided (Home page visual order).
+      // Fallback to date sort only for legacy/default receipts source.
+      const orderedReceipts = hasExplicitList
+        ? [...receiptsToUse]
+        : [...receiptsToUse].sort(
+            (a, b) => new Date(b.product_date) - new Date(a.product_date)
+          );
+      setSortedReceipts(orderedReceipts);
+      const initialIndex = orderedReceipts.findIndex((r) => r.id === receipt?.id);
       if (initialIndex !== -1) {
-        setSelectedReceipt(sorted[initialIndex]);
+        setSelectedReceipt(orderedReceipts[initialIndex]);
         if (setSelectedIndex) {
           setSelectedIndex(initialIndex);
         }

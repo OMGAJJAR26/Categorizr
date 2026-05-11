@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { NODE_API_URL } from "../api/Axios";
 import { useNavigate } from "react-router-dom";
 import Header from "../components/Header";
@@ -55,6 +55,21 @@ const HomePage = () => {
 
   const { draftReceipts, groupedReceipts, yearTotals, sortedYears, filteredReceipts } =
     useReceiptGrouping(receipts, filters, sortConfig, searchTerm);
+
+  // Keep swipe order identical to visual list order:
+  // Draft section first, then regular receipts grouped by year.
+  const swipeOrderedReceipts = useMemo(() => {
+    const orderedRegular = sortedYears.flatMap((year) => groupedReceipts[year] || []);
+    const seen = new Set();
+    const ordered = [];
+    [...draftReceipts, ...orderedRegular].forEach((r) => {
+      if (!r?.id || seen.has(r.id)) return;
+      seen.add(r.id);
+      ordered.push(r);
+    });
+    // Fallback (no grouping available yet)
+    return ordered.length > 0 ? ordered : filteredReceipts;
+  }, [draftReceipts, sortedYears, groupedReceipts, filteredReceipts]);
 
   const {
     showReportModal,
@@ -1027,7 +1042,7 @@ const HomePage = () => {
                         {selectedReceipt?.id === receipt.id && (
                           <ReceiptDetail
                             receipt={selectedReceipt}
-                            receiptList={draftReceipts}
+                            receiptList={swipeOrderedReceipts}
                             reversedSwipe={true}
                             selectedIndex={selectedIndex}
                             setSelectedIndex={setSelectedIndex}
@@ -1098,7 +1113,7 @@ const HomePage = () => {
                             <>
                               <ReceiptDetail
                                 receipt={selectedReceipt}
-                                receiptList={filteredReceipts}
+                                receiptList={swipeOrderedReceipts}
                                 selectedIndex={selectedIndex}
                                 setSelectedIndex={setSelectedIndex}
                                 onSelectReceipt={handleReceiptClick}
