@@ -107,7 +107,6 @@ const AddReceiptModal = ({ onClose, onReceiptAdded, initialData = null, onDuplic
 
   const [alertMsg, setAlertMsg] = useState(null);
   const [showMaxDefaultTaxModal, setShowMaxDefaultTaxModal] = useState(false);
-  const [showMaxReceiptTaxMsg, setShowMaxReceiptTaxMsg] = useState(false);
   const [files, setFiles] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -358,8 +357,11 @@ const [localMerchants, setLocalMerchants] = useState([]);
     
     const isCurrentlyDefault = parseInt(taxToToggle.is_default_tax) === 1;
     
+    // This cap warning is only for explicit Default selection, not while adding/editing a tax type.
     if (!isCurrentlyDefault && defaultTaxIds.length >= 2) {
-      setShowMaxDefaultTaxModal(true);
+      if (!showAddTaxForm && editingTaxId == null) {
+        setShowMaxDefaultTaxModal(true);
+      }
       return;
     }
     
@@ -1244,18 +1246,6 @@ const handleFieldChange = (field, value) => {
       (t) => t.tax_name === tax.tax_name && t.tax_rate === tax.tax_rate,
     );
     console.log("Tax already exists:", exists);
-
-    // Block adding a 3rd non-TIP tax type
-    if (!exists) {
-      const nonTipSelected = formData.receipt_tax_values.filter(
-        (t) => !(t.tax_name || "").toLowerCase().includes("tip")
-      );
-      if (nonTipSelected.length >= 2) {
-        setShowMaxReceiptTaxMsg(true);
-        setShowTaxDropdown(false);
-        return;
-      }
-    }
 
     if (!exists) {
       // Use current total and tip to compute subtotal, then tax amounts
@@ -7224,14 +7214,6 @@ const handleSelectLogo = (index) => {
         />
       )}
 
-      {/* Max 2 selected tax types popup */}
-      {showMaxReceiptTaxMsg && (
-        <SimpleAlertModal
-          title="Message"
-          message={"A maximum of two tax types can be selected. Please unselect a tax type before selecting another."}
-          onClose={() => setShowMaxReceiptTaxMsg(false)}
-        />
-      )}
     </AnimatePresence>
   );
 };

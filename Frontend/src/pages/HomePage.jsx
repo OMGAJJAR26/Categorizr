@@ -129,6 +129,7 @@ const HomePage = () => {
 
   const customizedReportRef = useRef(null);
   const calledRef = useRef(false);
+  const autoRefreshInFlightRef = useRef(false);
   const mobileSearchInputRef = useRef(null);
   const receiptsScrollRef = useRef(null);
   const [showMobileSearch, setShowMobileSearch] = useState(false);
@@ -357,6 +358,42 @@ const HomePage = () => {
       refreshData();
     }
   }, [refreshData]);
+
+  // Auto-refresh receipts so incoming eReceipts appear without manual refresh/login cycle.
+  // Uses silent refresh to avoid full-page loading flicker.
+  useEffect(() => {
+    if (!user?.id) return;
+
+    let stopped = false;
+    const runSilentAutoRefresh = async () => {
+      if (stopped || document.hidden || autoRefreshInFlightRef.current) return;
+      autoRefreshInFlightRef.current = true;
+      try {
+        await silentRefreshData(0);
+      } catch (e) {
+        // Keep this non-blocking; regular manual refresh still works.
+        console.error("Auto refresh failed:", e);
+      } finally {
+        autoRefreshInFlightRef.current = false;
+      }
+    };
+
+    // Refresh whenever tab becomes active again.
+    const handleVisibilityOrFocus = () => {
+      runSilentAutoRefresh();
+    };
+
+    const intervalId = window.setInterval(runSilentAutoRefresh, 15000);
+    window.addEventListener("focus", handleVisibilityOrFocus);
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
+
+    return () => {
+      stopped = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+    };
+  }, [user?.id, silentRefreshData]);
 
   const handleReceiptClick = async (receipt, index) => {
     if (receipt.status === "0") {

@@ -78,20 +78,8 @@ const ReceiptsMobileView = ({
         <div className={`font-semibold ${isUnread ? 'text-gray-400' : ''}`}>
           {getFormattedDate()}
         </div>
-        <div className="flex items-center gap-2">
-          <div className={`font-bold text-base ${getTotalColor()}`}>
-            {formatCurrency(receipt.purchasePrice || 0)}
-          </div>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowCloudPopup(true);
-            }}
-            className="p-1 hover:opacity-70 transition-opacity flex-shrink-0"
-            title="Backed up to cloud"
-          >
-            <img src="/cloudsave.svg" alt="Cloud saved" className="w-5 h-5 object-contain" />
-          </button>
+        <div className={`font-bold text-base ${getTotalColor()}`}>
+          {formatCurrency(receipt.purchasePrice || 0)}
         </div>
       </div>
       
@@ -263,6 +251,16 @@ const ReceiptsMobileView = ({
           title={disableDelete ? "Draft receipts cannot be swiped/deleted" : "Delete receipt"}
         >
           <Trash2 size={16} className="text-red-500 group-hover:text-red-600" />
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowCloudPopup(true);
+          }}
+          className="p-1 hover:opacity-70 transition-opacity flex-shrink-0"
+          title="Backed up to cloud"
+        >
+          <img src="/cloudsave.svg" alt="Cloud saved" className="w-5 h-5 object-contain" />
         </button>
       </div>
     </div>

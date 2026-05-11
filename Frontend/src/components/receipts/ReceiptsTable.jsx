@@ -121,16 +121,6 @@ const ReceiptsTable = ({
 
         <div className="flex items-center justify-center gap-2">
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowCloudPopup(true);
-            }}
-            className="p-1 hover:opacity-70 transition-opacity flex-shrink-0"
-            title="Backed up to cloud"
-          >
-            <img src="/cloudsave.svg" alt="Cloud saved" className="w-5 h-5 object-contain" />
-          </button>
-          <button
             onClick={onViewClick}
             className="text-blue-600 font-semibold hover:underline text-sm xl:text-base"
           >
@@ -232,6 +222,16 @@ const ReceiptsTable = ({
           >
             <Trash2 size={16} className="text-red-500 group-hover:text-red-600" />
           </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowCloudPopup(true);
+            }}
+            className="p-1 hover:opacity-70 transition-opacity flex-shrink-0"
+            title="Backed up to cloud"
+          >
+            <img src="/cloudsave.svg" alt="Cloud saved" className="w-5 h-5 object-contain" />
+          </button>
         </div>
       </div>
 
@@ -297,16 +297,6 @@ const ReceiptsTable = ({
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowCloudPopup(true);
-              }}
-              className="p-1 hover:opacity-70 transition-opacity flex-shrink-0"
-              title="Backed up to cloud"
-            >
-              <img src="/cloudsave.svg" alt="Cloud saved" className="w-5 h-5 object-contain" />
-            </button>
-            <button
               onClick={onViewClick}
               className="text-blue-600 font-semibold hover:underline text-sm"
             >
@@ -340,6 +330,16 @@ const ReceiptsTable = ({
               title={disableDelete ? "Draft receipts cannot be swiped/deleted" : "Delete receipt"}
             >
               <Trash2 size={16} className="text-red-500 group-hover:text-red-600" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowCloudPopup(true);
+              }}
+              className="p-1 hover:opacity-70 transition-opacity flex-shrink-0"
+              title="Backed up to cloud"
+            >
+              <img src="/cloudsave.svg" alt="Cloud saved" className="w-5 h-5 object-contain" />
             </button>
           </div>
         </div>

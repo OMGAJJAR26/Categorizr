@@ -240,7 +240,6 @@ const ReceiptDetail = ({
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [alertMsg, setAlertMsg] = useState(null);
   const [showMaxDefaultTaxModal, setShowMaxDefaultTaxModal] = useState(false);
-  const [showMaxReceiptTaxMsg, setShowMaxReceiptTaxMsg] = useState(false);
 
   // Refs for dropdowns
   const merchantInputRef = useRef(null);
@@ -490,8 +489,11 @@ const ReceiptDetail = ({
     const taxToToggle = (taxData || []).find(t => t.id === taxId);
     if (!taxToToggle) return;
     const isCurrentlyDefault = parseInt(taxToToggle.is_default_tax) === 1;
+    // This cap warning is only for explicit Default selection, not while adding/editing a tax type.
     if (!isCurrentlyDefault && defaultTaxIds.length >= 2) {
-      setShowMaxDefaultTaxModal(true);
+      if (!showAddTaxForm && editingTaxId == null) {
+        setShowMaxDefaultTaxModal(true);
+      }
       return;
     }
     try {
@@ -1426,24 +1428,6 @@ useEffect(() => {
 
   // Add a tax type to the current receipt's tax values
   const addTaxToReceipt = (tax) => {
-    // Check 2-tax limit before entering the updater (so we can show popup)
-    const currentTaxValues =
-      editedReceipt.receipt_tax_values ||
-      enrichedReceiptTaxValues.filter(
-        (t) => !(t.tax_name || "").toLowerCase().includes("tip")
-      ) ||
-      [];
-    const nonTipSelected = currentTaxValues.filter(
-      (t) => !(t.tax_name || "").toLowerCase().includes("tip")
-    );
-    const alreadyExistsCheck = currentTaxValues.some(
-      (t) => t.tax_name === tax.tax_name && t.tax_rate === tax.tax_rate
-    );
-    if (!alreadyExistsCheck && nonTipSelected.length >= 2) {
-      setShowMaxReceiptTaxMsg(true);
-      return;
-    }
-
     setEditedReceipt((prev) => {
       const currentTaxValues =
         prev.receipt_tax_values ||
@@ -7259,23 +7243,6 @@ Thank you for using our receipt management system.
         </div>
       )}
 
-      {showMaxReceiptTaxMsg && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs mx-auto p-6 text-center">
-            <div className="w-12 h-12 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4">
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            </div>
-            <h3 className="text-base font-bold text-slate-900 mb-2">Message</h3>
-            <p className="text-sm text-slate-700 leading-relaxed">A maximum of two tax types can be selected. Please unselect a tax type before selecting another.</p>
-            <button
-              onClick={() => setShowMaxReceiptTaxMsg(false)}
-              className="mt-5 w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl transition-colors"
-            >
-              OK
-            </button>
-          </div>
-        </div>
-      )}
     </>
   );
 };
