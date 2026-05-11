@@ -11,6 +11,7 @@ const Cash              = "/payment-logos/Cash.jpg";
 const DebitCard         = "/payment-logos/DebitCard.webp";
 const Creditdebitcardicon = "/payment-logos/Creditdebitcardicon.jpg";
 import { usePaymentDisplay } from "../hooks/usePaymentDisplay";
+import { TAG_STATUS_GROUPS } from "../utils/tagStatusGroups";
 
 const STORAGE_KEYS = {
   price: "selectedPriceFilter",
@@ -42,46 +43,11 @@ const paymentLogoMap = {
 
 // Helper function to get tag display label
 const getTagDisplayLabel = (tagKey) => {
-  switch (tagKey) {
-    case 'verified':
-      return 'Verified';
-    case 'unverified':
-      return 'Unverified';
-    case 'starred':
-      return 'Starred';
-    case 'unstarred':
-      return 'Unstarred';
-    case 'flagged':
-      return 'Flagged';
-    case 'unflagged':
-      return 'Unflagged';
-    case 'locked':
-      return 'Locked';
-    case 'unlocked':
-      return 'Unlocked';
-    case 'reconciled':
-      return 'Reconciled';
-    case 'unreconciled':
-      return 'Unreconciled';
-    case 'reimbursed':
-      return 'Reimbursement';
-    case 'unreimbursed':
-      return 'Not Reimbursed';
-    case 'warrantied':
-      return 'Warrantied';
-    case 'unwarrantied':
-      return 'Unwarrantied';
-    case 'unread':
-      return 'Unread';  
-    case 'read':
-      return 'Read';
-    case 'forwarded':
-      return 'Forwarded';
-    case 'received':
-      return 'Received';
-    default:
-      return tagKey;
+  for (const group of TAG_STATUS_GROUPS) {
+    const option = group.options.find((item) => item.key === tagKey);
+    if (option) return option.label;
   }
+  return tagKey;
 };
 
 const getPaymentLogo = (label = "") => {

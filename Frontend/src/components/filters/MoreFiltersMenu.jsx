@@ -1,27 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Filter } from "lucide-react";
-import { filterReceipts } from "../../utils/receiptFilters";
-
-const TAG_OPTIONS = [
-  { key: "verified", label: "Verified" },
-  { key: "unverified", label: "Unverified" },
-  { key: "starred", label: "Starred" },
-  { key: "unstarred", label: "Unstarred" },
-  { key: "flagged", label: "Flagged" },
-  { key: "unflagged", label: "Unflagged" },
-  { key: "locked", label: "Locked" },
-  { key: "unlocked", label: "Unlocked" },
-  { key: "reconciled", label: "Reconciled" },
-  { key: "unreconciled", label: "Unreconciled" },
-  { key: "reimbursed", label: "Reimbursement" },
-  { key: "unreimbursed", label: "Not Reimbursed" },
-  { key: "warrantied", label: "Warrantied" },
-  { key: "unwarrantied", label: "Unwarrantied" },
-  { key: "unread", label: "Unread" },
-  { key: "read", label: "Read" },
-  { key: "forwarded", label: "Forwarded" },
-  { key: "received", label: "Received" },
-];
+import {
+  TAG_STATUS_GROUPS,
+  getEffectiveGroupSelection,
+  isGroupAllSelected,
+  setGroupToAll,
+  toggleGroupOption,
+} from "../../utils/tagStatusGroups";
 
 const MoreFiltersMenu = ({
   activeMenu,
@@ -30,6 +15,7 @@ const MoreFiltersMenu = ({
   updateFilter,
 }) => {
   const moreFiltersRef = useRef(null);
+  const [draftTags, setDraftTags] = useState(selectedTags || []);
 
   // Close menu when clicking/tapping outside (same as Filter and Sort)
   useEffect(() => {
@@ -53,16 +39,35 @@ const MoreFiltersMenu = ({
     }
   }, [activeMenu, setActiveMenu]);
 
-  const handleTagToggle = (tagKey) => {
-    const newTags = selectedTags.includes(tagKey)
-      ? selectedTags.filter((tag) => tag !== tagKey)
-      : [...selectedTags, tagKey];
-    updateFilter("tags", newTags);
+  useEffect(() => {
+    if (activeMenu === "moreFilters") {
+      setDraftTags(selectedTags || []);
+    }
+  }, [activeMenu, selectedTags]);
+
+  const handleTagToggle = (groupKey, tagKey) => {
+    const newTags = toggleGroupOption(draftTags, groupKey, tagKey);
+    setDraftTags(newTags);
+  };
+
+  const handleAllToggle = (groupKey) => {
+    const newTags = setGroupToAll(draftTags, groupKey);
+    setDraftTags(newTags);
   };
 
   const handleClearAll = () => {
-    updateFilter("tags", []);
+    setDraftTags([]);
   };
+
+  const handleDone = (event) => {
+    event.stopPropagation();
+    updateFilter("tags", draftTags);
+    setActiveMenu(null);
+  };
+
+  const activeGroupsCount = TAG_STATUS_GROUPS.filter(
+    (group) => !isGroupAllSelected(draftTags, group)
+  ).length;
 
   return (
     <div className="relative hidden md:block" ref={moreFiltersRef}>
@@ -84,12 +89,17 @@ const MoreFiltersMenu = ({
 
       {activeMenu === "moreFilters" && (
         <div
-          className="absolute top-10 sm:top-12 right-0 bg-white text-sm text-gray-700 rounded-lg shadow-lg w-56 z-[100] border max-h-[70vh] overflow-hidden flex flex-col"
+          className="absolute top-10 sm:top-12 right-0 bg-white text-sm text-gray-700 rounded-2xl shadow-2xl w-[340px] z-[100] border border-blue-100 max-h-[62vh] overflow-hidden flex flex-col"
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="flex items-center justify-between px-4 py-2 border-b whitespace-nowrap">
-            <span className="font-semibold">Select Tags</span>
+          <div className="flex items-center justify-between px-4 py-3 border-b bg-gradient-to-r from-blue-50 via-indigo-50 to-white">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-gray-800">Status Filters</span>
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-semibold">
+                {activeGroupsCount} active
+              </span>
+            </div>
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -97,67 +107,78 @@ const MoreFiltersMenu = ({
               }}
               className="text-xs text-red-500 hover:text-red-700 font-medium"
             >
-              Clear All
+              Reset
             </button>
           </div>
 
-          <div className="max-h-60 overflow-y-auto flex-1">
-            <ul className="divide-y divide-gray-200">
-              {TAG_OPTIONS.map((tag) => (
-                <li
-                  key={tag.key}
-                  className="px-4 py-2 hover:bg-blue-50 cursor-pointer flex items-center justify-between active:bg-blue-100"
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    handleTagToggle(tag.key);
-                  }}
+          <div className="overflow-y-auto flex-1 px-3 py-2.5 space-y-2.5 bg-slate-50/40">
+            {TAG_STATUS_GROUPS.map((group) => {
+              const effectiveSelection = getEffectiveGroupSelection(draftTags, group);
+              const allSelected = isGroupAllSelected(draftTags, group);
+              return (
+                <div
+                  key={group.key}
+                  className="bg-white rounded-xl border border-gray-200 px-2.5 py-2 shadow-sm"
                 >
-                  <span className="flex items-center">
-                    <span
-                      className={`w-4 h-4 border rounded mr-2 flex items-center justify-center ${
-                        selectedTags?.includes(tag.key)
-                          ? "bg-blue-500 border-blue-500"
-                          : "border-gray-300"
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-[11px] font-semibold text-gray-700">
+                      {group.heading}
+                    </div>
+                    {!allSelected && (
+                      <div className="text-[10px] font-semibold uppercase tracking-wide text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded-full">
+                        Filtered
+                      </div>
+                    )}
+                  </div>
+                  <div className="inline-flex w-full rounded-lg border border-gray-200 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleAllToggle(group.key);
+                      }}
+                      className={`flex-1 px-2 py-1.5 text-[11px] font-semibold border-r border-gray-200 transition-colors ${
+                        allSelected
+                          ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white"
+                          : "bg-white text-gray-700 hover:bg-gray-50"
                       }`}
                     >
-                      {selectedTags?.includes(tag.key) && (
-                        <svg
-                          className="w-3 h-3 text-white"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
+                      All
+                    </button>
+                    {group.options.map((option, index) => {
+                      const isSelected = effectiveSelection.includes(option.key);
+                      const isLast = index === group.options.length - 1;
+                      return (
+                        <button
+                          key={option.key}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleTagToggle(group.key, option.key);
+                          }}
+                          className={`flex-1 px-2 py-1.5 text-[11px] font-semibold transition-colors ${
+                            !isLast ? "border-r border-gray-200" : ""
+                          } ${
+                            isSelected
+                              ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white"
+                              : "bg-white text-gray-700 hover:bg-gray-50"
+                          }`}
                         >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={3}
-                            d="M5 13l4 4L19 7"
-                          />
-                        </svg>
-                      )}
-                    </span>
-                    {tag.label}
-                  </span>
-                  {selectedTags?.includes(tag.key) && (
-                    <span className="text-blue-600 text-xs font-medium">
-                      Selected
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
-          <div className="border-t p-3">
+          <div className="border-t p-2.5 bg-white">
             <div className="flex justify-end items-center">
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setActiveMenu(null);
-                }}
-                className="bg-blue-500 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-blue-600 transition-colors"
+                onClick={handleDone}
+                className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold hover:from-blue-700 hover:to-indigo-700 transition-colors"
               >
                 Done
               </button>

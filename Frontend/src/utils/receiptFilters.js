@@ -1,4 +1,5 @@
 import { parseReceiptTags } from "./receiptFormatters";
+import { TAG_STATUS_GROUPS } from "./tagStatusGroups";
 
 // Helper function for search aliases
 const getSearchAliases = (issuer) => {
@@ -53,31 +54,6 @@ const matchesSearch = (receipt, searchTerm) => {
     searchFields.some((field) => field.includes(search)) ||
     issuerAliases.includes(search)
   );
-};
-
-const matchesForwardedReceived = (receipt, selectedTags) => {
-  if (!selectedTags || !selectedTags.length) return true;
-
-  const hasForwarded = selectedTags.includes("forwarded");
-  const hasReceived = selectedTags.includes("received");
-
-  if (!hasForwarded && !hasReceived) return true;
-
-  const status = receipt.badgeStatus;
-
-  if (hasForwarded && hasReceived) {
-    return status === "forwarded" || status === "received" || status === "both";
-  }
-
-  if (hasForwarded) {
-    return status === "forwarded" || status === "both";
-  }
-
-  if (hasReceived) {
-    return status === "received" || status === "both";
-  }
-
-  return true;
 };
 
 const matchesPrice = (receipt, priceFilter) => {
@@ -171,77 +147,67 @@ const matchesTaxTypes = (receipt, taxTypes) => {
   });
 };
 
-const matchesTags = (receipt, selectedTags) => {
-  if (!selectedTags || !selectedTags.length) return true;
+const tagPredicateMap = {
+  verified: (context) => context.verified,
+  unverified: (context) => !context.verified,
+  starred: (context) => context.starred,
+  unstarred: (context) => !context.starred,
+  flagged: (context) => context.flagged,
+  unflagged: (context) => !context.flagged,
+  locked: (context) => context.locked,
+  unlocked: (context) => !context.locked,
+  reconciled: (context) => context.reconciled,
+  unreconciled: (context) => !context.reconciled,
+  reimbursed: (context) => context.reimbursed,
+  unreimbursed: (context) => !context.reimbursed,
+  warrantied: (context) => context.warrantied,
+  unwarrantied: (context) => !context.warrantied,
+  unread: (context) => context.unread,
+  read: (context) => context.read,
+  forwarded: (context) => context.forwarded,
+  received: (context) => context.received,
+};
 
-  const receiptTags = parseReceiptTags(receipt.receipt_tag);
-  if (!receiptTags) return false;
+const matchesGroupedTags = (receipt, selectedTags) => {
+  const receiptTags = parseReceiptTags(receipt.receipt_tag) || {};
+  const badgeStatus = (receipt.badgeStatus || "").toLowerCase();
+  const isRead = String(receipt.status) === "1";
+  const tagContext = {
+    verified: !!receiptTags.verified,
+    starred: !!receiptTags.starred,
+    flagged: !!receiptTags.flagged,
+    locked: !!receiptTags.locked,
+    reconciled: !!receiptTags.reconciled,
+    reimbursed: !!receiptTags.reimbursed,
+    warrantied: !!receiptTags.warrantied,
+    unread: !isRead,
+    read: isRead,
+    forwarded: badgeStatus === "forwarded" || badgeStatus === "both",
+    received: badgeStatus === "received" || badgeStatus === "both",
+  };
 
-  return selectedTags.some((tag) => {
-    // Handle status tags separately
-      if (
-      tag === "unread" ||
-      tag === "read" ||
-      tag === "forwarded" ||
-      tag === "received"
+  return TAG_STATUS_GROUPS.every((group) => {
+    const optionKeys = group.options.map((option) => option.key);
+    const selectedForGroup = optionKeys.filter((key) =>
+      (selectedTags || []).includes(key)
+    );
+
+    // "All" state:
+    // - no explicit selection stored for this group
+    // - or both options explicitly selected
+    // In both cases, do not constrain results for this group.
+    if (
+      selectedForGroup.length === 0 ||
+      selectedForGroup.length === optionKeys.length
     ) {
       return true;
     }
-      switch (tag) {
-        case "verified":
-          return receiptTags.verified;
-        case "starred":
-          return receiptTags.starred;
-        case "flagged":
-          return receiptTags.flagged;
-        case "locked":
-          return receiptTags.locked;
-        case "reconciled":
-          return receiptTags.reconciled;
-        case "reimbursed":
-          return receiptTags.reimbursed;
-        case "warrantied":
-          return receiptTags.warrantied;
-        case "unverified":
-          return !receiptTags.verified;
-        case "unstarred":
-          return !receiptTags.starred;
-        case "unflagged":
-          return !receiptTags.flagged;
-        case "unlocked":
-          return !receiptTags.locked;
-        case "unreconciled":
-          return !receiptTags.reconciled;
-        case "unreimbursed":
-          return !receiptTags.reimbursed;
-        case "unwarrantied":
-          return !receiptTags.warrantied;
-        default:
-          return false;
-      }
+
+    return selectedForGroup.some((tagKey) => {
+      const predicate = tagPredicateMap[tagKey];
+      return predicate ? predicate(tagContext) : true;
+    });
   });
-};
-
-// Check if receipt matches status filter (unread/read)
-const matchesStatus = (receipt, selectedTags) => {
-  if (!selectedTags || !selectedTags.length) return true;
-
-  const hasUnread = selectedTags.includes("unread");
-  const hasRead = selectedTags.includes("read");
-
-  // If neither selected → allow all
-  if (!hasUnread && !hasRead) return true;
-
-  // If both selected → allow all
-  if (hasUnread && hasRead) return true;
-
-  // Only unread
-  if (hasUnread) return receipt.status === "0";
-
-  // Only read
-  if (hasRead) return receipt.status === "1";
-
-  return true;
 };
 
 
@@ -270,9 +236,7 @@ export const filterReceipts = (receipts, filters, searchTerm) => {
       matchesReceiptCategory(receipt, filters.receiptCategory) &&
       matchesPaymentMethod(receipt, filters.paymentMethod, getPaymentDisplay) &&
       matchesTaxTypes(receipt, filters.taxTypes) &&
-      matchesStatus(receipt, filters.tags) &&
-      matchesTags(receipt, filters.tags) &&
-      matchesForwardedReceived(receipt, filters.tags)
+      matchesGroupedTags(receipt, filters.tags)
     );
   });
 };

@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { normalizeSelectedTags } from "../utils/tagStatusGroups";
 
 export const FILTER_TYPES = {
   PRICE: 'price',
@@ -35,7 +36,9 @@ const getInitialFilters = () => {
     if (saved) {
       const parsed = JSON.parse(saved);
       // Merge with defaults to ensure all keys exist
-      return { ...defaultFilters, ...parsed };
+      const merged = { ...defaultFilters, ...parsed };
+      merged[FILTER_TYPES.TAGS] = normalizeSelectedTags(merged[FILTER_TYPES.TAGS] || []);
+      return merged;
     }
   } catch (error) {
     console.error("Error loading saved filters:", error);
@@ -126,7 +129,7 @@ export const useReceiptFilters = () => {
           break;
         
         case FILTER_TYPES.TAGS:
-          newFilters[FILTER_TYPES.TAGS] = value;
+          newFilters[FILTER_TYPES.TAGS] = normalizeSelectedTags(value || []);
           break;
         
         default:
@@ -194,6 +197,7 @@ export const useReceiptFilters = () => {
             newFilters[FILTER_TYPES.TAGS] = newFilters[FILTER_TYPES.TAGS].filter(
               tag => tag !== tagToRemove
             );
+            newFilters[FILTER_TYPES.TAGS] = normalizeSelectedTags(newFilters[FILTER_TYPES.TAGS]);
           }
       }
       
