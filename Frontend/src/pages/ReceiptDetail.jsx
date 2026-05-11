@@ -175,6 +175,9 @@ const ReceiptDetail = ({
   const [newLast4Digits, setNewLast4Digits] = useState("");
   const [newPaymentCategoryType, setNewPaymentCategoryType] = useState("");
   const [localPaymentMethods, setLocalPaymentMethods] = useState([]);
+  const [showPayMethodConfirm, setShowPayMethodConfirm] = useState(false);
+  const [pendingPayMethodFn, setPendingPayMethodFn] = useState(null);
+  const [payMethodConfirmMessage, setPayMethodConfirmMessage] = useState("");
 
   // Add Merchant modal state
   const [showAddMerchantModal, setShowAddMerchantModal] = useState(false);
@@ -1337,46 +1340,48 @@ useEffect(() => {
       ? `${newCardIssuerName.trim()} *${last4}`
       : `${selectedCardTypeForLogo} *${last4}`;
 
+    const PAYMENT_LOGOS = { Visa: Visa, MasterCard: MasterCard, "American Express": AmericanExpress, Discover: Discover, "Diners Club": DinersClub, PayPal: PayPal, "Debit Card": DebitCard, Cash: Cash };
+    const logoUrl = PAYMENT_LOGOS[selectedCardTypeForLogo] || "";
+
     // ── EDIT MODE ────────────────────────────────────────────────────────────
     if (payModalEditMode) {
       const { name: oldName, apiId } = payModalEditMode;
-      // Update via API if we have an ID
-      if (apiId != null) {
-        const PAYMENT_LOGOS = { Visa: Visa, MasterCard: MasterCard, "American Express": AmericanExpress, Discover: Discover, "Diners Club": DinersClub, PayPal: PayPal, "Debit Card": DebitCard, Cash: Cash };
-        const logoUrl = PAYMENT_LOGOS[selectedCardTypeForLogo] || "";
-        await updateApiPaymentMethod(apiId, newPayStr, logoUrl);
-      }
-      // Propagate to receipts using old name
-      const matchingReceipts = (receipts || []).filter(
-        (r) => getPaymentDisplayForReceipt(r).toLowerCase() === (oldName || "").toLowerCase()
+      setPendingPayMethodFn(() => async () => {
+        if (apiId != null) {
+          await updateApiPaymentMethod(apiId, newPayStr, logoUrl);
+        }
+        const matchingReceipts = (receipts || []).filter(
+          (r) => getPaymentDisplayForReceipt(r).toLowerCase() === (oldName || "").toLowerCase()
+        );
+        if (matchingReceipts.length > 0) {
+          await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
+            paymentType: selectedCardTypeForLogo,
+            card_issuer_name: finalCardIssuerName,
+            last_4_digit_card: last4 || r.last_4_digit_card || "",
+          })));
+        }
+        const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
+        _pct[newPayStr] = selectedCardTypeForLogo;
+        localStorage.setItem("cat_pay_card_types", JSON.stringify(_pct));
+        if (newPaymentCategoryType) {
+          const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
+          _pet[newPayStr] = newPaymentCategoryType;
+          localStorage.setItem("cat_pay_expense_type", JSON.stringify(_pet));
+        }
+        editCustomPaymentMethod(oldName, newPayStr);
+        await Promise.all([refreshData(), fetchApiPaymentMethods()]);
+        handleFieldChange("paymentType", selectedCardTypeForLogo);
+        handleFieldChange("paymentBrand", "");
+        handleFieldChange("card_issuer_name", finalCardIssuerName);
+        handleFieldChange("last_4_digit_card", last4);
+        setPayModalEditMode(null);
+        handleCloseAddPaymentModal();
+        setToast({ isVisible: true, message: "Payment Method Updated", type: "success" });
+      });
+      setPayMethodConfirmMessage(
+        "When editing a payment method, all receipts associated with that payment method will also be updated."
       );
-      if (matchingReceipts.length > 0) {
-        await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
-          paymentType: selectedCardTypeForLogo,
-          card_issuer_name: finalCardIssuerName,
-          last_4_digit_card: last4 || r.last_4_digit_card || "",
-        })));
-      }
-      // Save localStorage mappings
-      const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
-      _pct[newPayStr] = selectedCardTypeForLogo;
-      localStorage.setItem("cat_pay_card_types", JSON.stringify(_pct));
-      if (newPaymentCategoryType) {
-        const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
-        _pet[newPayStr] = newPaymentCategoryType;
-        localStorage.setItem("cat_pay_expense_type", JSON.stringify(_pet));
-      }
-      // Rename custom entry if present
-      editCustomPaymentMethod(oldName, newPayStr);
-      await Promise.all([refreshData(), fetchApiPaymentMethods()]);
-      // Apply to current receipt form
-      handleFieldChange("paymentType", selectedCardTypeForLogo);
-      handleFieldChange("paymentBrand", "");
-      handleFieldChange("card_issuer_name", finalCardIssuerName);
-      handleFieldChange("last_4_digit_card", last4);
-      setPayModalEditMode(null);
-      handleCloseAddPaymentModal();
-      setToast({ isVisible: true, message: "Payment Method Updated", type: "success" });
+      setShowPayMethodConfirm(true);
       return;
     }
 
@@ -1385,30 +1390,32 @@ useEffect(() => {
       setToast({ isVisible: true, message: "Payment Method already exists", type: "error" });
       return;
     }
-    // Apply to current receipt form
-    handleFieldChange("paymentType", selectedCardTypeForLogo);
-    handleFieldChange("paymentBrand", "");
-    handleFieldChange("card_issuer_name", finalCardIssuerName);
-    if (last4.length > 0) {
-      handleFieldChange("last_4_digit_card", last4);
-    } else {
-      handleFieldChange("last_4_digit_card", "");
-    }
-    // Save to API
-    const PAYMENT_LOGOS = { Visa: Visa, MasterCard: MasterCard, "American Express": AmericanExpress, Discover: Discover, "Diners Club": DinersClub, PayPal: PayPal, "Debit Card": DebitCard, Cash: Cash };
-    const logoUrl = PAYMENT_LOGOS[selectedCardTypeForLogo] || "";
-    await addApiPaymentMethod(newPayStr, logoUrl);
-    const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
-    _pct[newPayStr] = selectedCardTypeForLogo;
-    localStorage.setItem("cat_pay_card_types", JSON.stringify(_pct));
-    if (newPaymentCategoryType) {
-      const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
-      _pet[newPayStr] = newPaymentCategoryType;
-      localStorage.setItem("cat_pay_expense_type", JSON.stringify(_pet));
-    }
-    await fetchApiPaymentMethods();
-    handleCloseAddPaymentModal();
-    setToast({ isVisible: true, message: "Payment Method Added", type: "success" });
+    setPendingPayMethodFn(() => async () => {
+      handleFieldChange("paymentType", selectedCardTypeForLogo);
+      handleFieldChange("paymentBrand", "");
+      handleFieldChange("card_issuer_name", finalCardIssuerName);
+      if (last4.length > 0) {
+        handleFieldChange("last_4_digit_card", last4);
+      } else {
+        handleFieldChange("last_4_digit_card", "");
+      }
+      await addApiPaymentMethod(newPayStr, logoUrl);
+      const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
+      _pct[newPayStr] = selectedCardTypeForLogo;
+      localStorage.setItem("cat_pay_card_types", JSON.stringify(_pct));
+      if (newPaymentCategoryType) {
+        const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
+        _pet[newPayStr] = newPaymentCategoryType;
+        localStorage.setItem("cat_pay_expense_type", JSON.stringify(_pet));
+      }
+      await fetchApiPaymentMethods();
+      handleCloseAddPaymentModal();
+      setToast({ isVisible: true, message: "Payment Method Added", type: "success" });
+    });
+    setPayMethodConfirmMessage(
+      "This will add the payment method to your account so you can use it on your receipts."
+    );
+    setShowPayMethodConfirm(true);
   };
 
   // ============ Tax Management Functions ============
@@ -6285,6 +6292,61 @@ Thank you for using our receipt management system.
                     className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     {payModalEditMode ? "Edit Payment Method" : "Add Payment Method"}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Payment method add/edit confirmation (same copy pattern as Settings) */}
+      <AnimatePresence>
+        {showPayMethodConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => { setShowPayMethodConfirm(false); setPendingPayMethodFn(null); setPayMethodConfirmMessage(""); }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-6">
+                <h3 className="text-lg font-bold text-gray-900 mb-3">Confirmation</h3>
+                <p className="text-sm text-gray-600 mb-6">{payMethodConfirmMessage}</p>
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => { setShowPayMethodConfirm(false); setPendingPayMethodFn(null); setPayMethodConfirmMessage(""); }}
+                    className="px-6 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setShowPayMethodConfirm(false);
+                      const fn = pendingPayMethodFn;
+                      setPendingPayMethodFn(null);
+                      setPayMethodConfirmMessage("");
+                      if (typeof fn === "function") {
+                        try {
+                          await fn();
+                        } catch (e) {
+                          setToast({ isVisible: true, message: e?.message || "Update failed", type: "error" });
+                        }
+                      }
+                    }}
+                    className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    OK
                   </button>
                 </div>
               </div>
