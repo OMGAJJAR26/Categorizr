@@ -1772,6 +1772,11 @@ const parseTaxRateInput = (raw) => {
     return exists ? "Tax Type already exists" : "";
   };
 
+  // Live duplicate-name detection for the Add Tax form (no id to exclude).
+  const addInlineTaxDuplicateMsg = type === "taxes"
+    ? getInlineTaxDuplicateMessage(null, addTaxVal.tax_name)
+    : "";
+
   // ── ADD ──
   const handleAdd = async () => {
     if (type === "taxes") {
@@ -2573,6 +2578,7 @@ const parseTaxRateInput = (raw) => {
               </div>
             </div>
             {addTaxNameOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NAME_MAX} exceeded</p>}
+            {!!addInlineTaxDuplicateMsg && <p className="text-xs text-red-600 -mt-1">{addInlineTaxDuplicateMsg}</p>}
             {addTaxRateOverflow && (
               <p className="text-xs text-red-600 font-medium -mt-1">Tax Rate allows max 2 digits before decimal and 3 after decimal</p>
             )}
@@ -2591,7 +2597,7 @@ const parseTaxRateInput = (raw) => {
               {addTaxNumberOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NUMBER_MAX} exceeded</p>}
             </div>
             <div className="flex justify-end">
-              <button type="button" onClick={handleAdd} className={`px-4 py-2.5 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn}`}>Add</button>
+              <button type="button" onClick={handleAdd} disabled={!!addInlineTaxDuplicateMsg} className={`px-4 py-2.5 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn} disabled:opacity-50 disabled:cursor-not-allowed`}>Add</button>
             </div>
           </>
         )}

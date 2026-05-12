@@ -1828,7 +1828,10 @@ useEffect(() => {
   const handleEditTax = (tax) => {
     setEditingTaxId(tax.id);
     setNewTaxName(tax.tax_name || "");
-    setNewTaxRate(tax.tax_rate || "");
+    // Normalize stored rate (e.g. backend may persist "6.5000") so the input shows
+    // "6.5" rather than "6.5000"/"6.500" and doesn't trigger the >3-decimal banner.
+    const rawRate = tax.tax_rate;
+    setNewTaxRate(rawRate === undefined || rawRate === null || rawRate === "" ? "" : formatTaxRate(rawRate));
     setNewTaxNumber(tax.tax_number || "");
     setTaxRateOverflow(false);
     setShowAddTaxForm(true);
