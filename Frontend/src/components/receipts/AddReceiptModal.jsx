@@ -60,11 +60,11 @@ function getDuplicateReceiptValidationMessage(formData) {
   return null;
 }
 
-/** Describe Purchase (`product_name`): default to "Duplicate" when blank on the duplicated receipt. */
+/** Describe Purchase (`product_name`): default to "Duplicate" when blank, otherwise append " (1)". */
 function withDuplicateDefaultProductName(formData) {
   if (!formData) return formData;
   const trimmed = String(formData.product_name ?? "").trim();
-  if (trimmed) return { ...formData };
+  if (trimmed) return { ...formData, product_name: `${trimmed} (1)` };
   return { ...formData, product_name: "Duplicate" };
 }
 
@@ -3994,6 +3994,8 @@ const handleSelectLogo = (index) => {
                     ? "Add Receipt Split"
                     : showSplitScreen
                     ? "Split Expense"
+                    : isDuplicateMode
+                    ? "Add Duplicate"
                     : "Add Receipt"}
                 </h2>
 
