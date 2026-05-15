@@ -12,6 +12,7 @@ import MerchantAvatar from "../MerchantAvatar";
 import { parseReceipt, pdfToImage, canvasToBlob } from "../../utils/receiptParser";
 import { parseTaxRateInput, createTaxRateKeyDownHandler } from "../../utils/taxRateInput";
 import { useTaxRateLimitAlert } from "../../hooks/useTaxRateLimitAlert";
+import { buildExpenseCategoryOptions } from "../../utils/expenseCategories";
 
 // Payment method logos (for Add Payment Method modal card type list)
 const Visa              = "/payment-logos/Visa.png";
@@ -93,6 +94,7 @@ const AddReceiptModal = ({ onClose, onReceiptAdded, initialData = null, onDuplic
     apiMerchants,
     deleteApiMerchant,
     apiExpenseCategories,
+    fetchApiExpenseCategories,
     addApiExpenseCategory,
     updateApiExpenseCategory,
     deleteApiExpenseCategory,
@@ -557,52 +559,20 @@ const [localMerchants, setLocalMerchants] = useState([]);
     }));
   };
 
-  // Default expense categories - same as used in the app
-  const defaultExpenseCategories = [
-    "Restaurants",
-    "Fuel",
-    "General Retail",
-    "Groceries",
-    "Travel",
-    "Entertainment",
-    "Utilities",
-    "Healthcare",
-    "Education",
-    "Office Supplies",
-    "Transportation",
-    "Insurance",
-    "Subscriptions",
-    "Personal Care",
-    "Home Improvement",
-    "Clothing",
-    "Electronics",
-    "Gifts",
-    "Donations",
-    "Professional Services",
-    "Other",
-  ];
+  useEffect(() => {
+    fetchApiExpenseCategories?.();
+  }, [fetchApiExpenseCategories]);
 
-  // Helper function to validate expense category - filters out garbage values
-  const isValidExpenseCategory = (category) => {
-    if (!category) return false;
-    const val = category.toString().trim();
-    // Filter out numeric-only values, single characters, values with only digits/special chars
-    if (/^\d+$/.test(val)) return false; // Pure numeric like "0", "1111"
-    if (val.length < 2) return false; // Single characters
-    if (/^[\d\W]+$/.test(val)) return false; // Only digits and special chars like "12qw" without letters
-    if (/^\d+[a-zA-Z]?(-\d+)?$/.test(val)) return false; // Patterns like "1a", "1a-1"
-    return true;
-  };
-
-  // Get all unique expense categories - use same data as Filter -> Expense Type
-  // Filter out invalid/garbage values and combine with defaults
-  const validExistingCategories = (expenseCategories || []).filter(
-    isValidExpenseCategory,
+  // API categories first, then receipt-derived names (same source as Homepage filter).
+  const allExpenseCategories = useMemo(
+    () =>
+      buildExpenseCategoryOptions({
+        apiExpenseCategories,
+        receiptCategories: expenseCategories,
+        includeDefaultsWhenEmpty: true,
+      }),
+    [apiExpenseCategories, expenseCategories]
   );
-
-  const allExpenseCategories = [
-    ...new Set([...defaultExpenseCategories, ...validExistingCategories]),
-  ].sort((a, b) => a.localeCompare(b));
 
   // Get all merchants with their images from merchantsWithImages - deduplicated by name
   // Include locally added merchants

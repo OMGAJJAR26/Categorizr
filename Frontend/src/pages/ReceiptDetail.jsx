@@ -25,31 +25,7 @@ import MerchantAvatar from "../components/MerchantAvatar";
 import { usePaymentDisplay } from "../hooks/usePaymentDisplay";
 import { parseTaxRateInput, createTaxRateKeyDownHandler } from "../utils/taxRateInput";
 import { useTaxRateLimitAlert } from "../hooks/useTaxRateLimitAlert";
-
-// Default expense categories
-const defaultExpenseCategories = [
-  "Restaurants",
-  "Fuel",
-  "General Retail",
-  "Groceries",
-  "Travel",
-  "Entertainment",
-  "Utilities",
-  "Healthcare",
-  "Education",
-  "Office Supplies",
-  "Transportation",
-  "Insurance",
-  "Subscriptions",
-  "Personal Care",
-  "Home Improvement",
-  "Clothing",
-  "Electronics",
-  "Gifts",
-  "Donations",
-  "Professional Services",
-  "Other",
-];
+import { buildExpenseCategoryOptions } from "../utils/expenseCategories";
 
 // Default payment methods
 const defaultPaymentMethods = [
@@ -79,16 +55,6 @@ const resolveIssuerName = (pt) => {
   return pt; // custom name
 };
 
-// Helper function to validate expense category
-const isValidExpenseCategory = (category) => {
-  if (!category) return false;
-  const val = category.toString().trim();
-  if (/^\d+$/.test(val)) return false;
-  if (val.length < 2) return false;
-  if (/^[\d\W]+$/.test(val)) return false;
-  if (/^\d+[a-zA-Z]?(-\d+)?$/.test(val)) return false;
-  return true;
-};
 import flagDeselect from "../assets/receipttags/flag_deselect.png";
 import flagSelect from "../assets/receipttags/flag_select.png";
 import locked from "../assets/receipttags/locked.png";
@@ -303,6 +269,7 @@ const ReceiptDetail = ({
     apiMerchants,
     deleteApiMerchant,
     apiExpenseCategories,
+    fetchApiExpenseCategories,
     addApiExpenseCategory,
     updateApiExpenseCategory,
     deleteApiExpenseCategory,
@@ -346,15 +313,19 @@ const ReceiptDetail = ({
     return merchant?.image || null;
   };
 
-  // Get all expense categories - filtered
-  const allExpenseCategories = React.useMemo(() => {
-    const validExisting = (expenseCategories || []).filter(
-      isValidExpenseCategory
-    );
-    return [...new Set([...defaultExpenseCategories, ...validExisting])].sort(
-      (a, b) => a.localeCompare(b)
-    );
-  }, [expenseCategories]);
+  useEffect(() => {
+    fetchApiExpenseCategories?.();
+  }, [fetchApiExpenseCategories]);
+
+  const allExpenseCategories = useMemo(
+    () =>
+      buildExpenseCategoryOptions({
+        apiExpenseCategories,
+        receiptCategories: expenseCategories,
+        includeDefaultsWhenEmpty: true,
+      }),
+    [apiExpenseCategories, expenseCategories]
+  );
 
   // Define getPaymentDisplayName BEFORE allPaymentMethods useMemo (to avoid hoisting issues)
   const getPaymentDisplayName = React.useCallback((rec) => {

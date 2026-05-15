@@ -1,5 +1,10 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { PHP_API_BASE } from "../api/Axios";
+import {
+  parseExpenseCategoryApiResponse,
+  getExpenseCategoryNamesFromApi,
+  buildExpenseCategoryOptions,
+} from "../utils/expenseCategories";
 
 const DataContext = createContext();
 const BASE_URL = "/api";
@@ -828,7 +833,7 @@ export const DataProvider = ({ children }) => {
       });
       if (res.ok) {
         const data = await res.json();
-        const cats = Array.isArray(data) ? data.filter(c => c.expense_category_name) : [];
+        const cats = parseExpenseCategoryApiResponse(data).filter((c) => c.expense_category_name);
         console.log("%c[ExpenseCategories] fetchApiExpenseCategories response (full):", "color:#a855f7;font-weight:bold", data);
         console.log("%c[ExpenseCategories] filtered categories:", "color:#a855f7;font-weight:bold", cats);
         setApiExpenseCategories(cats);
@@ -1517,23 +1522,26 @@ setMerchantsWithImages(
         });
         if (apiCatRes.ok) {
           const apiCatJson = await apiCatRes.json();
-          apiExpenseCategoriesData = Array.isArray(apiCatJson)
-            ? apiCatJson.filter(c => c.expense_category_name)
-            : [];
+          apiExpenseCategoriesData = parseExpenseCategoryApiResponse(apiCatJson).filter(
+            (c) => c.expense_category_name
+          );
           setApiExpenseCategories(apiExpenseCategoriesData);
         }
       } catch (apiCatErr) {
         console.error("fetchApiExpenseCategories in fetchData error", apiCatErr);
       }
 
-      // Populate expenseCategories from the expense_type field of all receipts.
-      // This ensures custom categories entered by the user appear in the Filter → Expense Category list.
-      setExpenseCategories([
+      const receiptDerivedCategories = [
         ...new Set(
           receiptsWithIntegrations
             .map((r) => (r.expense_type ?? "").toString().trim())
             .filter(Boolean)
         ),
+      ];
+      const apiCategoryNames = getExpenseCategoryNamesFromApi(apiExpenseCategoriesData);
+      // Receipt-derived + API names so dropdowns/filters stay in sync after fetchData.
+      setExpenseCategories([
+        ...new Set([...apiCategoryNames, ...receiptDerivedCategories]),
       ]);
     } catch (err) {
       setError(err.message);
@@ -1559,10 +1567,11 @@ setMerchantsWithImages(
     // Only fetch data if token exists
     if (token) {
       fetchData(); // fetchData already calls fetchTaxes internally
+      fetchApiExpenseCategories();
     } else {
       setLoading(false);
     }
-  }, [fetchData]); // fetchData already includes fetchTaxes in its dependencies
+  }, [fetchData, fetchApiExpenseCategories]);
 
   const clearAllData = () => {
     setUser(null);
@@ -2174,26 +2183,30 @@ setMerchantsWithImages(
   ].sort((a, b) =>
     (a?.name || "").toString().toLowerCase().localeCompare((b?.name || "").toString().toLowerCase())
   );
-  const _rcLower = new Set(receiptCategoriesRaw.map((c) => (c || "").toLowerCase()));
-  const _rcCustomLower = new Set([
-    ..._rcLower,
-    ...customCategories.map((c) => (c || "").toLowerCase()),
-  ]);
-  const mergedExpenseCategories = [
-    ...receiptCategoriesRaw.filter((c) => !hiddenCategories.has(c)),
-    ...customCategories.filter((c) => !hiddenCategories.has(c) && !_rcLower.has(c.toLowerCase())),
-    // API expense categories not already present from receipts or custom list
-    ...apiExpenseCategories
-      .filter((c) => c.expense_category_name &&
-        !hiddenCategories.has(c.expense_category_name) &&
-        !_rcCustomLower.has((c.expense_category_name || "").toLowerCase()))
-      .map((c) => c.expense_category_name),
-    // Admin defaults (UI-ready hook; endpoint wiring to be added later)
-    ...adminDefaultExpenseCategories.filter((c) => {
+  const visibleReceiptCategories = receiptCategoriesRaw.filter(
+    (c) => c && !hiddenCategories.has(c)
+  );
+  const visibleCustomCategories = customCategories.filter(
+    (c) => c && !hiddenCategories.has(c)
+  );
+  const visibleApiExpenseCategories = apiExpenseCategories.filter(
+    (c) => c?.expense_category_name && !hiddenCategories.has(c.expense_category_name)
+  );
+  const visibleAdminDefaults = adminDefaultExpenseCategories.filter(
+    (c) => {
       const n = (c || "").toString().trim();
-      return n && !hiddenCategories.has(n) && !_rcCustomLower.has(n.toLowerCase());
-    }),
-  ];
+      return n && !hiddenCategories.has(n);
+    }
+  );
+  const mergedExpenseCategories = buildExpenseCategoryOptions({
+    apiExpenseCategories: visibleApiExpenseCategories,
+    receiptCategories: [
+      ...visibleReceiptCategories,
+      ...visibleCustomCategories,
+      ...visibleAdminDefaults,
+    ],
+    includeDefaultsWhenEmpty: true,
+  });
   const _rpLower = new Set(receiptPaymentsRaw.map((p) => (p || "").toLowerCase()));
   const _rpCustomLower = new Set([
     ..._rpLower,

@@ -1,55 +1,25 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useData } from "../../context/DataContext";
-
-// Default expense categories
-const defaultExpenseCategories = [
-  "Restaurants",
-  "Fuel",
-  "General Retail",
-  "Groceries",
-  "Travel",
-  "Entertainment",
-  "Utilities",
-  "Healthcare",
-  "Education",
-  "Office Supplies",
-  "Transportation",
-  "Insurance",
-  "Subscriptions",
-  "Personal Care",
-  "Home Improvement",
-  "Clothing",
-  "Electronics",
-  "Gifts",
-  "Donations",
-  "Professional Services",
-  "Other",
-];
-
-// Helper function to validate expense category - filters out garbage values
-const isValidExpenseCategory = (category) => {
-  if (!category) return false;
-  const val = category.toString().trim();
-  // Filter out numeric-only values, single characters, values with only digits/special chars
-  if (/^\d+$/.test(val)) return false; // Pure numeric like "0", "1111"
-  if (val.length < 2) return false; // Single characters
-  if (/^[\d\W]+$/.test(val)) return false; // Only digits and special chars
-  if (/^\d+[a-zA-Z]?(-\d+)?$/.test(val)) return false; // Patterns like "1a", "1a-1"
-  return true;
-};
+import { buildExpenseCategoryOptions } from "../../utils/expenseCategories";
 
 const ExpenseTypeFilterModel = ({ onClose, onApply, initialSelected = [] }) => {
-  const { expenseCategories } = useData();
+  const { expenseCategories, apiExpenseCategories, fetchApiExpenseCategories } = useData();
   const [selectedExpenseCategory, setSelectedExpenseCategory] =
     useState(initialSelected);
 
-  // Filter out invalid categories and combine with defaults
-  const validCategories = useMemo(() => {
-    const validExisting = (expenseCategories || []).filter(isValidExpenseCategory);
-    return [...new Set([...defaultExpenseCategories, ...validExisting])].sort((a, b) =>
-      a.localeCompare(b)
-    );
-  }, [expenseCategories]);
+  useEffect(() => {
+    fetchApiExpenseCategories?.();
+  }, [fetchApiExpenseCategories]);
+
+  const validCategories = useMemo(
+    () =>
+      buildExpenseCategoryOptions({
+        apiExpenseCategories,
+        receiptCategories: expenseCategories,
+        includeDefaultsWhenEmpty: true,
+      }),
+    [apiExpenseCategories, expenseCategories]
+  );
 
   const toggleExpenseCategory = (expenseCategory) => {
     setSelectedExpenseCategory((prev) =>
@@ -79,12 +49,13 @@ const ExpenseTypeFilterModel = ({ onClose, onApply, initialSelected = [] }) => {
 
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-30 z-50 p-4">
-      <div
-        className="bg-white rounded-lg shadow-lg p-4 sm:p-6 w-full max-w-[22rem]"
-      >
+      <div className="bg-white rounded-lg shadow-lg p-4 sm:p-6 w-full max-w-[22rem]">
         <h2 className="text-lg font-semibold mb-4">Select Expense Category</h2>
         <div className="max-h-48 overflow-y-auto">
-          {validCategories.map((expenseCategory) => (
+          {validCategories.length === 0 ? (
+            <p className="text-sm text-gray-500 py-2">No expense categories yet.</p>
+          ) : (
+            validCategories.map((expenseCategory) => (
               <label
                 key={expenseCategory}
                 className="flex items-center space-x-2 mb-2 cursor-pointer"
@@ -97,7 +68,8 @@ const ExpenseTypeFilterModel = ({ onClose, onApply, initialSelected = [] }) => {
                 />
                 <span>{expenseCategory}</span>
               </label>
-            ))}
+            ))
+          )}
         </div>
         <div className="mt-4 grid grid-cols-[repeat(2,1fr)] gap-2.5">
           <button
