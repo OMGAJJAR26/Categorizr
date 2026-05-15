@@ -1509,21 +1509,44 @@ useEffect(() => {
 
   // ============ Tax Management Functions ============
 
+  const MAX_RECEIPT_TAX_TYPES = 2;
+  const MAX_RECEIPT_TAX_MSG =
+    "A maximum of two tax types can be selected. Please remove one before selecting another.";
+
   // Add a tax type to the current receipt's tax values
-  const addTaxToReceipt = (tax) => {
+  const addTaxToReceipt = (tax, { silent = false } = {}) => {
+    const currentTaxValues =
+      editedReceipt.receipt_tax_values ||
+      enrichedReceiptTaxValues.filter(
+        (t) => !(t.tax_name || "").toLowerCase().includes("tip")
+      ) ||
+      [];
+
+    const alreadyExists = currentTaxValues.some(
+      (t) => t.tax_name === tax.tax_name && t.tax_rate === tax.tax_rate
+    );
+    if (alreadyExists) return;
+    if (currentTaxValues.length >= MAX_RECEIPT_TAX_TYPES) {
+      if (!silent) setAlertMsg(MAX_RECEIPT_TAX_MSG);
+      return;
+    }
+
     setEditedReceipt((prev) => {
-      const currentTaxValues =
+      const prevTaxValues =
         prev.receipt_tax_values ||
         enrichedReceiptTaxValues.filter(
           (t) => !(t.tax_name || "").toLowerCase().includes("tip")
         ) ||
         [];
 
-      // Check for duplicates
-      const alreadyExists = currentTaxValues.some(
-        (t) => t.tax_name === tax.tax_name && t.tax_rate === tax.tax_rate
-      );
-      if (alreadyExists) return prev;
+      if (
+        prevTaxValues.some(
+          (t) => t.tax_name === tax.tax_name && t.tax_rate === tax.tax_rate
+        )
+      ) {
+        return prev;
+      }
+      if (prevTaxValues.length >= MAX_RECEIPT_TAX_TYPES) return prev;
       const total =
         parseFloat(prev.purchasePrice) ||
         parseFloat(r.total) ||
@@ -1548,7 +1571,7 @@ useEffect(() => {
         updated: 0,
       };
       // Sort alphabetically so tax fields always render in A→Z order
-      const newTaxValues = [...currentTaxValues, newTaxEntry]
+      const newTaxValues = [...prevTaxValues, newTaxEntry]
         .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""));
 
       // Recalculate subtotal from total using combined tax rates
@@ -1772,12 +1795,15 @@ useEffect(() => {
         // Add to receipt FIRST — must happen before any fetchTaxes/taxData update
         // (the ref guard in the init useEffect prevents taxData changes from
         //  resetting editedReceipt, but calling addTaxToReceipt first is safer)
-        addTaxToReceipt({
-          id: savedTax.id || 0,
-          tax_name: addedTaxName,
-          tax_rate: addedTaxRate,
-          tax_number: addedTaxNumber || "",
-        });
+        addTaxToReceipt(
+          {
+            id: savedTax.id || 0,
+            tax_name: addedTaxName,
+            tax_rate: addedTaxRate,
+            tax_number: addedTaxNumber || "",
+          },
+          { silent: true }
+        );
         // Add to local session list so dropdown shows the new tax immediately
         setLocalTaxTypes((prev) => [...prev, { ...taxPayload, id: savedTax.id || Date.now() }]);
         setTaxRefreshKey((prev) => prev + 1);
@@ -5801,6 +5827,8 @@ Thank you for using our receipt management system.
                               >
                                 {sortedTaxPills.map((tax, idx) => {
                                   const isSelected = tax._selIdx !== -1;
+                                  const atMaxTaxTypes =
+                                    currentTaxVals.length >= MAX_RECEIPT_TAX_TYPES;
                                   return (
                                     <button
                                       key={idx}
@@ -5808,6 +5836,8 @@ Thank you for using our receipt management system.
                                       onClick={() => {
                                         if (isSelected) {
                                           removeTaxFromReceipt(tax._selIdx);
+                                        } else if (atMaxTaxTypes) {
+                                          setAlertMsg(MAX_RECEIPT_TAX_MSG);
                                         } else {
                                           addTaxToReceipt(tax);
                                         }

@@ -243,6 +243,9 @@ const [localMerchants, setLocalMerchants] = useState([]);
   // ── Tax field validation banners ─────────────────────────────────────────
   const TAX_NAME_MAX   = 15;
   const TAX_RATE_MAX   = 99.999;
+  const MAX_RECEIPT_TAX_TYPES = 2;
+  const MAX_RECEIPT_TAX_MSG =
+    "A maximum of two tax types can be selected. Please remove one before selecting another.";
   const TAX_NUMBER_MAX = 35;
 
   const [taxNameOverflow, setTaxNameOverflow]           = useState(false);
@@ -1237,7 +1240,7 @@ const handleFieldChange = (field, value) => {
 
   // Add tax type with auto-calculated amount based on current total, keep total fixed
   // Update your addTaxType function to ensure fk_tax_id is set correctly
-  const addTaxType = (tax) => {
+  const addTaxType = (tax, { silent = false } = {}) => {
     console.log("=== addTaxType START ===");
     console.log("Tax to add:", tax);
     console.log("Current receipt tax values:", formData.receipt_tax_values);
@@ -1248,6 +1251,13 @@ const handleFieldChange = (field, value) => {
     console.log("Tax already exists:", exists);
 
     if (!exists) {
+      if (formData.receipt_tax_values.length >= MAX_RECEIPT_TAX_TYPES) {
+        if (!silent) {
+          setAlertMsg(MAX_RECEIPT_TAX_MSG);
+          setShowTaxDropdown(false);
+        }
+        return;
+      }
       // Use current total and tip to compute subtotal, then tax amounts
       const totalNum = parseFloat(formData.purchasePrice) || 0;
       const tipNum = parseFloat(formData.tip) || 0;
@@ -1484,8 +1494,8 @@ const handleFieldChange = (field, value) => {
         return exists ? prev : [...prev, newTax];
       });
 
-      // Add the new tax type to the current receipt
-      addTaxType(newTax);
+      // Add to receipt only if under per-receipt limit (no alert when saving from Manage Tax Types)
+      addTaxType(newTax, { silent: true });
     } catch (err) {
       console.error("=== handleAddTaxType ERROR ===");
       console.error("Error details:", err);
@@ -5746,6 +5756,8 @@ const handleSelectLogo = (index) => {
                               })
                               .map((tax, idx) => {
                                 const isSelected = tax._selIdx !== -1;
+                                const atMaxTaxTypes =
+                                  formData.receipt_tax_values.length >= MAX_RECEIPT_TAX_TYPES;
                                 return (
                                   <button
                                     key={idx}
@@ -5753,6 +5765,8 @@ const handleSelectLogo = (index) => {
                                     onClick={() => {
                                       if (isSelected) {
                                         removeTaxType(tax._selIdx);
+                                      } else if (atMaxTaxTypes) {
+                                        setAlertMsg(MAX_RECEIPT_TAX_MSG);
                                       } else {
                                         addTaxType(tax);
                                       }
