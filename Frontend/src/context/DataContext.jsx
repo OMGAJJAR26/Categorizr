@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { PHP_API_BASE } from "../api/Axios";
+import { getPaymentDisplayFromReceipt } from "../hooks/usePaymentDisplay";
 import {
   parseExpenseCategoryApiResponse,
   getExpenseCategoryNamesFromApi,
@@ -38,17 +39,8 @@ const buildPaymentMethods = (receiptList) => {
   };
 
   receiptList.forEach((r) => {
-    const issuer = (r.card_issuer_name ?? r.cardIssuerName)?.toString().trim();
-    const last4 = (r.last_4_digit_card ?? r.last4DigitCard)?.toString().trim();
-    if (issuer && issuer !== "0") {
-      // Guard against double-appending: iOS sometimes stores "Mastercard *7836" in
-      // card_issuer_name AND "7836" in last_4_digit_card — only append if not already present.
-      const alreadyHasLast4 = last4 && last4 !== "0" && issuer.includes(`*${last4}`);
-      addPayment(last4 && last4 !== "0" && !alreadyHasLast4 ? `${issuer} *${last4}` : issuer);
-    } else {
-      const paymentType = r.paymentType ?? r.payment_type;
-      if (paymentType) addPayment(paymentType);
-    }
+    const display = getPaymentDisplayFromReceipt(r);
+    if (display && display !== "-") addPayment(display);
   });
 
   return [...paymentMap.values()].filter(Boolean);

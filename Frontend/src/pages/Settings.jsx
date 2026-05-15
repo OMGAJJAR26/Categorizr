@@ -58,6 +58,7 @@ import MerchantAvatar from "../components/MerchantAvatar";
 import SimpleAlertModal from "../components/SimpleAlertModal";
 import { useNavigate } from "react-router-dom";
 import { useData } from "../context/DataContext";
+import { getPaymentDisplayFromReceipt } from "../hooks/usePaymentDisplay";
 
 /* ─── Helpers ─────────────────────────────────────────── */
 
@@ -1555,6 +1556,30 @@ const ReceiptInfoInline = ({ type }) => {
     return { issuer, last4 };
   };
 
+  // True when issuer is a user-entered custom name (not the card brand alone).
+  const isCustomCardIssuer = (issuer, brand) => {
+    const iss = (issuer || "").trim();
+    if (!iss) return false;
+    const ik = normalizeMatchKey(iss);
+    const bk = normalizeMatchKey(brand || "");
+    if (ik === bk) return false;
+    if (ik === normalizeMatchKey(inferCardTypeFromPayment(iss))) return false;
+    return true;
+  };
+
+  const storedCardIssuerName = (customIssuer, cardType) => {
+    const iss = (customIssuer || "").trim();
+    return isCustomCardIssuer(iss, cardType) ? iss : "";
+  };
+
+  // List label: brand *last4 when no custom issuer (e.g. "MasterCard *7979").
+  const getPaymentMethodListLabel = (paymentName) => {
+    const { issuer, last4 } = parsePaymentDisplay(paymentName);
+    const brand = getPaymentBrand(paymentName, inferCardTypeFromPayment(paymentName));
+    const base = isCustomCardIssuer(issuer, brand) ? issuer : (brand || issuer || paymentName);
+    return last4 ? `${base} *${last4}` : (base || paymentName);
+  };
+
   const getPaymentBrand = (paymentName, fallbackCardType = "") => {
     const key = (paymentName || "").toString().trim();
     const normalizedKey = normalizePaymentDisplayKey(key);
@@ -1623,11 +1648,7 @@ const ReceiptInfoInline = ({ type }) => {
     return base === "cash";
   };
 
-  const paymentDisplayForReceipt = (r) => {
-    const iss = (r.card_issuer_name || r.cardIssuerName || "").toString().trim();
-    const l4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
-    return iss ? (l4 ? `${iss} *${l4}` : iss) : (r.paymentType || r.payment_type || "").toString().trim();
-  };
+  const paymentDisplayForReceipt = (r) => getPaymentDisplayFromReceipt(r);
 
   const getReceiptsByMerchant = (name) =>
     (receipts || []).filter(
@@ -1858,10 +1879,10 @@ const isBlockedTaxRateInput = (val) => {
             // Propagate to receipts that use old name
             const matchingReceipts = getReceiptsByPaymentDisplay(oldName);
             if (matchingReceipts.length > 0) {
-              const { issuer: newIssuer, last4: newL4 } = parsePaymentDisplay(payStr);
+              const { last4: newL4 } = parsePaymentDisplay(payStr);
               await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
                 paymentType: ct,
-                card_issuer_name: newIssuer,
+                card_issuer_name: storedCardIssuerName(issuer, ct),
                 last_4_digit_card: newL4 || r.last_4_digit_card || "",
               })));
             }
@@ -2056,10 +2077,11 @@ const isBlockedTaxRateInput = (val) => {
     const currentName = item.name;
     if (item.isReceiptItem) {
       const { issuer, last4 } = parsePaymentDisplay(newName);
+      const brand = getPaymentBrand(currentName, inferCardTypeFromPayment(currentName));
       const matching = getReceiptsByPaymentDisplay(currentName);
       await Promise.all(matching.map(r => updateReceipt(r.id, {
         paymentType: getPaymentBrand(currentName, r.paymentType || r.payment_type || ""),
-        card_issuer_name: issuer,
+        card_issuer_name: storedCardIssuerName(issuer, brand),
         last_4_digit_card: last4 || (r.last_4_digit_card || r.last4DigitCard || ""),
       })));
       savePayCard(newName, getPaymentBrand(currentName, inferCardTypeFromPayment(currentName)));
@@ -2890,7 +2912,8 @@ const isBlockedTaxRateInput = (val) => {
                         logoNode={type === "merchants"
                           ? <MerchantAvatar name={item.name} explicitUrl={displayLogo} className="w-9 h-9 flex-shrink-0" />
                           : undefined}
-                        name={item.name} badgeCls={colors.badge}
+                        name={type === "payments" ? getPaymentMethodListLabel(item.name) : item.name}
+                        badgeCls={colors.badge}
                         showIcon={type !== "categories"}
                         actions={<>
                           {!isMisc && !(type === "payments" && isCashMethod(item.name)) && (
@@ -2902,14 +2925,9 @@ const isBlockedTaxRateInput = (val) => {
                                 const pApiMatches = resolvePaymentApiMatches(item);
                                 const pApiId = item.apiId ?? getApiEntityId(pApiMatches[0]) ?? null;
                                 setNewCardType(pBrand || "");
-                                // Only pre-fill Card Issuer when the parsed issuer is a distinct
-                                // custom name — not the card brand itself.
-                                // "American Express"      → issuer "American Express" = brand → blank
-                                // "Visa *1234"            → issuer "Visa" = brand "Visa"     → blank
-                                // "Bank of America"       → issuer "Bank of America" ≠ brand "MasterCard" → show
-                                // "Bank of America *1234" → issuer "Bank of America" ≠ brand "MasterCard" → show
-                                const issuerIsJustBrand = normalizeMatchKey(pIssuer) === normalizeMatchKey(pBrand);
-                                setNewIssuerName(issuerIsJustBrand ? "" : (pIssuer || ""));
+                                // Leave Card Issuer empty when the name is only brand + last4
+                                // (e.g. "MasterCard *7979") so users know they can add a custom issuer.
+                                setNewIssuerName(isCustomCardIssuer(pIssuer, pBrand) ? pIssuer : "");
                                 setNewLast4(pLast4 || "");
                                 setNewExpenseType(payExpenseTypeMap[item.name] || "Personal");
                                 setPayEditMode({ item, apiId: pApiId });

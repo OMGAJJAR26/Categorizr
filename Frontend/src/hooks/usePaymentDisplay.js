@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback } from "react";
 const Visa              = "/payment-logos/Visa.png";
 const MasterCard        = "/payment-logos/MasterCard.png";
 const PayPal            = "/payment-logos/PayPal.png";
@@ -48,15 +48,79 @@ const detectCardNetwork = (str) => {
   return null;
 };
 
+// Match PaymentFilterMethod.jsx logic for consistency
+// Display format: cardIssuerName *last4 (ALWAYS prioritize cardIssuerName over paymentType)
+export function getPaymentDisplayFromReceipt(receipt) {
+  const issuer = (
+    receipt?.card_issuer_name ||
+    receipt?.cardIssuerName ||
+    ""
+  )?.toString?.().trim?.() || null;
+  const type = receipt?.paymentType?.toString?.().trim?.() || null;
+
+  if (!issuer && !type) return "-";
+
+  if (type?.toLowerCase().includes("cash")) return "Cash";
+  if (issuer?.toLowerCase() === "cash") return "Cash";
+
+  let last4 = "";
+  const last4Raw = (
+    receipt?.last_4_digit_card ||
+    receipt?.last4DigitCard ||
+    ""
+  )?.toString?.().trim?.() || "";
+  if (last4Raw && last4Raw !== "0" && /^\d{3,4}$/.test(last4Raw)) {
+    last4 = last4Raw;
+  }
+
+  if (!last4 && type && type.includes("*")) {
+    const parts = type.split("*");
+    const tail = parts[parts.length - 1];
+    const digits = tail?.replace(/\D/g, "") || "";
+    if (digits.length >= 3) {
+      last4 = digits.slice(-4);
+    }
+  }
+
+  if (issuer && issuer !== "0" && issuer.trim() !== "") {
+    const alreadyHasLast4 = last4 && issuer.includes(`*${last4}`);
+    return `${issuer}${last4 && !alreadyHasLast4 ? ` *${last4}` : ""}`;
+  }
+
+  if ((!issuer || issuer === "0") && type && type !== "0" && type !== "0*0" && !/^0\*\d*$/.test(type)) {
+    const baseType = type.replace(/\s*\*\d{3,4}$/, "").trim();
+    const typeLower = baseType.toLowerCase();
+
+    let extractedIssuer = null;
+    if (typeLower.includes("visa")) extractedIssuer = "Visa";
+    else if (typeLower.includes("master")) extractedIssuer = "MasterCard";
+    else if (typeLower.includes("amex") || typeLower.includes("american express")) extractedIssuer = "American Express";
+    else if (typeLower.includes("discover")) extractedIssuer = "Discover";
+    else if (typeLower.includes("diners")) extractedIssuer = "Diners Club";
+    else if (typeLower.includes("paypal")) extractedIssuer = "PayPal";
+    else if (typeLower.includes("debit")) extractedIssuer = "Debit Card";
+    else if (baseType && baseType !== "0") {
+      extractedIssuer = baseType;
+    }
+
+    if (extractedIssuer) {
+      return `${extractedIssuer}${last4 ? ` *${last4}` : ""}`;
+    }
+  }
+
+  if (last4) {
+    return `*${last4}`;
+  }
+
+  return "-";
+}
+
 export const usePaymentDisplay = () => {
-  // getPaymentLogo accepts either a string (paymentType) or a receipt object.
-  // Always returns a logo — never undefined/null.
   const getPaymentLogo = useCallback((paymentTypeOrReceipt) => {
     if (!paymentTypeOrReceipt) return LOGO_MAP.other;
 
     const isObject = typeof paymentTypeOrReceipt === "object";
 
-    // Step 1: Explicit logo URL from receipt object
     if (isObject) {
       const explicitLogo =
         paymentTypeOrReceipt.payment_logo_url ||
@@ -68,7 +132,6 @@ export const usePaymentDisplay = () => {
       if (isValidUrl(explicitLogo)) return explicitLogo.trim();
     }
 
-    // Step 2: Extract payment fields
     let paymentType = "";
     let paymentBrand = "";
     let cardIssuerName = "";
@@ -82,7 +145,6 @@ export const usePaymentDisplay = () => {
       paymentType = paymentTypeOrReceipt.toString().trim();
     }
 
-    // Helper: get network logo from a string (strips *last4 first)
     const networkFromStr = (s) => {
       if (!s || s === "0") return null;
       const base = s.replace(/\s*\*\d{3,4}$/, "").trim();
@@ -91,15 +153,12 @@ export const usePaymentDisplay = () => {
       return network ? LOGO_MAP[network] : null;
     };
 
-    // Priority 1: paymentType network detection
     const logo1 = networkFromStr(paymentType);
     if (logo1) return logo1;
 
-    // Priority 2: paymentBrand network detection
     const logo2 = networkFromStr(paymentBrand);
     if (logo2) return logo2;
 
-    // Priority 3: card_issuer_name network detection (skip generic values)
     if (cardIssuerName && cardIssuerName !== "0") {
       const issuerLower = cardIssuerName.toLowerCase().trim();
       const isGeneric = issuerLower === "personal" || issuerLower === "business";
@@ -110,7 +169,6 @@ export const usePaymentDisplay = () => {
       if (issuerLower === "other") return LOGO_MAP.other;
     }
 
-    // Priority 4: "Other", gift cards, special types → credit card icon
     const allSources = [paymentType, cardIssuerName, paymentBrand];
     for (const src of allSources) {
       if (!src || src === "0") continue;
@@ -120,7 +178,6 @@ export const usePaymentDisplay = () => {
       }
     }
 
-    // Priority 5: Bank name detection → MasterCard logo (like mobile app)
     const bankNames = [
       "bank of america", "bank one", "chase", "wells fargo", "citibank", "citi",
       "capital one", "us bank", "pnc", "td bank", "truist", "regions", "ally",
@@ -136,96 +193,14 @@ export const usePaymentDisplay = () => {
       }
     }
 
-    // Priority 6: Anything with *XXXX pattern → bank logo
     for (const src of allSources) {
       if (src && /\*\d{3,4}$/.test(src.trim())) return LOGO_MAP.bank;
     }
 
-    // Default
     return LOGO_MAP.other;
   }, []);
 
-  // Match PaymentFilterMethod.jsx logic for consistency
-  // Display format: cardIssuerName *last4 (ALWAYS prioritize cardIssuerName over paymentType)
-  const getPaymentDisplay = useCallback((receipt) => {
-    // PRIORITY 1: Always use cardIssuerName if available (this is what user wants to see)
-    // Handle both snake_case and camelCase formats from API
-    const issuer = (
-      receipt?.card_issuer_name || 
-      receipt?.cardIssuerName ||
-      ""
-    )?.toString?.().trim?.() || null;
-    const type = receipt?.paymentType?.toString?.().trim?.() || null;
-
-    // Handle completely empty case
-    if (!issuer && !type) return "-";
-
-    // Handle cash
-    if (type?.toLowerCase().includes("cash")) return "Cash";
-    if (issuer?.toLowerCase() === "cash") return "Cash";
-
-    // Extract last4 from last_4_digit_card field (API stores it separately) - PRIORITY
-    // Handle both snake_case and camelCase formats
-    let last4 = "";
-    const last4Raw = (
-      receipt?.last_4_digit_card || 
-      receipt?.last4DigitCard ||
-      ""
-    )?.toString?.().trim?.() || "";
-    if (last4Raw && last4Raw !== "0" && /^\d{3,4}$/.test(last4Raw)) {
-      last4 = last4Raw;
-    }
-
-    // Also check paymentType if last4 not found in last_4_digit_card field
-    if (!last4 && type && type.includes("*")) {
-      const parts = type.split("*");
-      const tail = parts[parts.length - 1];
-      const digits = tail?.replace(/\D/g, "") || "";
-      if (digits.length >= 3) {
-        last4 = digits.slice(-4);
-      }
-    }
-
-    // PRIORITY 1: If cardIssuerName exists, ALWAYS use it (this is what user wants)
-    if (issuer && issuer !== "0" && issuer.trim() !== "") {
-      // Guard: iOS may store "Mastercard *7836" in issuer AND "7836" in last_4_digit_card.
-      // Only append *last4 if the issuer doesn't already contain it.
-      const alreadyHasLast4 = last4 && issuer.includes(`*${last4}`);
-      return `${issuer}${last4 && !alreadyHasLast4 ? ` *${last4}` : ""}`;
-    }
-
-    // PRIORITY 2: Only if cardIssuerName is missing, try to extract from paymentType
-    // But user wants cardIssuerName, so we should try to get it from paymentType and use it
-    if ((!issuer || issuer === "0") && type && type !== "0" && type !== "0*0" && !/^0\*\d*$/.test(type)) {
-      const baseType = type.replace(/\s*\*\d{3,4}$/, "").trim();
-      const typeLower = baseType.toLowerCase();
-      
-      // Extract card network name from paymentType to use as cardIssuerName
-      let extractedIssuer = null;
-      if (typeLower.includes("visa")) extractedIssuer = "Visa";
-      else if (typeLower.includes("master")) extractedIssuer = "MasterCard";
-      else if (typeLower.includes("amex") || typeLower.includes("american express")) extractedIssuer = "American Express";
-      else if (typeLower.includes("discover")) extractedIssuer = "Discover";
-      else if (typeLower.includes("diners")) extractedIssuer = "Diners Club";
-      else if (typeLower.includes("paypal")) extractedIssuer = "PayPal";
-      else if (typeLower.includes("debit")) extractedIssuer = "Debit Card";
-      else if (baseType && baseType !== "0") {
-        extractedIssuer = baseType;
-      }
-
-      // Use extracted issuer as cardIssuerName
-      if (extractedIssuer) {
-        return `${extractedIssuer}${last4 ? ` *${last4}` : ""}`;
-      }
-    }
-
-    // Last resort: show last4 if available
-    if (last4) {
-      return `*${last4}`;
-    }
-
-    return "-";
-  }, []);
+  const getPaymentDisplay = useCallback(getPaymentDisplayFromReceipt, []);
 
   const getDetailedPaymentDisplay = useCallback((receipt) => {
     const paymentType = receipt?.paymentType;
@@ -248,11 +223,9 @@ export const usePaymentDisplay = () => {
           basePaymentType.length > cardIssuerName.length
             ? basePaymentType
             : cardIssuerName;
-        // Guard: don't append *last4 if finalName already contains it
         const alreadyHasLast4a = finalName.includes(`*${last4DigitCard}`);
         return alreadyHasLast4a ? finalName : `${finalName} *${last4DigitCard}`;
       } else {
-        // basePaymentType already has *digits stripped; cardIssuerName may still contain it
         const cleanIssuer = cardIssuerName.replace(/\s*\*\d+$/, "").trim();
         return `${basePaymentType} ${cleanIssuer} *${last4DigitCard}`;
       }
@@ -268,7 +241,6 @@ export const usePaymentDisplay = () => {
     }
 
     if (cardIssuerName && last4DigitCard) {
-      // Guard: iOS may embed *last4 in cardIssuerName already
       const alreadyHasLast4b = cardIssuerName.includes(`*${last4DigitCard}`);
       return alreadyHasLast4b ? cardIssuerName : `${cardIssuerName} *${last4DigitCard}`;
     }
@@ -276,17 +248,15 @@ export const usePaymentDisplay = () => {
     return "—";
   }, []);
 
-  // Optional: A combined function that extracts issuer from payment method string
   const getPaymentDisplayFromMethod = useCallback((method, receiptData = {}) => {
     if (!method) return "—";
-    
-    // Try to extract issuer from method string
+
     const methodLower = method.toLowerCase();
     let issuer = null;
-    
+
     if (methodLower.includes("visa")) issuer = "Visa";
     else if (methodLower.includes("master")) issuer = "MasterCard";
-    else if (methodLower.includes("amex") || methodLower.includes("american express")) 
+    else if (methodLower.includes("amex") || methodLower.includes("american express"))
       issuer = "American Express";
     else if (methodLower.includes("discover")) issuer = "Discover";
     else if (methodLower.includes("diners")) issuer = "Diners Club";
@@ -294,22 +264,21 @@ export const usePaymentDisplay = () => {
     else if (methodLower.includes("debit")) issuer = "Debit Card";
     else if (methodLower.includes("cash")) issuer = "Cash";
     else issuer = method;
-    
-    // Use the detailed display with extracted or provided data
+
     const paymentData = {
       paymentType: method,
       card_issuer_name: receiptData.card_issuer_name || issuer,
       last_4_digit_card: receiptData.last_4_digit_card || ""
     };
-    
+
     return getDetailedPaymentDisplay(paymentData);
   }, [getDetailedPaymentDisplay]);
 
   return {
     getPaymentLogo,
-    getPaymentDisplay, // Simple version
-    getDetailedPaymentDisplay, // Your detailed logic
-    getPaymentDisplayFromMethod, // For when you only have method string
+    getPaymentDisplay,
+    getDetailedPaymentDisplay,
+    getPaymentDisplayFromMethod,
     LOGO_MAP,
   };
 };
