@@ -207,6 +207,7 @@ const ReceiptDetail = ({
   const [taxError, setTaxError] = useState(null);
   const [localTaxTypes, setLocalTaxTypes] = useState([]);
   const [showAddTaxForm, setShowAddTaxForm] = useState(false);
+  const manageTaxModalBodyRef = useRef(null);
   const [taxRateFocused, setTaxRateFocused] = useState(false);
   const [showTaxRateChangeWarning, setShowTaxRateChangeWarning] = useState(false);
   const [pendingTaxUpdate, setPendingTaxUpdate] = useState(null);
@@ -516,6 +517,13 @@ useEffect(() => {
     refreshTaxesOnClose();
   }
 }, [showManageTaxModal, fetchTaxes]);
+
+  useEffect(() => {
+    if ((editingTaxId || showAddTaxForm) && manageTaxModalBodyRef.current) {
+      manageTaxModalBodyRef.current.scrollTop = 0;
+    }
+  }, [editingTaxId, showAddTaxForm]);
+
   // Mark receipt as read when component mounts
   useEffect(() => {
     if (receipt && receipt.status === "0") {
@@ -6818,69 +6826,11 @@ Thank you for using our receipt management system.
               </div>
 
               {/* Scrollable Body */}
-              <div className="overflow-y-auto flex-1 px-6 py-4">
-
-                {/* List of existing tax types — alphabetical */}
-                {allTaxTypes.length > 0 ? (
-                  <div className="space-y-2 mb-2">
-                    {[...allTaxTypes]
-                      .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""))
-                      .map(tax => {
-                        const isDefault = isTaxDefault(tax);
-                        return (
-                          <div
-                            key={tax.id || `${tax.tax_name}-${tax.tax_rate}`}
-                            className="flex items-center justify-between px-4 py-3 bg-white border border-gray-200 rounded-xl"
-                          >
-                            <div className="flex-1 min-w-0 mr-2">
-                              <div className="font-semibold text-blue-600 text-sm leading-tight">
-                                {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
-                              </div>
-                              <div className="text-xs text-gray-400 mt-0.5">
-                                Tax No. {tax.tax_number || "N/A"}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-1.5 flex-shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => toggleDefaultTax(tax.id)}
-                                title={isDefault ? "Remove as default" : "Set as default"}
-                                className={`px-2.5 py-1 text-xs rounded-lg border font-medium transition-colors ${
-                                  isDefault
-                                    ? "border-yellow-400 bg-yellow-50 text-yellow-600"
-                                    : "border-gray-300 bg-white text-gray-500 hover:border-gray-400"
-                                }`}
-                              >
-                                {isDefault ? "★ Default" : "Default"}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleEditTax(tax)}
-                                disabled={isSavingTax || isDeletingTax}
-                                className="px-2.5 py-1 text-xs bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors font-medium"
-                              >Edit</button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteTaxType(tax.id)}
-                                disabled={isSavingTax || isDeletingTax || editingTaxId !== null}
-                                className="px-2.5 py-1 text-xs bg-red-500 text-white rounded-lg hover:bg-red-600 disabled:opacity-50 transition-colors font-medium"
-                              >Delete</button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                  </div>
-                ) : (
-                  !showAddTaxForm && (
-                    <p className="text-sm text-gray-400 text-center py-8">
-                      No tax types yet. Tap <strong>Add</strong> to create one.
-                    </p>
-                  )
-                )}
+              <div ref={manageTaxModalBodyRef} className="overflow-y-auto flex-1 px-6 py-4 flex flex-col">
 
                 {/* Add / Edit form — shown when Add tapped or Edit tapped */}
                 {(showAddTaxForm || editingTaxId) && (
-                  <div className={`${allTaxTypes.length > 0 ? "border-t border-gray-100 pt-5 mt-3" : "pt-2"}`}>
+                  <div className="order-1 mb-4 pb-5 border-b border-gray-100">
                     <h3 className="text-base font-bold text-gray-900 mb-4">
                       {editingTaxId ? "Edit Tax Type" : "Add New Tax Type"}
                     </h3>
@@ -7007,6 +6957,65 @@ Thank you for using our receipt management system.
                     </div>
                   </div>
                 )}
+
+                {/* List of existing tax types — alphabetical */}
+                {allTaxTypes.length > 0 ? (
+                  <div className={`space-y-2 mb-2${(showAddTaxForm || editingTaxId) ? " order-2" : ""}`}>
+                    {[...allTaxTypes]
+                      .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""))
+                      .map(tax => {
+                        const isDefault = isTaxDefault(tax);
+                        return (
+                          <div
+                            key={tax.id || `${tax.tax_name}-${tax.tax_rate}`}
+                            className="flex items-center justify-between px-4 py-3 bg-white border border-gray-200 rounded-xl"
+                          >
+                            <div className="flex-1 min-w-0 mr-2">
+                              <div className="font-semibold text-blue-600 text-sm leading-tight">
+                                {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
+                              </div>
+                              <div className="text-xs text-gray-400 mt-0.5">
+                                Tax No. {tax.tax_number || "N/A"}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => toggleDefaultTax(tax.id)}
+                                title={isDefault ? "Remove as default" : "Set as default"}
+                                className={`px-2.5 py-1 text-xs rounded-lg border font-medium transition-colors ${
+                                  isDefault
+                                    ? "border-yellow-400 bg-yellow-50 text-yellow-600"
+                                    : "border-gray-300 bg-white text-gray-500 hover:border-gray-400"
+                                }`}
+                              >
+                                {isDefault ? "★ Default" : "Default"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleEditTax(tax)}
+                                disabled={isSavingTax || isDeletingTax}
+                                className="px-2.5 py-1 text-xs bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors font-medium"
+                              >Edit</button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteTaxType(tax.id)}
+                                disabled={isSavingTax || isDeletingTax || editingTaxId !== null}
+                                className="px-2.5 py-1 text-xs bg-red-500 text-white rounded-lg hover:bg-red-600 disabled:opacity-50 transition-colors font-medium"
+                              >Delete</button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                ) : (
+                  !showAddTaxForm && (
+                    <p className="text-sm text-gray-400 text-center py-8">
+                      No tax types yet. Tap <strong>Add</strong> to create one.
+                    </p>
+                  )
+                )}
+
               </div>
             </motion.div>
           </motion.div>
