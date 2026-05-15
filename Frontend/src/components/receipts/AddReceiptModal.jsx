@@ -10,6 +10,8 @@ import Toast from "../Toast";
 import { usePaymentDisplay } from "../../hooks/usePaymentDisplay";
 import MerchantAvatar from "../MerchantAvatar";
 import { parseReceipt, pdfToImage, canvasToBlob } from "../../utils/receiptParser";
+import { parseTaxRateInput, createTaxRateKeyDownHandler } from "../../utils/taxRateInput";
+import { useTaxRateLimitAlert } from "../../hooks/useTaxRateLimitAlert";
 
 // Payment method logos (for Add Payment Method modal card type list)
 const Visa              = "/payment-logos/Visa.png";
@@ -249,7 +251,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const TAX_NUMBER_MAX = 35;
 
   const [taxNameOverflow, setTaxNameOverflow]           = useState(false);
-  const [taxRateOverflow, setTaxRateOverflow]           = useState(false);
+  const { message: taxRateLimitAlert, showAlert: showTaxRateLimitAlert, clearAlert: clearTaxRateLimitAlert } = useTaxRateLimitAlert();
   const [taxNumberOverflow, setTaxNumberOverflow]       = useState(false);
   const [descriptionOverflow, setDescriptionOverflow]   = useState(false);
   const [notesOverflow, setNotesOverflow]               = useState(false);
@@ -299,45 +301,13 @@ const [localMerchants, setLocalMerchants] = useState([]);
     return str === "99.999" || str === "999";
   };
 
-  // ── Tax rate input helpers ────────────────────────────────────────────────
-  // Blocks letters and symbols at the keyboard level (paste handled by sanitizeTaxRate)
-  const preventInvalidTaxRateKey = (e) => {
-    if (e.ctrlKey || e.metaKey) return;
-    const allowed = ["Backspace","Delete","ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Tab","Enter","Home","End"];
-    if (allowed.includes(e.key)) return;
-    if (/^\d$/.test(e.key)) return;
-    if (e.key === ".") return;
-    e.preventDefault();
-  };
-
-  // Restrict to max 2 digits before decimal and max 3 after decimal.
-  // Keep input blocked at typing time and show inline alert.
-  const parseTaxRateInput = (raw) => {
-    let v = String(raw).replace(/%/g, "").replace(/[^\d.]/g, "");
-    const dotIdx = v.indexOf(".");
-    let overflow = false;
-    if (dotIdx !== -1) {
-      // Remove any extra dots after the first
-      v = v.slice(0, dotIdx + 1) + v.slice(dotIdx + 1).replace(/\./g, "");
-      const [whole = "", dec = ""] = v.split(".");
-      overflow = whole.length > 2 || dec.length > 3;
-      v = whole.slice(0, 2) + "." + dec.slice(0, 3);
-    } else {
-      overflow = v.length > 2;
-      v = v.slice(0, 2);
-    }
-    return { value: v, overflow };
-  };
-
   const taxNameError = taxNameOverflow
     ? `Character limit of ${TAX_NAME_MAX} exceeded`
     : (newTaxName.trim() && isDuplicateTaxName(newTaxName.trim(), editingTaxId || null)
       ? `"${newTaxName.trim()}" already exists. Please use a different name.`
       : "");
 
-  const taxRateError = taxRateOverflow
-    ? "Tax Rate allows max 2 digits before decimal and 3 digits after decimal."
-    : (newTaxRate !== "" && isBlockedTaxRateInput(newTaxRate)
+  const taxRateError = (newTaxRate !== "" && isBlockedTaxRateInput(newTaxRate)
     ? "Tax Rate cannot be 99.999 or 999."
     : (newTaxRate !== "" && parseFloat(newTaxRate) > TAX_RATE_MAX
     ? `Maximum tax rate of ${TAX_RATE_MAX}% exceeded`
@@ -1451,7 +1421,7 @@ const handleFieldChange = (field, value) => {
       const addedTaxNumber = newTaxNumber.trim();
       setNewTaxName("");
       setNewTaxRate("");
-      setTaxRateOverflow(false);
+      clearTaxRateLimitAlert();
       setNewTaxNumber("");
       setTaxNameOverflow(false);
       setTaxNumberOverflow(false);
@@ -1571,7 +1541,7 @@ const handleFieldChange = (field, value) => {
       // Reset form
       setNewTaxName("");
       setNewTaxRate("");
-      setTaxRateOverflow(false);
+      clearTaxRateLimitAlert();
       setNewTaxNumber("");
       setTaxNameOverflow(false);
       setTaxNumberOverflow(false);
@@ -1609,7 +1579,7 @@ const handleFieldChange = (field, value) => {
         udpated: 0,
       });
       setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber(""); setEditingTaxId(null);
-      setTaxRateOverflow(false);
+      clearTaxRateLimitAlert();
       setTaxNameOverflow(false); setTaxNumberOverflow(false);
       setShowAddTaxForm(false); setError(null);
     } catch (err) {
@@ -1647,7 +1617,7 @@ const handleFieldChange = (field, value) => {
     const rawRate = tax.tax_rate;
     setNewTaxRate(rawRate === undefined || rawRate === null || rawRate === "" ? "" : formatTaxRate(rawRate));
     setNewTaxNumber(tax.tax_number || "");
-    setTaxRateOverflow(false);
+    clearTaxRateLimitAlert();
     setTaxNameOverflow(false);
     setTaxNumberOverflow(false);
     setShowAddTaxForm(true);
@@ -1660,7 +1630,7 @@ const handleFieldChange = (field, value) => {
     setNewTaxName("");
     setNewTaxRate("");
     setNewTaxNumber("");
-    setTaxRateOverflow(false);
+    clearTaxRateLimitAlert();
     setTaxNameOverflow(false);
     setTaxNumberOverflow(false);
     setError(null);
@@ -1671,7 +1641,7 @@ const handleFieldChange = (field, value) => {
     setShowAddTaxForm(false);
     setTaxRateFocused(false);
     setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber("");
-    setTaxRateOverflow(false);
+    clearTaxRateLimitAlert();
     setTaxNameOverflow(false); setTaxNumberOverflow(false);
     setEditingTaxId(null);
     setError(null);
@@ -6648,7 +6618,7 @@ const handleSelectLogo = (index) => {
                       onClick={() => {
                         setShowAddTaxForm(true);
                         setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber("");
-                        setTaxRateOverflow(false);
+                        clearTaxRateLimitAlert();
                         setTaxNameOverflow(false); setTaxNumberOverflow(false);
                         setError(null);
                       }}
@@ -6783,19 +6753,32 @@ const handleSelectLogo = (index) => {
                           type="text"
                           inputMode="decimal"
                           className={`w-full px-4 py-2.5 pr-8 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all ${
-                            taxRateError ? "border-red-400 bg-red-50" : "border-gray-200"
+                            taxRateError || taxRateLimitAlert ? "border-red-400 bg-red-50" : "border-gray-200"
                           }`}
                           value={newTaxRate}
-                          onKeyDown={preventInvalidTaxRateKey}
+                          onKeyDown={createTaxRateKeyDownHandler(newTaxRate, showTaxRateLimitAlert)}
                           onChange={e => {
                             const parsed = parseTaxRateInput(e.target.value);
+                            if (parsed.rejected) {
+                              showTaxRateLimitAlert(parsed.message);
+                              return;
+                            }
                             setNewTaxRate(parsed.value);
-                            setTaxRateOverflow(parsed.overflow);
                           }}
                           placeholder="Enter Tax Rate"
                         />
                         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">%</span>
                       </div>
+                      {taxRateLimitAlert && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0 }}
+                          className="mt-1.5 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-red-600 text-xs flex items-center gap-1.5"
+                        >
+                          <span className="font-bold">!</span> {taxRateLimitAlert}
+                        </motion.div>
+                      )}
                       {taxRateError && (
                         <div className="mt-1.5 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-red-600 text-xs flex items-center gap-1.5">
                           <span className="font-bold">!</span> {taxRateError}
@@ -6841,7 +6824,7 @@ const handleSelectLogo = (index) => {
                           setShowAddTaxForm(false);
                           setEditingTaxId(null);
                           setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber("");
-                          setTaxRateOverflow(false);
+                          clearTaxRateLimitAlert();
                           setTaxNameOverflow(false); setTaxNumberOverflow(false);
                           setTaxRateFocused(false);
                           setError(null);

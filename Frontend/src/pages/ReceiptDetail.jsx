@@ -23,6 +23,8 @@ import { useData } from "../context/DataContext";
 import { useCurrency } from "../context/CurrencyContext";
 import MerchantAvatar from "../components/MerchantAvatar";
 import { usePaymentDisplay } from "../hooks/usePaymentDisplay";
+import { parseTaxRateInput, createTaxRateKeyDownHandler } from "../utils/taxRateInput";
+import { useTaxRateLimitAlert } from "../hooks/useTaxRateLimitAlert";
 
 // Default expense categories
 const defaultExpenseCategories = [
@@ -1705,32 +1707,7 @@ useEffect(() => {
     return dot !== -1 && str.length - dot - 1 > 3;
   };
 
-  const [taxRateOverflow, setTaxRateOverflow] = useState(false);
-
-  const preventInvalidTaxRateKey = (e) => {
-    if (e.ctrlKey || e.metaKey) return;
-    const allowed = ["Backspace","Delete","ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Tab","Enter","Home","End"];
-    if (allowed.includes(e.key)) return;
-    if (/^\d$/.test(e.key)) return;
-    if (e.key === ".") return;
-    e.preventDefault();
-  };
-
-  const parseTaxRateInput = (raw) => {
-    let v = String(raw).replace(/%/g, "").replace(/[^\d.]/g, "");
-    const dotIdx = v.indexOf(".");
-    let overflow = false;
-    if (dotIdx !== -1) {
-      v = v.slice(0, dotIdx + 1) + v.slice(dotIdx + 1).replace(/\./g, "");
-      const [whole = "", dec = ""] = v.split(".");
-      overflow = whole.length > 2 || dec.length > 3;
-      v = whole.slice(0, 2) + "." + dec.slice(0, 3);
-    } else {
-      overflow = v.length > 2;
-      v = v.slice(0, 2);
-    }
-    return { value: v, overflow };
-  };
+  const { message: taxRateLimitAlert, showAlert: showTaxRateLimitAlert, clearAlert: clearTaxRateLimitAlert } = useTaxRateLimitAlert();
 
   const isBlockedTaxRateInput = (val) => {
     const str = String(val).replace(/%/g, "").trim();
@@ -1743,9 +1720,7 @@ useEffect(() => {
       ? `"${newTaxName.trim()}" already exists. Please use a different name.`
       : "");
 
-  const taxRateError = taxRateOverflow
-    ? "Tax Rate allows max 2 digits before decimal and 3 digits after decimal."
-    : (newTaxRate !== "" && isBlockedTaxRateInput(newTaxRate)
+  const taxRateError = (newTaxRate !== "" && isBlockedTaxRateInput(newTaxRate)
     ? "Tax Rate cannot be 99.999 or 999."
     : (newTaxRate !== "" && parseFloat(newTaxRate) > TAX_RATE_MAX
     ? `Tax Rate cannot exceed ${TAX_RATE_MAX}%`
@@ -1808,7 +1783,7 @@ useEffect(() => {
       setNewTaxName("");
       setNewTaxRate("");
       setNewTaxNumber("");
-      setTaxRateOverflow(false);
+      clearTaxRateLimitAlert();
       setShowAddTaxForm(false);
       
       if (savedTax) {
@@ -1885,7 +1860,7 @@ useEffect(() => {
       setNewTaxName("");
       setNewTaxRate("");
       setNewTaxNumber("");
-      setTaxRateOverflow(false);
+      clearTaxRateLimitAlert();
       setEditingTaxId(null);
       setShowAddTaxForm(false);
     } catch (err) {
@@ -1922,7 +1897,7 @@ useEffect(() => {
       });
       await fetchTaxes();
       setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber(""); setEditingTaxId(null);
-      setTaxRateOverflow(false);
+      clearTaxRateLimitAlert();
       setShowAddTaxForm(false); setTaxError(null);
     } catch (err) {
       setTaxError(err.message || "Failed to update tax type.");
@@ -1962,7 +1937,7 @@ useEffect(() => {
     const rawRate = tax.tax_rate;
     setNewTaxRate(rawRate === undefined || rawRate === null || rawRate === "" ? "" : formatTaxRate(rawRate));
     setNewTaxNumber(tax.tax_number || "");
-    setTaxRateOverflow(false);
+    clearTaxRateLimitAlert();
     setShowAddTaxForm(true);
     setTaxError(null);
   };
@@ -1972,7 +1947,7 @@ useEffect(() => {
     setNewTaxName("");
     setNewTaxRate("");
     setNewTaxNumber("");
-    setTaxRateOverflow(false);
+    clearTaxRateLimitAlert();
   };
 
   const closeTaxModal = () => {
@@ -1980,7 +1955,7 @@ useEffect(() => {
     setShowAddTaxForm(false);
     setTaxRateFocused(false);
     setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber("");
-    setTaxRateOverflow(false);
+    clearTaxRateLimitAlert();
     setEditingTaxId(null);
     setTaxError(null);
   };
@@ -6852,7 +6827,7 @@ Thank you for using our receipt management system.
                       onClick={() => {
                         setShowAddTaxForm(true);
                         setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber("");
-                        setTaxRateOverflow(false);
+                        clearTaxRateLimitAlert();
                         setTaxError(null);
                       }}
                       className="px-4 py-1.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors"
@@ -6978,19 +6953,32 @@ Thank you for using our receipt management system.
                           type="text"
                           inputMode="decimal"
                           className={`w-full px-4 py-2.5 pr-8 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all ${
-                            taxRateError ? "border-red-400 bg-red-50" : "border-gray-200"
+                            taxRateError || taxRateLimitAlert ? "border-red-400 bg-red-50" : "border-gray-200"
                           }`}
                           value={newTaxRate}
-                          onKeyDown={preventInvalidTaxRateKey}
+                          onKeyDown={createTaxRateKeyDownHandler(newTaxRate, showTaxRateLimitAlert)}
                           onChange={e => {
                             const parsed = parseTaxRateInput(e.target.value);
+                            if (parsed.rejected) {
+                              showTaxRateLimitAlert(parsed.message);
+                              return;
+                            }
                             setNewTaxRate(parsed.value);
-                            setTaxRateOverflow(parsed.overflow);
                           }}
                           placeholder="Enter Tax Rate"
                         />
                         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">%</span>
                       </div>
+                      {taxRateLimitAlert && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0 }}
+                          className="mt-1.5 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-red-600 text-xs flex items-center gap-1.5"
+                        >
+                          <span className="font-bold">!</span> {taxRateLimitAlert}
+                        </motion.div>
+                      )}
                       {taxRateError && (
                         <div className="mt-1.5 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-red-600 text-xs flex items-center gap-1.5">
                           <span className="font-bold">!</span> {taxRateError}
@@ -7028,7 +7016,7 @@ Thank you for using our receipt management system.
                           setShowAddTaxForm(false);
                           setEditingTaxId(null);
                           setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber("");
-                          setTaxRateOverflow(false);
+                          clearTaxRateLimitAlert();
                           setTaxRateFocused(false);
                           setTaxError(null);
                         }}
