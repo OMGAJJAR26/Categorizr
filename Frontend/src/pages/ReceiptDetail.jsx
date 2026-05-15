@@ -276,6 +276,8 @@ const ReceiptDetail = ({
   const [additionalPhotoUrls, setAdditionalPhotoUrls] = useState([]);
   const [annotatorUrl, setAnnotatorUrl] = useState(null);
   const [annotatorSource, setAnnotatorSource] = useState(null); // { type: 'additional', index } | { type: 'existing', sourceUrl }
+  /** Latest annotated CDN URL — used on Save Changes if React state hasn't flushed yet */
+  const pendingAnnotatedMediaRef = useRef(null);
 
   // Editable tags state
   const [editedTags, setEditedTags] = useState(DEFAULT_TAGS);
@@ -1153,10 +1155,38 @@ useEffect(() => {
         return;
       }
       splitMediaField(source).forEach((item) => pushUrl(item));
-      pushUrl(source);
     });
     if (urls.length === 0) return "0";
     return urls.join(",");
+  };
+
+  const collectReceiptMediaUrlsForSave = () => {
+    const urls = [];
+    const pushUnique = (candidate) => {
+      const normalized = normalizeMediaUrl(candidate);
+      if (!normalized || normalized === "0" || urls.includes(normalized)) return;
+      urls.push(normalized);
+    };
+
+    splitMediaField(editedReceipt.receipt_image ?? selectedReceipt.receipt_image ?? "").forEach(
+      pushUnique
+    );
+    splitMediaField(
+      editedReceipt.emailAttachment ?? selectedReceipt.emailAttachment ?? ""
+    ).forEach(pushUnique);
+    additionalPhotoUrls.forEach(pushUnique);
+
+    const pending = pendingAnnotatedMediaRef.current;
+    if (pending?.persistUrl && pending.normOld) {
+      const idx = urls.findIndex((u) => mediaUrlsEqual(u, pending.normOld));
+      if (idx >= 0) {
+        urls[idx] = normalizeMediaUrl(pending.persistUrl);
+      } else if (!urls.some((u) => mediaUrlsEqual(u, pending.persistUrl))) {
+        urls.unshift(normalizeMediaUrl(pending.persistUrl));
+      }
+    }
+
+    return urls.filter((u) => u && !u.startsWith("data:") && !u.startsWith("blob:"));
   };
 
   /** Replace one normalized URL inside a comma-separated media field (both slots, all segments). */
@@ -2318,6 +2348,9 @@ useEffect(() => {
       setAdditionalPhotoUrls((prev) =>
         prev.map((u) => (mediaUrlsEqual(u, rawTarget) ? persistUrl : u))
       );
+      if (!persistUrl.startsWith("data:") && !persistUrl.startsWith("blob:")) {
+        pendingAnnotatedMediaRef.current = { normOld, persistUrl };
+      }
     }
     setAnnotatorUrl(null);
     setAnnotatorSource(null);
@@ -2773,27 +2806,16 @@ useEffect(() => {
       // For API: send paymentType WITHOUT *last4 (backend expects just network name)
       const finalPaymentTypeForAPI = basePaymentType || paymentType;
 
-      // Merge edited data with original receipt fields to ensure all fields are included
-      const mergedReceiptImg  = normalizeMediaUrl(editedReceipt.receipt_image  ?? selectedReceipt.receipt_image  ?? "") || "0";
-      const mergedEmailAttach = normalizeMediaUrl(editedReceipt.emailAttachment ?? selectedReceipt.emailAttachment ?? "") || "0";
-
-      // If emailAttachment is still a duplicate of receipt_image (common after Add Receipt),
-      // promote the first additionalPhotoUrl into that slot so it actually gets saved.
-      const emptyValsSet = new Set(["0", "null", "", "undefined"]);
-      let finalEmailAttach = mergedEmailAttach;
-      let remainingAdditional = [...additionalPhotoUrls];
-      if (
-        (emptyValsSet.has(mergedEmailAttach) || mergedEmailAttach === mergedReceiptImg) &&
-        remainingAdditional.length > 0
-      ) {
-        finalEmailAttach = normalizeMediaUrl(remainingAdditional[0]) || mergedEmailAttach;
-        remainingAdditional = remainingAdditional.slice(1);
+      const mediaUrlsForSave = collectReceiptMediaUrlsForSave();
+      if (pendingAnnotatedMediaRef.current?.persistUrl && mediaUrlsForSave.length === 0) {
+        setAlertMsg(
+          "Annotation could not be saved to the server. Please tap Save Annotation again, then Save Changes."
+        );
+        setIsSaving(false);
+        return;
       }
-      const combinedReceiptImages = buildCombinedMediaField([
-        mergedReceiptImg,
-        finalEmailAttach,
-        ...remainingAdditional,
-      ]);
+      const combinedReceiptImages =
+        mediaUrlsForSave.length > 0 ? mediaUrlsForSave.join(",") : "0";
 
       const updatedData = {
         ...selectedReceipt, // Include all original fields
@@ -2812,6 +2834,7 @@ useEffect(() => {
 
       const success = await updateReceipt(selectedReceipt.id, updatedData);
       if (success) {
+        pendingAnnotatedMediaRef.current = null;
         // If the user entered a custom expense category, add it to context immediately
         // so it appears in Filter → Expense Category without waiting for a refresh.
         if (updatedData.expense_type && updatedData.expense_type.trim()) {
@@ -6085,7 +6108,8 @@ Thank you for using our receipt management system.
                                   </a>
                                 ) : (
                                   <img
-                                    src={proxyImageUrl(u)}
+                                    key={normalizeMediaUrl(u)}
+                                    src={`${proxyImageUrl(u)}${proxyImageUrl(u).includes("?") ? "&" : "?"}_v=${encodeURIComponent(normalizeMediaUrl(u).slice(-24))}`}
                                     alt="Receipt"
                                     className="w-24 h-auto rounded cursor-pointer border border-gray-200"
                                     onClick={() => window.open(u, "_blank")}

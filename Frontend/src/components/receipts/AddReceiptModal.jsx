@@ -517,7 +517,6 @@ const [localMerchants, setLocalMerchants] = useState([]);
         return;
       }
       splitMediaField(source).forEach((item) => pushUrl(item));
-      pushUrl(source);
     });
 
     if (urls.length === 0) return "0";
