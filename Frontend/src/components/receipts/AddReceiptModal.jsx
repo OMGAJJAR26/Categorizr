@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { formatTaxRate } from "../../utils/receiptFormatters";
 import { containsEmoji, stripEmoji } from "../../utils/emojiUtils";
 import SimpleAlertModal from "../SimpleAlertModal";
-import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus, MoreHorizontal, Minus, ChevronLeft, ChevronRight, Pencil, Camera, PenLine } from "lucide-react";
+import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus, MoreHorizontal, Minus, ChevronLeft, ChevronRight, Pencil, Camera, PenLine, AlertCircle } from "lucide-react";
 import ReceiptAnnotator from "./ReceiptAnnotator";
 import { motion, AnimatePresence } from "framer-motion";
 import { useData } from "../../context/DataContext";
@@ -3568,6 +3568,10 @@ const handleSelectLogo = (index) => {
       setError("Please enter last 4 digits of card number");
       return;
     }
+    if (paymentDuplicateError) {
+      setError("Payment Method already exists");
+      return;
+    }
 
     // Determine card issuer name - ALWAYS use what user entered in cardIssuerName field
     // Only fallback to payment card type if user didn't enter anything
@@ -3861,6 +3865,48 @@ const handleSelectLogo = (index) => {
       return existingCardType === normalizedCardType && existingLast4 === normalizedLast4;
     });
   };
+
+  const normalizePaymentMethodKey = (value) =>
+    String(value || "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .replace(/\s*\*\s*/, " *")
+      .toLowerCase();
+
+  const paymentMethodNameExists = (name, excludeName = "") => {
+    const target = normalizePaymentMethodKey(name);
+    const excluded = normalizePaymentMethodKey(excludeName);
+    if (!target) return false;
+    const allCandidates = [
+      ...allPaymentMethods,
+      ...localPaymentMethodStrings,
+      ...(apiPaymentMethods || []).map((p) => p?.card_number || ""),
+    ];
+    return allCandidates.some((item) => {
+      const normalizedItem = normalizePaymentMethodKey(item);
+      return normalizedItem === target && normalizedItem !== excluded;
+    });
+  };
+
+  const paymentMethodDraftName = (() => {
+    const cardType = (newPaymentCardType || "").trim();
+    const issuer = (newCardIssuerName || "").trim();
+    const last4 = (newLast4Digits || "").replace(/\D/g, "").slice(0, 4);
+    if (!cardType || last4.length < 4) return "";
+    const displayBase = issuer || cardType;
+    return `${displayBase} *${last4}`;
+  })();
+
+  const paymentDuplicateError =
+    paymentMethodDraftName &&
+    paymentMethodNameExists(paymentMethodDraftName, payModalEditMode?.name || "")
+      ? "Payment Method already exists"
+      : "";
+
+  const editMerchantDuplicateError =
+    editMerchantName.trim() && merchantExists(editMerchantName, editingMerchant?.name || "")
+      ? "Merchant name already exists"
+      : "";
 
   const filteredPaymentMethods = (() => {
     const allMethodsCombined = [
@@ -6101,7 +6147,10 @@ const handleSelectLogo = (index) => {
                         type="text"
                         className={`${inputClass} w-full`}
                         value={newCardIssuerName}
-                        onChange={(e) => setNewCardIssuerName(e.target.value)}
+                        onChange={(e) => {
+                          setNewCardIssuerName(e.target.value);
+                          if (error === "Payment Method already exists") setError(null);
+                        }}
                         placeholder="Enter Card Issuer (e.g., SBI)"
                       />
                     </div>
@@ -6115,6 +6164,7 @@ const handleSelectLogo = (index) => {
                             .replace(/\D/g, "")
                             .slice(0, 4);
                           setNewLast4Digits(value);
+                          if (error === "Payment Method already exists") setError(null);
                         }}
                         placeholder="0000"
                         maxLength={4}
@@ -6122,6 +6172,13 @@ const handleSelectLogo = (index) => {
                     </div>
                   </div>
                 </div>
+
+                {paymentDuplicateError && (
+                  <div className="mb-4 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+                    <AlertCircle size={14} />
+                    {paymentDuplicateError}
+                  </div>
+                )}
 
                 {/* Payment Category Type (Business/Personal) */}
                 <div className="mb-6">
@@ -6158,7 +6215,7 @@ const handleSelectLogo = (index) => {
                   <button
                     type="button"
                     onClick={handleAddPaymentMethod}
-                    disabled={!newPaymentCardType || newLast4Digits.replace(/\D/g, "").length < 4}
+                    disabled={!newPaymentCardType || newLast4Digits.replace(/\D/g, "").length < 4 || !!paymentDuplicateError}
                     className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     {payModalEditMode ? "Save Changes" : "Add Payment Method"}
@@ -6221,12 +6278,20 @@ const handleSelectLogo = (index) => {
                       setEditMerchantName(e.target.value);
                       setEditLogoOptions([]);
                       setEditSelectedLogoIndex(null);
+                      if (editMerchantError === "Merchant name already exists") setEditMerchantError(null);
                     }}
                     placeholder="Enter merchant name"
                     autoFocus
                     disabled={isSavingEditMerchant}
                   />
                 </div>
+
+                {editMerchantDuplicateError && (
+                  <div className="mb-4 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+                    <AlertCircle size={14} />
+                    {editMerchantDuplicateError}
+                  </div>
+                )}
 
                 {/* Merchant Logo Section */}
                 <div className="mb-6">
@@ -6346,7 +6411,7 @@ const handleSelectLogo = (index) => {
                   <button
                     type="button"
                     onClick={handleSaveEditMerchant}
-                    disabled={!editMerchantName.trim() || isSavingEditMerchant}
+                    disabled={!editMerchantName.trim() || isSavingEditMerchant || !!editMerchantDuplicateError}
                     className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     {isSavingEditMerchant ? "Saving…" : "Save Changes"}

@@ -89,6 +89,15 @@ const getPaymentLogo = (name) => {
   return null;
 };
 
+const normalizePaymentDisplayKey = (value) => {
+  const raw = (value || "").toString().trim();
+  if (!raw) return "";
+  const match = raw.match(/^(.*?)(?:\s*\*(\d{3,4}))?$/);
+  const issuer = (match?.[1] || raw).trim().replace(/\s+/g, " ");
+  const last4 = (match?.[2] || "").trim();
+  return last4 ? `${issuer} *${last4}`.toLowerCase() : issuer.toLowerCase();
+};
+
 const PAYMENT_CARD_TYPES = [
   { name: "Visa",             logo: visaLogo },
   { name: "MasterCard",       logo: mastercardLogo },
@@ -1321,6 +1330,7 @@ const ReceiptInfoInline = ({ type }) => {
     resetAddFormState();
     setEditTaxKey(null);
     setEditTaxRateOverflow(false);
+    setEditTaxRateFocused(false);
   }, [type]);
 
   const cfg    = MODAL_CFG[type];
@@ -1376,9 +1386,11 @@ const ReceiptInfoInline = ({ type }) => {
   const [addTaxNameOverflow, setAddTaxNameOverflow]     = useState(false);
   const [addTaxRateOverflow, setAddTaxRateOverflow]     = useState(false);
   const [addTaxNumberOverflow, setAddTaxNumberOverflow]   = useState(false);
+  const [addTaxRateFocused, setAddTaxRateFocused]       = useState(false);
   const [editTaxNameOverflow, setEditTaxNameOverflow]   = useState(false);
   const [editTaxRateOverflow, setEditTaxRateOverflow]   = useState(false);
   const [editTaxNumberOverflow, setEditTaxNumberOverflow] = useState(false);
+  const [editTaxRateFocused, setEditTaxRateFocused]     = useState(false);
 
   // Merchant confirmation dialog state
   const [showMerchantEditConfirm, setShowMerchantEditConfirm] = useState(false);
@@ -1422,6 +1434,7 @@ const ReceiptInfoInline = ({ type }) => {
     setAddTaxNameOverflow(false);
     setAddTaxRateOverflow(false);
     setAddTaxNumberOverflow(false);
+    setAddTaxRateFocused(false);
     setNewMerchantName("");
     setAddLogoOpts([]);
     setAddLogoSel(null);
@@ -1488,15 +1501,19 @@ const ReceiptInfoInline = ({ type }) => {
       const displayKey = (last4 && last4 !== "0" && !alreadyHasLast4)
         ? `${issuer} *${last4}`
         : issuer;
-      if (!map[displayKey.toLowerCase()]) map[displayKey.toLowerCase()] = brand;
+      const rawKey = (displayKey || "").toLowerCase();
+      const normalizedKey = normalizePaymentDisplayKey(displayKey);
+      if (rawKey && !map[rawKey]) map[rawKey] = brand;
+      if (normalizedKey && !map[normalizedKey]) map[normalizedKey] = brand;
     });
     return map;
   })();
 
   // Get the correct logo for a payment string
   const getPayLogoResolved = (payStr) => {
+    const normalizedKey = normalizePaymentDisplayKey(payStr);
     // Priority 1: localStorage mapping (saved when added via Settings)
-    const stored = payCardMap[payStr];
+    const stored = payCardMap[payStr] || (normalizedKey ? payCardMap[normalizedKey] : null);
     if (stored) {
       const found = PAYMENT_CARD_TYPES.find(c => c.name === stored);
       if (found) return found.logo;
@@ -1506,7 +1523,9 @@ const ReceiptInfoInline = ({ type }) => {
     if (logo) return logo;
     // Priority 3: look up the card brand from receipts (covers custom-named payment methods
     // added via Add/Edit Receipt modal where brand is stored in paymentType, not display name)
-    const brand = receiptDisplayToCardType[(payStr || "").toLowerCase()];
+    const brand =
+      receiptDisplayToCardType[(payStr || "").toLowerCase()] ||
+      (normalizedKey ? receiptDisplayToCardType[normalizedKey] : null);
     if (brand) return getPaymentLogo(brand);
     return null;
   };
@@ -1534,10 +1553,13 @@ const ReceiptInfoInline = ({ type }) => {
 
   const getPaymentBrand = (paymentName, fallbackCardType = "") => {
     const key = (paymentName || "").toString().trim();
+    const normalizedKey = normalizePaymentDisplayKey(key);
     if (!key) return (fallbackCardType || "").trim();
-    const fromLocal = payCardMap[key];
+    const fromLocal = payCardMap[key] || (normalizedKey ? payCardMap[normalizedKey] : null);
     if (fromLocal) return fromLocal;
-    const fromReceipts = receiptDisplayToCardType[key.toLowerCase()];
+    const fromReceipts =
+      receiptDisplayToCardType[key.toLowerCase()] ||
+      (normalizedKey ? receiptDisplayToCardType[normalizedKey] : null);
     if (fromReceipts) return fromReceipts;
     const inferred = inferCardTypeFromPayment(key);
     return inferred === "Other" ? (fallbackCardType || "").trim() : inferred;
@@ -2287,6 +2309,7 @@ const parseTaxRateInput = (raw) => {
         toast("success", "Tax Type Updated");
         setEditTaxKey(null);
         setEditTaxRateOverflow(false);
+        setEditTaxRateFocused(false);
       }
       catch (e) { toast("error", e.message || "Failed."); }
       return;
@@ -2383,6 +2406,7 @@ const parseTaxRateInput = (raw) => {
       });
       toast("success", "Tax Type Updated");
       setEditTaxKey(null);
+      setEditTaxRateFocused(false);
     } catch (e) {
       toast("error", e.message || "Failed.");
     } finally {
@@ -2522,6 +2546,9 @@ const parseTaxRateInput = (raw) => {
     : [];
 
   const mInput = "flex-1 min-w-0 bg-white border border-gray-200 text-gray-900 text-sm rounded-xl px-3 py-2 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all";
+  const taxRateInput = "w-full bg-white border border-gray-200 text-gray-900 text-sm rounded-xl px-3 py-2 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all";
+  const showAddTaxRateSuffix = addTaxVal.tax_rate.toString().trim() !== "" && !addTaxRateFocused;
+  const showEditTaxRateSuffix = editTaxVal.tax_rate.toString().trim() !== "" && !editTaxRateFocused;
   const Btn = ({ color, onClick, children }) => (
     <button type="button" onClick={onClick} style={{ margin: 0, padding: 0, width: 28, height: 28, flexShrink: 0 }}
       className={`flex items-center justify-center rounded-lg text-white text-xs transition-all ${color}`}>
@@ -2541,7 +2568,7 @@ const parseTaxRateInput = (raw) => {
             if (showAddForm) {
               resetAddFormState();
             }
-            setShowAddForm((prev) => !prev); setPayEditMode(null); setEditTaxKey(null); setEditTaxRateOverflow(false);
+            setShowAddForm((prev) => !prev); setPayEditMode(null); setEditTaxKey(null); setEditTaxRateOverflow(false); setEditTaxRateFocused(false);
           }}
           className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-semibold transition-all ${
             showAddForm
@@ -2568,13 +2595,23 @@ const parseTaxRateInput = (raw) => {
                   setAddTaxNameOverflow(false);
                   setAddTaxVal(p => ({ ...p, tax_name: v }));
                 }} />
-              <div className="relative max-w-[100px]">
-                <input className={`${mInput} pr-6`} placeholder="Rate" value={addTaxVal.tax_rate} onKeyDown={preventInvalidTaxRateKey} onChange={e => {
-                  const parsed = parseTaxRateInput(e.target.value);
-                  setAddTaxVal(p => ({ ...p, tax_rate: parsed.value }));
-                  setAddTaxRateOverflow(parsed.overflow);
-                }} />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-medium">%</span>
+              <div className="relative w-[72px] flex-shrink-0">
+                <input
+                  className={`${taxRateInput}${showAddTaxRateSuffix ? " pr-6" : ""}`}
+                  placeholder="Rate"
+                  value={addTaxVal.tax_rate}
+                  onKeyDown={preventInvalidTaxRateKey}
+                  onFocus={() => setAddTaxRateFocused(true)}
+                  onBlur={() => setAddTaxRateFocused(false)}
+                  onChange={e => {
+                    const parsed = parseTaxRateInput(e.target.value);
+                    setAddTaxVal(p => ({ ...p, tax_rate: parsed.value }));
+                    setAddTaxRateOverflow(parsed.overflow);
+                  }}
+                />
+                {showAddTaxRateSuffix && (
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">%</span>
+                )}
               </div>
             </div>
             {addTaxNameOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NAME_MAX} exceeded</p>}
@@ -2591,7 +2628,7 @@ const parseTaxRateInput = (raw) => {
                     setAddTaxNumberOverflow(false);
                     setAddTaxVal(p => ({ ...p, tax_number: v }));
                   }} />
-                <div className="max-w-[100px] w-[100px] flex-shrink-0" />
+                <div className="w-[72px] flex-shrink-0" />
               </div>
               <p className="mt-1 text-xs text-slate-400">* Required</p>
               {addTaxNumberOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NUMBER_MAX} exceeded</p>}
@@ -2654,7 +2691,7 @@ const parseTaxRateInput = (raw) => {
                 ))}
               </div>
             </div>
-            <button type="button" onClick={handleAdd}  className={`px-4 py-2 rounded-xl text-white text-sm font-semibold self-start ${colors.btn}`}>{payEditMode ? "Edit Payment Method" : "Add Payment Method"}</button>
+            <button type="button" onClick={handleAdd}  className={`px-4 py-2 rounded-xl text-white text-sm font-semibold self-start ${colors.btn}`}>Add</button>
           </>
         )}
 
@@ -2715,13 +2752,23 @@ const parseTaxRateInput = (raw) => {
                               setEditTaxNameOverflow(false);
                               setEditTaxVal(p => ({ ...p, tax_name: v }));
                             }} placeholder="Tax Name (e.g. GST)" />
-                          <div className="relative max-w-[100px]">
-                            <input className={`${mInput} pr-6`} value={editTaxVal.tax_rate} onKeyDown={preventInvalidTaxRateKey} onChange={e => {
-                              const parsed = parseTaxRateInput(e.target.value);
-                              setEditTaxVal(p => ({ ...p, tax_rate: parsed.value }));
-                              setEditTaxRateOverflow(parsed.overflow);
-                            }} placeholder="Rate" />
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-medium">%</span>
+                          <div className="relative w-[72px] flex-shrink-0">
+                            <input
+                              className={`${taxRateInput}${showEditTaxRateSuffix ? " pr-6" : ""}`}
+                              value={editTaxVal.tax_rate}
+                              onKeyDown={preventInvalidTaxRateKey}
+                              onFocus={() => setEditTaxRateFocused(true)}
+                              onBlur={() => setEditTaxRateFocused(false)}
+                              onChange={e => {
+                                const parsed = parseTaxRateInput(e.target.value);
+                                setEditTaxVal(p => ({ ...p, tax_rate: parsed.value }));
+                                setEditTaxRateOverflow(parsed.overflow);
+                              }}
+                              placeholder="Rate"
+                            />
+                            {showEditTaxRateSuffix && (
+                              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">%</span>
+                            )}
                           </div>
                         </div>
                         {editTaxNameOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NAME_MAX} exceeded</p>}
@@ -2739,7 +2786,7 @@ const parseTaxRateInput = (raw) => {
                                   setEditTaxNumberOverflow(false);
                                   setEditTaxVal(p => ({ ...p, tax_number: v }));
                                 }} placeholder="Tax Number" />
-                              <div className="max-w-[100px] w-[100px] flex-shrink-0" />
+                              <div className="w-[72px] flex-shrink-0" />
                             </div>
                             <p className="mt-1 text-xs text-slate-400">* Required</p>
                             {editTaxNumberOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NUMBER_MAX} exceeded</p>}
@@ -2782,9 +2829,10 @@ const parseTaxRateInput = (raw) => {
                               setEditTaxRateOverflow(false);
                               setEditTaxNameOverflow(false);
                               setEditTaxNumberOverflow(false);
+                              setEditTaxRateFocused(false);
                             } catch (e) { toast("error", e.message || "Failed."); }
                           }} className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg flex-shrink-0">Save</button>
-                          <button type="button" onClick={() => { setEditTaxKey(null); setEditTaxRateOverflow(false); setEditTaxNameOverflow(false); setEditTaxNumberOverflow(false); }} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex-shrink-0">Cancel</button>
+                          <button type="button" onClick={() => { setEditTaxKey(null); setEditTaxRateOverflow(false); setEditTaxNameOverflow(false); setEditTaxNumberOverflow(false); setEditTaxRateFocused(false); }} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex-shrink-0">Cancel</button>
                         </div>
                       </div>
                     ) : (
@@ -2804,7 +2852,7 @@ const parseTaxRateInput = (raw) => {
                             className={`px-2.5 py-1 text-xs rounded-lg border font-medium transition-colors ${defaultTaxIds.includes(tax.id) ? "bg-yellow-50 border-yellow-400 text-yellow-600" : "bg-white border-slate-200 text-slate-400 hover:border-yellow-400 hover:text-yellow-500"}`}>
                             {defaultTaxIds.includes(tax.id) ? "★ Default" : "Default"}
                           </button>
-                          <Btn color="bg-blue-500 hover:bg-blue-600" onClick={() => { setShowAddForm(false); setEditTaxKey(tax.id); setEditTaxRateOverflow(false); setEditTaxVal({ tax_name: tax.tax_name, tax_rate: parseFloat(parseFloat(tax.tax_rate).toFixed(3)).toString(), tax_number: tax.tax_number || "" }); }}><Pencil size={13}/></Btn>
+                          <Btn color="bg-blue-500 hover:bg-blue-600" onClick={() => { setShowAddForm(false); setEditTaxKey(tax.id); setEditTaxRateOverflow(false); setEditTaxRateFocused(false); setEditTaxVal({ tax_name: tax.tax_name, tax_rate: parseFloat(parseFloat(tax.tax_rate).toFixed(3)).toString(), tax_number: tax.tax_number || "" }); }}><Pencil size={13}/></Btn>
                           <Btn color="bg-red-400 hover:bg-red-500" onClick={() => handleDelete({ key: tax.id, name: tax.tax_name })}><Trash2 size={13}/></Btn>
                         </div>
                       </>

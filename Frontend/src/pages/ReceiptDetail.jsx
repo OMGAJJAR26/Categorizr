@@ -105,6 +105,16 @@ import warrantedSelect from "../assets/receipttags/warrantied_select.png";
 import * as XLSX from "xlsx";
 import JSZip from "jszip";
 
+/** Match receipt ids across number/string API shapes. */
+const findReceiptIndexInList = (list, id) => {
+  if (id == null || !Array.isArray(list) || list.length === 0) return -1;
+  const target = String(id);
+  return list.findIndex((r) => String(r?.id) === target);
+};
+
+const SWIPE_IGNORE_SELECTOR =
+  'input, textarea, select, button, a, label, [role="button"], [contenteditable="true"]';
+
 const ReceiptDetail = ({
   receipt,
   onClose,
@@ -141,10 +151,17 @@ const ReceiptDetail = ({
   const containerRef = useRef(null);
   const dropdownRef = useRef();
   const scrollContentRef = useRef(null);
+  const currentSelectedIdRef = useRef(receipt?.id ?? null);
+  const lastReportedIndexRef = useRef(null);
+  const swipeGestureActiveRef = useRef(false);
   const [showPDFPreview, setShowPDFPreview] = useState(false);
   const [pdfKey, setPdfKey] = useState(0);
   const [isSwiping, setIsSwiping] = useState(false);
   const [quickbooksConnected, setQuickbooksConnected] = useState(false);
+  useEffect(() => {
+    currentSelectedIdRef.current = selectedReceipt?.id ?? null;
+  }, [selectedReceipt?.id]);
+
   const [quickbooksRealmId, setQuickbooksRealmId] = useState(null);
   const [linkToQbLoading, setLinkToQbLoading] = useState(false);
   const [toast, setToast] = useState({
@@ -837,25 +854,40 @@ useEffect(() => {
   useEffect(() => {
     const hasExplicitList = Array.isArray(receiptList) && receiptList.length > 0;
     const receiptsToUse = hasExplicitList ? receiptList : receipts;
+    if (!receiptsToUse || receiptsToUse.length === 0) return;
 
-    if (receiptsToUse && receiptsToUse.length > 0) {
-      // Preserve caller order when receiptList is provided (Home page visual order).
-      // Fallback to date sort only for legacy/default receipts source.
-      const orderedReceipts = hasExplicitList
-        ? [...receiptsToUse]
-        : [...receiptsToUse].sort(
-            (a, b) => new Date(b.product_date) - new Date(a.product_date)
-          );
-      setSortedReceipts(orderedReceipts);
-      const initialIndex = orderedReceipts.findIndex((r) => r.id === receipt?.id);
-      if (initialIndex !== -1) {
-        setSelectedReceipt(orderedReceipts[initialIndex]);
-        if (setSelectedIndex) {
-          setSelectedIndex(initialIndex);
-        }
-      }
+    // Preserve caller order when receiptList is provided (Home page visual order).
+    // Fallback to date sort only for legacy/default receipts source.
+    const orderedReceipts = hasExplicitList
+      ? [...receiptsToUse]
+      : [...receiptsToUse].sort(
+          (a, b) => new Date(b.product_date) - new Date(a.product_date)
+        );
+    setSortedReceipts(orderedReceipts);
+
+    // Keep the current card selected during silent refreshes so the modal
+    // doesn't jump to the first receipt. Only re-anchor when we can resolve
+    // the current or originally opened id in the updated list.
+    const currentSelectedId = currentSelectedIdRef.current;
+    let nextIndex = findReceiptIndexInList(orderedReceipts, currentSelectedId);
+    if (nextIndex === -1) {
+      nextIndex = findReceiptIndexInList(orderedReceipts, receipt?.id);
     }
-  }, [receipts, receipt, receiptList, setSelectedIndex]);
+    if (nextIndex === -1) return;
+
+    const nextSelected = orderedReceipts[nextIndex];
+    if (
+      currentSelectedId == null ||
+      String(currentSelectedId) !== String(nextSelected.id)
+    ) {
+      setSelectedReceipt(nextSelected);
+      currentSelectedIdRef.current = nextSelected.id;
+    }
+    if (setSelectedIndex && lastReportedIndexRef.current !== nextIndex) {
+      setSelectedIndex(nextIndex);
+      lastReportedIndexRef.current = nextIndex;
+    }
+  }, [receipts, receiptList, receipt?.id, setSelectedIndex]);
 
   // Close options menu on outside click
   useEffect(() => {
@@ -940,23 +972,38 @@ useEffect(() => {
 
   if (!selectedReceipt) return null;
 
-  const currentIndex = sortedReceipts.findIndex(
-    (r) => r.id === selectedReceipt.id
+  const currentIndex = findReceiptIndexInList(
+    sortedReceipts,
+    selectedReceipt.id
   );
 
   const goToPrevious = () => {
-    if (currentIndex > 0) {
-      setDirection(-1);
-      setEditedTags(DEFAULT_TAGS);
-      setSelectedReceipt(sortedReceipts[currentIndex - 1]);
+    if (currentIndex <= 0) return;
+    const prevIndex = currentIndex - 1;
+    const prevReceipt = sortedReceipts[prevIndex];
+    if (!prevReceipt) return;
+    setDirection(-1);
+    setEditedTags(DEFAULT_TAGS);
+    setSelectedReceipt(prevReceipt);
+    currentSelectedIdRef.current = prevReceipt.id;
+    if (setSelectedIndex) {
+      setSelectedIndex(prevIndex);
+      lastReportedIndexRef.current = prevIndex;
     }
   };
 
   const goToNext = () => {
-    if (currentIndex < sortedReceipts.length - 1) {
-      setDirection(1);
-      setEditedTags(DEFAULT_TAGS);
-      setSelectedReceipt(sortedReceipts[currentIndex + 1]);
+    if (currentIndex < 0 || currentIndex >= sortedReceipts.length - 1) return;
+    const nextIndex = currentIndex + 1;
+    const nextReceipt = sortedReceipts[nextIndex];
+    if (!nextReceipt) return;
+    setDirection(1);
+    setEditedTags(DEFAULT_TAGS);
+    setSelectedReceipt(nextReceipt);
+    currentSelectedIdRef.current = nextReceipt.id;
+    if (setSelectedIndex) {
+      setSelectedIndex(nextIndex);
+      lastReportedIndexRef.current = nextIndex;
     }
   };
 
@@ -975,15 +1022,51 @@ useEffect(() => {
       // Normal receipts: swipe left (diff > 0) → next, swipe right (diff < 0) → previous
       // Draft receipts:  swipe right (diff < 0) → next, swipe left (diff > 0) → previous
       const goingNext = reversedSwipe ? diff < 0 : diff > 0;
-      if (goingNext) {
+      const canGoNext =
+        currentIndex >= 0 && currentIndex < sortedReceipts.length - 1;
+      const canGoPrevious = currentIndex > 0;
+      if (goingNext && canGoNext) {
         goToNext();
-      } else {
+      } else if (!goingNext && canGoPrevious) {
         goToPrevious();
       }
     }
 
     setStartX(null);
     setIsSwiping(false);
+  };
+
+  const shouldIgnoreSwipeTarget = (target) =>
+    !!target?.closest?.(SWIPE_IGNORE_SELECTOR);
+
+  const onContainerTouchStart = (e) => {
+    if (e.touches.length !== 1 || shouldIgnoreSwipeTarget(e.target)) {
+      swipeGestureActiveRef.current = false;
+      return;
+    }
+    swipeGestureActiveRef.current = true;
+    handleSwipeStart(e.touches[0].clientX);
+  };
+
+  const onContainerTouchEnd = (e) => {
+    if (!swipeGestureActiveRef.current || e.changedTouches.length !== 1) return;
+    handleSwipeEnd(e.changedTouches[0].clientX);
+    swipeGestureActiveRef.current = false;
+  };
+
+  const onContainerMouseDown = (e) => {
+    if (e.button !== 0 || shouldIgnoreSwipeTarget(e.target)) {
+      swipeGestureActiveRef.current = false;
+      return;
+    }
+    swipeGestureActiveRef.current = true;
+    handleSwipeStart(e.clientX);
+  };
+
+  const onContainerMouseUp = (e) => {
+    if (!swipeGestureActiveRef.current || e.button !== 0) return;
+    handleSwipeEnd(e.clientX);
+    swipeGestureActiveRef.current = false;
   };
 
   const r = selectedReceipt;
@@ -4299,9 +4382,13 @@ Thank you for using our receipt management system.
         variants={backdropVariants}
         className="fixed inset-0 z-50 flex items-center justify-center bg-white/30 backdrop-blur-sm receipt-detail-modal"
       >
-        <div
+        <motion.div
           ref={containerRef}
-          className="relative w-full h-full overflow-auto p-2 sm:p-4 text-center"
+          className="relative w-full h-full overflow-auto p-2 sm:p-4 text-center touch-pan-y"
+          onTouchStart={onContainerTouchStart}
+          onTouchEnd={onContainerTouchEnd}
+          onMouseDown={onContainerMouseDown}
+          onMouseUp={onContainerMouseUp}
         >
           <motion.div
             variants={modalVariants}
@@ -6061,7 +6148,7 @@ Thank you for using our receipt management system.
               )}
             </div>
           </motion.div>
-        </div>
+        </motion.div>
       </motion.div>
 
       {showPDFPreview && (
