@@ -26,6 +26,7 @@ const ReceiptAnnotator = ({ imageUrl, onSave, onClose }) => {
   // without stale-closure delays — the root cause of invisible strokes.
   const isDrawingRef = useRef(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
   const [color, setColor] = useState("#EF4444");
   const [lineWidth, setLineWidth] = useState(3);
   const [tool, setTool] = useState("pen"); // 'pen' | 'eraser'
@@ -139,6 +140,7 @@ const ReceiptAnnotator = ({ imageUrl, onSave, onClose }) => {
   // ── Save: compose background + annotation layer ──────────────────────────
   const handleSave = async () => {
     setIsSaving(true);
+    setSaveError(null);
     try {
       const annotationCanvas = canvasRef.current;
       const { w, h } = imgNaturalSize;
@@ -375,13 +377,17 @@ const ReceiptAnnotator = ({ imageUrl, onSave, onClose }) => {
       onSave(finalUrl);
     } catch (err) {
       console.error("ReceiptAnnotator save error:", err);
+      setSaveError(
+        err?.message ||
+          "Could not save annotation. Wait for the image to finish loading, then try again."
+      );
     } finally {
       setIsSaving(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 p-4">
+    <div className="receipt-annotator-root fixed inset-0 z-[90] flex items-center justify-center bg-black/75 p-4">
       <div className="bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-3xl max-h-[95vh]">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
@@ -527,6 +533,12 @@ const ReceiptAnnotator = ({ imageUrl, onSave, onClose }) => {
             />
           </div>
         </div>
+
+        {saveError && (
+          <p className="mx-5 mb-0 px-3 py-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg">
+            {saveError}
+          </p>
+        )}
 
         {/* Footer */}
         <div className="flex justify-end items-center gap-3 px-5 py-3 border-t border-gray-200">

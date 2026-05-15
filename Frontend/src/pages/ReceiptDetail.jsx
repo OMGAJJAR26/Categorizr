@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { NODE_API_URL } from "../api/Axios";
+import { NODE_API_URL, proxyImageUrl, unproxyImageUrl } from "../api/Axios";
 import { formatTaxRate } from "../utils/receiptFormatters";
 import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine,} from "lucide-react";
 import ReceiptAnnotator from "../components/receipts/ReceiptAnnotator";
@@ -113,7 +113,7 @@ const findReceiptIndexInList = (list, id) => {
 };
 
 const SWIPE_IGNORE_SELECTOR =
-  'input, textarea, select, button, a, label, [role="button"], [contenteditable="true"]';
+  'input, textarea, select, button, a, label, canvas, [role="button"], [contenteditable="true"], .receipt-annotator-root';
 
 const ReceiptDetail = ({
   receipt,
@@ -1040,7 +1040,7 @@ useEffect(() => {
     !!target?.closest?.(SWIPE_IGNORE_SELECTOR);
 
   const onContainerTouchStart = (e) => {
-    if (e.touches.length !== 1 || shouldIgnoreSwipeTarget(e.target)) {
+    if (annotatorUrl || e.touches.length !== 1 || shouldIgnoreSwipeTarget(e.target)) {
       swipeGestureActiveRef.current = false;
       return;
     }
@@ -1049,23 +1049,8 @@ useEffect(() => {
   };
 
   const onContainerTouchEnd = (e) => {
-    if (!swipeGestureActiveRef.current || e.changedTouches.length !== 1) return;
+    if (annotatorUrl || !swipeGestureActiveRef.current || e.changedTouches.length !== 1) return;
     handleSwipeEnd(e.changedTouches[0].clientX);
-    swipeGestureActiveRef.current = false;
-  };
-
-  const onContainerMouseDown = (e) => {
-    if (e.button !== 0 || shouldIgnoreSwipeTarget(e.target)) {
-      swipeGestureActiveRef.current = false;
-      return;
-    }
-    swipeGestureActiveRef.current = true;
-    handleSwipeStart(e.clientX);
-  };
-
-  const onContainerMouseUp = (e) => {
-    if (!swipeGestureActiveRef.current || e.button !== 0) return;
-    handleSwipeEnd(e.clientX);
     swipeGestureActiveRef.current = false;
   };
 
@@ -1130,7 +1115,7 @@ useEffect(() => {
   };
 
   const normalizeMediaUrl = (url) => {
-    const raw = (url || "").toString().trim();
+    const raw = unproxyImageUrl((url || "").toString().trim());
     if (!raw) return "";
     // blob: URLs are ephemeral and invalid after page refresh — treat as empty.
     if (raw.startsWith("blob:")) return "";
@@ -1142,6 +1127,11 @@ useEffect(() => {
     } catch {
       return encodeURI(raw);
     }
+  };
+  const mediaUrlsEqual = (a, b) => {
+    const na = normalizeMediaUrl(a);
+    const nb = normalizeMediaUrl(b);
+    return !!na && !!nb && na === nb;
   };
   const splitMediaField = (value) => {
     if (!value || typeof value !== "string") return [];
@@ -2268,10 +2258,23 @@ useEffect(() => {
     }
   };
 
-  const handleAnnotationSaveDetail = (dataUrl) => {
+  const handleAnnotationSaveDetail = (savedUrl) => {
+    const persistUrl =
+      normalizeMediaUrl(savedUrl) ||
+      (typeof savedUrl === "string" ? savedUrl.trim() : "");
+
+    if (!persistUrl) {
+      setAlertMsg("Could not save annotation. Please try again.");
+      return;
+    }
+
     if (annotatorSource?.type === "additional") {
       setAdditionalPhotoUrls((prev) =>
-        prev.map((u, i) => (i === annotatorSource.index ? dataUrl : u))
+        prev.map((u, i) => {
+          if (i === annotatorSource.index) return persistUrl;
+          if (mediaUrlsEqual(u, annotatorSource.sourceUrl)) return persistUrl;
+          return u;
+        })
       );
     } else if (annotatorSource?.type === "existing") {
       if (editedTags.locked) {
@@ -2279,7 +2282,7 @@ useEffect(() => {
         setAnnotatorSource(null);
         return;
       }
-      const rawTarget = annotatorSource.sourceUrl || annotatorUrl || "";
+      const rawTarget = annotatorSource.sourceUrl || unproxyImageUrl(annotatorUrl) || "";
       const normOld = normalizeMediaUrl(rawTarget);
       if (!normOld) {
         setAnnotatorUrl(null);
@@ -2289,14 +2292,32 @@ useEffect(() => {
       setEditedReceipt((prev) => {
         const email0 = prev.emailAttachment ?? selectedReceipt.emailAttachment ?? "0";
         const receipt0 = prev.receipt_image ?? selectedReceipt.receipt_image ?? "0";
-        const mergedEmail = replaceNormalizedUrlInMediaCsv(email0, normOld, dataUrl);
-        const mergedReceipt = replaceNormalizedUrlInMediaCsv(receipt0, normOld, dataUrl);
+        let mergedEmail = replaceNormalizedUrlInMediaCsv(email0, normOld, persistUrl);
+        let mergedReceipt = replaceNormalizedUrlInMediaCsv(receipt0, normOld, persistUrl);
+        if (mergedEmail === email0 && mergedReceipt === receipt0) {
+          const combined = buildCombinedMediaField([receipt0, email0]);
+          if (combined !== "0") {
+            const mergedCombined = replaceNormalizedUrlInMediaCsv(
+              combined,
+              normOld,
+              persistUrl
+            );
+            mergedReceipt = mergedCombined;
+            mergedEmail = mergedCombined;
+          } else {
+            mergedReceipt = persistUrl;
+            mergedEmail = persistUrl;
+          }
+        }
         return {
           ...prev,
           emailAttachment: normalizeMediaUrl(mergedEmail) || "0",
           receipt_image: normalizeMediaUrl(mergedReceipt) || "0",
         };
       });
+      setAdditionalPhotoUrls((prev) =>
+        prev.map((u) => (mediaUrlsEqual(u, rawTarget) ? persistUrl : u))
+      );
     }
     setAnnotatorUrl(null);
     setAnnotatorSource(null);
@@ -4413,8 +4434,6 @@ Thank you for using our receipt management system.
           className="relative w-full h-full overflow-auto p-2 sm:p-4 text-center touch-pan-y"
           onTouchStart={onContainerTouchStart}
           onTouchEnd={onContainerTouchEnd}
-          onMouseDown={onContainerMouseDown}
-          onMouseUp={onContainerMouseUp}
         >
           <motion.div
             variants={modalVariants}
@@ -6066,7 +6085,7 @@ Thank you for using our receipt management system.
                                   </a>
                                 ) : (
                                   <img
-                                    src={u}
+                                    src={proxyImageUrl(u)}
                                     alt="Receipt"
                                     className="w-24 h-auto rounded cursor-pointer border border-gray-200"
                                     onClick={() => window.open(u, "_blank")}
@@ -6115,11 +6134,16 @@ Thank you for using our receipt management system.
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      setAnnotatorUrl(u);
+                                      const sourceUrl = normalizeMediaUrl(u) || u;
+                                      setAnnotatorUrl(proxyImageUrl(sourceUrl));
                                       setAnnotatorSource(
                                         isAdditional
-                                          ? { type: "additional", index: idx - urls.length }
-                                          : { type: "existing", sourceUrl: u }
+                                          ? {
+                                              type: "additional",
+                                              index: idx - urls.length,
+                                              sourceUrl,
+                                            }
+                                          : { type: "existing", sourceUrl }
                                       );
                                     }}
                                     className="absolute top-1 right-8 bg-white/90 hover:bg-blue-600 hover:text-white text-gray-700 rounded p-1 opacity-0 group-hover:opacity-100 transition-all shadow"
