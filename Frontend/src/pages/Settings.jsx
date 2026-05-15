@@ -582,16 +582,13 @@ const ManageModal = ({ type, onClose }) => {
                     setAddTaxNameOverflow(false);
                     setAddTaxVal(p => ({ ...p, tax_name: v }));
                   }} />
-                <div className="w-[80px] flex-shrink-0 flex flex-col gap-1">
-                  <span className="text-xs text-slate-400 leading-none">Rate (%)</span>
-                  <div className="relative">
-                    <input className={`${mInput} pr-6 w-full`} placeholder="" value={addTaxVal.tax_rate} onKeyDown={createTaxRateKeyDownHandler(addTaxVal.tax_rate, showAddTaxRateLimitAlert)} onChange={e => {
+                <div className="relative w-[80px] flex-shrink-0">
+                    <input className={`${mInput} pr-6 w-full placeholder:text-slate-400`} placeholder="Rate (%)" value={addTaxVal.tax_rate} onKeyDown={createTaxRateKeyDownHandler(addTaxVal.tax_rate, showAddTaxRateLimitAlert)} onChange={e => {
                       const parsed = parseTaxRateInput(e.target.value);
                       if (parsed.rejected) { showAddTaxRateLimitAlert(parsed.message); return; }
                       setAddTaxVal(p => ({ ...p, tax_rate: parsed.value }));
                     }} />
                     <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">%</span>
-                  </div>
                 </div>
               </div>
               {addTaxNameOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NAME_MAX} exceeded</p>}
@@ -655,16 +652,13 @@ const ManageModal = ({ type, onClose }) => {
                             setEditTaxNameOverflow(false);
                             setEditTaxVal(p => ({ ...p, tax_name: v }));
                           }} placeholder="Name" />
-                        <div className="w-[80px] flex-shrink-0 flex flex-col gap-1">
-                          <span className="text-xs text-slate-400 leading-none">Rate (%)</span>
-                          <div className="relative">
-                            <input className={`${mInput} pr-6 w-full`} value={editTaxVal.tax_rate} onKeyDown={createTaxRateKeyDownHandler(editTaxVal.tax_rate, showEditTaxRateLimitAlert)} onChange={e => {
+                        <div className="relative w-[80px] flex-shrink-0">
+                            <input className={`${mInput} pr-6 w-full placeholder:text-slate-400`} value={editTaxVal.tax_rate} onKeyDown={createTaxRateKeyDownHandler(editTaxVal.tax_rate, showEditTaxRateLimitAlert)} onChange={e => {
                               const parsed = parseTaxRateInput(e.target.value);
                               if (parsed.rejected) { showEditTaxRateLimitAlert(parsed.message); return; }
                               setEditTaxVal(p => ({ ...p, tax_rate: parsed.value }));
-                            }} placeholder="" />
+                            }} placeholder="Rate (%)" />
                             <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">%</span>
-                          </div>
                         </div>
                       </div>
                       {editTaxNameOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NAME_MAX} exceeded</p>}
@@ -2578,12 +2572,10 @@ const isBlockedTaxRateInput = (val) => {
                   setAddTaxNameOverflow(false);
                   setAddTaxVal(p => ({ ...p, tax_name: v }));
                 }} />
-              <div className="w-[72px] flex-shrink-0 flex flex-col gap-1">
-                <span className="text-xs text-slate-400 leading-none">Rate (%)</span>
-                <div className="relative">
+              <div className="relative w-[72px] flex-shrink-0">
                   <input
-                    className={`${taxRateInput}${showAddTaxRateSuffix ? " pr-6" : ""}`}
-                    placeholder=""
+                    className={`${taxRateInput}${showAddTaxRateSuffix ? " pr-6" : ""} placeholder:text-slate-400`}
+                    placeholder="Rate (%)"
                     value={addTaxVal.tax_rate}
                     onKeyDown={createTaxRateKeyDownHandler(addTaxVal.tax_rate, showAddTaxRateLimitAlert)}
                     onFocus={() => setAddTaxRateFocused(true)}
@@ -2597,7 +2589,6 @@ const isBlockedTaxRateInput = (val) => {
                   {showAddTaxRateSuffix && (
                     <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">%</span>
                   )}
-                </div>
               </div>
             </div>
             {addTaxNameOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NAME_MAX} exceeded</p>}
@@ -2738,11 +2729,9 @@ const isBlockedTaxRateInput = (val) => {
                               setEditTaxNameOverflow(false);
                               setEditTaxVal(p => ({ ...p, tax_name: v }));
                             }} placeholder="Tax Name (e.g. GST)" />
-                          <div className="w-[72px] flex-shrink-0 flex flex-col gap-1">
-                            <span className="text-xs text-slate-400 leading-none">Rate (%)</span>
-                            <div className="relative">
+                          <div className="relative w-[72px] flex-shrink-0">
                               <input
-                                className={`${taxRateInput}${showEditTaxRateSuffix ? " pr-6" : ""}`}
+                                className={`${taxRateInput}${showEditTaxRateSuffix ? " pr-6" : ""} placeholder:text-slate-400`}
                                 value={editTaxVal.tax_rate}
                                 onKeyDown={createTaxRateKeyDownHandler(editTaxVal.tax_rate, showEditTaxRateLimitAlert)}
                                 onFocus={() => setEditTaxRateFocused(true)}
@@ -2752,12 +2741,11 @@ const isBlockedTaxRateInput = (val) => {
                                   if (parsed.rejected) { showEditTaxRateLimitAlert(parsed.message); return; }
                                   setEditTaxVal(p => ({ ...p, tax_rate: parsed.value }));
                                 }}
-                                placeholder=""
+                                placeholder="Rate (%)"
                               />
                               {showEditTaxRateSuffix && (
                                 <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">%</span>
                               )}
-                            </div>
                           </div>
                         </div>
                         {editTaxNameOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NAME_MAX} exceeded</p>}
