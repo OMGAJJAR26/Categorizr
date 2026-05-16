@@ -2098,8 +2098,10 @@ setMerchantsWithImages(
 
   // ── Hide / unhide receipt-derived items (non-destructive — items reappear from receipts but stay out of dropdowns) ──
   const hideMerchant = useCallback((name) => {
+    const trimmed = (name || "").toString().trim();
+    if (!trimmed) return;
     setHiddenMerchants((prev) => {
-      const next = new Set([...prev, name]);
+      const next = new Set([...prev, trimmed]);
       localStorage.setItem("cat_hidden_merchants", JSON.stringify([...next]));
       return next;
     });
@@ -2140,6 +2142,45 @@ setMerchantsWithImages(
     });
   }, []);
 
+  const normalizeHiddenKey = (value) =>
+    String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+
+  const isMerchantHidden = useCallback(
+    (name) => {
+      const key = normalizeHiddenKey(name);
+      if (!key) return false;
+      for (const hidden of hiddenMerchants) {
+        if (normalizeHiddenKey(hidden) === key) return true;
+      }
+      return false;
+    },
+    [hiddenMerchants]
+  );
+
+  const isCategoryHidden = useCallback(
+    (name) => {
+      const key = normalizeHiddenKey(name);
+      if (!key) return false;
+      for (const hidden of hiddenCategories) {
+        if (normalizeHiddenKey(hidden) === key) return true;
+      }
+      return false;
+    },
+    [hiddenCategories]
+  );
+
+  const isPaymentMethodHidden = useCallback(
+    (name) => {
+      const key = normalizeHiddenKey(name);
+      if (!key) return false;
+      for (const hidden of hiddenPaymentMethods) {
+        if (normalizeHiddenKey(hidden) === key) return true;
+      }
+      return false;
+    },
+    [hiddenPaymentMethods]
+  );
+
   // ─── Compute merged + filtered arrays for dropdown consumers ───────────────
   // Raw receipt-derived arrays (before any hidden filtering — exposed for the management modal)
   const receiptMerchantsRaw   = merchants;           // string[]
@@ -2154,11 +2195,11 @@ setMerchantsWithImages(
     ...customMerchants.map((m) => (m || "").toLowerCase()),
   ]);
   const mergedMerchants = [
-    ...receiptMerchantsRaw.filter((m) => !hiddenMerchants.has(m)),
-    ...customMerchants.filter((m) => !hiddenMerchants.has(m) && !_rmLower.has(m.toLowerCase())),
+    ...receiptMerchantsRaw.filter((m) => !isMerchantHidden(m)),
+    ...customMerchants.filter((m) => !isMerchantHidden(m) && !_rmLower.has(m.toLowerCase())),
     ...DEFAULT_MERCHANTS_WITH_LOGOS
       .map((m) => m.name)
-      .filter((m) => m && !hiddenMerchants.has(m) && !_rmCustomLower.has((m || "").toLowerCase())),
+      .filter((m) => m && !isMerchantHidden(m) && !_rmCustomLower.has((m || "").toLowerCase())),
   ].sort((a, b) =>
     (a || "").toString().toLowerCase().localeCompare((b || "").toString().toLowerCase())
   );
@@ -2168,36 +2209,36 @@ setMerchantsWithImages(
     ...customMerchants.map((m) => (m || "").toLowerCase()),
   ]);
   const mergedMerchantsWithImages = [
-    ...receiptMerchWImgRaw.filter((m) => !hiddenMerchants.has(m.name)),
+    ...receiptMerchWImgRaw.filter((m) => !isMerchantHidden(m.name)),
     ...customMerchants
-      .filter((m) => !hiddenMerchants.has(m) && !_miLower.has(m.toLowerCase()))
+      .filter((m) => !isMerchantHidden(m) && !_miLower.has(m.toLowerCase()))
       .map((m) => ({ name: m, image: "" })),
     // API merchants not already present from receipts or custom list
     ...apiMerchants
-      .filter((m) => m.store_name && !hiddenMerchants.has(m.store_name) && !_miCustomLower.has((m.store_name || "").toLowerCase()))
+      .filter((m) => m.store_name && !isMerchantHidden(m.store_name) && !_miCustomLower.has((m.store_name || "").toLowerCase()))
       .map((m) => ({ name: m.store_name, image: m.store_image_url || "" })),
     ...DEFAULT_MERCHANTS_WITH_LOGOS.filter(
       (m) =>
         m.name &&
-        !hiddenMerchants.has(m.name) &&
+        !isMerchantHidden(m.name) &&
         !_miCustomLower.has((m.name || "").toLowerCase())
     ),
   ].sort((a, b) =>
     (a?.name || "").toString().toLowerCase().localeCompare((b?.name || "").toString().toLowerCase())
   );
   const visibleReceiptCategories = receiptCategoriesRaw.filter(
-    (c) => c && !hiddenCategories.has(c)
+    (c) => c && !isCategoryHidden(c)
   );
   const visibleCustomCategories = customCategories.filter(
-    (c) => c && !hiddenCategories.has(c)
+    (c) => c && !isCategoryHidden(c)
   );
   const visibleApiExpenseCategories = apiExpenseCategories.filter(
-    (c) => c?.expense_category_name && !hiddenCategories.has(c.expense_category_name)
+    (c) => c?.expense_category_name && !isCategoryHidden(c.expense_category_name)
   );
   const visibleAdminDefaults = adminDefaultExpenseCategories.filter(
     (c) => {
       const n = (c || "").toString().trim();
-      return n && !hiddenCategories.has(n);
+      return n && !isCategoryHidden(n);
     }
   );
   const mergedExpenseCategories = buildExpenseCategoryOptions({
@@ -2215,16 +2256,16 @@ setMerchantsWithImages(
     ...customPaymentMethods.map((p) => (p || "").toLowerCase()),
   ]);
   const mergedPaymentMethods = [
-    ...receiptPaymentsRaw.filter((p) => !hiddenPaymentMethods.has(p)),
-    ...customPaymentMethods.filter((p) => !hiddenPaymentMethods.has(p) && !_rpLower.has(p.toLowerCase())),
+    ...receiptPaymentsRaw.filter((p) => !isPaymentMethodHidden(p)),
+    ...customPaymentMethods.filter((p) => !isPaymentMethodHidden(p) && !_rpLower.has(p.toLowerCase())),
     // API payment methods not already present from receipts or custom list
     ...apiPaymentMethods
-      .filter((m) => m.card_number && !hiddenPaymentMethods.has(m.card_number) && !_rpCustomLower.has((m.card_number || "").toLowerCase()))
+      .filter((m) => m.card_number && !isPaymentMethodHidden(m.card_number) && !_rpCustomLower.has((m.card_number || "").toLowerCase()))
       .map((m) => m.card_number),
     ...DEFAULT_PAYMENT_METHODS.filter(
       (m) =>
         m &&
-        !hiddenPaymentMethods.has(m) &&
+        !isPaymentMethodHidden(m) &&
         !_rpCustomLower.has((m || "").toLowerCase())
     ),
   ];
@@ -2322,12 +2363,15 @@ setMerchantsWithImages(
         hiddenMerchants,
         hideMerchant,
         unhideMerchant,
+        isMerchantHidden,
         hiddenCategories,
         hideCategory,
         unhideCategory,
+        isCategoryHidden,
         hiddenPaymentMethods,
         hidePaymentMethod,
         unhidePaymentMethod,
+        isPaymentMethodHidden,
       }}
     >
       {children}

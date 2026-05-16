@@ -275,7 +275,19 @@ const ReceiptDetail = ({
     deleteTax,
     fetchTaxes,
     addExpenseCategory,
+    addCustomCategory,
+    editCustomCategory,
+    deleteCustomCategory,
+    hideCategory,
+    addCustomMerchant,
+    editCustomMerchant,
+    deleteCustomMerchant,
+    hideMerchant,
+    addApiMerchant,
+    saveMerchLogo,
     apiMerchants,
+    fetchApiMerchants,
+    updateApiMerchant,
     deleteApiMerchant,
     apiExpenseCategories,
     fetchApiExpenseCategories,
@@ -2101,6 +2113,28 @@ useEffect(() => {
             : m
         )
       );
+      const apiMatch = (apiMerchants || []).find(
+        (m) => normalizeMatchKey(m.store_name) === normalizeMatchKey(oldName)
+      );
+      if (apiMatch?.id) {
+        const updateMerchantResult = await updateApiMerchant(apiMatch.id, newName, newLogo);
+        if (!updateMerchantResult?.ok) {
+          throw new Error(updateMerchantResult?.error || "Failed to update merchant");
+        }
+      } else {
+        const addMerchantResult = await addApiMerchant(newName, newLogo);
+        if (!addMerchantResult?.ok) {
+          throw new Error(addMerchantResult?.error || "Failed to update merchant");
+        }
+      }
+      if (normalizeMatchKey(newName) !== normalizeMatchKey(oldName)) {
+        hideMerchant(oldName);
+        deleteCustomMerchant(oldName);
+        addCustomMerchant(newName);
+      } else {
+        editCustomMerchant(oldName, newName);
+      }
+      if (newLogo) saveMerchLogo(newName, newLogo);
       // Update the currently viewed receipt's store fields if affected
       if ((editedReceipt.storeName || "").toLowerCase() === oldName.toLowerCase()) {
         handleFieldChange("storeName", newName);
@@ -2108,7 +2142,7 @@ useEffect(() => {
       }
       setShowEditMerchantModal(false);
       setEditingMerchant(null);
-      await refreshData();
+      await Promise.all([fetchApiMerchants(), silentRefreshData(0)]);
       setToast({ isVisible: true, message: "Merchant updated successfully!", type: "success" });
     } catch (err) {
       setEditMerchantError(err.message || "Failed to update merchant.");
@@ -2145,7 +2179,8 @@ useEffect(() => {
         handleFieldChange("storeName", "Miscellaneous");
         handleFieldChange("store_image", "");
       }
-      await refreshData();
+      hideMerchant(merchant.name);
+      await Promise.all([fetchApiMerchants(), silentRefreshData(0)]);
       setToast({ isVisible: true, message: "Merchant deleted successfully!", type: "success" });
     } catch (err) {
       setToast({ isVisible: true, message: err.message || "Failed to delete merchant.", type: "error" });
@@ -2347,15 +2382,20 @@ useEffect(() => {
       if (apiMatch?.id) {
         const updateResult = await updateApiExpenseCategory(String(apiMatch.id), newName);
         if (!updateResult?.ok) throw new Error(updateResult?.error || "Failed to update category");
+        deleteCustomCategory(oldName);
       } else {
-        addExpenseCategory(newName);
+        hideCategory(oldName);
+        addCustomCategory(newName);
+      }
+      if (normalizeMatchKey(oldName) !== normalizeMatchKey(newName)) {
+        editCustomCategory(oldName, newName);
       }
       if ((editedReceipt.expense_type || "").toLowerCase() === oldName.toLowerCase()) {
         handleFieldChange("expense_type", newName);
       }
       setShowEditCategoryModal(false);
       setEditingCategory(null);
-      await refreshData();
+      await Promise.all([fetchApiExpenseCategories(), silentRefreshData(0)]);
       setToast({ isVisible: true, message: "Expense Category Updated", type: "success" });
     } catch (err) {
       setEditCategoryError(err.message || "Failed to update category.");
@@ -2386,9 +2426,10 @@ useEffect(() => {
           throw new Error(deleteCategoryResult?.error || "Failed to delete category");
         }
       }
+      hideCategory(deletingCategory);
       setShowDeleteCategoryConfirm(false);
       setDeletingCategory(null);
-      await refreshData();
+      await Promise.all([fetchApiExpenseCategories(), silentRefreshData(0)]);
       setToast({ isVisible: true, message: "Expense category deleted successfully!", type: "success" });
     } catch (err) {
       setToast({ isVisible: true, message: err.message || "Failed to delete category.", type: "error" });

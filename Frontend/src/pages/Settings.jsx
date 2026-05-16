@@ -189,7 +189,7 @@ const COLOR_MAP = {
 
 const ManageModal = ({ type, onClose }) => {
   const {
-    receiptMerchWImgRaw, customMerchants, hideMerchant, addCustomMerchant, editCustomMerchant, deleteCustomMerchant,
+    receiptMerchWImgRaw, customMerchants, hideMerchant, isMerchantHidden, addCustomMerchant, editCustomMerchant, deleteCustomMerchant,
     receiptCategoriesRaw, customCategories, hideCategory, addCustomCategory, editCustomCategory, deleteCustomCategory,
     receiptPaymentsRaw, customPaymentMethods, hidePaymentMethod, addCustomPaymentMethod, editCustomPaymentMethod, deleteCustomPaymentMethod,
     taxData, addTax, updateTax, deleteTax, fetchTaxes,
@@ -491,7 +491,7 @@ const ManageModal = ({ type, onClose }) => {
   };
 
   const buildReceiptItems = () => {
-    if (type === "merchants")  return receiptMerchWImgRaw.filter(m => !hiddenMerchants.has(m.name)).map(m => ({ key: m.name, name: m.name, logo: m.image || null }));
+    if (type === "merchants")  return receiptMerchWImgRaw.filter(m => !isMerchantHidden(m.name)).map(m => ({ key: m.name, name: m.name, logo: m.image || null }));
     if (type === "categories") return receiptCategoriesRaw.filter(c => !hiddenCategories.has(c)).map(c => ({ key: c, name: c, logo: null }));
     if (type === "payments")   return receiptPaymentsRaw.filter(p => !hiddenPaymentMethods.has(p)).map(p => ({ key: p, name: p, logo: getPaymentLogo(p) }));
     return [];
@@ -499,7 +499,7 @@ const ManageModal = ({ type, onClose }) => {
   const buildCustomItems = () => {
     if (type === "merchants") {
       const customItems = customMerchants
-        .filter(m => !hiddenMerchants.has(m))
+        .filter(m => !isMerchantHidden(m))
         .map(m => ({ key: m, name: m, logo: null }));
       const existingNames = new Set([
         ...receiptMerchWImgRaw.map((m) => normalizeMatchKey(m?.name)),
@@ -1316,7 +1316,7 @@ const LogoGrid = ({ options, selectedIndex, onSelect }) => {
 const ReceiptInfoInline = ({ type }) => {
   const {
     receipts, updateReceipt,
-    receiptMerchWImgRaw, customMerchants, hiddenMerchants, hideMerchant, addCustomMerchant, editCustomMerchant, deleteCustomMerchant,
+    receiptMerchWImgRaw, customMerchants, hiddenMerchants, hideMerchant, isMerchantHidden, addCustomMerchant, editCustomMerchant, deleteCustomMerchant,
     receiptCategoriesRaw, customCategories, hideCategory, addCustomCategory, editCustomCategory, deleteCustomCategory,
     receiptPaymentsRaw, customPaymentMethods, hiddenPaymentMethods, hidePaymentMethod, unhidePaymentMethod, addCustomPaymentMethod, editCustomPaymentMethod, deleteCustomPaymentMethod,
     taxData, addTax, updateTax, deleteTax, fetchTaxes,
@@ -1979,9 +1979,24 @@ const isBlockedTaxRateInput = (val) => {
           await addApiMerchant(newName, keepLogo || "");
         }
         if (normalizeMatchKey(newName) !== normalizeMatchKey(item.name)) {
-          hideMerchant(item.key); 
+          hideMerchant(item.key);
           addCustomMerchant(newName);
         }
+      } else if (item.isDefaultItem) {
+        if (normalizeMatchKey(newName) !== normalizeMatchKey(item.name)) {
+          hideMerchant(item.name);
+          addCustomMerchant(newName);
+        }
+        const apiMatch = (apiMerchants || []).find(
+          (m) => normalizeMatchKey(m?.store_name) === normalizeMatchKey(item.name)
+        );
+        if (apiMatch) {
+          const updateMerchantResult = await updateApiMerchant(apiMatch.id, newName, keepLogo || apiMatch.store_image_url || "");
+          if (!updateMerchantResult?.ok) throw new Error(updateMerchantResult?.error || "Failed to update merchant");
+        } else {
+          await addApiMerchant(newName, keepLogo || "");
+        }
+        if (keepLogo) saveMerchLogo(newName, keepLogo);
       } else if (item.isApiItem) {
         const updateMerchantResult = await updateApiMerchant(item.apiId, newName, keepLogo || "");
         if (!updateMerchantResult?.ok) throw new Error(updateMerchantResult?.error || "Failed to update merchant");
@@ -2419,7 +2434,7 @@ const isBlockedTaxRateInput = (val) => {
   const buildAllItems = () => {
     if (type === "merchants") {
       const rItems = receiptMerchWImgRaw
-        .filter(m => !hiddenMerchants.has(m.name))
+        .filter(m => !isMerchantHidden(m.name))
         .map(m => ({
           key: m.name, name: m.name,
           logo: merchLogos[m.name] || m.image || null,
@@ -2428,12 +2443,12 @@ const isBlockedTaxRateInput = (val) => {
         }));
       const rKeys = new Set(rItems.map(m => m.name.toLowerCase()));
       const cItems = customMerchants
-        .filter(m => !rKeys.has(m.toLowerCase()) && !hiddenMerchants.has(m))
+        .filter(m => !rKeys.has(m.toLowerCase()) && !isMerchantHidden(m))
         .map(m => ({ key: m, name: m, logo: merchLogos[m] || null, isReceiptItem: false, isApiItem: false }));
       // API merchants (server-stored, shown below receipt-derived and custom)
       const allExistingKeys = new Set([...rItems.map(m => m.name.toLowerCase()), ...cItems.map(m => m.name.toLowerCase())]);
       const apiItems = (apiMerchants || [])
-        .filter(m => m.store_name && !allExistingKeys.has((m.store_name || "").toLowerCase()) && !hiddenMerchants.has(m.store_name))
+        .filter(m => m.store_name && !allExistingKeys.has((m.store_name || "").toLowerCase()) && !isMerchantHidden(m.store_name))
         .map(m => ({
           key: `api_${m.id}`,
           name: m.store_name,
@@ -2445,7 +2460,7 @@ const isBlockedTaxRateInput = (val) => {
       const allWithApi = [...rItems, ...cItems, ...apiItems];
       const existingAfterApi = new Set(allWithApi.map((m) => (m.name || "").toLowerCase()));
       const defaultItems = SETTINGS_DEFAULT_MERCHANTS_WITH_LOGOS
-        .filter((m) => m.name && !existingAfterApi.has((m.name || "").toLowerCase()))
+        .filter((m) => m.name && !existingAfterApi.has((m.name || "").toLowerCase()) && !isMerchantHidden(m.name))
         .map((m) => ({
           key: `default_${m.name}`,
           name: m.name,

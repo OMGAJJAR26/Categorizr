@@ -91,16 +91,26 @@ const AddReceiptModal = ({ onClose, onReceiptAdded, initialData = null, onDuplic
     taxData,
     merchantsWithImages,
     refreshData,
+    silentRefreshData,
     addTax,
     updateTax,
     deleteTax,
     fetchTaxes,
-    addExpenseCategory,
     updateReceipt,
+    addExpenseCategory,
     addCustomMerchant,
+    editCustomMerchant,
+    deleteCustomMerchant,
+    addCustomCategory,
+    editCustomCategory,
+    deleteCustomCategory,
     addApiMerchant,
     saveMerchLogo,
+    hideMerchant,
+    hideCategory,
     apiMerchants,
+    fetchApiMerchants,
+    updateApiMerchant,
     deleteApiMerchant,
     apiExpenseCategories,
     fetchApiExpenseCategories,
@@ -1915,15 +1925,20 @@ const handleFieldChange = (field, value) => {
       if (apiMatch?.id) {
         const updateResult = await updateApiExpenseCategory(String(apiMatch.id), newName);
         if (!updateResult?.ok) throw new Error(updateResult?.error || "Failed to update category");
+        deleteCustomCategory(oldName);
       } else {
-        addExpenseCategory(newName);
+        hideCategory(oldName);
+        addCustomCategory(newName);
+      }
+      if (normalizeMatchKey(oldName) !== normalizeMatchKey(newName)) {
+        editCustomCategory(oldName, newName);
       }
       if ((formData.expense_type || "").toLowerCase() === oldName.toLowerCase()) {
         handleFieldChange("expense_type", newName);
       }
       setShowEditCategoryModal(false);
       setEditingCategory(null);
-      await refreshData();
+      await Promise.all([fetchApiExpenseCategories(), silentRefreshData(0)]);
       setToast({ isVisible: true, message: "Expense Category Updated", type: "success" });
     } catch (err) {
       setEditCategoryError(err.message || "Failed to update category.");
@@ -1954,9 +1969,10 @@ const handleFieldChange = (field, value) => {
           throw new Error(deleteCategoryResult?.error || "Failed to delete category");
         }
       }
+      hideCategory(deletingCategory);
       setShowDeleteCategoryConfirm(false);
       setDeletingCategory(null);
-      await refreshData();
+      await Promise.all([fetchApiExpenseCategories(), silentRefreshData(0)]);
       setToast({ isVisible: true, message: "Expense category deleted successfully!", type: "success" });
     } catch (err) {
       setToast({ isVisible: true, message: err.message || "Failed to delete category.", type: "error" });
@@ -3071,15 +3087,38 @@ const handleFieldChange = (field, value) => {
             : m
         )
       );
+      const apiMatch = (apiMerchants || []).find(
+        (m) => normalizeMatchKey(m.store_name) === normalizeMatchKey(oldName)
+      );
+      if (apiMatch?.id) {
+        const updateMerchantResult = await updateApiMerchant(apiMatch.id, newName, newLogo);
+        if (!updateMerchantResult?.ok) {
+          throw new Error(updateMerchantResult?.error || "Failed to update merchant");
+        }
+      } else {
+        const addMerchantResult = await addApiMerchant(newName, newLogo);
+        if (!addMerchantResult?.ok) {
+          throw new Error(addMerchantResult?.error || "Failed to update merchant");
+        }
+      }
+      if (normalizeMatchKey(newName) !== normalizeMatchKey(oldName)) {
+        hideMerchant(oldName);
+        deleteCustomMerchant(oldName);
+        addCustomMerchant(newName);
+      } else {
+        editCustomMerchant(oldName, newName);
+      }
       if (newLogo) saveMerchLogo(newName, newLogo);
       // If the form currently has this merchant selected, update it too
       if ((formData.storeName || "").toLowerCase() === oldName.toLowerCase()) {
         handleFieldChange("storeName", newName);
+        handleFieldChange("store_image", newLogo || "");
         setDetectedMerchantLogo(newLogo || null);
       }
       setShowEditMerchantModal(false);
       setEditingMerchant(null);
-      await refreshData();
+      await Promise.all([fetchApiMerchants(), silentRefreshData(0)]);
+      setToast({ isVisible: true, message: "Merchant Updated", type: "success" });
     } catch (err) {
       setEditMerchantError(err.message || "Failed to update merchant.");
     } finally {
@@ -3115,9 +3154,11 @@ const handleFieldChange = (field, value) => {
         handleFieldChange("storeName", "");
         setDetectedMerchantLogo(null);
       }
-      await refreshData();
+      hideMerchant(merchant.name);
+      await Promise.all([fetchApiMerchants(), silentRefreshData(0)]);
+      setToast({ isVisible: true, message: "Merchant Deleted", type: "success" });
     } catch (err) {
-      setError(err.message || "Failed to delete merchant.");
+      setToast({ isVisible: true, message: err.message || "Failed to delete merchant.", type: "error" });
     } finally {
       setIsSavingEditMerchant(false);
     }
