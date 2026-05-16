@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
 import { useData } from "../../context/DataContext";
+import { getPaymentDisplayFromReceipt } from "../../hooks/usePaymentDisplay";
 
 // ✅ Import all payment logos
 const Visa              = "/payment-logos/Visa.png";
@@ -14,7 +15,7 @@ const Creditdebitcardicon = "/payment-logos/Creditdebitcardicon.jpg";
 
 // ✅ Final version
 const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
-  const { receipts, paymentMethods } = useData();
+  const { receipts } = useData();
   const [selectedPaymentMethods, setSelectedPaymentMethods] =
     useState(initialSelected);
 
@@ -217,7 +218,7 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
     // Build methodsData with label, logo, and detailed receipt info
     const methodsData = selectedPaymentMethods.map((method) => {
       const matchingReceipt = receipts.find((r) => {
-        const displayName = getPaymentDisplayName(r);
+        const displayName = getPaymentDisplayFromReceipt(r);
         return normalizeLabel(displayName) === method;
       });
       
@@ -269,42 +270,6 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
     localStorage.removeItem("selectedPaymentMethods");
   };
 
-  // ✅ Format display name
-  const getPaymentDisplayName = useCallback((r) => {
-    let issuer = r?.card_issuer_name?.toString?.().trim?.() || null;
-    let type = r?.paymentType?.toString?.().trim?.() || null;
-    const last4Digit = r?.last_4_digit_card?.toString?.().trim?.() || null;
-
-    if (!issuer && !type) return "-";
-    if (type?.toLowerCase().includes("cash")) return "Cash";
-
-    // PRIORITY: Check last_4_digit_card field first (API stores it separately)
-    let last4 = "";
-    if (last4Digit && last4Digit !== "0" && /^\d{3,4}$/.test(last4Digit)) {
-      last4 = last4Digit;
-    } else if (type && type.includes("*")) {
-      // Fallback: Extract from paymentType if last_4_digit_card not available
-      const parts = type.split("*");
-      const tail = parts[parts.length - 1];
-      last4 = tail?.replace(/\D/g, "").slice(-4) || tail || "";
-    }
-
-    // PRIORITY 1: Always use card_issuer_name if available
-    if (issuer && issuer !== "0") {
-      // Guard: iOS may store "Mastercard *7836" in issuer AND "7836" in last_4_digit_card.
-      // Only append *last4 if the issuer doesn't already contain it.
-      const alreadyHasLast4 = last4 && issuer.includes(`*${last4}`);
-      return `${issuer}${last4 && !alreadyHasLast4 ? ` *${last4}` : ""}`;
-    }
-    
-    // PRIORITY 2: Use paymentType if no issuer
-    if (type) {
-      return last4 ? `*${last4}` : type;
-    }
-
-    return "-";
-  }, []);
-
   // ✅ Normalize label
   const normalizeLabel = (method) => {
     const m = (method || "").toString();
@@ -313,25 +278,24 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
     return method;
   };
 
-  // ✅ Extract unique payment methods from receipts
+  // Unique payment methods from receipts only (avoids stale global paymentMethods entries)
   const uniqueMethods = useMemo(() => {
-    const set = new Set();
+    const byKey = new Map();
     (receipts || []).forEach((r) => {
-      const title = getPaymentDisplayName(r);
-      if (title && title !== "-") {
-        set.add(normalizeLabel(title));
+      const title = getPaymentDisplayFromReceipt(r);
+      if (!title || title === "-") return;
+      const label = normalizeLabel(title);
+      const last4 = (r?.last_4_digit_card || "").toString().replace(/\D/g, "").slice(-4);
+      const isBareLast4 = /^\*\d{3,4}$/.test(label);
+      const existing = byKey.get(last4 || label);
+      if (!existing || (existing.isBare && !isBareLast4)) {
+        byKey.set(last4 || label, { label, isBare: isBareLast4 });
       }
     });
-    (paymentMethods || []).forEach((method) => {
-      const normalized = normalizeLabel((method || "").toString().trim());
-      if (normalized && normalized !== "-") {
-        set.add(normalized);
-      }
-    });
-    const arr = Array.from(set);
-    arr.sort((a, b) => a.localeCompare(b));
-    return arr;
-  }, [receipts, paymentMethods, getPaymentDisplayName]);
+    return Array.from(byKey.values())
+      .map((v) => v.label)
+      .sort((a, b) => a.localeCompare(b));
+  }, [receipts]);
 
   // ✅ Select all
   const handleSelectAll = () => {
@@ -346,44 +310,18 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
         <div className="max-h-48 overflow-y-auto">
           {uniqueMethods.map((paymentMethod) => {
             // Find the first receipt with this payment method to get its logo and details
-            const matchingReceipt = receipts.find(r => {
-              const displayName = getPaymentDisplayName(r);
+            const matchingReceipt = receipts.find((r) => {
+              const displayName = getPaymentDisplayFromReceipt(r);
               return normalizeLabel(displayName) === paymentMethod;
             });
-            
-            // Extract issuer name and last4 from payment method string or receipt
-            let issuerName = "";
-            let last4 = "";
-            
-            if (matchingReceipt) {
-              // Use receipt data if available
-              issuerName = matchingReceipt.card_issuer_name || "";
-              last4 = matchingReceipt.last_4_digit_card || "";
-              
-              // If issuer name not in receipt, extract from paymentType
-              if (!issuerName && matchingReceipt.paymentType) {
-                const parts = matchingReceipt.paymentType.split("*");
-                issuerName = parts[0]?.trim() || "";
-                if (parts[1]) {
-                  last4 = parts[1]?.trim().replace(/\D/g, "").slice(-4) || "";
-                }
-              }
-            } else {
-              // Extract from payment method string (format: "Issuer Name *1234")
-              const parts = paymentMethod.split("*");
-              issuerName = parts[0]?.trim() || "";
-              if (parts[1]) {
-                last4 = parts[1]?.trim().replace(/\D/g, "").slice(-4) || "";
-              }
-            }
-            
-            // Get logo - use receipt if available, otherwise use payment method string
-            const logo = getPaymentLogo(paymentMethod) || (matchingReceipt ? getPaymentLogo(matchingReceipt) : getPaymentLogo(paymentMethod));
-            
-            // Format display: issuer name *last4 (or just issuer name if no last4)
-            const displayText = issuerName 
-              ? (last4 ? `${issuerName} *${last4}` : issuerName)
-              : paymentMethod; // Fallback to original if no issuer name
+
+            const displayText = matchingReceipt
+              ? getPaymentDisplayFromReceipt(matchingReceipt)
+              : paymentMethod;
+
+            const logo = matchingReceipt
+              ? getPaymentLogo(matchingReceipt)
+              : getPaymentLogo(paymentMethod);
             
             return (
               <label

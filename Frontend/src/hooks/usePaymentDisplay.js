@@ -1,5 +1,9 @@
 import { useCallback } from "react";
-import { inferCardTypeFromPayment, isCustomCardIssuer } from "../utils/paymentMethodUtils";
+import {
+  inferCardTypeFromPayment,
+  isCustomCardIssuer,
+  parsePaymentDisplay,
+} from "../utils/paymentMethodUtils";
 const Visa              = "/payment-logos/Visa.png";
 const MasterCard        = "/payment-logos/MasterCard.png";
 const PayPal            = "/payment-logos/PayPal.png";
@@ -56,69 +60,58 @@ export function getPaymentDisplayFromReceipt(receipt) {
     receipt?.card_issuer_name ||
     receipt?.cardIssuerName ||
     ""
-  )?.toString?.().trim?.() || null;
-  const type = receipt?.paymentType?.toString?.().trim?.() || null;
+  )
+    ?.toString?.()
+    .trim?.() || "";
+  const type = (receipt?.paymentType || receipt?.payment_type || "")
+    ?.toString?.()
+    .trim?.() || "";
+  const selectedType = (
+    receipt?.selected_card_type ||
+    receipt?.selectedCardType ||
+    ""
+  )
+    ?.toString?.()
+    .trim?.() || "";
 
-  if (!issuer && !type) return "-";
+  if (!issuer && !type && !selectedType) return "-";
 
-  if (type?.toLowerCase().includes("cash")) return "Cash";
-  if (issuer?.toLowerCase() === "cash") return "Cash";
+  const cashHint = `${issuer} ${type} ${selectedType}`.toLowerCase();
+  if (cashHint.includes("cash")) return "Cash";
 
   let last4 = "";
   const last4Raw = (
     receipt?.last_4_digit_card ||
     receipt?.last4DigitCard ||
     ""
-  )?.toString?.().trim?.() || "";
+  )
+    ?.toString?.()
+    .trim?.() || "";
   if (last4Raw && last4Raw !== "0" && /^\d{3,4}$/.test(last4Raw)) {
     last4 = last4Raw;
+  } else if (type.includes("*")) {
+    last4 = parsePaymentDisplay(type).last4;
   }
 
-  if (!last4 && type && type.includes("*")) {
-    const parts = type.split("*");
-    const tail = parts[parts.length - 1];
-    const digits = tail?.replace(/\D/g, "") || "";
-    if (digits.length >= 3) {
-      last4 = digits.slice(-4);
-    }
-  }
+  const typeBase = (type || selectedType).replace(/\s*\*\d{3,4}$/, "").trim();
+  const brand =
+    typeBase ||
+    inferCardTypeFromPayment(issuer || type || selectedType);
 
-  if (issuer && issuer !== "0" && issuer.trim() !== "") {
+  if (issuer && issuer !== "0") {
     const cleanIssuer = issuer.replace(/\s*\*\d{3,4}/g, "").trim();
-    const brand =
-      (type || "").replace(/\s*\*\d{3,4}$/, "").trim() ||
-      inferCardTypeFromPayment(cleanIssuer);
-    if (isCustomCardIssuer(cleanIssuer, brand)) {
-      const alreadyHasLast4 = last4 && issuer.includes(`*${last4}`);
-      return `${issuer}${last4 && !alreadyHasLast4 ? ` *${last4}` : ""}`;
-    }
+    const displayBase = isCustomCardIssuer(cleanIssuer, brand)
+      ? cleanIssuer
+      : brand || cleanIssuer;
+    const alreadyHasLast4 = last4 && issuer.includes(`*${last4}`);
+    return `${displayBase}${last4 && !alreadyHasLast4 ? ` *${last4}` : ""}`;
   }
 
-  if ((!issuer || issuer === "0") && type && type !== "0" && type !== "0*0" && !/^0\*\d*$/.test(type)) {
-    const baseType = type.replace(/\s*\*\d{3,4}$/, "").trim();
-    const typeLower = baseType.toLowerCase();
-
-    let extractedIssuer = null;
-    if (typeLower.includes("visa")) extractedIssuer = "Visa";
-    else if (typeLower.includes("master")) extractedIssuer = "MasterCard";
-    else if (typeLower.includes("amex") || typeLower.includes("american express")) extractedIssuer = "American Express";
-    else if (typeLower.includes("discover")) extractedIssuer = "Discover";
-    else if (typeLower.includes("diners")) extractedIssuer = "Diners Club";
-    else if (typeLower.includes("paypal")) extractedIssuer = "PayPal";
-    else if (typeLower.includes("debit")) extractedIssuer = "Debit Card";
-    else if (baseType && baseType !== "0") {
-      extractedIssuer = baseType;
-    }
-
-    if (extractedIssuer) {
-      return `${extractedIssuer}${last4 ? ` *${last4}` : ""}`;
-    }
+  if (brand && brand !== "0" && !/^0\*\d*$/.test(brand)) {
+    return `${brand}${last4 ? ` *${last4}` : ""}`;
   }
 
-  if (last4) {
-    return `*${last4}`;
-  }
-
+  if (last4) return `*${last4}`;
   return "-";
 }
 
