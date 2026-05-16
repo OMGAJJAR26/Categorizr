@@ -68,6 +68,20 @@ export const formatTaxRate = (rate) => {
   return parseFloat(num.toFixed(3)).toString();
 };
 
+/** Stable key for merging tax lists (handles "18" vs "18.000" vs 18). */
+export const taxTypeDedupKey = (tax) => {
+  const name = (tax?.tax_name || "").toString().trim().toLowerCase();
+  if (!name || name.includes("tip")) return "";
+  return `${name}|${formatTaxRate(tax?.tax_rate)}`;
+};
+
+/** True when two tax rows refer to the same type (name + normalized rate). */
+export const taxTypesMatch = (a, b) => {
+  const keyA = taxTypeDedupKey(a);
+  const keyB = taxTypeDedupKey(b);
+  return keyA !== "" && keyA === keyB;
+};
+
 export const toTaxLabel = (tax) => {
   const name = tax?.tax_name?.toString().trim() || "Unknown";
   if (name.toLowerCase().startsWith("tip")) return "Tip";

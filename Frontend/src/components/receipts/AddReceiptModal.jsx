@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { formatTaxRate } from "../../utils/receiptFormatters";
+import { formatTaxRate, taxTypeDedupKey, taxTypesMatch } from "../../utils/receiptFormatters";
 import { containsEmoji, stripEmoji } from "../../utils/emojiUtils";
 import SimpleAlertModal from "../SimpleAlertModal";
 import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus, MoreHorizontal, Minus, ChevronLeft, ChevronRight, Pencil, Camera, PenLine, AlertCircle } from "lucide-react";
@@ -274,23 +274,29 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const allTaxTypes = useMemo(() => {
     const taxMap = new Map();
     const addToMap = (tax) => {
+      const key = taxTypeDedupKey(tax);
+      if (!key) return;
       const name = (tax.tax_name || "").toString().trim();
-      const rate = (tax.tax_rate || "").toString().trim();
-      if (name && rate && !name.toLowerCase().includes("tip")) {
-        const key = `${name}|${rate}`;
-        if (!taxMap.has(key)) {
-          taxMap.set(key, { tax_name: name, tax_rate: rate, tax_number: tax.tax_number || "", id: tax.id || 0, fk_user_id: tax.fk_user_id || 0 });
-        }
+      const rate = formatTaxRate(tax.tax_rate);
+      const entry = {
+        tax_name: name,
+        tax_rate: rate,
+        tax_number: tax.tax_number || "",
+        id: tax.id || 0,
+        fk_user_id: tax.fk_user_id || 0,
+      };
+      const existing = taxMap.get(key);
+      if (!existing || (!existing.id && entry.id)) {
+        taxMap.set(key, entry);
       }
     };
     // Primary source: taxData reflects server state
     if (Array.isArray(taxData)) taxData.forEach(addToMap);
-    // Secondary: localTaxTypes, but ONLY for names not in taxData
-    // (prevents stale/deleted entries from causing false "already exists")
-    const taxDataNames = new Set((taxData || []).map(t => (t.tax_name || "").trim().toLowerCase()));
+    // Secondary: session-only taxes not yet in taxData
+    const taxDataKeys = new Set((taxData || []).map(taxTypeDedupKey).filter(Boolean));
     if (Array.isArray(localTaxTypes)) {
       localTaxTypes
-        .filter(t => !taxDataNames.has((t.tax_name || "").trim().toLowerCase()))
+        .filter((t) => !taxDataKeys.has(taxTypeDedupKey(t)))
         .forEach(addToMap);
     }
     return Array.from(taxMap.values());
@@ -1195,7 +1201,7 @@ const handleFieldChange = (field, value) => {
     console.log("Current receipt tax values:", formData.receipt_tax_values);
 
     const exists = formData.receipt_tax_values.some(
-      (t) => t.tax_name === tax.tax_name && t.tax_rate === tax.tax_rate,
+      (t) => taxTypesMatch(t, tax),
     );
     console.log("Tax already exists:", exists);
 
@@ -1435,16 +1441,14 @@ const handleFieldChange = (field, value) => {
       console.log("Form reset, modal closed");
       console.log("=== handleAddTaxType SUCCESS ===");
 
-      // Persist this tax in the local session list so it survives any background refreshData() calls
-      setLocalTaxTypes((prev) => {
-        const exists = prev.some(
-          (t) => t.tax_name === newTax.tax_name && t.tax_rate === newTax.tax_rate,
-        );
-        return exists ? prev : [...prev, newTax];
-      });
+      // addTax already refreshed taxData — normalize rate for receipt selection
+      const normalizedTax = {
+        ...newTax,
+        tax_rate: formatTaxRate(newTax.tax_rate),
+      };
 
       // Add to receipt only if under per-receipt limit (no alert when saving from Manage Tax Types)
-      addTaxType(newTax, { silent: true });
+      addTaxType(normalizedTax, { silent: true });
     } catch (err) {
       console.error("=== handleAddTaxType ERROR ===");
       console.error("Error details:", err);
@@ -5670,8 +5674,8 @@ const handleSelectLogo = (index) => {
                             {[...allTaxTypes]
                               .map((tax) => ({
                                 ...tax,
-                                _selIdx: formData.receipt_tax_values.findIndex(
-                                  (t) => t.tax_name === tax.tax_name && t.tax_rate === tax.tax_rate
+                                _selIdx: formData.receipt_tax_values.findIndex((t) =>
+                                  taxTypesMatch(t, tax)
                                 ),
                               }))
                               .sort((a, b) => {

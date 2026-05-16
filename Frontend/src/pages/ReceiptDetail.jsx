@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { NODE_API_URL, proxyImageUrl, unproxyImageUrl } from "../api/Axios";
-import { formatTaxRate } from "../utils/receiptFormatters";
+import { formatTaxRate, taxTypeDedupKey, taxTypesMatch } from "../utils/receiptFormatters";
 import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine,} from "lucide-react";
 import ReceiptAnnotator from "../components/receipts/ReceiptAnnotator";
 import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationDialog";
@@ -211,7 +211,6 @@ const ReceiptDetail = ({
   const [isSavingTax, setIsSavingTax] = useState(false);
   const [editingTaxId, setEditingTaxId] = useState(null);
   const [isDeletingTax, setIsDeletingTax] = useState(false);
-  const [taxRefreshKey, setTaxRefreshKey] = useState(0);
   const [taxError, setTaxError] = useState(null);
   const [localTaxTypes, setLocalTaxTypes] = useState([]);
   const [showAddTaxForm, setShowAddTaxForm] = useState(false);
@@ -422,52 +421,40 @@ const ReceiptDetail = ({
       .sort((a, b) => a.localeCompare(b));
   }, [paymentMethods]);
 
-  // Get all tax types - merge taxData (API definitions) with receiptTaxValues, exclude Tip
+  // Get all tax types - merge taxData (API) with session-only localTaxTypes, exclude Tip
   const allTaxTypes = React.useMemo(() => {
-  const taxMap = new Map();
-
-  // Priority 1: Add taxes from taxData API (saved tax type definitions)
-  if (Array.isArray(taxData)) {
-    taxData.forEach((tax) => {
+    const taxMap = new Map();
+    const addToMap = (tax) => {
+      const key = taxTypeDedupKey(tax);
+      if (!key) return;
       const name = (tax.tax_name || "").toString().trim();
-      const rate = (tax.tax_rate || "").toString().trim();
-      if (name && rate && !name.toLowerCase().includes("tip")) {
-        const key = `${name}|${rate}`;
-        if (!taxMap.has(key)) {
-          taxMap.set(key, {
-            tax_name: name,
-            tax_rate: rate,
-            tax_number: tax.tax_number || "",
-            id: tax.id || 0,
-            fk_user_id: tax.fk_user_id || 0,
-            is_default_tax: tax.is_default_tax || 0,
-          });
-        }
+      const rate = formatTaxRate(tax.tax_rate);
+      const entry = {
+        tax_name: name,
+        tax_rate: rate,
+        tax_number: tax.tax_number || "",
+        id: tax.id || 0,
+        fk_user_id: tax.fk_user_id || 0,
+        is_default_tax: tax.is_default_tax || 0,
+      };
+      const existing = taxMap.get(key);
+      if (!existing || (!existing.id && entry.id)) {
+        taxMap.set(key, entry);
       }
-    });
-  }
+    };
 
-  // Also include any taxes added locally this session
-  localTaxTypes.forEach((tax) => {
-    const name = (tax.tax_name || "").toString().trim();
-    const rate = (tax.tax_rate || "").toString().trim();
-    if (name && rate && !name.toLowerCase().includes("tip")) {
-      const key = `${name}|${rate}`;
-      if (!taxMap.has(key)) {
-        taxMap.set(key, {
-          tax_name: name,
-          tax_rate: rate,
-          tax_number: tax.tax_number || "",
-          id: tax.id || 0,
-          fk_user_id: tax.fk_user_id || 0,
-          is_default_tax: tax.is_default_tax || 0,
-        });
-      }
+    if (Array.isArray(taxData)) taxData.forEach(addToMap);
+
+    // Session-only taxes not yet in taxData (e.g. optimistic before fetch completes)
+    const taxDataKeys = new Set((taxData || []).map(taxTypeDedupKey).filter(Boolean));
+    if (Array.isArray(localTaxTypes)) {
+      localTaxTypes
+        .filter((t) => !taxDataKeys.has(taxTypeDedupKey(t)))
+        .forEach(addToMap);
     }
-  });
 
-  return Array.from(taxMap.values());
-}, [taxData, taxRefreshKey, localTaxTypes]);
+    return Array.from(taxMap.values());
+  }, [taxData, localTaxTypes]);
 
   // IDs of taxes marked as default (is_default_tax === 1)
   // Also expose a helper to check by id or by is_default_tax on the allTaxTypes object itself
@@ -1516,9 +1503,7 @@ useEffect(() => {
       ) ||
       [];
 
-    const alreadyExists = currentTaxValues.some(
-      (t) => t.tax_name === tax.tax_name && t.tax_rate === tax.tax_rate
-    );
+    const alreadyExists = currentTaxValues.some((t) => taxTypesMatch(t, tax));
     if (alreadyExists) return;
     if (currentTaxValues.length >= MAX_RECEIPT_TAX_TYPES) {
       if (!silent) setAlertMsg(MAX_RECEIPT_TAX_MSG);
@@ -1533,11 +1518,7 @@ useEffect(() => {
         ) ||
         [];
 
-      if (
-        prevTaxValues.some(
-          (t) => t.tax_name === tax.tax_name && t.tax_rate === tax.tax_rate
-        )
-      ) {
+      if (prevTaxValues.some((t) => taxTypesMatch(t, tax))) {
         return prev;
       }
       if (prevTaxValues.length >= MAX_RECEIPT_TAX_TYPES) return prev;
@@ -1759,22 +1740,17 @@ useEffect(() => {
       setShowAddTaxForm(false);
       
       if (savedTax) {
-        // Add to receipt FIRST — must happen before any fetchTaxes/taxData update
-        // (the ref guard in the init useEffect prevents taxData changes from
-        //  resetting editedReceipt, but calling addTaxToReceipt first is safer)
+        // addTax already refreshed taxData via fetchTaxes — do not also push localTaxTypes
+        // (that caused duplicate rows when API rate format differed, e.g. "18" vs "18.000")
         addTaxToReceipt(
           {
             id: savedTax.id || 0,
-            tax_name: addedTaxName,
-            tax_rate: addedTaxRate,
-            tax_number: addedTaxNumber || "",
+            tax_name: savedTax.tax_name || addedTaxName,
+            tax_rate: formatTaxRate(savedTax.tax_rate ?? addedTaxRate),
+            tax_number: savedTax.tax_number ?? addedTaxNumber ?? "",
           },
           { silent: true }
         );
-        // Add to local session list so dropdown shows the new tax immediately
-        setLocalTaxTypes((prev) => [...prev, { ...taxPayload, id: savedTax.id || Date.now() }]);
-        setTaxRefreshKey((prev) => prev + 1);
-        // fetchTaxes is called automatically by the modal-close useEffect
       }
     } catch (err) {
       console.error("Error adding tax:", err);
@@ -5748,17 +5724,17 @@ Thank you for using our receipt management system.
                             ) || [];
 
                           const combinedTaxesMap = new Map();
-                          allTaxTypes.forEach(t => combinedTaxesMap.set(`${t.tax_name}|${t.tax_rate}`, t));
+                          allTaxTypes.forEach(t => combinedTaxesMap.set(taxTypeDedupKey(t), t));
                           currentTaxVals.forEach(t => {
-                             const key = `${t.tax_name}|${t.tax_rate}`;
-                             if (!combinedTaxesMap.has(key)) combinedTaxesMap.set(key, t);
+                             const key = taxTypeDedupKey(t);
+                             if (key && !combinedTaxesMap.has(key)) combinedTaxesMap.set(key, t);
                           });
 
                           const sortedTaxPills = Array.from(combinedTaxesMap.values())
                             .map((tax) => ({
                               ...tax,
-                              _selIdx: currentTaxVals.findIndex(
-                                (t) => t.tax_name === tax.tax_name && t.tax_rate === tax.tax_rate
+                              _selIdx: currentTaxVals.findIndex((t) =>
+                                taxTypesMatch(t, tax)
                               ),
                             }))
                             .sort((a, b) => {

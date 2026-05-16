@@ -1,7 +1,7 @@
 export const TAX_RATE_DECIMAL_LIMIT_MSG =
-  "You cannot add more than 3 digits after the decimal.";
+  "Maximum tax rate of 99.999% exceeded.";
 export const TAX_RATE_WHOLE_LIMIT_MSG =
-  "You cannot add more than 2 digits before the decimal.";
+  "Maximum tax rate of 99.999% exceeded.";
 
 /** Clamp tax rate; flags when input exceeds digit limits (before clamp). */
 export function parseTaxRateInput(raw) {
