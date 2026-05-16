@@ -8,9 +8,19 @@ export const normalizePaymentMatchKey = (value) =>
 
 export const parsePaymentDisplay = (value) => {
   const raw = (value || "").toString().trim();
-  const match = raw.match(/^(.*?)(?:\s*\*(\d{3,4}))?$/);
-  const issuer = (match?.[1] || raw).trim();
-  const last4 = (match?.[2] || "").trim();
+  if (!raw) return { issuer: "", last4: "" };
+
+  // Use the last *#### segment as canonical last4 (handles "Other *0009 *0009" from API)
+  const last4Match = raw.match(/\*(\d{3,4})\s*$/);
+  const last4 = last4Match ? last4Match[1] : "";
+
+  let issuer = raw;
+  if (last4) {
+    issuer = raw.replace(new RegExp(`(?:\\s*\\*${last4}\\s*)+$`, "i"), "").trim();
+  }
+  // Remove any remaining embedded *#### so brand/issuer is clean (e.g. "Other" not "Other *0009")
+  issuer = issuer.replace(/\s*\*\d{3,4}\s*/g, " ").trim().replace(/\s+/g, " ");
+
   return { issuer, last4 };
 };
 
@@ -56,11 +66,14 @@ export const storedCardIssuerName = (customIssuer, cardType) => {
 /** List/dropdown label: brand *last4 when no custom issuer (e.g. "MasterCard *7979"). */
 export const getPaymentMethodListLabel = (paymentName, brand) => {
   const { issuer, last4 } = parsePaymentDisplay(paymentName);
-  const resolvedBrand = brand || inferCardTypeFromPayment(paymentName);
+  const resolvedBrand = brand || inferCardTypeFromPayment(issuer || paymentName);
   const base = isCustomCardIssuer(issuer, resolvedBrand)
     ? issuer
     : (resolvedBrand || issuer || paymentName);
-  return last4 ? `${base} *${last4}` : (base || paymentName);
+  if (!last4) return (base || paymentName);
+  const alreadyHasLast4 =
+    new RegExp(`\\*${last4}\\s*$`).test(base) || base.includes(`*${last4}`);
+  return alreadyHasLast4 ? base : `${base} *${last4}`;
 };
 
 /** API/storage string: custom issuer *last4, or card type *last4 when issuer is blank. */

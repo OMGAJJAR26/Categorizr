@@ -59,6 +59,7 @@ import SimpleAlertModal from "../components/SimpleAlertModal";
 import { useNavigate } from "react-router-dom";
 import { useData } from "../context/DataContext";
 import { getPaymentDisplayFromReceipt } from "../hooks/usePaymentDisplay";
+import { parsePaymentDisplay } from "../utils/paymentMethodUtils";
 
 /* ─── Helpers ─────────────────────────────────────────── */
 
@@ -93,12 +94,9 @@ const getPaymentLogo = (name) => {
 };
 
 const normalizePaymentDisplayKey = (value) => {
-  const raw = (value || "").toString().trim();
-  if (!raw) return "";
-  const match = raw.match(/^(.*?)(?:\s*\*(\d{3,4}))?$/);
-  const issuer = (match?.[1] || raw).trim().replace(/\s+/g, " ");
-  const last4 = (match?.[2] || "").trim();
-  return last4 ? `${issuer} *${last4}`.toLowerCase() : issuer.toLowerCase();
+  const { issuer, last4 } = parsePaymentDisplay(value);
+  const base = (issuer || "").replace(/\s+/g, " ").trim();
+  return last4 ? `${base} *${last4}`.toLowerCase() : base.toLowerCase();
 };
 
 const PAYMENT_CARD_TYPES = [
@@ -377,15 +375,6 @@ const ManageModal = ({ type, onClose }) => {
     obj?.id ?? obj?.payment_method_id ?? obj?.fk_payment_method_id ?? null;
   const getApiMerchantId = (obj) =>
     obj?.id ?? obj?.store_id ?? obj?.fk_store_id ?? null;
-  const parsePaymentDisplay = (value) => {
-    const raw = (value || "").toString().trim();
-    const match = raw.match(/^(.*?)(?:\s*\*(\d{3,4}))?$/);
-    return {
-      issuer: (match?.[1] || raw).trim(),
-      last4: (match?.[2] || "").trim(),
-    };
-  };
-
   const handleDelete = async (itemOrKey) => {
     const item = typeof itemOrKey === "object" && itemOrKey !== null
       ? itemOrKey
@@ -1549,14 +1538,6 @@ const ReceiptInfoInline = ({ type }) => {
     return "Other";
   };
 
-  const parsePaymentDisplay = (value) => {
-    const raw = (value || "").toString().trim();
-    const match = raw.match(/^(.*?)(?:\s*\*(\d{3,4}))?$/);
-    const issuer = (match?.[1] || raw).trim();
-    const last4 = (match?.[2] || "").trim();
-    return { issuer, last4 };
-  };
-
   // True when issuer is a user-entered custom name (not the card brand alone).
   const isCustomCardIssuer = (issuer, brand) => {
     const iss = (issuer || "").trim();
@@ -1576,9 +1557,12 @@ const ReceiptInfoInline = ({ type }) => {
   // List label: brand *last4 when no custom issuer (e.g. "MasterCard *7979").
   const getPaymentMethodListLabel = (paymentName) => {
     const { issuer, last4 } = parsePaymentDisplay(paymentName);
-    const brand = getPaymentBrand(paymentName, inferCardTypeFromPayment(paymentName));
+    const brand = getPaymentBrand(paymentName, inferCardTypeFromPayment(issuer || paymentName));
     const base = isCustomCardIssuer(issuer, brand) ? issuer : (brand || issuer || paymentName);
-    return last4 ? `${base} *${last4}` : (base || paymentName);
+    if (!last4) return base || paymentName;
+    const alreadyHasLast4 =
+      new RegExp(`\\*${last4}\\s*$`).test(base) || base.includes(`*${last4}`);
+    return alreadyHasLast4 ? base : `${base} *${last4}`;
   };
 
   const getPaymentBrand = (paymentName, fallbackCardType = "") => {
