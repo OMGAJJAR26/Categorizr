@@ -1,6 +1,11 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useData } from "../../context/DataContext";
 import { getPaymentDisplayFromReceipt } from "../../hooks/usePaymentDisplay";
+import {
+  getPaymentMethodListLabel,
+  inferCardTypeFromPayment,
+  normalizePaymentMatchKey,
+} from "../../utils/paymentMethodUtils";
 
 // ✅ Import all payment logos
 const Visa              = "/payment-logos/Visa.png";
@@ -14,10 +19,31 @@ const DebitCard         = "/payment-logos/DebitCard.webp";
 const Creditdebitcardicon = "/payment-logos/Creditdebitcardicon.jpg";
 
 // ✅ Final version
+const CARD_TYPE_INT_TO_NAME = {
+  0: "American Express",
+  1: "MasterCard",
+  2: "Visa",
+  3: "Debit Card",
+  4: "Discover",
+  5: "Diners Club",
+  6: "PayPal",
+  7: "Cash",
+  8: "Other",
+};
+
 const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
-  const { receipts } = useData();
+  const {
+    receipts,
+    apiPaymentMethods,
+    fetchApiPaymentMethods,
+    isPaymentMethodHidden,
+  } = useData();
   const [selectedPaymentMethods, setSelectedPaymentMethods] =
     useState(initialSelected);
+
+  useEffect(() => {
+    fetchApiPaymentMethods();
+  }, [fetchApiPaymentMethods]);
 
   // Logo map - matching usePaymentDisplay.js
   const logoMap = {
@@ -217,9 +243,10 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
 
     // Build methodsData with label, logo, and detailed receipt info
     const methodsData = selectedPaymentMethods.map((method) => {
+      const methodKey = normalizePaymentMatchKey(method);
       const matchingReceipt = receipts.find((r) => {
         const displayName = getPaymentDisplayFromReceipt(r);
-        return normalizeLabel(displayName) === method;
+        return normalizePaymentMatchKey(normalizeLabel(displayName)) === methodKey;
       });
       
       const logo = matchingReceipt
@@ -278,24 +305,56 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
     return method;
   };
 
-  // Unique payment methods from receipts only (avoids stale global paymentMethods entries)
+  const apiLabelForMethod = useCallback((m) => {
+    const cardNumber = (m?.card_number || "").toString().trim();
+    if (!cardNumber) return "";
+    const typeInt = parseInt(m?.card_type, 10);
+    const brandFromApi = Number.isFinite(typeInt)
+      ? CARD_TYPE_INT_TO_NAME[typeInt]
+      : "";
+    const brand = brandFromApi || inferCardTypeFromPayment(cardNumber);
+    return normalizeLabel(getPaymentMethodListLabel(cardNumber, brand));
+  }, []);
+
+  // All API payment methods + receipt-only methods (deduped, no bare *last4 when full label exists)
   const uniqueMethods = useMemo(() => {
     const byKey = new Map();
-    (receipts || []).forEach((r) => {
-      const title = getPaymentDisplayFromReceipt(r);
-      if (!title || title === "-") return;
-      const label = normalizeLabel(title);
-      const last4 = (r?.last_4_digit_card || "").toString().replace(/\D/g, "").slice(-4);
+
+    const addLabel = (rawLabel) => {
+      const label = normalizeLabel((rawLabel || "").toString().trim());
+      if (!label || label === "-") return;
+      const key = normalizePaymentMatchKey(label);
+      const last4 = (label.match(/\*(\d{3,4})$/)?.[1] || "").replace(/\D/g, "");
       const isBareLast4 = /^\*\d{3,4}$/.test(label);
-      const existing = byKey.get(last4 || label);
+      const dedupeKey = last4 ? `last4:${last4}` : key;
+      const existing = byKey.get(dedupeKey) || byKey.get(key);
       if (!existing || (existing.isBare && !isBareLast4)) {
-        byKey.set(last4 || label, { label, isBare: isBareLast4 });
+        byKey.set(dedupeKey, { label, isBare: isBareLast4, key });
+        if (dedupeKey !== key) byKey.set(key, { label, isBare: isBareLast4, key });
       }
+    };
+
+    (apiPaymentMethods || []).forEach((m) => {
+      if (!m?.card_number || isPaymentMethodHidden(m.card_number)) return;
+      if (String(m?.card_type || "").toLowerCase() === "merchant") return;
+      addLabel(apiLabelForMethod(m));
     });
+
+    (receipts || []).forEach((r) => {
+      addLabel(getPaymentDisplayFromReceipt(r));
+    });
+
+    const seen = new Set();
     return Array.from(byKey.values())
       .map((v) => v.label)
+      .filter((label) => {
+        const k = normalizePaymentMatchKey(label);
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      })
       .sort((a, b) => a.localeCompare(b));
-  }, [receipts]);
+  }, [apiPaymentMethods, receipts, isPaymentMethodHidden, apiLabelForMethod]);
 
   // ✅ Select all
   const handleSelectAll = () => {
@@ -310,18 +369,26 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
         <div className="max-h-48 overflow-y-auto">
           {uniqueMethods.map((paymentMethod) => {
             // Find the first receipt with this payment method to get its logo and details
+            const methodKey = normalizePaymentMatchKey(paymentMethod);
             const matchingReceipt = receipts.find((r) => {
               const displayName = getPaymentDisplayFromReceipt(r);
-              return normalizeLabel(displayName) === paymentMethod;
+              return normalizePaymentMatchKey(normalizeLabel(displayName)) === methodKey;
             });
+            const matchingApi = (apiPaymentMethods || []).find(
+              (m) => normalizePaymentMatchKey(apiLabelForMethod(m)) === methodKey
+            );
 
             const displayText = matchingReceipt
               ? getPaymentDisplayFromReceipt(matchingReceipt)
               : paymentMethod;
 
-            const logo = matchingReceipt
-              ? getPaymentLogo(matchingReceipt)
-              : getPaymentLogo(paymentMethod);
+            const storedLogo = (matchingApi?.icon_image || "").trim();
+            const logo =
+              (storedLogo.startsWith("/payment-logos/") ||
+                /^https?:\/\//i.test(storedLogo)
+                ? storedLogo
+                : null) ||
+              (matchingReceipt ? getPaymentLogo(matchingReceipt) : getPaymentLogo(paymentMethod));
             
             return (
               <label
