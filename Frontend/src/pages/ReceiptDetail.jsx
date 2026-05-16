@@ -22,7 +22,15 @@ import Toast from "../components/Toast";
 import { useData } from "../context/DataContext";
 import { useCurrency } from "../context/CurrencyContext";
 import MerchantAvatar from "../components/MerchantAvatar";
-import { usePaymentDisplay } from "../hooks/usePaymentDisplay";
+import { getPaymentDisplayFromReceipt, usePaymentDisplay } from "../hooks/usePaymentDisplay";
+import {
+  buildPaymentMethodStorageString,
+  inferCardTypeFromPayment,
+  isCustomCardIssuer,
+  parsePaymentDisplay,
+  readPayCardTypeMap,
+  storedCardIssuerName,
+} from "../utils/paymentMethodUtils";
 import { parseTaxRateInput, createTaxRateKeyDownHandler } from "../utils/taxRateInput";
 import { useTaxRateLimitAlert } from "../hooks/useTaxRateLimitAlert";
 import { buildExpenseCategoryOptions } from "../utils/expenseCategories";
@@ -1326,11 +1334,7 @@ useEffect(() => {
 
   // ── Payment method delete from dropdown ───────────────────────────────────
 
-  const getPaymentDisplayForReceipt = (r) => {
-    const iss = (r.card_issuer_name || r.cardIssuerName || "").toString().trim();
-    const l4  = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
-    return iss ? (l4 ? `${iss} *${l4}` : iss) : (r.paymentType || r.payment_type || "").toString().trim();
-  };
+  const getPaymentDisplayForReceipt = (r) => getPaymentDisplayFromReceipt(r);
 
   const handleDeletePaymentInDropdown = async (method) => {
     if (isCashPaymentMethod(method)) return; // safety
@@ -1368,32 +1372,18 @@ useEffect(() => {
 
   const handleEditPaymentInDropdown = (method) => {
     if (isCashPaymentMethod(method)) return;
-    // Parse method name into components
-    const parts = method.split("*");
-    const issuer = (parts[0] || "").trim();
-    const last4  = (parts[1] || "").trim();
-    // Detect card type
-    const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
-    const cardType = _pct[method] || (() => {
-      const v = (method || "").toLowerCase();
-      if (v.includes("visa")) return "Visa";
-      if (v.includes("master")) return "MasterCard";
-      if (v.includes("american") || v.includes("amex")) return "American Express";
-      if (v.includes("discover")) return "Discover";
-      if (v.includes("diners")) return "Diners Club";
-      if (v.includes("paypal")) return "PayPal";
-      if (v.includes("debit")) return "Debit Card";
-      return "Other";
-    })();
+    const { issuer, last4 } = parsePaymentDisplay(method);
+    const _pct = readPayCardTypeMap();
+    const cardType = _pct[method] || inferCardTypeFromPayment(method);
     const apiMatch = (apiPaymentMethods || []).find(
       (p) => (p.card_number || "").toLowerCase() === (method || "").toLowerCase()
     );
     const apiId = apiMatch
       ? (apiMatch.id ?? apiMatch.payment_method_id ?? apiMatch.fk_payment_method_id ?? null)
       : null;
-    // Prefill the modal
     setNewPaymentCardType(cardType);
-    setNewCardIssuerName(issuer || "");
+    // Leave Card Issuer empty when the name is only brand + last4 (same as Settings).
+    setNewCardIssuerName(isCustomCardIssuer(issuer, cardType) ? issuer : "");
     setNewLast4Digits(last4 || "");
     const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
     setNewPaymentCategoryType(_pet[method] || "");
@@ -1424,11 +1414,14 @@ useEffect(() => {
     else if (cardTypeLower.includes("debit")) selectedCardTypeForLogo = "Debit Card";
     else if (cardTypeLower === "other") selectedCardTypeForLogo = "Other";
 
-    const finalCardIssuerName = newCardIssuerName.trim() || selectedCardTypeForLogo;
+    const customIssuer = newCardIssuerName.trim();
     const last4 = newLast4Digits.trim().replace(/\D/g, "").slice(0, 4);
-    const newPayStr = newCardIssuerName.trim()
-      ? `${newCardIssuerName.trim()} *${last4}`
-      : `${selectedCardTypeForLogo} *${last4}`;
+    const storedIssuer = storedCardIssuerName(customIssuer, selectedCardTypeForLogo);
+    const newPayStr = buildPaymentMethodStorageString(
+      customIssuer,
+      selectedCardTypeForLogo,
+      last4
+    );
 
     const PAYMENT_LOGOS = { Visa: Visa, MasterCard: MasterCard, "American Express": AmericanExpress, Discover: Discover, "Diners Club": DinersClub, PayPal: PayPal, "Debit Card": DebitCard, Cash: Cash };
     const logoUrl = PAYMENT_LOGOS[selectedCardTypeForLogo] || "";
@@ -1446,11 +1439,11 @@ useEffect(() => {
         if (matchingReceipts.length > 0) {
           await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
             paymentType: selectedCardTypeForLogo,
-            card_issuer_name: finalCardIssuerName,
+            card_issuer_name: storedIssuer,
             last_4_digit_card: last4 || r.last_4_digit_card || "",
           })));
         }
-        const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
+        const _pct = readPayCardTypeMap();
         _pct[newPayStr] = selectedCardTypeForLogo;
         localStorage.setItem("cat_pay_card_types", JSON.stringify(_pct));
         if (newPaymentCategoryType) {
@@ -1462,7 +1455,7 @@ useEffect(() => {
         await Promise.all([refreshData(), fetchApiPaymentMethods()]);
         handleFieldChange("paymentType", selectedCardTypeForLogo);
         handleFieldChange("paymentBrand", "");
-        handleFieldChange("card_issuer_name", finalCardIssuerName);
+        handleFieldChange("card_issuer_name", storedIssuer);
         handleFieldChange("last_4_digit_card", last4);
         setPayModalEditMode(null);
         handleCloseAddPaymentModal();
@@ -1483,7 +1476,7 @@ useEffect(() => {
     setPendingPayMethodFn(() => async () => {
       handleFieldChange("paymentType", selectedCardTypeForLogo);
       handleFieldChange("paymentBrand", "");
-      handleFieldChange("card_issuer_name", finalCardIssuerName);
+      handleFieldChange("card_issuer_name", storedIssuer);
       if (last4.length > 0) {
         handleFieldChange("last_4_digit_card", last4);
       } else {

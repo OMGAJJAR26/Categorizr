@@ -7,7 +7,16 @@ import ReceiptAnnotator from "./ReceiptAnnotator";
 import { motion, AnimatePresence } from "framer-motion";
 import { useData } from "../../context/DataContext";
 import Toast from "../Toast";
-import { usePaymentDisplay } from "../../hooks/usePaymentDisplay";
+import { getPaymentDisplayFromReceipt, usePaymentDisplay } from "../../hooks/usePaymentDisplay";
+import {
+  buildPaymentMethodStorageString,
+  getPaymentMethodListLabel,
+  inferCardTypeFromPayment,
+  isCustomCardIssuer,
+  parsePaymentDisplay,
+  readPayCardTypeMap,
+  storedCardIssuerName,
+} from "../../utils/paymentMethodUtils";
 import MerchantAvatar from "../MerchantAvatar";
 import { parseReceipt, pdfToImage, canvasToBlob } from "../../utils/receiptParser";
 import { parseTaxRateInput, createTaxRateKeyDownHandler } from "../../utils/taxRateInput";
@@ -3471,27 +3480,16 @@ const handleSelectLogo = (index) => {
 
   const handleEditPaymentInDropdown = (method) => {
     if (isCashPaymentMethod(method)) return;
-    const parts = method.split("*");
-    const issuer = (parts[0] || "").trim();
-    const last4  = (parts[1] || "").trim();
-    const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
-    const cardType = _pct[method] || (() => {
-      const v = (method || "").toLowerCase();
-      if (v.includes("visa")) return "Visa";
-      if (v.includes("master")) return "MasterCard";
-      if (v.includes("american") || v.includes("amex")) return "American Express";
-      if (v.includes("discover")) return "Discover";
-      if (v.includes("diners")) return "Diners Club";
-      if (v.includes("paypal")) return "PayPal";
-      if (v.includes("debit")) return "Debit Card";
-      return "Other";
-    })();
+    const { issuer, last4 } = parsePaymentDisplay(method);
+    const _pct = readPayCardTypeMap();
+    const cardType = _pct[method] || inferCardTypeFromPayment(method);
     const apiMatch = (apiPaymentMethods || []).find(
       (p) => (p.card_number || "").toLowerCase() === (method || "").toLowerCase()
     );
     const apiId = apiMatch ? (apiMatch.id ?? apiMatch.payment_method_id ?? null) : null;
     setNewPaymentCardType(cardType);
-    setNewCardIssuerName(issuer || "");
+    // Leave Card Issuer empty when the name is only brand + last4 (same as Settings).
+    setNewCardIssuerName(isCustomCardIssuer(issuer, cardType) ? issuer : "");
     setNewLast4Digits(last4 || "");
     const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
     setNewPaymentCategoryType(_pet[method] || "");
@@ -3529,13 +3527,9 @@ const handleSelectLogo = (index) => {
       return;
     }
 
-    // Determine card issuer name - ALWAYS use what user entered in cardIssuerName field
-    // Only fallback to payment card type if user didn't enter anything
-    let finalCardIssuerName = newCardIssuerName.trim();
+    const customIssuer = newCardIssuerName.trim();
     const cardTypeLower = newPaymentCardType.trim().toLowerCase();
 
-    // Determine the selected card type for logo detection FIRST (before using it)
-    // This is the actual card type selected (e.g., "Diners Club") even if custom issuer name was entered
     let selectedCardTypeForLogo = null;
     if (cardTypeLower.includes("visa")) {
       selectedCardTypeForLogo = "Visa";
@@ -3560,32 +3554,21 @@ const handleSelectLogo = (index) => {
       selectedCardTypeForLogo = newPaymentCardType.trim();
     }
 
-    // If user didn't enter a card issuer name, use payment card type as fallback
-    if (!finalCardIssuerName) {
-      finalCardIssuerName = selectedCardTypeForLogo;
+    const last4Final = newLast4Digits.trim().replace(/\D/g, "").slice(0, 4);
+    if (paymentMethodDuplicateExists(selectedCardTypeForLogo, last4Final)) {
+      setError("Payment Method already exists");
+      return;
     }
 
-    // Build payment method string
-    // IMPORTANT: Use selectedCardTypeForLogo for paymentType (for logo detection)
-    // But use finalCardIssuerName for display (card_issuer_name)
-    // This ensures correct logo even when custom issuer name is entered
-    let paymentMethodString = selectedCardTypeForLogo || finalCardIssuerName;
-
-    // Add last 4 digits if provided
-    if (newLast4Digits && newLast4Digits.trim().length > 0) {
-      const last4 = newLast4Digits.trim().replace(/\D/g, "").slice(0, 4);
-      if (last4.length > 0) {
-        if (paymentMethodDuplicateExists(selectedCardTypeForLogo, last4)) {
-          setError("Payment Method already exists");
-          return;
-        }
-        paymentMethodString = `${paymentMethodString} *${last4}`;
-      }
-    }
+    const storedIssuer = storedCardIssuerName(customIssuer, selectedCardTypeForLogo);
+    const paymentMethodString = buildPaymentMethodStorageString(
+      customIssuer,
+      selectedCardTypeForLogo,
+      last4Final
+    );
 
     const PAYMENT_LOGOS = { Visa: Visa, MasterCard: MasterCard, "American Express": AmericanExpress, Discover: Discover, "Diners Club": DinersClub, PayPal: PayPal, "Debit Card": DebitCard, Cash: Cash };
     const logoUrl = PAYMENT_LOGOS[selectedCardTypeForLogo] || "";
-    const last4Final = newLast4Digits.trim().replace(/\D/g, "").slice(0, 4);
 
     // ── EDIT MODE ────────────────────────────────────────────────────────────
     if (payModalEditMode) {
@@ -3601,21 +3584,17 @@ const handleSelectLogo = (index) => {
         }
         // Update receipts that used the old payment method name
         const matchingReceipts = (receipts || []).filter(
-          (r) => {
-            const issuer = (r.card_issuer_name || r.cardIssuerName || "").toString().trim();
-            const l4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
-            const disp = issuer ? (l4 ? `${issuer} *${l4}` : issuer) : (r.paymentType || "").toString().trim();
-            return disp.toLowerCase() === (oldName || "").toLowerCase();
-          }
+          (r) =>
+            getPaymentDisplayFromReceipt(r).toLowerCase() === (oldName || "").toLowerCase()
         );
         if (matchingReceipts.length > 0) {
           await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
             paymentType: selectedCardTypeForLogo,
-            card_issuer_name: finalCardIssuerName,
+            card_issuer_name: storedIssuer,
             last_4_digit_card: last4Final || r.last_4_digit_card || "",
           })));
         }
-        const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
+        const _pct = readPayCardTypeMap();
         _pct[paymentMethodString] = selectedCardTypeForLogo;
         localStorage.setItem("cat_pay_card_types", JSON.stringify(_pct));
         if (newPaymentCategoryType) {
@@ -3626,7 +3605,7 @@ const handleSelectLogo = (index) => {
         editCustomPaymentMethod(oldName, paymentMethodString);
         await Promise.all([refreshData(), fetchApiPaymentMethods()]);
         handleFieldChange("paymentType", selectedCardTypeForLogo || paymentMethodString);
-        handleFieldChange("card_issuer_name", finalCardIssuerName);
+        handleFieldChange("card_issuer_name", storedIssuer);
         if (last4Final) handleFieldChange("last_4_digit_card", last4Final);
         handleCloseAddPaymentModal();
         setShowPaymentDropdown(false);
@@ -3643,7 +3622,7 @@ const handleSelectLogo = (index) => {
     setPendingPayEditFn(() => async () => {
       const newPaymentMethod = {
         paymentType: paymentMethodString,
-        cardIssuerName: finalCardIssuerName,
+        cardIssuerName: storedIssuer,
         selectedCardType: selectedCardTypeForLogo,
         last4DigitCard: last4Final || "",
         paymentCategoryType: newPaymentCategoryType || "Personal",
@@ -3662,7 +3641,7 @@ const handleSelectLogo = (index) => {
       await fetchApiPaymentMethods();
 
       handleFieldChange("paymentType", selectedCardTypeForLogo || paymentMethodString);
-      handleFieldChange("card_issuer_name", finalCardIssuerName);
+      handleFieldChange("card_issuer_name", storedIssuer);
       if (last4Final) handleFieldChange("last_4_digit_card", last4Final);
       if (newPaymentCategoryType === "Business") {
         handleFieldChange("receipt_category", "1");
@@ -3726,15 +3705,16 @@ const handleSelectLogo = (index) => {
   // Filter payment methods - show all options when dropdown opens, filter when typing
   // Convert localPaymentMethods objects to display format: cardIssuerName *last4 (not paymentType)
   const localPaymentMethodStrings = localPaymentMethods.map((pm) => {
-    // Use cardIssuerName for display (card issuer name + last4), not paymentType (card type + last4)
     const issuerName = pm.cardIssuerName || "";
     const last4 = pm.last4DigitCard || "";
+    const brand = pm.selectedCardType || inferCardTypeFromPayment(pm.paymentType || "");
     if (issuerName && last4) {
-      return `${issuerName} *${last4}`;
-    } else if (issuerName) {
-      return issuerName;
+      return isCustomCardIssuer(issuerName, brand)
+        ? `${issuerName} *${last4}`
+        : getPaymentMethodListLabel(`${brand} *${last4}`, brand);
     }
-    // Fallback to paymentType if cardIssuerName not available
+    if (issuerName) return issuerName;
+    if (brand && last4) return `${brand} *${last4}`;
     return pm.paymentType || "";
   });
 
@@ -3849,8 +3829,7 @@ const handleSelectLogo = (index) => {
     const issuer = (newCardIssuerName || "").trim();
     const last4 = (newLast4Digits || "").replace(/\D/g, "").slice(0, 4);
     if (!cardType || last4.length < 4) return "";
-    const displayBase = issuer || cardType;
-    return `${displayBase} *${last4}`;
+    return buildPaymentMethodStorageString(issuer, cardType, last4);
   })();
 
   const paymentDuplicateError =
@@ -5093,13 +5072,15 @@ const handleSelectLogo = (index) => {
                 }
               }
 
-              // Format display: issuer name *last4 (or just issuer name if no last4)
-              const alreadyHasLast4 = last4 && issuerName.includes(`*${last4}`);
-              const displayText = issuerName
-                ? last4 && !alreadyHasLast4
-                  ? `${issuerName} *${last4}`
-                  : issuerName
-                : methodString; // Fallback to original if no issuer name
+              const _pctForLabel = readPayCardTypeMap();
+              const brandForLabel =
+                matchingLocalMethod?.selectedCardType ||
+                _pctForLabel[methodString] ||
+                inferCardTypeFromPayment(methodString);
+              const displayText = getPaymentMethodListLabel(
+                last4 ? `${issuerName || brandForLabel} *${last4}` : methodString,
+                brandForLabel
+              );
 
               const isCashItem = isCashPaymentMethod(methodString);
               return (
