@@ -1324,6 +1324,7 @@ const ReceiptInfoInline = ({ type }) => {
     apiPaymentMethods, fetchApiPaymentMethods, addApiPaymentMethod, updateApiPaymentMethod, deleteApiPaymentMethod,
     apiExpenseCategories, fetchApiExpenseCategories, addApiExpenseCategory, updateApiExpenseCategory, deleteApiExpenseCategory,
     refreshData,
+    silentRefreshData,
   } = useData();
 
   useEffect(() => { if (type === "taxes") fetchTaxes(); }, [type, fetchTaxes]);
@@ -1895,7 +1896,7 @@ const isBlockedTaxRateInput = (val) => {
             setPayEditMode(null);
             setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
             setShowAddForm(false);
-            await Promise.all([refreshData(), fetchApiPaymentMethods()]);
+            await Promise.all([silentRefreshData(0), fetchApiPaymentMethods()]);
             toast("success", "Payment Method Updated");
           },
         });

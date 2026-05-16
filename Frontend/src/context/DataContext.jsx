@@ -1926,9 +1926,19 @@ setMerchantsWithImages(
 
       // Update local state regardless
       setReceipts(prevReceipts => {
-        const updatedReceipts = prevReceipts.map(receipt =>
-          receipt.id === receiptId ? { ...receipt, ...updates } : receipt
-        );
+        const paymentFieldsChanged =
+          updates.paymentType !== undefined ||
+          updates.card_issuer_name !== undefined ||
+          updates.last_4_digit_card !== undefined;
+        const updatedReceipts = prevReceipts.map(receipt => {
+          if (receipt.id !== receiptId) return receipt;
+          const merged = { ...receipt, ...updates };
+          if (paymentFieldsChanged) {
+            merged.payment_logo_url = "";
+            merged.paymentLogoUrl = "";
+          }
+          return merged;
+        });
 
         // Also update payment methods list if paymentType changed
         if (updates.paymentType) {

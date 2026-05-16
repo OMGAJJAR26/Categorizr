@@ -162,6 +162,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const [showPayEditConfirm, setShowPayEditConfirm] = useState(false);
   const [pendingPayEditFn, setPendingPayEditFn] = useState(null);
   const [payConfirmMessage, setPayConfirmMessage] = useState("");
+  const [isPayMethodSaving, setIsPayMethodSaving] = useState(false);
 
   // ── Duplicate feature ─────────────────────────────────────────────────────
   const [isDuplicated, setIsDuplicated] = useState(false);       // true = already used once
@@ -1059,6 +1060,16 @@ const handleFieldChange = (field, value) => {
   if (field === "storeName" && error) setError(null);
   setFormData((prev) => {
     const newData = { ...prev, [field]: value };
+
+    if (
+      field === "paymentType" ||
+      field === "card_issuer_name" ||
+      field === "last_4_digit_card" ||
+      field === "paymentBrand"
+    ) {
+      newData.payment_logo_url = "";
+      newData.paymentLogoUrl = "";
+    }
 
     // When subtotal changes, recalculate tax amounts based on rates and update total
     if (field === "subtotal") {
@@ -3469,6 +3480,7 @@ const handleSelectLogo = (index) => {
 
   // Handle closing Add Payment Method modal
   const handleCloseAddPaymentModal = () => {
+    if (isPayMethodSaving) return;
     setNewPaymentCardType("");
     setNewCardIssuerName("");
     setNewLast4Digits("");
@@ -3512,7 +3524,7 @@ const handleSelectLogo = (index) => {
     await deleteApiPaymentMethod(targetApiId, method);
     hidePaymentMethod(method);
     deleteCustomPaymentMethod(method);
-    await Promise.all([refreshData(), fetchApiPaymentMethods()]);
+    await fetchApiPaymentMethods();
     setToast({ isVisible: true, message: "Payment Method Deleted", type: "success" });
   };
 
@@ -3596,6 +3608,8 @@ const handleSelectLogo = (index) => {
             paymentType: selectedCardTypeForLogo,
             card_issuer_name: storedIssuer,
             last_4_digit_card: last4Final || r.last_4_digit_card || "",
+            payment_logo_url: "",
+            paymentLogoUrl: "",
           })));
         }
         const _pct = readPayCardTypeMap();
@@ -3607,10 +3621,12 @@ const handleSelectLogo = (index) => {
           localStorage.setItem("cat_pay_expense_type", JSON.stringify(_pet));
         }
         editCustomPaymentMethod(oldName, paymentMethodString);
-        await Promise.all([refreshData(), fetchApiPaymentMethods()]);
+        await fetchApiPaymentMethods();
         handleFieldChange("paymentType", selectedCardTypeForLogo || paymentMethodString);
         handleFieldChange("card_issuer_name", storedIssuer);
         if (last4Final) handleFieldChange("last_4_digit_card", last4Final);
+        handleFieldChange("payment_logo_url", "");
+        handleFieldChange("paymentLogoUrl", "");
         handleCloseAddPaymentModal();
         setShowPaymentDropdown(false);
         setToast({ isVisible: true, message: "Payment Method Updated", type: "success" });
@@ -6006,13 +6022,23 @@ const handleSelectLogo = (index) => {
             exit="hidden"
             variants={backdropVariants}
             className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm"
-            onClick={handleCloseAddPaymentModal}
+            onClick={() => { if (!isPayMethodSaving) handleCloseAddPaymentModal(); }}
           >
             <motion.div
               variants={modalVariants}
               className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
+              {isPayMethodSaving && (
+                <div className="absolute inset-0 z-10 bg-white/80 flex flex-col items-center justify-center rounded-xl">
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                    className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full mb-3"
+                  />
+                  <p className="text-sm text-gray-600 font-medium">Updating payment method…</p>
+                </div>
+              )}
               {/* Modal Header */}
               <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 bg-white">
                 <h2 className="text-xl font-bold text-gray-900">
@@ -6020,7 +6046,8 @@ const handleSelectLogo = (index) => {
                 </h2>
                 <button
                   onClick={handleCloseAddPaymentModal}
-                  className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors"
+                  disabled={isPayMethodSaving}
+                  className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors disabled:opacity-50"
                   aria-label="Close"
                 >
                   <X size={20} className="text-gray-600" />
@@ -6153,17 +6180,22 @@ const handleSelectLogo = (index) => {
                   <button
                     type="button"
                     onClick={handleCloseAddPaymentModal}
-                    className="px-6 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors"
+                    disabled={isPayMethodSaving}
+                    className="px-6 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
                   >
                     Cancel
                   </button>
                   <button
                     type="button"
                     onClick={handleAddPaymentMethod}
-                    disabled={!newPaymentCardType || newLast4Digits.replace(/\D/g, "").length < 4 || !!paymentDuplicateError}
+                    disabled={isPayMethodSaving || !newPaymentCardType || newLast4Digits.replace(/\D/g, "").length < 4 || !!paymentDuplicateError}
                     className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
-                    {payModalEditMode ? "Save Changes" : "Add Payment Method"}
+                    {isPayMethodSaving
+                      ? "Saving…"
+                      : payModalEditMode
+                        ? "Save Changes"
+                        : "Add Payment Method"}
                   </button>
                 </div>
               </div>
@@ -6862,7 +6894,7 @@ const handleSelectLogo = (index) => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm"
-            onClick={() => { setShowPayEditConfirm(false); setPendingPayEditFn(null); setPayConfirmMessage(""); }}
+            onClick={() => { if (!isPayMethodSaving) { setShowPayEditConfirm(false); setPendingPayEditFn(null); setPayConfirmMessage(""); } }}
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -6881,8 +6913,9 @@ const handleSelectLogo = (index) => {
                 <div className="flex justify-end gap-3">
                   <button
                     type="button"
-                    onClick={() => { setShowPayEditConfirm(false); setPendingPayEditFn(null); setPayConfirmMessage(""); }}
-                    className="px-6 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors"
+                    onClick={() => { if (!isPayMethodSaving) { setShowPayEditConfirm(false); setPendingPayEditFn(null); setPayConfirmMessage(""); } }}
+                    disabled={isPayMethodSaving}
+                    className="px-6 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
                   >
                     Cancel
                   </button>
@@ -6893,17 +6926,20 @@ const handleSelectLogo = (index) => {
                       setShowPayEditConfirm(false);
                       setPendingPayEditFn(null);
                       setPayConfirmMessage("");
-                      if (typeof run === "function") {
-                        try {
-                          await run();
-                        } catch (e) {
-                          setToast?.({ isVisible: true, message: e?.message || "Update failed", type: "error" });
-                        }
+                      if (typeof run !== "function") return;
+                      setIsPayMethodSaving(true);
+                      try {
+                        await run();
+                      } catch (e) {
+                        setToast?.({ isVisible: true, message: e?.message || "Update failed", type: "error" });
+                      } finally {
+                        setIsPayMethodSaving(false);
                       }
                     }}
-                    className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                    disabled={isPayMethodSaving}
+                    className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
                   >
-                    OK
+                    {isPayMethodSaving ? "Saving…" : "OK"}
                   </button>
                 </div>
               </div>

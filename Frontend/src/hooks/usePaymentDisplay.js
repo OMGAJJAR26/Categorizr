@@ -115,11 +115,40 @@ export function getPaymentDisplayFromReceipt(receipt) {
   return "-";
 }
 
+/** Card type is "Other" — always use the generic credit-card icon until user picks another type. */
+const isOtherCardType = (paymentType) => {
+  const baseType = (paymentType || "").replace(/\s*\*\d{3,4}$/, "").trim().toLowerCase();
+  return baseType === "other";
+};
+
 export const usePaymentDisplay = () => {
   const getPaymentLogo = useCallback((paymentTypeOrReceipt) => {
-    if (!paymentTypeOrReceipt) return LOGO_MAP.other;
+    if (!paymentTypeOrReceipt) return null;
 
     const isObject = typeof paymentTypeOrReceipt === "object";
+
+    let paymentType = "";
+    let paymentBrand = "";
+    let cardIssuerName = "";
+    let selectedCardType = "";
+
+    if (isObject) {
+      paymentType = (paymentTypeOrReceipt.paymentType || paymentTypeOrReceipt.payment_type || "").toString().trim();
+      paymentBrand = (paymentTypeOrReceipt.paymentBrand || paymentTypeOrReceipt.payment_method_name || "").toString().trim();
+      selectedCardType = (paymentTypeOrReceipt.selectedCardType || paymentTypeOrReceipt.selected_card_type || "").toString().trim();
+      cardIssuerName = (paymentTypeOrReceipt.card_issuer_name || paymentTypeOrReceipt.cardIssuerName || "").toString().trim();
+      // Local payment-method objects store brand in selectedCardType; use only when paymentType is empty.
+      if (!paymentType && selectedCardType && !cardIssuerName) {
+        paymentType = selectedCardType;
+      }
+    } else {
+      paymentType = paymentTypeOrReceipt.toString().trim();
+    }
+
+    // Card type "Other" → always generic credit-card icon (ignore stale cached logos)
+    if (isOtherCardType(paymentType)) {
+      return LOGO_MAP.other;
+    }
 
     if (isObject) {
       const explicitLogo =
@@ -129,20 +158,9 @@ export const usePaymentDisplay = () => {
         paymentTypeOrReceipt.paymentLogo ||
         paymentTypeOrReceipt.payment_display?.logoUrl ||
         paymentTypeOrReceipt.paymentDisplay?.logoUrl;
-      if (isValidUrl(explicitLogo)) return explicitLogo.trim();
-    }
-
-    let paymentType = "";
-    let paymentBrand = "";
-    let cardIssuerName = "";
-
-    if (isObject) {
-      paymentType = (paymentTypeOrReceipt.paymentType || paymentTypeOrReceipt.payment_type || "").toString().trim();
-      paymentBrand = (paymentTypeOrReceipt.paymentBrand || paymentTypeOrReceipt.payment_method_name || "").toString().trim();
-      const selectedCardType = (paymentTypeOrReceipt.selectedCardType || paymentTypeOrReceipt.selected_card_type || "").toString().trim();
-      cardIssuerName = (selectedCardType || paymentTypeOrReceipt.card_issuer_name || paymentTypeOrReceipt.cardIssuerName || "").toString().trim();
-    } else {
-      paymentType = paymentTypeOrReceipt.toString().trim();
+      if (isValidUrl(explicitLogo) && !isOtherCardType(paymentType)) {
+        return explicitLogo.trim();
+      }
     }
 
     const networkFromStr = (s) => {
@@ -173,7 +191,8 @@ export const usePaymentDisplay = () => {
     for (const src of allSources) {
       if (!src || src === "0") continue;
       const base = src.replace(/\s*\*\d{3,4}$/, "").toLowerCase().trim();
-      if (base === "other" || base.includes("starbucks") || base.includes("gift")) {
+      if (base === "other") return LOGO_MAP.other;
+      if (base.includes("starbucks") || base.includes("gift")) {
         return LOGO_MAP.other;
       }
     }
