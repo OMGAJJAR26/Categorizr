@@ -4912,18 +4912,12 @@ const handleSelectLogo = (index) => {
             : ""
         }`}
         value={(() => {
-          // Display format: card issuer name *last4 (like homepage)
-          const issuerName =
-            formData.card_issuer_name || "";
-          const last4 = formData.last_4_digit_card || "";
-          if (issuerName && last4) {
-            const alreadyHasLast4 = issuerName.includes(`*${last4}`);
-            return alreadyHasLast4 ? issuerName : `${issuerName} *${last4}`;
-          } else if (issuerName) {
-            return issuerName;
-          }
-          // Fallback to paymentType if card_issuer_name not set
-          return formData.paymentType || "";
+          const display = getPaymentDisplay({
+            paymentType: formData.paymentType,
+            card_issuer_name: formData.card_issuer_name,
+            last_4_digit_card: formData.last_4_digit_card,
+          });
+          return display === "-" ? "" : display;
         })()}
         onChange={(e) => {
           // Extract card issuer name and last4 from input
@@ -4987,17 +4981,18 @@ const handleSelectLogo = (index) => {
               cardType = "Debit Card";
             else if (issuerLower.includes("cash"))
               cardType = "Cash";
+            else if (issuerLower === "other")
+              cardType = "Other";
             // If no card type detected, keep the issuer name (will show generic logo)
           }
 
           // Update paymentType (for API - card type for logo detection)
           handleFieldChange("paymentType", cardType);
 
-          // Always update card_issuer_name (including empty) so user can clear the field
           const safeIssuerName = cardIssuerName.replace(/\s*\*\d{3,4}$/, "").trim();
           handleFieldChange(
             "card_issuer_name",
-            safeIssuerName,
+            storedCardIssuerName(safeIssuerName, cardType),
           );
 
           // Update last_4_digit_card
@@ -5124,11 +5119,12 @@ const handleSelectLogo = (index) => {
                         "paymentType",
                         matchingLocalMethod.selectedCardType,
                       );
-                      // Use cardIssuerName from localPaymentMethod for display
                       handleFieldChange(
                         "card_issuer_name",
-                        matchingLocalMethod.cardIssuerName ||
-                          cardIssuerName,
+                        storedCardIssuerName(
+                          matchingLocalMethod.cardIssuerName || cardIssuerName,
+                          matchingLocalMethod.selectedCardType
+                        ),
                       );
                     } else {
                       // For methods from allPaymentMethods, extract card type from the issuer name for logo
@@ -5247,10 +5243,9 @@ const handleSelectLogo = (index) => {
                         "paymentType",
                         cardType,
                       );
-                      // Use card issuer name for display (keep original name like "Chase")
                       handleFieldChange(
                         "card_issuer_name",
-                        cardIssuerName,
+                        storedCardIssuerName(cardIssuerName, cardType),
                       );
                     }
 

@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { inferCardTypeFromPayment, isCustomCardIssuer } from "../utils/paymentMethodUtils";
 const Visa              = "/payment-logos/Visa.png";
 const MasterCard        = "/payment-logos/MasterCard.png";
 const PayPal            = "/payment-logos/PayPal.png";
@@ -83,8 +84,14 @@ export function getPaymentDisplayFromReceipt(receipt) {
   }
 
   if (issuer && issuer !== "0" && issuer.trim() !== "") {
-    const alreadyHasLast4 = last4 && issuer.includes(`*${last4}`);
-    return `${issuer}${last4 && !alreadyHasLast4 ? ` *${last4}` : ""}`;
+    const cleanIssuer = issuer.replace(/\s*\*\d{3,4}/g, "").trim();
+    const brand =
+      (type || "").replace(/\s*\*\d{3,4}$/, "").trim() ||
+      inferCardTypeFromPayment(cleanIssuer);
+    if (isCustomCardIssuer(cleanIssuer, brand)) {
+      const alreadyHasLast4 = last4 && issuer.includes(`*${last4}`);
+      return `${issuer}${last4 && !alreadyHasLast4 ? ` *${last4}` : ""}`;
+    }
   }
 
   if ((!issuer || issuer === "0") && type && type !== "0" && type !== "0*0" && !/^0\*\d*$/.test(type)) {

@@ -374,13 +374,17 @@ const ReceiptDetail = ({
       }
     }
 
-    // PRIORITY 1: Always use card_issuer_name if available
+    // PRIORITY 1: Custom issuer only (not the card brand alone, e.g. "Other" or "Visa")
     if (issuer && issuer !== "0") {
-      // Strip any accidentally embedded *digits from issuer before displaying
       const cleanIssuer = issuer.replace(/\s*\*\d{3,4}/g, "").trim();
-      const alreadyHasLast4 = last4 && issuer.includes(`*${last4}`);
-      if (alreadyHasLast4) return issuer; // issuer already has *last4 embedded, use as-is
-      return `${cleanIssuer}${last4 ? ` *${last4}` : ""}`;
+      const brand =
+        (type || "").replace(/\s*\*\d{3,4}/g, "").trim() ||
+        inferCardTypeFromPayment(cleanIssuer);
+      if (isCustomCardIssuer(cleanIssuer, brand)) {
+        const alreadyHasLast4 = last4 && issuer.includes(`*${last4}`);
+        if (alreadyHasLast4) return issuer;
+        return `${cleanIssuer}${last4 ? ` *${last4}` : ""}`;
+      }
     }
 
     // PRIORITY 2: Use paymentType if no issuer
@@ -683,6 +687,7 @@ useEffect(() => {
         payment_logo_url: "",
         paymentLogoUrl: "",
         card_issuer_name: selectedReceipt.card_issuer_name || "",
+        last_4_digit_card: selectedReceipt.last_4_digit_card || "",
         subtotal:
           selectedReceipt.subtotal || selectedReceipt.purchasePrice || 0,
         purchasePrice: selectedReceipt.purchasePrice || 0,
@@ -5203,9 +5208,11 @@ Thank you for using our receipt management system.
                                 // Clear paymentBrand so original receipt's brand doesn't override logo detection
                                 handleFieldChange("paymentBrand", "");
 
-                                // Always update card_issuer_name (including empty) so user can clear the field
                                 const safeBaseName = baseName.replace(/\s*\*\d{3,4}$/, "").trim();
-                                handleFieldChange("card_issuer_name", safeBaseName);
+                                handleFieldChange(
+                                  "card_issuer_name",
+                                  storedCardIssuerName(safeBaseName, cardType)
+                                );
 
                                 // Update last_4_digit_card if present
                                 if (
@@ -5409,13 +5416,13 @@ Thank you for using our receipt management system.
                                         // doesn't override logo detection for the newly selected method
                                         handleFieldChange("paymentBrand", "");
 
-                                        // Update card_issuer_name with issuer name (for display)
-                                        if (baseMethod) {
-                                          handleFieldChange(
-                                            "card_issuer_name",
-                                            baseMethod
-                                          );
-                                        }
+                                        // Custom issuer only — not the card brand (e.g. "Other *0009" → issuer "")
+                                        handleFieldChange(
+                                          "card_issuer_name",
+                                          isCustomCardIssuer(baseMethod, cardType)
+                                            ? baseMethod
+                                            : ""
+                                        );
 
                                         // Update last_4_digit_card
                                         if (
