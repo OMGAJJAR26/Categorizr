@@ -2218,12 +2218,12 @@ const isBlockedTaxRateInput = (val) => {
       toast("error", "Cash payment method cannot be deleted");
       return;
     }
-    // Step 1 — replace this method with Cash in every matching receipt
+    // Step 1 — clear payment method from every matching receipt
     const matching = getReceiptsByPaymentDisplay(item.name || "");
     if (matching.length > 0) {
       await Promise.all(
         matching.map(r =>
-          updateReceipt(r.id, { paymentType: "Cash", card_issuer_name: "", last_4_digit_card: "" })
+          updateReceipt(r.id, { paymentType: "", card_issuer_name: "", last_4_digit_card: "" })
         )
       );
     }
@@ -3139,9 +3139,10 @@ const isBlockedTaxRateInput = (val) => {
           className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
             className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center border border-slate-200">
-            <h3 className="text-base font-bold text-slate-900 mb-3">Confirmation</h3>
             <p className="text-sm font-medium text-slate-700 leading-relaxed mb-5">
-              When editing a payment method, all receipts associated with that payment method will also be updated.
+              When editing an Payment Method all<br />
+              receipts associated with that Payment<br />
+              Method will also be updated.
             </p>
             <div className="flex gap-3">
               <button type="button"
@@ -3151,7 +3152,7 @@ const isBlockedTaxRateInput = (val) => {
               </button>
               <button type="button" onClick={doConfirmPaymentEdit}
                 className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 rounded-xl text-white font-semibold text-sm transition-colors">
-                OK
+                Okay
               </button>
             </div>
           </motion.div>

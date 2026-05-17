@@ -173,6 +173,9 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const [pendingPayEditFn, setPendingPayEditFn] = useState(null);
   const [payConfirmMessage, setPayConfirmMessage] = useState("");
   const [isPayMethodSaving, setIsPayMethodSaving] = useState(false);
+  // ── Payment-method delete confirmation ────────────────────────────────────
+  const [showPayDeleteConfirm, setShowPayDeleteConfirm] = useState(false);
+  const [pendingPayDeleteMethod, setPendingPayDeleteMethod] = useState(null);
 
   // ── Duplicate feature ─────────────────────────────────────────────────────
   const [isDuplicated, setIsDuplicated] = useState(false);       // true = already used once
@@ -3585,13 +3588,30 @@ const handleSelectLogo = (index) => {
     setShowPaymentDropdown(false);
   };
 
-  const handleDeletePaymentInDropdown = async (method) => {
+  const handleDeletePaymentInDropdown = (method) => {
     if (isCashPaymentMethod(method)) return;
+    setPendingPayDeleteMethod(method);
+    setShowPayDeleteConfirm(true);
+  };
+
+  const doConfirmPayDeleteInDropdown = async () => {
+    setShowPayDeleteConfirm(false);
+    const method = pendingPayDeleteMethod;
+    setPendingPayDeleteMethod(null);
+    if (!method) return;
+    // Clear payment method from all matching receipts
+    const matching = (receipts || []).filter(
+      (r) => getPaymentDisplayFromReceipt(r).toLowerCase() === (method || "").toLowerCase()
+    );
+    if (matching.length > 0) {
+      await Promise.all(matching.map(r =>
+        updateReceipt(r.id, { paymentType: "", card_issuer_name: "", last_4_digit_card: "" })
+      ));
+    }
     const apiMatch = (apiPaymentMethods || []).find(
       (p) => (p.card_number || "").toLowerCase() === (method || "").toLowerCase()
     );
     const targetApiId = apiMatch ? (apiMatch.id ?? apiMatch.payment_method_id ?? null) : null;
-    // Call delete API (best-effort — always hide locally regardless)
     await deleteApiPaymentMethod(targetApiId, method);
     hidePaymentMethod(method);
     deleteCustomPaymentMethod(method);
@@ -3723,10 +3743,9 @@ const handleSelectLogo = (index) => {
     }
 
     // ── ADD MODE ─────────────────────────────────────────────────────────────
-    setPayConfirmMessage(
-      "This will add the payment method to your account so you can use it on your receipts."
-    );
-    setPendingPayEditFn(() => async () => {
+    // No confirmation needed for add — save directly
+    setIsPayMethodSaving(true);
+    try {
       const newPaymentMethod = {
         paymentType: paymentMethodString,
         cardIssuerName: storedIssuer,
@@ -3759,8 +3778,11 @@ const handleSelectLogo = (index) => {
       handleCloseAddPaymentModal();
       setShowPaymentDropdown(false);
       setToast({ isVisible: true, message: "Payment Method Added", type: "success" });
-    });
-    setShowPayEditConfirm(true);
+    } catch (e) {
+      setToast({ isVisible: true, message: e?.message || "Save failed", type: "error" });
+    } finally {
+      setIsPayMethodSaving(false);
+    }
   };
 
   // Filter functions for dropdowns - use merchantsWithImages
@@ -6986,11 +7008,11 @@ const handleSelectLogo = (index) => {
               className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-3">Confirmation</h3>
-                <p className="text-sm text-gray-600 mb-6">
-                  {payConfirmMessage ||
-                    "When editing a payment method, all receipts associated with that payment method will also be updated."}
+              <div className="p-6 text-center">
+                <p className="text-sm font-medium text-slate-700 leading-relaxed mb-6">
+                  When editing an Payment Method all<br />
+                  receipts associated with that Payment<br />
+                  Method will also be updated.
                 </p>
                 <div className="flex justify-end gap-3">
                   <button
@@ -7021,9 +7043,49 @@ const handleSelectLogo = (index) => {
                     disabled={isPayMethodSaving}
                     className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
                   >
-                    {isPayMethodSaving ? "Saving…" : "OK"}
+                    {isPayMethodSaving ? "Saving…" : "Okay"}
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Payment Method Delete Confirmation Dialog */}
+      <AnimatePresence>
+        {showPayDeleteConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 12 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 12 }}
+              className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center border border-slate-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
+                Are you sure you want to delete this<br />
+                Payment Method? When deleting a<br />
+                Payment Method all receipts<br />
+                associated with that Payment Method<br />
+                will have that Payment Method<br />
+                removed.
+              </p>
+              <div className="flex gap-3">
+                <button type="button"
+                  onClick={() => { setShowPayDeleteConfirm(false); setPendingPayDeleteMethod(null); }}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
+                  Cancel
+                </button>
+                <button type="button" onClick={doConfirmPayDeleteInDropdown}
+                  className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 rounded-xl text-white font-semibold text-sm transition-colors">
+                  Delete
+                </button>
               </div>
             </motion.div>
           </motion.div>
