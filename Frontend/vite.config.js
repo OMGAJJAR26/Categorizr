@@ -260,7 +260,16 @@ export default defineConfig(({ mode }) => {
         target: 'https://categorizr.com/emailserver',
         changeOrigin: true,
         secure: false,
-        agent: new https.Agent({ keepAlive: false }),
+        // Keep-alive pool so every request doesn't do a fresh TCP+TLS handshake
+        agent: new https.Agent({
+          keepAlive: true,
+          keepAliveMsecs: 10000,
+          maxSockets: 20,
+          timeout: 30000,        // socket idle timeout 30 s
+        }),
+        // How long the proxy waits for the backend to respond before giving up
+        proxyTimeout: 30000,
+        timeout: 35000,
         configure: (proxy) => {
           proxy.on('error', (err, req, res) => {
             console.warn('Proxy error for /api:', err.message);
@@ -274,7 +283,8 @@ export default defineConfig(({ mode }) => {
             if (accessToken) {
               proxyReq.setHeader('Accesstoken', accessToken);
             }
-            proxyReq.setHeader('Connection', 'close');
+            // Keep-alive header so the backend reuses the same TCP connection
+            proxyReq.setHeader('Connection', 'keep-alive');
           });
         },
       },

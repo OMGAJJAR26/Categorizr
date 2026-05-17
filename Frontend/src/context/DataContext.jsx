@@ -280,14 +280,17 @@ export const DataProvider = ({ children }) => {
     try {
       const token = localStorage.getItem("token");
       if (!token) throw new Error("Authentication token not found");
-      
+      const safePayload = {
+        ...taxData,
+        tax_name: escapeSqlApostrophe(taxData?.tax_name || ""),
+      };
       const response = await fetch(`${BASE_URL}/tax/addTax`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accesstoken: token,
         },
-        body: JSON.stringify(taxData),
+        body: JSON.stringify(safePayload),
       });
       
       if (!response.ok) {
@@ -309,14 +312,17 @@ export const DataProvider = ({ children }) => {
     try {
       const token = localStorage.getItem("token");
       if (!token) throw new Error("Authentication token not found");
-      
+      const safePayload = {
+        ...taxData,
+        tax_name: escapeSqlApostrophe(taxData?.tax_name || ""),
+      };
       const response = await fetch(`${BASE_URL}/tax/updateTax`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accesstoken: token,
         },
-        body: JSON.stringify(taxData),
+        body: JSON.stringify(safePayload),
       });
       
       if (!response.ok) {
@@ -377,11 +383,15 @@ export const DataProvider = ({ children }) => {
     } catch (e) { console.error("[Merchants] fetchApiMerchants error", e); }
   }, []);
 
+  // Backend SQL does direct string concatenation — escape single quotes so they
+  // don't break the query.  MySQL treats '' (doubled quote) as a literal apostrophe.
+  const escapeSqlApostrophe = (s) => (s || "").replace(/'/g, "''");
+
   const addApiMerchant = async (name, logoUrl = "") => {
     const token = localStorage.getItem("token");
     if (!token || !name.trim()) return { ok: false, data: null, error: "Missing token or merchant name" };
     const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
-    const payload = { store_name: name.trim(), store_image_url: logoUrl || "", fk_user_id };
+    const payload = { store_name: escapeSqlApostrophe(name.trim()), store_image_url: logoUrl || "", fk_user_id };
     console.log("%c[Merchants] POST /userstore/addStorev1 →", "color:#22c55e;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userstore/addStorev1`, {
@@ -408,7 +418,7 @@ export const DataProvider = ({ children }) => {
     const token = localStorage.getItem("token");
     if (!token) return { ok: false, data: null, error: "Missing token" };
     const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
-    const payload = { id, store_name: name.trim(), store_image_url: logoUrl || "", fk_user_id };
+    const payload = { id, store_name: escapeSqlApostrophe(name.trim()), store_image_url: logoUrl || "", fk_user_id };
     console.log("%c[Merchants] POST /userstore/updateStorev1 →", "color:#f59e0b;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userstore/updateStorev1`, {
@@ -618,7 +628,7 @@ export const DataProvider = ({ children }) => {
     if (!token || !name.trim()) return { ok: false, data: null, error: "Missing token or payment method name" };
     // card_type must be the integer enum value (0-8), NOT the string "payment"
     const payload = {
-      card_number: name.trim(),
+      card_number: escapeSqlApostrophe(name.trim()),
       icon_image: logoUrl || "",
       card_type: inferCardTypeInt(name.trim()),
       default_payment_category: expenseType || "",
@@ -688,7 +698,7 @@ export const DataProvider = ({ children }) => {
   const updateApiPaymentMethod = async (id, name, logoUrl = "", expenseType = "") => {
     const token = localStorage.getItem("token");
     if (!token) return { ok: false, data: null, error: "Missing token" };
-    const payload = { id, card_number: name.trim(), icon_image: logoUrl || "", card_type: inferCardTypeInt(name.trim()), default_payment_category: expenseType || "" };
+    const payload = { id, card_number: escapeSqlApostrophe(name.trim()), icon_image: logoUrl || "", card_type: inferCardTypeInt(name.trim()), default_payment_category: expenseType || "" };
     // Send as both query-string AND JSON body so the backend reads it regardless of its parser
     const updatePayQuery = new URLSearchParams({
       id:                       String(id),
@@ -836,7 +846,7 @@ export const DataProvider = ({ children }) => {
   const addApiExpenseCategory = async (name) => {
     const token = localStorage.getItem("token");
     if (!token || !name.trim()) return { ok: false, data: null, error: "Missing token or category name" };
-    const payload = { expense_category_name: name.trim() };
+    const payload = { expense_category_name: escapeSqlApostrophe(name.trim()) };
     console.log("%c[ExpenseCategories] POST /userexpensecategory/addExpenseCategoryv1 →", "color:#22c55e;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userexpensecategory/addExpenseCategoryv1`, {
@@ -860,7 +870,7 @@ export const DataProvider = ({ children }) => {
   const updateApiExpenseCategory = async (id, name) => {
     const token = localStorage.getItem("token");
     if (!token) return { ok: false, data: null, error: "Missing token" };
-    const payload = { id, expense_category_name: name.trim() };
+    const payload = { id, expense_category_name: escapeSqlApostrophe(name.trim()) };
     console.log("%c[ExpenseCategories] POST /userexpensecategory/updateExpenseCategoryv1 →", "color:#f59e0b;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userexpensecategory/updateExpenseCategoryv1`, {
@@ -871,7 +881,10 @@ export const DataProvider = ({ children }) => {
       if (res.ok) {
         const data = await res.json();
         console.log("%c[ExpenseCategories] updateApiExpenseCategory response (full):", "color:#f59e0b;font-weight:bold", data);
-        setApiExpenseCategories(prev => prev.map(c => String(c.id) === String(id) ? data : c));
+        // Use the known-good shape (preserve existing entry, just update the name) so
+        // visibleApiExpenseCategories never loses this entry due to a missing expense_category_name
+        // in the raw API response.
+        setApiExpenseCategories(prev => prev.map(c => String(c.id) === String(id) ? { ...c, expense_category_name: name } : c));
         return { ok: true, data, error: null };
       }
       return { ok: false, data: null, error: `Failed with status ${res.status}` };

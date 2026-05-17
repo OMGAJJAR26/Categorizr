@@ -1306,7 +1306,7 @@ const ReceiptInfoInline = ({ type }) => {
   const {
     receipts, updateReceipt,
     receiptMerchWImgRaw, customMerchants, hiddenMerchants, hideMerchant, isMerchantHidden, addCustomMerchant, editCustomMerchant, deleteCustomMerchant,
-    receiptCategoriesRaw, customCategories, hideCategory, addCustomCategory, editCustomCategory, deleteCustomCategory,
+    receiptCategoriesRaw, customCategories, hiddenCategories, hideCategory, isCategoryHidden, addCustomCategory, editCustomCategory, deleteCustomCategory,
     receiptPaymentsRaw, customPaymentMethods, hiddenPaymentMethods, hidePaymentMethod, unhidePaymentMethod, addCustomPaymentMethod, editCustomPaymentMethod, deleteCustomPaymentMethod,
     taxData, addTax, updateTax, deleteTax, fetchTaxes,
     apiMerchants, fetchApiMerchants, addApiMerchant, updateApiMerchant, deleteApiMerchant,
@@ -2050,6 +2050,8 @@ const isBlockedTaxRateInput = (val) => {
         // Has API backing — update via API (keeps the record, just renames it)
         const updateCategoryResult = await updateApiExpenseCategory(String(apiMatch.id), newName);
         if (!updateCategoryResult?.ok) throw new Error(updateCategoryResult?.error || "Failed to update expense category");
+        // Hide the old name so it no longer appears in the receipt-derived list
+        hideCategory(currentName);
       } else {
         // No API backing — hide old receipt-derived entry, add new custom one
         hideCategory(item.key);
@@ -2065,6 +2067,8 @@ const isBlockedTaxRateInput = (val) => {
       if (!updateCategoryResult?.ok) throw new Error(updateCategoryResult?.error || "Failed to update expense category");
       // Remove the stale custom-categories entry so the renamed API item is the only copy
       if (!item.isApiItem) deleteCustomCategory(item.key);
+      // Hide the old name so it no longer appears in the receipt-derived list or API list
+      hideCategory(currentName);
       toast("success", "Expense Category Updated");
       return;
     }
@@ -2107,6 +2111,8 @@ const isBlockedTaxRateInput = (val) => {
     if (!pendingCategoryEdit) return;
     try {
       await applyCategoryEdit(pendingCategoryEdit.item, pendingCategoryEdit.newName);
+      // Re-sync the API list so any stale backend entries are replaced with the latest data
+      await fetchApiExpenseCategories();
     } catch (e) {
       toast("error", e.message || "Update failed.");
     } finally {
@@ -2456,15 +2462,22 @@ const isBlockedTaxRateInput = (val) => {
       return [...allWithApi, ...defaultItems];
     }
     if (type === "categories") {
-      const rItems = receiptCategoriesRaw.map(c => ({ key: c, name: c, logo: null, isReceiptItem: true, isApiItem: false }));
-      const rKeys  = new Set(receiptCategoriesRaw.map(c => c.toLowerCase()));
+      // Filter out any receipt-derived names the user has renamed/hidden
+      const rItems = receiptCategoriesRaw
+        .filter(c => !hiddenCategories.has(c))
+        .map(c => ({ key: c, name: c, logo: null, isReceiptItem: true, isApiItem: false }));
+      const rKeys  = new Set(rItems.map(c => c.name.toLowerCase()));
       const cItems = customCategories
-        .filter(c => !rKeys.has(c.toLowerCase()))
+        .filter(c => !rKeys.has(c.toLowerCase()) && !hiddenCategories.has(c))
         .map(c => ({ key: c, name: c, logo: null, isReceiptItem: false, isApiItem: false }));
-      // API expense categories not already present from receipts or custom
+      // API expense categories not already present from receipts or custom, and not hidden
       const allExistingCatKeys = new Set([...rItems.map(c => c.name.toLowerCase()), ...cItems.map(c => c.name.toLowerCase())]);
       const apiItems = (apiExpenseCategories || [])
-        .filter(c => c.expense_category_name && !allExistingCatKeys.has((c.expense_category_name || "").toLowerCase()))
+        .filter(c =>
+          c.expense_category_name &&
+          !allExistingCatKeys.has((c.expense_category_name || "").toLowerCase()) &&
+          !hiddenCategories.has(c.expense_category_name)
+        )
         .map(c => ({
           key: `api_${c.id}`,
           name: c.expense_category_name,
