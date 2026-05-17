@@ -703,10 +703,12 @@ export const DataProvider = ({ children }) => {
   const updateApiPaymentMethod = async (id, name, logoUrl = "", expenseType = "") => {
     const token = localStorage.getItem("token");
     if (!token) return { ok: false, data: null, error: "Missing token" };
-    const payload = { id, card_number: escapeSqlApostrophe(name.trim()), icon_image: logoUrl || "", card_type: inferCardTypeInt(name.trim()), default_payment_category: expenseType || "" };
+    const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
+    const payload = { id, fk_user_id, card_number: escapeSqlApostrophe(name.trim()), icon_image: logoUrl || "", card_type: inferCardTypeInt(name.trim()), default_payment_category: expenseType || "" };
     // Send as both query-string AND JSON body so the backend reads it regardless of its parser
     const updatePayQuery = new URLSearchParams({
       id:                       String(id),
+      fk_user_id:               String(fk_user_id),
       card_number:              payload.card_number,
       icon_image:               payload.icon_image,
       card_type:                String(payload.card_type),
@@ -761,30 +763,27 @@ export const DataProvider = ({ children }) => {
 
       let authErrorMessage = "";
       const attempts = [
-        {
-          method: "GET",
-          url: queryUrl,
-          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
-          body: undefined,
-        },
+        // DELETE is the spec-defined method — confirmed working; try it first
         {
           method: "DELETE",
           url: queryUrl,
           headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
           body: undefined,
         },
+        // POST with JSON body as fallback (some backends route DELETE via POST)
         {
           method: "POST",
           url: endpoint,
           headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
           body: JSON.stringify(payload),
         },
+        // POST with query-string only as last resort
         {
           method: "POST",
           url: queryUrl,
           headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
           body: undefined,
-        }
+        },
       ];
 
       for (const attempt of attempts) {
