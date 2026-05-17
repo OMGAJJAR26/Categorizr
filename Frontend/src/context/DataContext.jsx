@@ -1804,7 +1804,7 @@ setMerchantsWithImages(
           if (value === null || value === undefined || value === "") {
             // For empty strings, check if we should preserve existing value
             // Some fields like notes can be empty, so we need to be careful
-            if (field === "notes" || field === "expense_type" || field === "product_name" || field === "storeName") {
+            if (field === "notes" || field === "expense_type" || field === "product_name" || field === "storeName" || field === "card_issuer_name") {
               // These fields can legitimately be empty, so use empty string if provided
               return value === "" ? "" : (existingReceipt?.[field] ?? defaultValue);
             }
