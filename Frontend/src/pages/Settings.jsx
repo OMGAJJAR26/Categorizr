@@ -251,7 +251,7 @@ const ManageModal = ({ type, onClose }) => {
         ...(apiMerchants || []).map((m) => m?.store_name || ""),
       ].some((m) => normalizeMatchKey(m) === normalizeMatchKey(merchantName));
       if (duplicate) {
-        toast("error", "Merchant name already exists");
+        toast("error", "Merchant already exists");
         return;
       }
       try {
@@ -309,7 +309,7 @@ const ManageModal = ({ type, onClose }) => {
         ...(apiMerchants || []).map((m) => m?.store_name || ""),
       ].some((m) => normalizeMatchKey(m) === normalizeMatchKey(nextName) && normalizeMatchKey(m) !== normalizeMatchKey(item?.name));
       if (duplicate) {
-        toast("error", "Merchant name already exists");
+        toast("error", "Merchant already exists");
         return;
       }
       try {
@@ -438,7 +438,7 @@ const ManageModal = ({ type, onClose }) => {
     const allCustomItems = buildCustomItems();
     const dupCheck = [...allReceiptItems, ...allCustomItems].some(i => i.key !== key && i.name.toLowerCase() === newName.toLowerCase());
     if (dupCheck) {
-      if (type === "merchants") return toast("error", "Merchant name already exists");
+      if (type === "merchants") return toast("error", "Merchant already exists");
       if (type === "categories") return toast("error", "Expense Category already exists");
     }
     if (type === "merchants")  {
@@ -1764,7 +1764,7 @@ const isBlockedTaxRateInput = (val) => {
       const exists = buildAllItems().some(
         (i) => normalizeMatchKey(i.name) === normalizeMatchKey(nextName) && i.key !== item.key
       );
-      return exists ? "Merchant name already exists" : "";
+      return exists ? "Merchant already exists" : "";
     }
     if (type === "categories") {
       const exists = buildAllItems().some(
@@ -2364,7 +2364,7 @@ const isBlockedTaxRateInput = (val) => {
     if (type === "merchants") {
       const allExisting = buildAllItems();
       if (allExisting.some(i => i.name.toLowerCase() === newName.toLowerCase() && i.key !== item.key)) {
-        return toast("error", "Merchant name already exists");
+        return toast("error", "Merchant already exists");
       }
       setPendingMerchantEdit({ item, newName, keepLogo });
       setShowMerchantEditConfirm(true);

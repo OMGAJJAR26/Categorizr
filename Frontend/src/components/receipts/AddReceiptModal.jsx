@@ -399,6 +399,9 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const [isFetchingEditLogos, setIsFetchingEditLogos] = useState(false);
   const [isSavingEditMerchant, setIsSavingEditMerchant] = useState(false);
   const [editMerchantError, setEditMerchantError] = useState(null);
+  const [showMerchantEditConfirm, setShowMerchantEditConfirm] = useState(false);
+  const [showMerchantDeleteConfirm, setShowMerchantDeleteConfirm] = useState(false);
+  const [pendingMerchantDeleteData, setPendingMerchantDeleteData] = useState(null);
 
   // ── Pre-fill from initialData (duplicate mode) ───────────────────────────
   useEffect(() => {
@@ -3058,15 +3061,23 @@ const handleFieldChange = (field, value) => {
   };
 
   /** Rename + update logo for ALL receipts using this merchant, then refresh. */
-  const handleSaveEditMerchant = async () => {
+  // Validate only — shows confirmation popup; actual save is in doConfirmMerchantEdit
+  const handleSaveEditMerchant = () => {
     if (!editMerchantName.trim()) {
-      setEditMerchantError("Merchant name is required.");
+      setEditMerchantError("Please enter Merchant Name");
       return;
     }
     if (merchantExists(editMerchantName, editingMerchant.name)) {
-      setEditMerchantError("Merchant name already exists");
+      setEditMerchantError("Merchant already exists");
       return;
     }
+    // Validation passed — show styled confirmation popup
+    setShowMerchantEditConfirm(true);
+  };
+
+  // Called when user taps "Okay" in the merchant edit confirmation popup
+  const doConfirmMerchantEdit = async () => {
+    setShowMerchantEditConfirm(false);
     setIsSavingEditMerchant(true);
     setEditMerchantError(null);
     const oldName = editingMerchant.name;
@@ -3126,10 +3137,19 @@ const handleFieldChange = (field, value) => {
     }
   };
 
-  /** Move all receipts of this merchant to "Miscellaneous", removing it from the list. */
-  const handleDeleteMerchant = async (merchant) => {
+  /** Show styled confirmation popup before deleting a merchant. */
+  const handleDeleteMerchant = (merchant) => {
     if (merchant.name.toLowerCase() === "miscellaneous") return;
-    if (!window.confirm(`Delete "${merchant.name}"?\n\nAll receipts with this merchant will be changed to "Miscellaneous".`)) return;
+    setPendingMerchantDeleteData(merchant);
+    setShowMerchantDeleteConfirm(true);
+  };
+
+  /** Called when user taps "Delete" in the merchant delete confirmation popup. */
+  const doConfirmMerchantDelete = async () => {
+    setShowMerchantDeleteConfirm(false);
+    if (!pendingMerchantDeleteData) return;
+    const merchant = pendingMerchantDeleteData;
+    setPendingMerchantDeleteData(null);
     setIsSavingEditMerchant(true);
     try {
       const affected = (receipts || []).filter(
@@ -3451,7 +3471,7 @@ const handleSelectLogo = (index) => {
 
     // 2. Duplicate check (case-insensitive, against global list)
     if (merchantExists(name)) {
-      setError("Merchant name already exists");
+      setError("Merchant already exists");
       return;
     }
 
@@ -3917,7 +3937,7 @@ const handleSelectLogo = (index) => {
 
   const editMerchantDuplicateError =
     editMerchantName.trim() && merchantExists(editMerchantName, editingMerchant?.name || "")
-      ? "Merchant name already exists"
+      ? "Merchant already exists"
       : "";
 
   const filteredPaymentMethods = (() => {
@@ -6307,7 +6327,7 @@ const handleSelectLogo = (index) => {
                       setEditMerchantName(e.target.value);
                       setEditLogoOptions([]);
                       setEditSelectedLogoIndex(null);
-                      if (editMerchantError === "Merchant name already exists") setEditMerchantError(null);
+                      if (editMerchantError === "Merchant already exists") setEditMerchantError(null);
                     }}
                     placeholder="Enter merchant name"
                     autoFocus
@@ -7318,6 +7338,60 @@ const handleSelectLogo = (index) => {
             setAnnotatorIndex(null);
           }}
         />
+      )}
+
+      {/* Merchant Edit Confirmation Popup */}
+      {showMerchantEditConfirm && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
+            className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center border border-slate-200">
+            <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
+              When editing a Merchant<br />
+              all receipts associated with that<br />
+              Merchant will also be updated.
+            </p>
+            <div className="flex gap-3">
+              <button type="button"
+                onClick={() => setShowMerchantEditConfirm(false)}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
+                Cancel
+              </button>
+              <button type="button" onClick={doConfirmMerchantEdit} disabled={isSavingEditMerchant}
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 rounded-xl text-white font-semibold text-sm transition-colors">
+                Okay
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+
+      {/* Merchant Delete Confirmation Popup */}
+      {showMerchantDeleteConfirm && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
+            className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center border border-slate-200">
+            <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
+              Are you sure you want to delete this<br />
+              Merchant? If so, then all Receipts<br />
+              associated with this Merchant will<br />
+              now be associated with the<br />
+              &quot;Miscellaneous&quot; Merchant.
+            </p>
+            <div className="flex gap-3">
+              <button type="button"
+                onClick={() => { setShowMerchantDeleteConfirm(false); setPendingMerchantDeleteData(null); }}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
+                Cancel
+              </button>
+              <button type="button" onClick={doConfirmMerchantDelete} disabled={isSavingEditMerchant}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-60 rounded-xl text-white font-semibold text-sm transition-colors">
+                Delete
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
       )}
 
       {/* Custom alert (replaces browser alert()) */}
