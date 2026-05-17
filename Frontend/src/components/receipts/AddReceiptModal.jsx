@@ -3639,11 +3639,27 @@ const handleSelectLogo = (index) => {
         if (apiId != null) {
           await updateApiPaymentMethod(apiId, paymentMethodString, logoUrl);
         }
-        // Update receipts that used the old payment method name
-        const matchingReceipts = (receipts || []).filter(
-          (r) =>
-            getPaymentDisplayFromReceipt(r).toLowerCase() === (oldName || "").toLowerCase()
+        // Update receipts that used the old payment method name.
+        // Use a broad match: exact display string OR same last4+issuer fields,
+        // so receipts stored via different code paths are all caught.
+        const { issuer: oldIssuer, last4: oldLast4 } = parsePaymentDisplay(oldName || "");
+        const exactByDisplay = (receipts || []).filter(
+          (r) => getPaymentDisplayFromReceipt(r).toLowerCase() === (oldName || "").toLowerCase()
         );
+        const exactIds = new Set(exactByDisplay.map(r => r.id));
+        const additionalByFields = oldLast4
+          ? (receipts || []).filter(r => {
+              if (exactIds.has(r.id)) return false;
+              const rLast4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
+              if (rLast4 !== oldLast4) return false;
+              const rIssuer = (r.card_issuer_name || r.cardIssuerName || "").toString().trim().toLowerCase();
+              const rTypeLower = (r.paymentType || r.payment_type || "").toString().replace(/\s*\*\d{3,4}$/, "").trim().toLowerCase();
+              const oldIssuerLower = (oldIssuer || "").toLowerCase();
+              return (oldIssuerLower && rIssuer === oldIssuerLower) ||
+                     (oldIssuerLower && rTypeLower === oldIssuerLower);
+            })
+          : [];
+        const matchingReceipts = [...exactByDisplay, ...additionalByFields];
         if (matchingReceipts.length > 0) {
           await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
             paymentType: selectedCardTypeForLogo,

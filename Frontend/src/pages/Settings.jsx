@@ -1861,8 +1861,25 @@ const isBlockedTaxRateInput = (val) => {
               const res = await updateApiPaymentMethod(targetId, payStr, selectedLogoUrl, newExpenseType);
               if (!res?.ok) throw new Error(res?.error || "Failed to update payment method");
             }
-            // Propagate to receipts that use old name
-            const matchingReceipts = getReceiptsByPaymentDisplay(oldName);
+            // Propagate to receipts that use old name.
+            // Use a broad match so receipts added via AddReceiptModal (which may store
+            // the issuer as paymentType rather than as card_issuer_name) are also caught.
+            const { issuer: oldIssuer, last4: oldLast4 } = parsePaymentDisplay(oldName);
+            const exactByDisplay = getReceiptsByPaymentDisplay(oldName);
+            const exactIds = new Set(exactByDisplay.map(r => r.id));
+            const additionalByFields = oldLast4
+              ? (receipts || []).filter(r => {
+                  if (exactIds.has(r.id)) return false;
+                  const rLast4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
+                  if (rLast4 !== oldLast4) return false;
+                  const rIssuer = (r.card_issuer_name || r.cardIssuerName || "").toString().trim().toLowerCase();
+                  const rTypeLower = (r.paymentType || r.payment_type || "").toString().replace(/\s*\*\d{3,4}$/, "").trim().toLowerCase();
+                  const oldIssuerLower = (oldIssuer || "").toLowerCase();
+                  return (oldIssuerLower && rIssuer === oldIssuerLower) ||
+                         (oldIssuerLower && rTypeLower === oldIssuerLower);
+                })
+              : [];
+            const matchingReceipts = [...exactByDisplay, ...additionalByFields];
             if (matchingReceipts.length > 0) {
               const { last4: newL4 } = parsePaymentDisplay(payStr);
               await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
@@ -2081,8 +2098,24 @@ const isBlockedTaxRateInput = (val) => {
     const currentName = item.name;
     if (item.isReceiptItem) {
       const { issuer, last4 } = parsePaymentDisplay(newName);
+      const { issuer: oldIssuer, last4: oldLast4 } = parsePaymentDisplay(currentName);
       const brand = getPaymentBrand(currentName, inferCardTypeFromPayment(currentName));
-      const matching = getReceiptsByPaymentDisplay(currentName);
+      // Broad match: exact display + same last4+issuer fallback (catches AddReceiptModal storage variants)
+      const exactMatches = getReceiptsByPaymentDisplay(currentName);
+      const exactIds = new Set(exactMatches.map(r => r.id));
+      const additionalMatches = oldLast4
+        ? (receipts || []).filter(r => {
+            if (exactIds.has(r.id)) return false;
+            const rLast4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
+            if (rLast4 !== oldLast4) return false;
+            const rIssuer = (r.card_issuer_name || r.cardIssuerName || "").toString().trim().toLowerCase();
+            const rTypeLower = (r.paymentType || r.payment_type || "").toString().replace(/\s*\*\d{3,4}$/, "").trim().toLowerCase();
+            const oldIssuerLower = (oldIssuer || "").toLowerCase();
+            return (oldIssuerLower && rIssuer === oldIssuerLower) ||
+                   (oldIssuerLower && rTypeLower === oldIssuerLower);
+          })
+        : [];
+      const matching = [...exactMatches, ...additionalMatches];
       await Promise.all(matching.map(r => updateReceipt(r.id, {
         paymentType: getPaymentBrand(currentName, r.paymentType || r.payment_type || ""),
         card_issuer_name: storedCardIssuerName(issuer, brand),
