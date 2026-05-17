@@ -244,6 +244,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const [editCategoryName, setEditCategoryName] = useState("");
   const [isSavingEditCategory, setIsSavingEditCategory] = useState(false);
   const [editCategoryError, setEditCategoryError] = useState(null);
+  const [showCategoryEditConfirm, setShowCategoryEditConfirm] = useState(false);
   const [showDeleteCategoryConfirm, setShowDeleteCategoryConfirm] = useState(false);
   const [deletingCategory, setDeletingCategory] = useState(null);
   const [isDeletingCategory, setIsDeletingCategory] = useState(false);
@@ -1903,15 +1904,24 @@ const handleFieldChange = (field, value) => {
     setShowCategoryDropdown(false);
   };
 
-  const handleSaveEditCategory = async () => {
+  // Validate only — shows confirmation popup; actual save is in doConfirmCategoryEdit
+  const handleSaveEditCategory = () => {
     const newName = editCategoryName.trim();
     if (!newName) { setEditCategoryError("Please enter Expense Category"); return; }
     if (expenseCategoryExists(newName, editingCategory)) {
       setEditCategoryError("Expense Category already exists");
       return;
     }
+    // Validation passed — show styled confirmation popup
+    setShowCategoryEditConfirm(true);
+  };
+
+  // Called when user taps "Okay" in the expense category edit confirmation popup
+  const doConfirmCategoryEdit = async () => {
+    setShowCategoryEditConfirm(false);
     setIsSavingEditCategory(true);
     setEditCategoryError(null);
+    const newName = editCategoryName.trim();
     const oldName = editingCategory;
     try {
       // Update all receipts that reference the old name
@@ -1976,7 +1986,7 @@ const handleFieldChange = (field, value) => {
       setShowDeleteCategoryConfirm(false);
       setDeletingCategory(null);
       await Promise.all([fetchApiExpenseCategories(), silentRefreshData(0)]);
-      setToast({ isVisible: true, message: "Expense category deleted successfully!", type: "success" });
+      setToast({ isVisible: true, message: "Expense Category Deleted", type: "success" });
     } catch (err) {
       setToast({ isVisible: true, message: err.message || "Failed to delete category.", type: "error" });
     } finally {
@@ -7219,9 +7229,6 @@ const handleSelectLogo = (index) => {
                 </button>
               </div>
               <div className="p-6">
-                <p className="text-sm text-gray-600 mb-4 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
-                  Confirmation: When editing an Expense Category all receipts associated with that Expense Category will also be updated.
-                </p>
                 <label className="block text-sm font-bold text-gray-700 mb-2">
                   Category Name <span className="text-red-500">*</span>
                 </label>
@@ -7338,6 +7345,32 @@ const handleSelectLogo = (index) => {
             setAnnotatorIndex(null);
           }}
         />
+      )}
+
+      {/* Expense Category Edit Confirmation Popup */}
+      {showCategoryEditConfirm && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
+            className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center border border-slate-200">
+            <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
+              When editing an Expense Category<br />
+              all receipts associated with that<br />
+              Expense Category will also be updated.
+            </p>
+            <div className="flex gap-3">
+              <button type="button"
+                onClick={() => setShowCategoryEditConfirm(false)}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
+                Cancel
+              </button>
+              <button type="button" onClick={doConfirmCategoryEdit} disabled={isSavingEditCategory}
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 rounded-xl text-white font-semibold text-sm transition-colors">
+                Okay
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
       )}
 
       {/* Merchant Edit Confirmation Popup */}
