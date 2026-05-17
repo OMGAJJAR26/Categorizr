@@ -2009,6 +2009,11 @@ const isBlockedTaxRateInput = (val) => {
         const updateMerchantResult = await updateApiMerchant(item.apiId, newName, keepLogo || "");
         if (!updateMerchantResult?.ok) throw new Error(updateMerchantResult?.error || "Failed to update merchant");
         if (keepLogo) saveMerchLogo(newName, keepLogo);
+        // Hide old name so receipt-derived list doesn't show both old and new after refresh
+        if (normalizeMatchKey(newName) !== normalizeMatchKey(item.name)) {
+          hideMerchant(item.name);
+          addCustomMerchant(newName);
+        }
       } else {
         editCustomMerchant(item.key, newName);
         if (keepLogo) saveMerchLogo(newName, keepLogo);
@@ -2137,7 +2142,19 @@ const isBlockedTaxRateInput = (val) => {
       const existingApi = (apiPaymentMethods || []).find((p) => p.id === item.apiId);
       const updatePaymentResult = await updateApiPaymentMethod(item.apiId, newName, existingApi?.icon_image || "", existingApi?.default_payment_category || "");
       if (!updatePaymentResult?.ok) throw new Error(updatePaymentResult?.error || "Failed to update payment method");
+      // Propagate name change to all receipts that used the old payment method
+      const { issuer: newIssuer, last4: newL4 } = parsePaymentDisplay(newName);
+      const newBrand = getPaymentBrand(newName, inferCardTypeFromPayment(newName));
+      const matchingReceipts = getReceiptsByPaymentDisplay(item.name);
+      if (matchingReceipts.length > 0) {
+        await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
+          paymentType: newBrand || newIssuer,
+          card_issuer_name: storedCardIssuerName(newIssuer, newBrand),
+          last_4_digit_card: newL4 || r.last_4_digit_card || "",
+        })));
+      }
       savePayCard(newName, getPaymentBrand(item.name, newCardType || ""));
+      await Promise.all([silentRefreshData(0), fetchApiPaymentMethods()]);
       toast("success", "Payment Method Updated");
       return;
     }
@@ -2218,12 +2235,12 @@ const isBlockedTaxRateInput = (val) => {
       toast("error", "Cash payment method cannot be deleted");
       return;
     }
-    // Step 1 — clear payment method from every matching receipt
+    // Step 1 — set payment method to Cash on every matching receipt
     const matching = getReceiptsByPaymentDisplay(item.name || "");
     if (matching.length > 0) {
       await Promise.all(
         matching.map(r =>
-          updateReceipt(r.id, { paymentType: "", card_issuer_name: "", last_4_digit_card: "" })
+          updateReceipt(r.id, { paymentType: "Cash", card_issuer_name: "", last_4_digit_card: "" })
         )
       );
     }

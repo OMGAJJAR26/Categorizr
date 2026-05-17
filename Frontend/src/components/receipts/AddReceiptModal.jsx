@@ -3599,13 +3599,13 @@ const handleSelectLogo = (index) => {
     const method = pendingPayDeleteMethod;
     setPendingPayDeleteMethod(null);
     if (!method) return;
-    // Clear payment method from all matching receipts
+    // Set payment method to Cash on all matching receipts
     const matching = (receipts || []).filter(
       (r) => getPaymentDisplayFromReceipt(r).toLowerCase() === (method || "").toLowerCase()
     );
     if (matching.length > 0) {
       await Promise.all(matching.map(r =>
-        updateReceipt(r.id, { paymentType: "", card_issuer_name: "", last_4_digit_card: "" })
+        updateReceipt(r.id, { paymentType: "Cash", card_issuer_name: "", last_4_digit_card: "" })
       ));
     }
     const apiMatch = (apiPaymentMethods || []).find(

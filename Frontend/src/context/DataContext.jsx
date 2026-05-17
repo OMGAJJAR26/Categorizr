@@ -626,8 +626,11 @@ export const DataProvider = ({ children }) => {
   const addApiPaymentMethod = async (name, logoUrl = "", expenseType = "") => {
     const token = localStorage.getItem("token");
     if (!token || !name.trim()) return { ok: false, data: null, error: "Missing token or payment method name" };
+    const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
     // card_type must be the integer enum value (0-8), NOT the string "payment"
     const payload = {
+      id: 0,
+      fk_user_id,
       card_number: escapeSqlApostrophe(name.trim()),
       icon_image: logoUrl || "",
       card_type: inferCardTypeInt(name.trim()),
@@ -635,6 +638,8 @@ export const DataProvider = ({ children }) => {
     };
     // Send as both query-string AND JSON body so the backend reads it regardless of its parser
     const addPayQuery = new URLSearchParams({
+      id:                       "0",
+      fk_user_id:               String(fk_user_id),
       card_number:              payload.card_number,
       icon_image:               payload.icon_image,
       card_type:                String(payload.card_type),
