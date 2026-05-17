@@ -851,7 +851,8 @@ export const DataProvider = ({ children }) => {
   const addApiExpenseCategory = async (name) => {
     const token = localStorage.getItem("token");
     if (!token || !name.trim()) return { ok: false, data: null, error: "Missing token or category name" };
-    const payload = { expense_category_name: escapeSqlApostrophe(name.trim()) };
+    const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
+    const payload = { id: 0, fk_user_id, expense_category_name: escapeSqlApostrophe(name.trim()) };
     console.log("%c[ExpenseCategories] POST /userexpensecategory/addExpenseCategoryv1 →", "color:#22c55e;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userexpensecategory/addExpenseCategoryv1`, {
@@ -875,7 +876,8 @@ export const DataProvider = ({ children }) => {
   const updateApiExpenseCategory = async (id, name) => {
     const token = localStorage.getItem("token");
     if (!token) return { ok: false, data: null, error: "Missing token" };
-    const payload = { id, expense_category_name: escapeSqlApostrophe(name.trim()) };
+    const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
+    const payload = { id, fk_user_id, expense_category_name: escapeSqlApostrophe(name.trim()) };
     console.log("%c[ExpenseCategories] POST /userexpensecategory/updateExpenseCategoryv1 →", "color:#f59e0b;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userexpensecategory/updateExpenseCategoryv1`, {

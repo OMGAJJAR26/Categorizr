@@ -2096,8 +2096,14 @@ const isBlockedTaxRateInput = (val) => {
       if (!updateCategoryResult?.ok) throw new Error(updateCategoryResult?.error || "Failed to update expense category");
       // Remove the stale custom-categories entry so the renamed API item is the only copy
       if (!item.isApiItem) deleteCustomCategory(item.key);
+      // Propagate name change to all receipts that referenced the old category
+      const matchingCatReceipts = getReceiptsByCategory(currentName);
+      if (matchingCatReceipts.length > 0) {
+        await Promise.all(matchingCatReceipts.map(r => updateReceipt(r.id, { expense_type: newName })));
+      }
       // Hide the old name so it no longer appears in the receipt-derived list or API list
       hideCategory(currentName);
+      await Promise.all([silentRefreshData(0), fetchApiExpenseCategories()]);
       toast("success", "Expense Category Updated");
       return;
     }
