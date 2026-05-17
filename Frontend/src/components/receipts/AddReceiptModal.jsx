@@ -3674,7 +3674,7 @@ const handleSelectLogo = (index) => {
       last4Final
     );
 
-    const PAYMENT_LOGOS = { Visa: Visa, MasterCard: MasterCard, "American Express": AmericanExpress, Discover: Discover, "Diners Club": DinersClub, PayPal: PayPal, "Debit Card": DebitCard, Cash: Cash };
+    const PAYMENT_LOGOS = { Visa: Visa, MasterCard: MasterCard, "American Express": AmericanExpress, Discover: Discover, "Diners Club": DinersClub, PayPal: PayPal, "Debit Card": DebitCard, Cash: Cash, Other: Creditdebitcardicon };
     const logoUrl = PAYMENT_LOGOS[selectedCardTypeForLogo] || "";
 
     // ── EDIT MODE ────────────────────────────────────────────────────────────
@@ -3687,7 +3687,7 @@ const handleSelectLogo = (index) => {
       );
       setPendingPayEditFn(() => async () => {
         if (apiId != null) {
-          await updateApiPaymentMethod(apiId, paymentMethodString, logoUrl);
+          await updateApiPaymentMethod(apiId, paymentMethodString, logoUrl, newPaymentCategoryType || "");
         }
         // Update receipts that used the old payment method name.
         // Use a broad match: exact display string OR same last4+issuer fields,
@@ -3755,7 +3755,8 @@ const handleSelectLogo = (index) => {
       };
       setLocalPaymentMethods((prev) => [...prev, newPaymentMethod]);
 
-      await addApiPaymentMethod(paymentMethodString, logoUrl);
+      // Pass logoUrl and expenseType so card_type, icon_image, default_payment_category are all sent correctly
+      await addApiPaymentMethod(paymentMethodString, logoUrl, newPaymentCategoryType || "Personal");
       const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
       _pct[paymentMethodString] = selectedCardTypeForLogo;
       localStorage.setItem("cat_pay_card_types", JSON.stringify(_pct));
@@ -3764,9 +3765,16 @@ const handleSelectLogo = (index) => {
         _pet[paymentMethodString] = newPaymentCategoryType;
         localStorage.setItem("cat_pay_expense_type", JSON.stringify(_pet));
       }
-      await fetchApiPaymentMethods();
+      // Do NOT call fetchApiPaymentMethods() here — addApiPaymentMethod already does an optimistic
+      // update to apiPaymentMethods. Fetching immediately can race with the server and overwrite
+      // the new entry with a stale list, making the method invisible until next page load.
 
-      handleFieldChange("paymentType", selectedCardTypeForLogo || paymentMethodString);
+      // For "Other" card type, store the full "Other *XXXX" string as paymentType so the dropdown
+      // can match it; for all other known brands, store just the brand name (standard data model).
+      const paymentTypeForForm = selectedCardTypeForLogo === "Other"
+        ? paymentMethodString
+        : (selectedCardTypeForLogo || paymentMethodString);
+      handleFieldChange("paymentType", paymentTypeForForm);
       handleFieldChange("card_issuer_name", storedIssuer);
       if (last4Final) handleFieldChange("last_4_digit_card", last4Final);
       if (newPaymentCategoryType === "Business") {

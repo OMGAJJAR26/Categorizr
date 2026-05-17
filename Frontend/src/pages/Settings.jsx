@@ -2135,7 +2135,7 @@ const isBlockedTaxRateInput = (val) => {
     }
     if (item.isApiItem) {
       const existingApi = (apiPaymentMethods || []).find((p) => p.id === item.apiId);
-      const updatePaymentResult = await updateApiPaymentMethod(item.apiId, newName, existingApi?.icon_image || "");
+      const updatePaymentResult = await updateApiPaymentMethod(item.apiId, newName, existingApi?.icon_image || "", existingApi?.default_payment_category || "");
       if (!updatePaymentResult?.ok) throw new Error(updatePaymentResult?.error || "Failed to update payment method");
       savePayCard(newName, getPaymentBrand(item.name, newCardType || ""));
       toast("success", "Payment Method Updated");
