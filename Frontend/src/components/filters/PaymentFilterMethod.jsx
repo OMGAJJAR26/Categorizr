@@ -35,6 +35,7 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
   const {
     receipts,
     apiPaymentMethods,
+    paymentMethods,
     fetchApiPaymentMethods,
     isPaymentMethodHidden,
   } = useData();
@@ -344,6 +345,12 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
       addLabel(getPaymentDisplayFromReceipt(r));
     });
 
+    // Include default payment methods (Cash, American Express, Bank of America, Citibank)
+    // that may not appear via API or receipt entries
+    (paymentMethods || []).forEach((m) => {
+      if (!isPaymentMethodHidden(m)) addLabel(m);
+    });
+
     const seen = new Set();
     return Array.from(byKey.values())
       .map((v) => v.label)
@@ -354,7 +361,7 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
         return true;
       })
       .sort((a, b) => a.localeCompare(b));
-  }, [apiPaymentMethods, receipts, isPaymentMethodHidden, apiLabelForMethod]);
+  }, [apiPaymentMethods, receipts, paymentMethods, isPaymentMethodHidden, apiLabelForMethod]);
 
   // ✅ Select all
   const handleSelectAll = () => {

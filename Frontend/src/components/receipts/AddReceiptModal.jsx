@@ -605,24 +605,24 @@ const [localMerchants, setLocalMerchants] = useState([]);
   // Include locally added merchants
   const allMerchantsWithImages = (() => {
     const uniqueMap = new Map();
-    const mergeMerchant = (merchant) => {
-      const normalizedName = (merchant?.name || "").toString().trim().toLowerCase();
+    // Add context merchants first (API + receipt-derived logos)
+    (merchantsWithImages || []).forEach((m) => {
+      const normalizedName = (m?.name || "").toString().trim().toLowerCase();
+      if (!normalizedName) return;
+      uniqueMap.set(normalizedName, m);
+    });
+    // localMerchants are set immediately when the user updates a logo — they take
+    // priority so the new image is visible right away without waiting for a refetch.
+    localMerchants.forEach((m) => {
+      const normalizedName = (m?.name || "").toString().trim().toLowerCase();
       if (!normalizedName) return;
       const existing = uniqueMap.get(normalizedName);
-      // Prefer the incoming merchant if it has an image and existing one does not.
       if (!existing) {
-        uniqueMap.set(normalizedName, merchant);
-      } else if (!existing.image && merchant?.image) {
-        uniqueMap.set(normalizedName, { ...existing, ...merchant });
+        uniqueMap.set(normalizedName, m);
+      } else if (m?.image) {
+        // Always overwrite with the freshest local image
+        uniqueMap.set(normalizedName, { ...existing, image: m.image });
       }
-    };
-    // Add merchants from API
-    (merchantsWithImages || []).forEach((m) => {
-      mergeMerchant(m);
-    });
-    // Add locally added merchants
-    localMerchants.forEach((m) => {
-      mergeMerchant(m);
     });
     return Array.from(uniqueMap.values());
   })();

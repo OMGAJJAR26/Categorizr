@@ -113,7 +113,7 @@ const PAYMENT_CARD_TYPES = [
 const DEFAULT_PAYMENT_CARD_MAP = {
   "American Express": "American Express",
   "Bank of America": "MasterCard",
-  "Citibank": "Visa",
+  "Citibank": "MasterCard",
   "Mastercard": "MasterCard",
   "Visa": "Visa",
   "Cash": "Cash",
@@ -1576,7 +1576,14 @@ const ReceiptInfoInline = ({ type }) => {
       (normalizedKey ? receiptDisplayToCardType[normalizedKey] : null);
     if (fromReceipts) return fromReceipts;
     const inferred = inferCardTypeFromPayment(key);
-    return inferred === "Other" ? (fallbackCardType || "").trim() : inferred;
+    if (inferred !== "Other") return inferred;
+    // For items like "Citibank *1234", also try the issuer-only part in payCardMap
+    const { issuer: issuerOnly, last4: keyLast4 } = parsePaymentDisplay(key);
+    if (issuerOnly && keyLast4) {
+      const fromIssuer = payCardMap[issuerOnly] || payCardMap[(issuerOnly || "").toLowerCase()];
+      if (fromIssuer) return fromIssuer;
+    }
+    return (fallbackCardType || "").trim();
   };
 
   const getPaymentSignature = (paymentName, fallbackCardType = "") => {
@@ -2533,14 +2540,25 @@ const isBlockedTaxRateInput = (val) => {
         .map(p => ({ key: p, name: p, logo: getPayLogoResolved(p), isReceiptItem: false, isApiItem: false }));
       // API payment methods not already in receipt-derived or custom lists
       const allExistingPayKeys = new Set([...rItems.map(p => p.name.toLowerCase()), ...cItems.map(p => p.name.toLowerCase())]);
+      // Build set of last4 digits already shown by receipt/custom items to avoid showing
+      // a stale API entry for the same physical card (e.g. after a rename where only
+      // receipts were updated but the API card_number still has the old name)
+      const existingLast4s = new Set();
+      [...rItems, ...cItems].forEach(p => {
+        const m = /\*(\d{3,4})$/.exec((p.name || "").trim());
+        if (m) existingLast4s.add(m[1]);
+      });
       const apiItems = (apiPaymentMethods || [])
-        .filter(m =>
-          m.card_number &&
-          getApiEntityId(m) !== null &&
-          !allExistingPayKeys.has((m.card_number || "").toLowerCase()) &&
-          !hiddenPaymentMethods.has(m.card_number) &&
-          !isCashVariant(m.card_number)
-        )
+        .filter(m => {
+          if (!m.card_number || getApiEntityId(m) === null) return false;
+          if (allExistingPayKeys.has((m.card_number || "").toLowerCase())) return false;
+          if (hiddenPaymentMethods.has(m.card_number)) return false;
+          if (isCashVariant(m.card_number)) return false;
+          // Skip API entry if receipt/custom list already has a card with the same last4
+          const last4Match = /\*(\d{3,4})$/.exec((m.card_number || "").trim());
+          if (last4Match && existingLast4s.has(last4Match[1])) return false;
+          return true;
+        })
         .map(m => {
           // Prefer icon_image stored on the API (when it's from the stable /payment-logos/ folder
           // or an absolute URL); fall back to keyword-based local detection for older entries.
