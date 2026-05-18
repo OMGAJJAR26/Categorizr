@@ -5684,19 +5684,34 @@ const handleSelectLogo = (index) => {
                         {/* TIP — only visible when TIP pill is selected */}
                         {formData.tip !== "" && (
                           <div className="mb-4 text-align-left">
-                            <label className="font-bold">
-                              TIP (
-                              {formData.tip !== "" &&
-                              formData.subtotal &&
-                              parseFloat(formData.subtotal) > 0
-                                ? `${Math.round(
-                                    (parseFloat(formData.tip) /
-                                      parseFloat(formData.subtotal)) *
-                                      100,
-                                  )}%`
-                                : "0%"}
-                              )
-                            </label>
+                            <div className="flex items-center justify-between">
+                              <label className="font-bold">
+                                TIP (
+                                {formData.tip !== "" &&
+                                formData.subtotal &&
+                                parseFloat(formData.subtotal) > 0
+                                  ? `${Math.round(
+                                      (parseFloat(formData.tip) /
+                                        parseFloat(formData.subtotal)) *
+                                        100,
+                                    )}%`
+                                  : "0%"}
+                                )
+                              </label>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleFieldChange("tip", "");
+                                    setCurrencyInput("tip", "");
+                                  }}
+                                  className="text-red-600 hover:text-red-800 p-1"
+                                  title="Remove tip"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </div>
                             <input
                               id="add-receipt-tip-input"
                               type="text"

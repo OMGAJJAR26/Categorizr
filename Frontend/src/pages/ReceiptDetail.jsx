@@ -5751,9 +5751,24 @@ Thank you for using our receipt management system.
                                     : 0;
                                 return (
                                   <div className="mb-4 text-align-left">
-                                    <label className="font-bold">
-                                      TIP ({tipPercentage}%)
-                                    </label>
+                                    <div className="flex items-center justify-between">
+                                      <label className="font-bold">
+                                        TIP ({tipPercentage}%)
+                                      </label>
+                                      <div className="flex items-center gap-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setTipVisible(false);
+                                            handleFieldChange("tip", "");
+                                            setCurrencyInputs((p) => ({ ...p, tip: undefined }));
+                                          }}
+                                          className="text-red-500 hover:text-red-700 text-xs font-medium"
+                                        >
+                                          Remove
+                                        </button>
+                                      </div>
+                                    </div>
                                     <input
                                       id="edit-receipt-tip-input"
                                       type="text"
