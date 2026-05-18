@@ -23,6 +23,7 @@ import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationD
 import Toast from "../components/Toast";
 import IntegrationsModal from "../components/IntegrationsModal";
 import { useReceiptFilters } from "../hooks/useReceiptFilters";
+import { splitMediaField } from "../utils/mediaUrlUtils";
 import { useReceiptSorting } from "../hooks/useReceiptSorting";
 import { useReceiptGrouping } from "../hooks/useReceiptGrouping";
 import { useReportGeneration } from "../hooks/useReportGeneration";
@@ -485,7 +486,8 @@ const HomePage = () => {
 
     for (const url of candidates) {
       if (!url || typeof url !== "string") continue;
-      const trimmed = url.trim();
+      const mediaUrls = splitMediaField(url);
+      const trimmed = (mediaUrls[0] || url).trim();
       
       if (!trimmed || ["0", "null", "@", "undefined", ""].includes(trimmed.toLowerCase())) {
         continue;

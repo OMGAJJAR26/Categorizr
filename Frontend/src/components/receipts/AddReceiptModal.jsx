@@ -22,6 +22,21 @@ import { parseReceipt, pdfToImage, canvasToBlob } from "../../utils/receiptParse
 import { parseTaxRateInput, createTaxRateKeyDownHandler } from "../../utils/taxRateInput";
 import { useTaxRateLimitAlert } from "../../hooks/useTaxRateLimitAlert";
 import { buildExpenseCategoryOptions } from "../../utils/expenseCategories";
+import TaxRateChangeWarningModal from "../TaxRateChangeWarningModal";
+import {
+  buildIncrementedTaxName,
+  propagateTaxNameChangeToReceipts,
+  propagateTaxRateChangeToReceipts,
+  taxRatesDiffer,
+} from "../../utils/taxTypeUtils";
+import {
+  splitMediaField,
+  buildCombinedMediaField,
+  normalizeMediaUrl as normalizeMediaUrlCore,
+  replaceUrlInMediaCsv,
+  isPdfUrl,
+} from "../../utils/mediaUrlUtils";
+import PdfThumbnail from "./PdfThumbnail";
 
 // Payment method logos (for Add Payment Method modal card type list)
 const Visa              = "/payment-logos/Visa.png";
@@ -478,19 +493,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
 
     return str;
   };
-  const normalizeMediaUrl = (url) => {
-    const raw = (url || "").toString().trim();
-    if (!raw) return "0";
-    try {
-      // Repair double-encoding (%2520 → %20) that happens when encodeURI is applied
-      // to an already-percent-encoded URL (e.g. one returned by Google Cloud Storage).
-      const fixed = raw.replace(/%25([0-9A-Fa-f]{2})/g, '%$1');
-      // decode-then-encode is idempotent: prevents further double-encoding on subsequent calls.
-      return encodeURI(decodeURI(fixed));
-    } catch {
-      return encodeURI(raw);
-    }
-  };
+  const normalizeMediaUrl = (url) => normalizeMediaUrlCore(url) || "0";
 
   // Returns null for values that should not be sent to the API as an image URL:
   // blob: URLs (ephemeral, invalid after page refresh), the "0" sentinel, and empty strings.
@@ -499,55 +502,6 @@ const [localMerchants, setLocalMerchants] = useState([]);
     if (!url || typeof url !== "string") return null;
     const s = url.trim();
     return (s && s !== "0" && !s.startsWith("blob:")) ? s : null;
-  };
-
-  const splitMediaField = (value) => {
-    if (!value || typeof value !== "string") return [];
-    return value
-      .split(",")
-      .map((part) => nonEmptyUrl(part))
-      .filter(Boolean);
-  };
-
-  const buildCombinedMediaField = (sources) => {
-    const urls = [];
-    const pushUrl = (candidate) => {
-      const normalized = normalizeMediaUrl(nonEmptyUrl(candidate) || "");
-      if (!normalized || normalized === "0" || urls.includes(normalized)) return;
-      urls.push(normalized);
-    };
-
-    sources.forEach((source) => {
-      if (Array.isArray(source)) {
-        source.forEach((item) => pushUrl(item));
-        return;
-      }
-      splitMediaField(source).forEach((item) => pushUrl(item));
-    });
-
-    if (urls.length === 0) return "0";
-    return urls.join(",");
-  };
-
-  /** Replace one normalized URL in a comma-separated receipt_image / emailAttachment value. */
-  const replaceNormalizedUrlInMediaCsvModal = (csv, normalizedOld, replacement) => {
-    if (!csv || typeof csv !== "string" || csv === "0") return csv;
-    const parts = csv
-      .split(",")
-      .map((p) => p.trim())
-      .filter((p) => p && !["0", "null", ""].includes(p));
-    let hit = false;
-    const next = parts.map((p) => {
-      const nePart = nonEmptyUrl(p);
-      const n = nePart ? normalizeMediaUrl(nePart) : null;
-      if (n && normalizedOld && n === normalizedOld) {
-        hit = true;
-        return replacement;
-      }
-      return p;
-    });
-    if (!hit) return csv;
-    return next.join(",");
   };
 
   // Get proper payment display name (handles 0*0 type issues)
@@ -878,8 +832,8 @@ const [localMerchants, setLocalMerchants] = useState([]);
         if (!prev) return prev;
         const email0 = (prev.emailAttachment ?? "").toString();
         const receipt0 = (prev.receipt_image ?? "").toString();
-        const mergedEmail = replaceNormalizedUrlInMediaCsvModal(email0, normOld, dataUrl);
-        const mergedReceipt = replaceNormalizedUrlInMediaCsvModal(receipt0, normOld, dataUrl);
+        const mergedEmail = replaceUrlInMediaCsv(email0, normOld, dataUrl);
+        const mergedReceipt = replaceUrlInMediaCsv(receipt0, normOld, dataUrl);
         if (mergedEmail === email0 && mergedReceipt === receipt0) return prev;
         return {
           ...prev,
@@ -1378,7 +1332,7 @@ const handleFieldChange = (field, value) => {
       return;
     }
     if (isDuplicateTaxName(newTaxName.trim())) {
-      setError("Tax Type already exists");
+      setToast({ isVisible: true, message: "Tax Type already exists", type: "error" });
       return;
     }
     if (hasMoreThan3Decimals(newTaxRate)) {
@@ -1477,6 +1431,7 @@ const handleFieldChange = (field, value) => {
 
       // Add to receipt only if under per-receipt limit (no alert when saving from Manage Tax Types)
       addTaxType(normalizedTax, { silent: true });
+      setToast({ isVisible: true, message: "Tax Type Added", type: "success" });
     } catch (err) {
       console.error("=== handleAddTaxType ERROR ===");
       console.error("Error details:", err);
@@ -1509,7 +1464,7 @@ const handleFieldChange = (field, value) => {
       return;
     }
     if (isDuplicateTaxName(newTaxName.trim(), editingTaxId)) {
-      setError("Tax Type already exists");
+      setToast({ isVisible: true, message: "Tax Type already exists", type: "error" });
       return;
     }
     if (isBlockedTaxRateInput(newTaxRate)) {
@@ -1521,9 +1476,16 @@ const handleFieldChange = (field, value) => {
       return;
     }
     const cleanRate = String(newTaxRate).replace(/%/g, "").trim();
-    const existingTaxForRateCheck = taxData.find(t => t.id === editingTaxId);
-    if (existingTaxForRateCheck && parseFloat(existingTaxForRateCheck.tax_rate) !== parseFloat(cleanRate)) {
-      setPendingTaxUpdate({ newName: newTaxName.trim(), newRate: cleanRate, newNumber: newTaxNumber.trim() });
+    const existingTaxForRateCheck = taxData.find((t) => t.id === editingTaxId);
+    if (
+      existingTaxForRateCheck &&
+      taxRatesDiffer(existingTaxForRateCheck.tax_rate, cleanRate)
+    ) {
+      setPendingTaxUpdate({
+        newName: newTaxName.trim(),
+        newRate: cleanRate,
+        newNumber: newTaxNumber.trim(),
+      });
       setShowTaxRateChangeWarning(true);
       return;
     }
@@ -1549,8 +1511,14 @@ const handleFieldChange = (field, value) => {
       };
 
       await updateTax(taxPayload);
+      await propagateTaxNameChangeToReceipts({
+        receipts,
+        taxId: editingTaxId,
+        oldName: existingTax?.tax_name,
+        newName: newTaxName.trim(),
+        updateReceipt,
+      });
 
-      // Reset form
       setNewTaxName("");
       setNewTaxRate("");
       clearTaxRateLimitAlert();
@@ -1560,6 +1528,7 @@ const handleFieldChange = (field, value) => {
       setEditingTaxId(null);
       setShowAddTaxForm(false);
       setError(null);
+      setToast({ isVisible: true, message: "Tax Type Updated", type: "success" });
     } catch (err) {
       setError(err.message || "Failed to update tax type. Please try again.");
     } finally {
@@ -1567,17 +1536,42 @@ const handleFieldChange = (field, value) => {
     }
   };
 
-  const confirmTaxRateChange = async () => {
-    if (isSavingTax) return;
-    setShowTaxRateChangeWarning(false);
+  const handleAddNewTaxTypeFromRateWarning = () => {
     if (!pendingTaxUpdate) return;
+    const existingTax = taxData.find((t) => t.id === editingTaxId);
+    const baseName = existingTax?.tax_name || pendingTaxUpdate.newName;
+    const incremented = buildIncrementedTaxName(
+      baseName,
+      allTaxTypes.map((t) => t.tax_name),
+    );
+    setShowTaxRateChangeWarning(false);
+    setPendingTaxUpdate(null);
+    setEditingTaxId(null);
+    setShowAddTaxForm(true);
+    setNewTaxName(incremented);
+    setNewTaxRate(pendingTaxUpdate.newRate);
+    setNewTaxNumber(
+      pendingTaxUpdate.newNumber || existingTax?.tax_number || "",
+    );
+    setError(null);
+  };
+
+  const confirmTaxRateChange = async () => {
+    if (isSavingTax || !pendingTaxUpdate || !editingTaxId) return;
+    setShowTaxRateChangeWarning(false);
     const { newName, newRate, newNumber } = pendingTaxUpdate;
     setPendingTaxUpdate(null);
     setIsSavingTax(true);
     setError(null);
     try {
       const fk_user_id = localStorage.getItem("fk_user_id") || 0;
-      const existingTax = taxData.find(t => t.id === editingTaxId);
+      const existingTax = taxData.find((t) => t.id === editingTaxId);
+      await propagateTaxRateChangeToReceipts({
+        receipts,
+        taxId: editingTaxId,
+        oldRate: existingTax?.tax_rate,
+        updateReceipt,
+      });
       await updateTax({
         id: editingTaxId,
         fk_user_id: parseInt(fk_user_id),
@@ -1590,10 +1584,28 @@ const handleFieldChange = (field, value) => {
         created: existingTax?.created || 0,
         udpated: 0,
       });
-      setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber(""); setEditingTaxId(null);
+      if (
+        (newName || "").trim().toLowerCase() !==
+        (existingTax?.tax_name || "").trim().toLowerCase()
+      ) {
+        await propagateTaxNameChangeToReceipts({
+          receipts,
+          taxId: editingTaxId,
+          oldName: existingTax?.tax_name,
+          newName,
+          updateReceipt,
+        });
+      }
+      setNewTaxName("");
+      setNewTaxRate("");
+      setNewTaxNumber("");
+      setEditingTaxId(null);
       clearTaxRateLimitAlert();
-      setTaxNameOverflow(false); setTaxNumberOverflow(false);
-      setShowAddTaxForm(false); setError(null);
+      setTaxNameOverflow(false);
+      setTaxNumberOverflow(false);
+      setShowAddTaxForm(false);
+      setError(null);
+      setToast({ isVisible: true, message: "Tax Type Updated", type: "success" });
     } catch (err) {
       setError(err.message || "Failed to update tax type.");
     } finally {
@@ -5978,15 +5990,36 @@ const handleSelectLogo = (index) => {
                             // Detect PDF per media item URL only.
                             // Do not infer from localImageFile type, otherwise an
                             // annotated PNG can be incorrectly treated as PDF and disappear.
-                            const lowerSafeUrl = safeUrl.toLowerCase();
-                            const isPdfUrl =
-                              lowerSafeUrl.includes(".pdf") ||
-                              lowerSafeUrl.startsWith("data:application/pdf");
-                            const displayUrl = isPdfUrl
+                            const isPdf = isPdfUrl(safeUrl);
+                            const isRemotePdf =
+                              isPdf && /^https?:\/\//i.test(safeUrl);
+                            const displayUrl = isPdf && !isRemotePdf
                               ? pdfPreviewUrl || getImagePreviewUrl()
                               : safeUrl;
 
-                            if (isPdfUrl && !displayUrl) {
+                            if (isRemotePdf) {
+                              return (
+                                <div key={idx} className="relative group">
+                                  <PdfThumbnail
+                                    url={safeUrl}
+                                    className="w-24 h-[118px]"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      removeUploadedMediaAt(idx);
+                                    }}
+                                    className="absolute top-1 right-1 bg-white/90 hover:bg-red-600 hover:text-white text-red-600 rounded p-1 opacity-0 group-hover:opacity-100 transition-all shadow"
+                                    title="Delete image"
+                                  >
+                                    <Trash2 size={11} />
+                                  </button>
+                                </div>
+                              );
+                            }
+
+                            if (isPdf && !displayUrl) {
                               return (
                                 <div key={idx} className="relative group">
                                   <button
@@ -6974,44 +7007,21 @@ const handleSelectLogo = (index) => {
         )}
       </AnimatePresence>
 
-      {/* Tax Rate Change Warning Dialog */}
-      <AnimatePresence>
-        {showTaxRateChangeWarning && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6"
-            >
-              <h3 className="text-lg font-bold text-gray-900 mb-2">Change Tax Rate?</h3>
-              <p className="text-sm text-gray-600 mb-4">
-                Receipts that already use this tax type will keep their current tax amount as a fixed dollar value — the % will not auto-recalculate.
-              </p>
-              <p className="text-sm text-gray-600 mb-6">
-                To apply the new rate to a receipt, open that receipt, deselect this tax type in the SELECT bar, then reselect it.
-              </p>
-              <div className="flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => { setShowTaxRateChangeWarning(false); setPendingTaxUpdate(null); }}
-                  className="px-5 py-2 text-sm text-gray-600 font-medium hover:bg-gray-100 rounded-xl transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={confirmTaxRateChange}
-                  className="px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition-colors"
-                >
-                  Confirm Change
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <TaxRateChangeWarningModal
+        isOpen={showTaxRateChangeWarning}
+        zIndexClass="z-[70]"
+        isProcessing={isSavingTax}
+        onGoBack={() => {
+          setShowTaxRateChangeWarning(false);
+          setPendingTaxUpdate(null);
+        }}
+        onClose={() => {
+          setShowTaxRateChangeWarning(false);
+          setPendingTaxUpdate(null);
+        }}
+        onAddNewTaxType={handleAddNewTaxTypeFromRateWarning}
+        onUpdateCurrentRate={confirmTaxRateChange}
+      />
 
       {/* Payment Method Edit Confirmation Dialog */}
       <AnimatePresence>

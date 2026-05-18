@@ -2,6 +2,13 @@ import { useState, useEffect, useMemo } from "react";
 import { containsEmoji, stripEmoji } from "../utils/emojiUtils";
 import { parseTaxRateInput, createTaxRateKeyDownHandler } from "../utils/taxRateInput";
 import { useTaxRateLimitAlert } from "../hooks/useTaxRateLimitAlert";
+import TaxRateChangeWarningModal from "../components/TaxRateChangeWarningModal";
+import {
+  buildIncrementedTaxName,
+  propagateTaxNameChangeToReceipts,
+  propagateTaxRateChangeToReceipts,
+  taxRatesDiffer,
+} from "../utils/taxTypeUtils";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Settings as SettingsIcon,
@@ -2361,7 +2368,7 @@ const isBlockedTaxRateInput = (val) => {
         (tax) => tax.id !== editKey && (tax.tax_name || "").toLowerCase() === n.toLowerCase()
       );
       if (duplicateTaxName) return toast("error", "Tax Type already exists");
-      const rateChanged = String(originalTax?.tax_rate ?? "") !== String(r);
+      const rateChanged = taxRatesDiffer(originalTax?.tax_rate, r);
       if (rateChanged) {
         setPendingTaxRateEdit({
           tax: originalTax,
@@ -2373,13 +2380,28 @@ const isBlockedTaxRateInput = (val) => {
         return;
       }
       try {
-        await updateTax({ ...originalTax, tax_name: n, tax_rate: r, tax_number: editTaxVal.tax_number.trim(), is_default_tax: parseInt(originalTax?.is_default_tax) || 0, is_tips: parseInt(originalTax?.is_tips) || 0 });
+        await updateTax({
+          ...originalTax,
+          tax_name: n,
+          tax_rate: r,
+          tax_number: editTaxVal.tax_number.trim(),
+          is_default_tax: parseInt(originalTax?.is_default_tax) || 0,
+          is_tips: parseInt(originalTax?.is_tips) || 0,
+        });
+        await propagateTaxNameChangeToReceipts({
+          receipts,
+          taxId: originalTax.id,
+          oldName: originalTax.tax_name,
+          newName: n,
+          updateReceipt,
+        });
         toast("success", "Tax Type Updated");
         setEditTaxKey(null);
         clearEditTaxRateLimitAlert();
         setEditTaxRateFocused(false);
+      } catch (e) {
+        toast("error", e.message || "Failed.");
       }
-      catch (e) { toast("error", e.message || "Failed."); }
       return;
     }
 
@@ -2460,27 +2482,96 @@ const isBlockedTaxRateInput = (val) => {
     } catch (e) { toast("error", e.message || "Delete failed."); }
   };
 
+  const resetTaxEditForm = () => {
+    setEditTaxKey(null);
+    clearEditTaxRateLimitAlert();
+    setEditTaxNameOverflow(false);
+    setEditTaxNumberOverflow(false);
+    setEditTaxRateFocused(false);
+  };
+
+  const saveTaxTypeWithoutRateChange = async (originalTax, n, r, num) => {
+    await updateTax({
+      ...originalTax,
+      tax_name: n,
+      tax_rate: r,
+      tax_number: num,
+      is_default_tax: parseInt(originalTax?.is_default_tax) || 0,
+      is_tips: parseInt(originalTax?.is_tips) || 0,
+    });
+    await propagateTaxNameChangeToReceipts({
+      receipts,
+      taxId: originalTax.id,
+      oldName: originalTax.tax_name,
+      newName: n,
+      updateReceipt,
+    });
+    toast("success", "Tax Type Updated");
+    resetTaxEditForm();
+  };
+
   const confirmTaxRateChange = async () => {
     if (!pendingTaxRateEdit?.tax) return;
     const targetTax = pendingTaxRateEdit.tax;
+    const { nextName, nextRate, nextNumber } = pendingTaxRateEdit;
     try {
+      await propagateTaxRateChangeToReceipts({
+        receipts,
+        taxId: targetTax.id,
+        oldRate: targetTax.tax_rate,
+        updateReceipt,
+      });
       await updateTax({
         ...targetTax,
-        tax_name: pendingTaxRateEdit.nextName,
-        tax_rate: pendingTaxRateEdit.nextRate,
-        tax_number: pendingTaxRateEdit.nextNumber || "",
+        tax_name: nextName,
+        tax_rate: nextRate,
+        tax_number: nextNumber || "",
         is_default_tax: parseInt(targetTax?.is_default_tax) || 0,
         is_tips: parseInt(targetTax?.is_tips) || 0,
       });
+      if (
+        (nextName || "").trim().toLowerCase() !==
+        (targetTax.tax_name || "").trim().toLowerCase()
+      ) {
+        await propagateTaxNameChangeToReceipts({
+          receipts,
+          taxId: targetTax.id,
+          oldName: targetTax.tax_name,
+          newName: nextName,
+          updateReceipt,
+        });
+      }
       toast("success", "Tax Type Updated");
-      setEditTaxKey(null);
-      setEditTaxRateFocused(false);
+      resetTaxEditForm();
     } catch (e) {
       toast("error", e.message || "Failed.");
     } finally {
       setShowTaxRateChangeWarning(false);
       setPendingTaxRateEdit(null);
     }
+  };
+
+  const handleAddNewTaxTypeFromRateWarning = () => {
+    if (!pendingTaxRateEdit?.tax) return;
+    const baseName = pendingTaxRateEdit.tax.tax_name || "";
+    const incremented = buildIncrementedTaxName(
+      baseName,
+      (taxData || []).map((t) => t.tax_name),
+    );
+    setShowTaxRateChangeWarning(false);
+    setPendingTaxRateEdit(null);
+    setEditTaxKey(null);
+    setShowAddForm(true);
+    setAddTaxVal({
+      tax_name: incremented,
+      tax_rate: pendingTaxRateEdit.nextRate,
+      tax_number:
+        pendingTaxRateEdit.nextNumber ||
+        pendingTaxRateEdit.tax.tax_number ||
+        "",
+    });
+    clearEditTaxRateLimitAlert();
+    setEditTaxRateFocused(false);
   };
 
   // Build unified list (receipt-derived + custom + API, no dupes, no "Custom" label)
@@ -2897,7 +2988,7 @@ const isBlockedTaxRateInput = (val) => {
                             );
                             if (duplicateTaxName) return toast("error", "Tax Type already exists");
                             const originalTax = (taxData || []).find((t) => t.id === editTaxKey);
-                            const rateChanged = String(originalTax?.tax_rate ?? "") !== String(r);
+                            const rateChanged = taxRatesDiffer(originalTax?.tax_rate, r);
                             if (rateChanged) {
                               setPendingTaxRateEdit({
                                 tax: originalTax,
@@ -2909,14 +3000,10 @@ const isBlockedTaxRateInput = (val) => {
                               return;
                             }
                             try {
-                              await updateTax({ ...originalTax, tax_name: n, tax_rate: r, tax_number: num, is_default_tax: parseInt(originalTax?.is_default_tax) || 0, is_tips: parseInt(originalTax?.is_tips) || 0 });
-                              toast("success", "Tax Type Updated");
-                              setEditTaxKey(null);
-                              clearEditTaxRateLimitAlert();
-                              setEditTaxNameOverflow(false);
-                              setEditTaxNumberOverflow(false);
-                              setEditTaxRateFocused(false);
-                            } catch (e) { toast("error", e.message || "Failed."); }
+                              await saveTaxTypeWithoutRateChange(originalTax, n, r, num);
+                            } catch (e) {
+                              toast("error", e.message || "Failed.");
+                            }
                           }} className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg flex-shrink-0">Save</button>
                           <button type="button" onClick={() => { setEditTaxKey(null); clearEditTaxRateLimitAlert(); setEditTaxNameOverflow(false); setEditTaxNumberOverflow(false); setEditTaxRateFocused(false); }} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex-shrink-0">Cancel</button>
                         </div>
@@ -3223,35 +3310,19 @@ const isBlockedTaxRateInput = (val) => {
       />
     )}
 
-    {/* Tax Rate Change Decision Popup */}
-    <AnimatePresence>
-      {showTaxRateChangeWarning && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Change Tax Rate?</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Receipts that already use this tax type will keep their current tax amount as a fixed dollar value — the % will not auto-recalculate.
-            </p>
-            <p className="text-sm text-gray-600 mb-6">
-              To apply the new rate to a receipt, open that receipt, deselect this tax type in the SELECT bar, then reselect it.
-            </p>
-            <div className="flex justify-end gap-3">
-              <button type="button"
-                onClick={() => { setShowTaxRateChangeWarning(false); setPendingTaxRateEdit(null); }}
-                className="px-5 py-2 text-sm text-gray-600 font-medium hover:bg-gray-100 rounded-xl transition-colors">
-                Cancel
-              </button>
-              <button type="button" onClick={confirmTaxRateChange}
-                className="px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition-colors">
-                Confirm Change
-              </button>
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <TaxRateChangeWarningModal
+      isOpen={showTaxRateChangeWarning}
+      onGoBack={() => {
+        setShowTaxRateChangeWarning(false);
+        setPendingTaxRateEdit(null);
+      }}
+      onClose={() => {
+        setShowTaxRateChangeWarning(false);
+        setPendingTaxRateEdit(null);
+      }}
+      onAddNewTaxType={handleAddNewTaxTypeFromRateWarning}
+      onUpdateCurrentRate={confirmTaxRateChange}
+    />
 
     {/* Tax Delete Blocked Message Popup */}
     <AnimatePresence>

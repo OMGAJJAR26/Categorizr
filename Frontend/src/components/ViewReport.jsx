@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useCurrency } from "../context/CurrencyContext";
 import { usePaymentDisplay } from "../hooks/usePaymentDisplay";
 import { formatTaxRate } from "../utils/receiptFormatters";
+import { getPdfProxyUrl, splitMediaField, isPdfUrl } from "../utils/mediaUrlUtils";
 import SimpleAlertModal from "./SimpleAlertModal";
 
 const ViewReport = ({ receipt, onClose }) => {
@@ -142,46 +143,29 @@ const ViewReport = ({ receipt, onClose }) => {
 
   // Add proxy for non-HTTPS PDF URLs
   const getEmailAttachmentUrl = () => {
-    const url = receipt?.emailAttachment;
-    if (!url || typeof url !== "string") return "";
+    const urls = [
+      ...splitMediaField(receipt?.receipt_image),
+      ...splitMediaField(receipt?.emailAttachment),
+    ];
+    const url = urls[0] || "";
+    if (!url) return "";
 
-    const trimmed = url.trim();
-    if (!trimmed || ["0", "null", "@", "undefined", ""].includes(trimmed))
-      return "";
-
-    // Ignore invalid patterns
     const invalidPatterns = [
       "android.resource://",
       "content://",
       "file://",
       "resource://",
     ];
-    if (invalidPatterns.some((p) => trimmed.startsWith(p))) return "";
+    if (invalidPatterns.some((p) => url.startsWith(p))) return "";
 
-    return trimmed;
-  };
-
-  const getPdfUrl = (url) => {
-    if (
-      url.startsWith("data:") ||
-      url.startsWith("https://") ||
-      url.includes("pdf_proxy_base.php")
-    ) {
-      return url;
-    }
-    const proxy =
-      "https://categorizr.com/emailserver/pdf_proxy_base.php?url=";
-    return proxy + encodeURIComponent(url);
+    return url;
   };
 
   const emailAttachmentUrl = getEmailAttachmentUrl();
-  const isPdfAttachment =
-    !!emailAttachmentUrl &&
-    (/\.pdf(\?|$)/i.test(emailAttachmentUrl) ||
-      emailAttachmentUrl.startsWith("data:application/pdf"));
+  const isPdfAttachment = isPdfUrl(emailAttachmentUrl);
 
   const finalPdfUrl = isPdfAttachment
-    ? getPdfUrl(emailAttachmentUrl)
+    ? getPdfProxyUrl(emailAttachmentUrl)
     : emailAttachmentUrl;
 
   const htmlContent = `

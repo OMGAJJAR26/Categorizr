@@ -3,6 +3,16 @@ import { NODE_API_URL, proxyImageUrl, unproxyImageUrl } from "../api/Axios";
 import { formatTaxRate, taxTypeDedupKey, taxTypesMatch } from "../utils/receiptFormatters";
 import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine,} from "lucide-react";
 import ReceiptAnnotator from "../components/receipts/ReceiptAnnotator";
+import PdfThumbnail from "../components/receipts/PdfThumbnail";
+import {
+  splitMediaField,
+  buildCombinedMediaField,
+  normalizeMediaUrl,
+  mediaUrlsEqual,
+  replaceUrlInMediaCsv,
+  getPdfProxyUrl,
+  isPdfUrl,
+} from "../utils/mediaUrlUtils";
 import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationDialog";
 import "../App.css";
 const Visa              = "/payment-logos/Visa.png";
@@ -33,6 +43,13 @@ import {
 } from "../utils/paymentMethodUtils";
 import { parseTaxRateInput, createTaxRateKeyDownHandler } from "../utils/taxRateInput";
 import { useTaxRateLimitAlert } from "../hooks/useTaxRateLimitAlert";
+import TaxRateChangeWarningModal from "../components/TaxRateChangeWarningModal";
+import {
+  buildIncrementedTaxName,
+  propagateTaxNameChangeToReceipts,
+  propagateTaxRateChangeToReceipts,
+  taxRatesDiffer,
+} from "../utils/taxTypeUtils";
 import { buildExpenseCategoryOptions } from "../utils/expenseCategories";
 
 // Default payment methods
@@ -1206,50 +1223,6 @@ useEffect(() => {
     e.preventDefault();
   };
 
-  const normalizeMediaUrl = (url) => {
-    const raw = unproxyImageUrl((url || "").toString().trim());
-    if (!raw) return "";
-    // blob: URLs are ephemeral and invalid after page refresh — treat as empty.
-    if (raw.startsWith("blob:")) return "";
-    try {
-      // Repair double-encoding (%2520 → %20) that may have been stored in the DB,
-      // then decode-then-encode to canonicalize (idempotent on subsequent calls).
-      const fixed = raw.replace(/%25([0-9A-Fa-f]{2})/g, '%$1');
-      return encodeURI(decodeURI(fixed));
-    } catch {
-      return encodeURI(raw);
-    }
-  };
-  const mediaUrlsEqual = (a, b) => {
-    const na = normalizeMediaUrl(a);
-    const nb = normalizeMediaUrl(b);
-    return !!na && !!nb && na === nb;
-  };
-  const splitMediaField = (value) => {
-    if (!value || typeof value !== "string") return [];
-    return value
-      .split(",")
-      .map((part) => normalizeMediaUrl(part))
-      .filter(Boolean);
-  };
-  const buildCombinedMediaField = (sources) => {
-    const urls = [];
-    const pushUrl = (candidate) => {
-      const normalized = normalizeMediaUrl(candidate);
-      if (!normalized || urls.includes(normalized)) return;
-      urls.push(normalized);
-    };
-    sources.forEach((source) => {
-      if (Array.isArray(source)) {
-        source.forEach((item) => pushUrl(item));
-        return;
-      }
-      splitMediaField(source).forEach((item) => pushUrl(item));
-    });
-    if (urls.length === 0) return "0";
-    return urls.join(",");
-  };
-
   const collectReceiptMediaUrlsForSave = () => {
     const urls = [];
     const pushUnique = (candidate) => {
@@ -1279,25 +1252,6 @@ useEffect(() => {
     return urls.filter((u) => u && !u.startsWith("data:") && !u.startsWith("blob:"));
   };
 
-  /** Replace one normalized URL inside a comma-separated media field (both slots, all segments). */
-  const replaceNormalizedUrlInMediaCsv = (csv, normalizedOld, replacement) => {
-    if (!csv || typeof csv !== "string" || csv === "0") return csv;
-    const parts = csv
-      .split(",")
-      .map((p) => p.trim())
-      .filter((p) => p && !["0", "null", ""].includes(p));
-    let hit = false;
-    const next = parts.map((p) => {
-      const n = normalizeMediaUrl(p);
-      if (n && normalizedOld && n === normalizedOld) {
-        hit = true;
-        return replacement;
-      }
-      return p;
-    });
-    if (!hit) return csv;
-    return next.join(",");
-  };
   const normalizeMatchKey = (value) =>
     String(value || "")
       .trim()
@@ -1823,7 +1777,7 @@ useEffect(() => {
       return;
     }
     if (isDuplicateTaxName(newTaxName.trim())) {
-      setTaxError("Tax Type already exists");
+      setToast({ isVisible: true, message: "Tax Type already exists", type: "error" });
       return;
     }
     if (hasMoreThan3Decimals(newTaxRate)) {
@@ -1877,6 +1831,7 @@ useEffect(() => {
           { silent: true }
         );
       }
+      setToast({ isVisible: true, message: "Tax Type Added", type: "success" });
     } catch (err) {
       console.error("Error adding tax:", err);
       setTaxError(err.message || "Failed to add tax type.");
@@ -1892,7 +1847,7 @@ useEffect(() => {
       return;
     }
     if (isDuplicateTaxName(newTaxName.trim(), editingTaxId)) {
-      setTaxError("Tax Type already exists");
+      setToast({ isVisible: true, message: "Tax Type already exists", type: "error" });
       return;
     }
     if (isBlockedTaxRateInput(newTaxRate)) {
@@ -1906,8 +1861,15 @@ useEffect(() => {
     const cleanRate = String(newTaxRate).replace(/%/g, "").trim();
     const allKnown = [...(taxData || []), ...localTaxTypes];
     const existingTaxForRateCheck = allKnown.find((t) => t.id === editingTaxId);
-    if (existingTaxForRateCheck && parseFloat(existingTaxForRateCheck.tax_rate) !== parseFloat(cleanRate)) {
-      setPendingTaxUpdate({ newName: newTaxName.trim(), newRate: cleanRate, newNumber: newTaxNumber.trim() });
+    if (
+      existingTaxForRateCheck &&
+      taxRatesDiffer(existingTaxForRateCheck.tax_rate, cleanRate)
+    ) {
+      setPendingTaxUpdate({
+        newName: newTaxName.trim(),
+        newRate: cleanRate,
+        newNumber: newTaxNumber.trim(),
+      });
       setShowTaxRateChangeWarning(true);
       return;
     }
@@ -1929,6 +1891,13 @@ useEffect(() => {
         udpated: Date.now(),
       };
       await updateTax(taxPayload);
+      await propagateTaxNameChangeToReceipts({
+        receipts,
+        taxId: editingTaxId,
+        oldName: existingTax?.tax_name,
+        newName: newTaxName.trim(),
+        updateReceipt,
+      });
       await fetchTaxes();
       setNewTaxName("");
       setNewTaxRate("");
@@ -1936,6 +1905,7 @@ useEffect(() => {
       clearTaxRateLimitAlert();
       setEditingTaxId(null);
       setShowAddTaxForm(false);
+      setToast({ isVisible: true, message: "Tax Type Updated", type: "success" });
     } catch (err) {
       console.error("Error updating tax:", err);
       setTaxError(err.message || "Failed to update tax type.");
@@ -1944,10 +1914,30 @@ useEffect(() => {
     }
   };
 
-  const confirmTaxRateChange = async () => {
-    if (isSavingTax) return;
-    setShowTaxRateChangeWarning(false);
+  const handleAddNewTaxTypeFromRateWarning = () => {
     if (!pendingTaxUpdate) return;
+    const allKnown = [...(taxData || []), ...localTaxTypes];
+    const existingTax = allKnown.find((t) => t.id === editingTaxId);
+    const baseName = existingTax?.tax_name || pendingTaxUpdate.newName;
+    const incremented = buildIncrementedTaxName(
+      baseName,
+      allKnown.map((t) => t.tax_name),
+    );
+    setShowTaxRateChangeWarning(false);
+    setPendingTaxUpdate(null);
+    setEditingTaxId(null);
+    setShowAddTaxForm(true);
+    setNewTaxName(incremented);
+    setNewTaxRate(pendingTaxUpdate.newRate);
+    setNewTaxNumber(
+      pendingTaxUpdate.newNumber || existingTax?.tax_number || "",
+    );
+    setTaxError(null);
+  };
+
+  const confirmTaxRateChange = async () => {
+    if (isSavingTax || !pendingTaxUpdate || !editingTaxId) return;
+    setShowTaxRateChangeWarning(false);
     const { newName, newRate, newNumber } = pendingTaxUpdate;
     setPendingTaxUpdate(null);
     setIsSavingTax(true);
@@ -1955,7 +1945,13 @@ useEffect(() => {
     try {
       const fk_user_id = localStorage.getItem("fk_user_id") || "0";
       const allKnown = [...(taxData || []), ...localTaxTypes];
-      const existingTax = allKnown.find(t => t.id === editingTaxId);
+      const existingTax = allKnown.find((t) => t.id === editingTaxId);
+      await propagateTaxRateChangeToReceipts({
+        receipts,
+        taxId: editingTaxId,
+        oldRate: existingTax?.tax_rate,
+        updateReceipt,
+      });
       await updateTax({
         id: editingTaxId,
         fk_user_id: parseInt(fk_user_id),
@@ -1968,10 +1964,27 @@ useEffect(() => {
         created: existingTax?.created || 0,
         udpated: Date.now(),
       });
+      if (
+        (newName || "").trim().toLowerCase() !==
+        (existingTax?.tax_name || "").trim().toLowerCase()
+      ) {
+        await propagateTaxNameChangeToReceipts({
+          receipts,
+          taxId: editingTaxId,
+          oldName: existingTax?.tax_name,
+          newName,
+          updateReceipt,
+        });
+      }
       await fetchTaxes();
-      setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber(""); setEditingTaxId(null);
+      setNewTaxName("");
+      setNewTaxRate("");
+      setNewTaxNumber("");
+      setEditingTaxId(null);
       clearTaxRateLimitAlert();
-      setShowAddTaxForm(false); setTaxError(null);
+      setShowAddTaxForm(false);
+      setTaxError(null);
+      setToast({ isVisible: true, message: "Tax Type Updated", type: "success" });
     } catch (err) {
       setTaxError(err.message || "Failed to update tax type.");
     } finally {
@@ -2393,12 +2406,12 @@ useEffect(() => {
       setEditedReceipt((prev) => {
         const email0 = prev.emailAttachment ?? selectedReceipt.emailAttachment ?? "0";
         const receipt0 = prev.receipt_image ?? selectedReceipt.receipt_image ?? "0";
-        let mergedEmail = replaceNormalizedUrlInMediaCsv(email0, normOld, persistUrl);
-        let mergedReceipt = replaceNormalizedUrlInMediaCsv(receipt0, normOld, persistUrl);
+        let mergedEmail = replaceUrlInMediaCsv(email0, normOld, persistUrl);
+        let mergedReceipt = replaceUrlInMediaCsv(receipt0, normOld, persistUrl);
         if (mergedEmail === email0 && mergedReceipt === receipt0) {
           const combined = buildCombinedMediaField([receipt0, email0]);
           if (combined !== "0") {
-            const mergedCombined = replaceNormalizedUrlInMediaCsv(
+            const mergedCombined = replaceUrlInMediaCsv(
               combined,
               normOld,
               persistUrl
@@ -3803,45 +3816,26 @@ useEffect(() => {
                 <div class="receipt-image-container">
                   ${(() => {
                     const getEmailAttachmentUrl = () => {
-                      const url = receipt?.emailAttachment;
-                      if (!url || typeof url !== "string") return "";
-                      const trimmed = url.trim();
-                      if (
-                        !trimmed ||
-                        ["0", "null", "@", "undefined", ""].includes(trimmed)
-                      )
-                        return "";
+                      const urls = [
+                        ...splitMediaField(receipt?.receipt_image),
+                        ...splitMediaField(receipt?.emailAttachment),
+                      ];
+                      const url = urls[0] || "";
+                      if (!url) return "";
                       const invalidPatterns = [
                         "android.resource://",
                         "content://",
                         "file://",
                         "resource://",
                       ];
-                      if (invalidPatterns.some((p) => trimmed.startsWith(p)))
-                        return "";
-                      return trimmed;
-                    };
-
-                    const getPdfUrl = (url) => {
-                      if (
-                        url.startsWith("data:") ||
-                        url.startsWith("https://") ||
-                        url.includes("pdf_proxy_base.php")
-                      ) {
-                        return url;
-                      }
-                      const proxy =
-                        "https://categorizr.com/emailserver/pdf_proxy_base.php?url=";
-                      return proxy + encodeURIComponent(url);
+                      if (invalidPatterns.some((p) => url.startsWith(p))) return "";
+                      return url;
                     };
 
                     const emailAttachmentUrl = getEmailAttachmentUrl();
-                    const isPdfAttachment =
-                      !!emailAttachmentUrl &&
-                      (/\.pdf(\?|$)/i.test(emailAttachmentUrl) ||
-                        emailAttachmentUrl.startsWith("data:application/pdf"));
+                    const isPdfAttachment = isPdfUrl(emailAttachmentUrl);
                     const finalPdfUrl = isPdfAttachment
-                      ? getPdfUrl(emailAttachmentUrl)
+                      ? getPdfProxyUrl(emailAttachmentUrl)
                       : emailAttachmentUrl;
 
                     return finalPdfUrl
@@ -4319,45 +4313,26 @@ Thank you for using our receipt management system.
                 <div class="receipt-image-container">
                   ${(() => {
                     const getEmailAttachmentUrl = () => {
-                      const url = receipt?.emailAttachment;
-                      if (!url || typeof url !== "string") return "";
-                      const trimmed = url.trim();
-                      if (
-                        !trimmed ||
-                        ["0", "null", "@", "undefined", ""].includes(trimmed)
-                      )
-                        return "";
+                      const urls = [
+                        ...splitMediaField(receipt?.receipt_image),
+                        ...splitMediaField(receipt?.emailAttachment),
+                      ];
+                      const url = urls[0] || "";
+                      if (!url) return "";
                       const invalidPatterns = [
                         "android.resource://",
                         "content://",
                         "file://",
                         "resource://",
                       ];
-                      if (invalidPatterns.some((p) => trimmed.startsWith(p)))
-                        return "";
-                      return trimmed;
-                    };
-
-                    const getPdfUrl = (url) => {
-                      if (
-                        url.startsWith("data:") ||
-                        url.startsWith("https://") ||
-                        url.includes("pdf_proxy_base.php")
-                      ) {
-                        return url;
-                      }
-                      const proxy =
-                        "https://categorizr.com/emailserver/pdf_proxy_base.php?url=";
-                      return proxy + encodeURIComponent(url);
+                      if (invalidPatterns.some((p) => url.startsWith(p))) return "";
+                      return url;
                     };
 
                     const emailAttachmentUrl = getEmailAttachmentUrl();
-                    const isPdfAttachment =
-                      !!emailAttachmentUrl &&
-                      (/\.pdf(\?|$)/i.test(emailAttachmentUrl) ||
-                        emailAttachmentUrl.startsWith("data:application/pdf"));
+                    const isPdfAttachment = isPdfUrl(emailAttachmentUrl);
                     const finalPdfUrl = isPdfAttachment
-                      ? getPdfUrl(emailAttachmentUrl)
+                      ? getPdfProxyUrl(emailAttachmentUrl)
                       : emailAttachmentUrl;
 
                     return finalPdfUrl
@@ -6107,25 +6082,6 @@ Thank you for using our receipt management system.
                             );
                           });
 
-                          const isPdf = (u) =>
-                            typeof u === "string" &&
-                            (/\.pdf(\?|$)/i.test(u) ||
-                              /^data:application\/pdf/i.test(u));
-
-                          const getPdfUrl = (url) => {
-                            if (
-                              url.startsWith("data:") ||
-                              url.startsWith("https://") ||
-                              url.includes("pdf_proxy_base.php")
-                            ) {
-                              return url;
-                            }
-
-                            const proxy =
-                              "https://categorizr.com/emailserver/pdf_proxy_base.php?url=";
-                            return proxy + encodeURIComponent(url);
-                          };
-
                           const allUrls = [
                             ...new Set(
                               [...urls, ...additionalPhotoUrls]
@@ -6147,28 +6103,8 @@ Thank you for using our receipt management system.
                             const isAdditional = idx >= urls.length;
                             return (
                               <div key={idx} className="relative group">
-                                {isPdf(u) ? (
-                                  <a
-                                    href={getPdfUrl(u)}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="block focus:outline-none"
-                                    title="Open PDF"
-                                  >
-                                    <div className="w-24 h-32 bg-gray-100 border rounded overflow-hidden relative">
-                                      <iframe
-                                        src={`${getPdfUrl(
-                                          u
-                                        )}#page=1&toolbar=0&navpanes=0&scrollbar=0`}
-                                        className="w-full h-full border-none pointer-events-none"
-                                        title="PDF Preview"
-                                        loading="lazy"
-                                      />
-                                      <div className="absolute bottom-1 left-1 right-1 text-center text-[10px] font-semibold bg-white/80 rounded p-0.5">
-                                        PDF
-                                      </div>
-                                    </div>
-                                  </a>
+                                {isPdfUrl(u) ? (
+                                  <PdfThumbnail url={u} />
                                 ) : (
                                   <img
                                     key={normalizeMediaUrl(u)}
@@ -6216,7 +6152,7 @@ Thank you for using our receipt management system.
                                   <Trash2 size={11} />
                                 </button>
                                 {/* Annotate button */}
-                                {!isPdf(u) && (
+                                {!isPdfUrl(u) && (
                                   <button
                                     type="button"
                                     onClick={(e) => {
@@ -7155,44 +7091,21 @@ Thank you for using our receipt management system.
         )}
       </AnimatePresence>
 
-      {/* Tax Rate Change Warning Dialog */}
-      <AnimatePresence>
-        {showTaxRateChangeWarning && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6"
-            >
-              <h3 className="text-lg font-bold text-gray-900 mb-2">Change Tax Rate?</h3>
-              <p className="text-sm text-gray-600 mb-4">
-                Receipts that already use this tax type will keep their current tax amount as a fixed dollar value — the % will not auto-recalculate.
-              </p>
-              <p className="text-sm text-gray-600 mb-6">
-                To apply the new rate to a receipt, open that receipt, deselect this tax type in the SELECT bar, then reselect it.
-              </p>
-              <div className="flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => { setShowTaxRateChangeWarning(false); setPendingTaxUpdate(null); }}
-                  className="px-5 py-2 text-sm text-gray-600 font-medium hover:bg-gray-100 rounded-xl transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={confirmTaxRateChange}
-                  className="px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition-colors"
-                >
-                  Confirm Change
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <TaxRateChangeWarningModal
+        isOpen={showTaxRateChangeWarning}
+        zIndexClass="z-[70]"
+        isProcessing={isSavingTax}
+        onGoBack={() => {
+          setShowTaxRateChangeWarning(false);
+          setPendingTaxUpdate(null);
+        }}
+        onClose={() => {
+          setShowTaxRateChangeWarning(false);
+          setPendingTaxUpdate(null);
+        }}
+        onAddNewTaxType={handleAddNewTaxTypeFromRateWarning}
+        onUpdateCurrentRate={confirmTaxRateChange}
+      />
 
       {/* Delete Tax Confirmation */}
       <AnimatePresence>

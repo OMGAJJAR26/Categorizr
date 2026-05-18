@@ -1,6 +1,7 @@
 import Tesseract from 'tesseract.js';
 import * as pdfjsLib from 'pdfjs-dist';
 import { proxyImageUrl } from '../api/Axios';
+import { getPdfProxyUrl } from './mediaUrlUtils';
 
 // Configure PDF.js worker - use local file from public folder
 // This must be set BEFORE any PDF.js operations
@@ -146,6 +147,58 @@ export async function pdfToImage(pdfFile) {
     console.error('Error stack:', error.stack);
     throw new Error(`Failed to convert PDF to image: ${error.message}`);
   }
+}
+
+/**
+ * Render the first page of a remote (or data:) PDF to a JPEG data URL for thumbnails.
+ * @param {string} pdfUrl - Canonical PDF URL
+ * @param {{ maxWidth?: number }} [options]
+ * @returns {Promise<string>} data:image/jpeg;base64,...
+ */
+export async function renderPdfFirstPageFromUrl(pdfUrl, options = {}) {
+  const { maxWidth = 256 } = options;
+  configurePDFWorker();
+
+  let arrayBuffer;
+  if (pdfUrl.startsWith("data:")) {
+    const base64 = pdfUrl.split(",")[1];
+    if (!base64) throw new Error("Invalid PDF data URL");
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    arrayBuffer = bytes.buffer;
+  } else {
+    const fetchUrl = getPdfProxyUrl(pdfUrl);
+    const response = await fetch(fetchUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch PDF: ${response.status}`);
+    }
+    arrayBuffer = await response.arrayBuffer();
+  }
+
+  const pdf = await pdfjsLib.getDocument({
+    data: arrayBuffer,
+    verbosity: 0,
+  }).promise;
+
+  if (pdf.numPages === 0) throw new Error("PDF has no pages");
+
+  const page = await pdf.getPage(1);
+  const baseViewport = page.getViewport({ scale: 1 });
+  const scale = Math.min(1.5, maxWidth / baseViewport.width);
+  const viewport = page.getViewport({ scale: Math.max(scale, 0.25) });
+
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+
+  context.fillStyle = "#FFFFFF";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  await page.render({ canvasContext: context, viewport }).promise;
+
+  return canvas.toDataURL("image/jpeg", 0.88);
 }
 
 /**
