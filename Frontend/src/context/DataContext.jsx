@@ -2398,4 +2398,18 @@ setMerchantsWithImages(
   );
 };
 
-export const useData = () => useContext(DataContext);
+export const useData = () => {
+  const ctx = useContext(DataContext);
+  if (ctx === undefined) {
+    // This fires only when a component is rendered outside <DataProvider>.
+    // Returning an empty object prevents a hard TypeError crash; the component
+    // will render with no data but won't blow up the whole app.
+    if (process.env.NODE_ENV !== "production") {
+      console.error(
+        "[useData] called outside DataProvider — check your component tree."
+      );
+    }
+    return {};
+  }
+  return ctx;
+};
