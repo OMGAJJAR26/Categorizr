@@ -473,6 +473,62 @@ const ReceiptDetail = ({
     return Array.from(taxMap.values());
   }, [taxData, localTaxTypes]);
 
+  // Resolve tax rate from receipt row or tax definition (taxData).
+  const resolveTaxRateForReceipt = useCallback(
+    (tax) => {
+      const direct = parseFloat(formatTaxRate(tax?.tax_rate));
+      if (!isNaN(direct) && direct > 0) return direct;
+      const taxId = parseInt(tax?.fk_tax_id) || 0;
+      if (taxId > 0 && Array.isArray(taxData)) {
+        const def = taxData.find((t) => parseInt(t.id) === taxId);
+        if (def) {
+          const fromDef = parseFloat(formatTaxRate(def.tax_rate));
+          if (!isNaN(fromDef) && fromDef > 0) return fromDef;
+        }
+      }
+      return 0;
+    },
+    [taxData],
+  );
+
+  // Keep total fixed: derive subtotal and per-tax amounts from rates.
+  const recalculateReceiptTotalsFromFixedTotal = useCallback(
+    (total, taxValues, tip) => {
+      const totalNum = parseFloat(total) || 0;
+      const tipNum = parseFloat(tip) || 0;
+      const taxes = (taxValues || []).filter(
+        (t) => !(t.tax_name || "").toLowerCase().includes("tip"),
+      );
+
+      const totalRateSum = taxes.reduce(
+        (sum, t) => sum + resolveTaxRateForReceipt(t) / 100,
+        0,
+      );
+      const subtotalNum =
+        taxes.length > 0 && totalRateSum > 0
+          ? (totalNum - tipNum) / (1 + totalRateSum)
+          : totalNum - tipNum;
+      const subtotal =
+        subtotalNum > 0 ? parseFloat(subtotalNum.toFixed(2)) : 0;
+
+      const receipt_tax_values = taxes.map((t) => {
+        const rate = resolveTaxRateForReceipt(t);
+        const tax_amount =
+          subtotal > 0 && rate > 0
+            ? parseFloat(((subtotal * rate) / 100).toFixed(2))
+            : 0;
+        return {
+          ...t,
+          tax_rate: rate > 0 ? formatTaxRate(rate) : t.tax_rate || "0",
+          tax_amount,
+        };
+      });
+
+      return { subtotal, receipt_tax_values };
+    },
+    [resolveTaxRateForReceipt],
+  );
+
   // IDs of taxes marked as default (is_default_tax === 1)
   // Also expose a helper to check by id or by is_default_tax on the allTaxTypes object itself
   const defaultTaxIds = useMemo(() => {
@@ -623,6 +679,15 @@ useEffect(() => {
         .filter((t) => !(t.tax_name || "").toLowerCase().includes("tip"))
         .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""));
 
+      const receiptTotal = parseFloat(selectedReceipt.purchasePrice) || 0;
+      const receiptTip = tipEntry ? parseFloat(tipEntry.tax_amount) || 0 : 0;
+      const { subtotal: initSubtotal, receipt_tax_values: initTaxValues } =
+        recalculateReceiptTotalsFromFixedTotal(
+          receiptTotal,
+          nonTipTaxValues,
+          receiptTip,
+        );
+
       // Clean up paymentType - preserve original paymentType if valid, otherwise use card_issuer_name
       // For display: construct "Network *last4" format
       // Note: API stores paymentType WITHOUT *last4, so we need to construct display format
@@ -701,11 +766,13 @@ useEffect(() => {
         card_issuer_name: selectedReceipt.card_issuer_name || "",
         last_4_digit_card: selectedReceipt.last_4_digit_card || "",
         subtotal:
-          selectedReceipt.subtotal || selectedReceipt.purchasePrice || 0,
+          initTaxValues.length > 0
+            ? initSubtotal
+            : selectedReceipt.subtotal || selectedReceipt.purchasePrice || 0,
         purchasePrice: selectedReceipt.purchasePrice || 0,
         product_name: selectedReceipt.product_name || "",
         notes: selectedReceipt.notes || "",
-        receipt_tax_values: nonTipTaxValues,
+        receipt_tax_values: initTaxValues,
         tip: tipEntry ? (tipEntry.tax_amount ?? "") : "",
         store_image: selectedReceipt.store_image || "",
       });
@@ -726,7 +793,34 @@ useEffect(() => {
         });
       }
     }
-  }, [selectedReceipt, taxData]);
+  }, [selectedReceipt, taxData, recalculateReceiptTotalsFromFixedTotal]);
+
+  // When tax definitions load, fill missing rates and recalc amounts from total.
+  useEffect(() => {
+    if (!selectedReceipt || !Array.isArray(taxData) || taxData.length === 0) return;
+    setEditedReceipt((prev) => {
+      const taxes = prev.receipt_tax_values || [];
+      if (taxes.length === 0) return prev;
+      const total =
+        parseFloat(prev.purchasePrice) ||
+        parseFloat(selectedReceipt.purchasePrice) ||
+        0;
+      if (!total) return prev;
+      const needsRate = taxes.some((t) => resolveTaxRateForReceipt(t) <= 0);
+      const needsAmount = taxes.some(
+        (t) => !(parseFloat(t.tax_amount) > 0) && resolveTaxRateForReceipt(t) > 0,
+      );
+      if (!needsRate && !needsAmount) return prev;
+      const tip = parseFloat(prev.tip) || 0;
+      const next = recalculateReceiptTotalsFromFixedTotal(total, taxes, tip);
+      return { ...prev, subtotal: next.subtotal, receipt_tax_values: next.receipt_tax_values };
+    });
+  }, [
+    taxData,
+    selectedReceipt,
+    resolveTaxRateForReceipt,
+    recalculateReceiptTotalsFromFixedTotal,
+  ]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -1229,17 +1323,6 @@ useEffect(() => {
 
   const receiptTags = parseReceiptTags(r.receipt_tag);
 
-  // Helper function to calculate subtotal from total, taxes, and tip
-  const calculateSubtotal = (total, taxValues, tip) => {
-    const totalNum = parseFloat(total) || 0;
-    const tipNum = parseFloat(tip) || 0;
-    const totalTaxes = (taxValues || []).reduce((sum, t) => {
-      return sum + (parseFloat(t.tax_amount) || 0);
-    }, 0);
-    const subtotal = totalNum - totalTaxes - tipNum;
-    return subtotal > 0 ? subtotal : 0;
-  };
-
   // ── Merchant-category intelligence ──────────────────────────────────────────
   // Scans existing receipts to find the most-recently-used expense category for
   // the given merchant. Returns "" when no history is found.
@@ -1296,15 +1379,21 @@ useEffect(() => {
         newData.paymentLogoUrl = "";
       }
 
-      // When total changes, recalculate subtotal
+      // When total changes, recalculate subtotal and tax amounts from rates
       if (field === "purchasePrice") {
         const total = parseFloat(value) || 0;
         const tipAmount = parseFloat(newData.tip) || 0;
         const taxValues = newData.receipt_tax_values || [];
-        newData.subtotal = calculateSubtotal(total, taxValues, tipAmount);
+        const recalculated = recalculateReceiptTotalsFromFixedTotal(
+          total,
+          taxValues,
+          tipAmount,
+        );
+        newData.subtotal = recalculated.subtotal;
+        newData.receipt_tax_values = recalculated.receipt_tax_values;
       }
 
-      // When tip changes, recalculate subtotal
+      // When tip changes, keep total fixed and recalculate subtotal/taxes from rates
       if (field === "tip") {
         const total =
           parseFloat(newData.purchasePrice) ||
@@ -1313,7 +1402,14 @@ useEffect(() => {
           0;
         const tipAmount = parseFloat(value) || 0;
         const taxValues = newData.receipt_tax_values || [];
-        newData.subtotal = calculateSubtotal(total, taxValues, tipAmount);
+        const recalculated = recalculateReceiptTotalsFromFixedTotal(
+          total,
+          taxValues,
+          tipAmount,
+        );
+        newData.subtotal = recalculated.subtotal;
+        newData.receipt_tax_values = recalculated.receipt_tax_values;
+        newData.purchasePrice = prev.purchasePrice;
       }
 
       return newData;
@@ -1568,13 +1664,14 @@ useEffect(() => {
 
       // Add the new tax entry with all required API fields
       const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
+      const taxRate = formatTaxRate(tax.tax_rate);
       const newTaxEntry = {
         id: 0,
         fk_user_id: fk_user_id,
         fk_receipt_id: selectedReceipt?.id || 0,
         fk_tax_id: tax.id || 0,
         tax_name: tax.tax_name,
-        tax_rate: tax.tax_rate,
+        tax_rate: taxRate,
         tax_amount: 0,
         tax_number: tax.tax_number || "",
         created: 0,
@@ -1584,28 +1681,17 @@ useEffect(() => {
       const newTaxValues = [...prevTaxValues, newTaxEntry]
         .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""));
 
-      // Recalculate subtotal from total using combined tax rates
-      const totalTaxRate = newTaxValues.reduce(
-        (sum, t) => sum + (parseFloat(t.tax_rate) || 0),
-        0
+      const { subtotal, receipt_tax_values } = recalculateReceiptTotalsFromFixedTotal(
+        total,
+        newTaxValues,
+        tipAmount,
       );
-      const newSubtotal =
-        totalTaxRate > 0
-          ? (total - tipAmount) / (1 + totalTaxRate / 100)
-          : total - tipAmount;
-
-      // Recalculate each tax amount based on new subtotal
-      const updatedTaxValues = newTaxValues.map((t) => ({
-        ...t,
-        tax_amount: parseFloat(
-          ((newSubtotal * (parseFloat(t.tax_rate) || 0)) / 100).toFixed(2)
-        ),
-      }));
 
       return {
         ...prev,
-        receipt_tax_values: updatedTaxValues,
-        subtotal: parseFloat(newSubtotal.toFixed(2)),
+        receipt_tax_values,
+        subtotal,
+        purchasePrice: prev.purchasePrice,
       };
     });
   };
@@ -1630,33 +1716,22 @@ useEffect(() => {
         parseFloat(prev.tip) ||
         (tipTax?.tax_amount ? parseFloat(tipTax.tax_amount) : 0);
 
-      // Recalculate subtotal
-      const totalTaxRate = newTaxValues.reduce(
-        (sum, t) => sum + (parseFloat(t.tax_rate) || 0),
-        0
+      const { subtotal, receipt_tax_values } = recalculateReceiptTotalsFromFixedTotal(
+        total,
+        newTaxValues,
+        tipAmount,
       );
-      const newSubtotal =
-        totalTaxRate > 0
-          ? (total - tipAmount) / (1 + totalTaxRate / 100)
-          : total - tipAmount;
-
-      // Recalculate each tax amount
-      const updatedTaxValues = newTaxValues.map((t) => ({
-        ...t,
-        tax_amount: parseFloat(
-          ((newSubtotal * (parseFloat(t.tax_rate) || 0)) / 100).toFixed(2)
-        ),
-      }));
 
       return {
         ...prev,
-        receipt_tax_values: updatedTaxValues,
-        subtotal: parseFloat(newSubtotal.toFixed(2)),
+        receipt_tax_values,
+        subtotal,
+        purchasePrice: prev.purchasePrice,
       };
     });
   };
 
-  // Tax amount input: digits + one decimal point, max 2 decimals.
+  // Tax amount input: keep total fixed; recalc subtotal and all tax rows from rates.
   const handleTaxAmountChange = (index, rawValue) => {
     const numeric = sanitizeMoneyInput(rawValue);
     const fieldKey = index === 0 ? "tax0" : "tax1";
@@ -1671,9 +1746,24 @@ useEffect(() => {
       const updatedTaxValues = currentTaxValues.map((t, i) =>
         i === index ? { ...t, tax_amount: numeric === "" ? 0 : parseFloat(numeric) } : t
       );
+      const total =
+        parseFloat(prev.purchasePrice) ||
+        parseFloat(r.total) ||
+        parseFloat(r.purchasePrice) ||
+        0;
+      const tipAmount =
+        parseFloat(prev.tip) ||
+        (tipTax?.tax_amount ? parseFloat(tipTax.tax_amount) : 0);
+      const { subtotal, receipt_tax_values } = recalculateReceiptTotalsFromFixedTotal(
+        total,
+        updatedTaxValues,
+        tipAmount,
+      );
       return {
         ...prev,
-        receipt_tax_values: updatedTaxValues,
+        receipt_tax_values,
+        subtotal,
+        purchasePrice: prev.purchasePrice,
       };
     });
   };
@@ -5538,50 +5628,19 @@ Thank you for using our receipt management system.
                             type="text"
                             readOnly
                             className={`${inputClass} ${(() => {
-                              const total =
-                                parseFloat(editedReceipt.purchasePrice) ||
-                                parseFloat(r.total) ||
-                                parseFloat(r.purchasePrice) ||
+                              const sub =
+                                parseFloat(editedReceipt.subtotal) ||
+                                parseFloat(r.subtotal) ||
                                 0;
-                              const tipAmount =
-                                parseFloat(editedReceipt.tip) ||
-                                (tipTax?.tax_amount
-                                  ? parseFloat(tipTax.tax_amount)
-                                  : 0);
-                              const taxValues =
-                                editedReceipt.receipt_tax_values || taxes || [];
-                              const totalTaxes = taxValues.reduce(
-                                (sum, t) =>
-                                  sum + (parseFloat(t.tax_amount) || 0),
-                                0
-                              );
-                              const calculatedSubtotal =
-                                total - totalTaxes - tipAmount;
-                              return calculatedSubtotal < 0
-                                ? "text-red-500"
-                                : "";
+                              return sub < 0 ? "text-red-500" : "";
                             })()}`}
                             value={(() => {
-                              const total =
-                                parseFloat(editedReceipt.purchasePrice) ||
-                                parseFloat(r.total) ||
-                                parseFloat(r.purchasePrice) ||
+                              const sub =
+                                parseFloat(editedReceipt.subtotal) ||
+                                parseFloat(r.subtotal) ||
                                 0;
-                              const tipAmount =
-                                parseFloat(editedReceipt.tip) ||
-                                (tipTax?.tax_amount
-                                  ? parseFloat(tipTax.tax_amount)
-                                  : 0);
-                              const taxValues =
-                                editedReceipt.receipt_tax_values || taxes || [];
-                              const totalTaxes = taxValues.reduce(
-                                (sum, t) =>
-                                  sum + (parseFloat(t.tax_amount) || 0),
-                                0
-                              );
-                              const calculatedSubtotal =
-                                total - totalTaxes - tipAmount;
-                              return `$${calculatedSubtotal > 0 ? calculatedSubtotal.toFixed(2) : "0.00"}`;
+                              const displaySub = Number.isFinite(sub) ? sub : 0;
+                              return `$${displaySub > 0 ? displaySub.toFixed(2) : "0.00"}`;
                             })()}
                           />
                         </div>
