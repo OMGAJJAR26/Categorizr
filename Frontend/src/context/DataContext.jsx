@@ -7,6 +7,7 @@ import {
   buildExpenseCategoryOptions,
 } from "../utils/expenseCategories";
 import { enrichReceiptTaxValues } from "../utils/taxTypeUtils";
+import { isMerchantSupersededByApi } from "../utils/merchantListUtils";
 
 const DataContext = createContext();
 const BASE_URL = "/api";
@@ -366,6 +367,22 @@ export const DataProvider = ({ children }) => {
     }
   }, [fetchTaxes]);
 
+  // Remove local custom entries that duplicate server stores (prevents ghost duplicates after login).
+  const purgeCustomMerchantsMatchingApi = useCallback((apiList) => {
+    const apiNames = new Set(
+      (apiList || [])
+        .map((m) => (m?.store_name || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+    if (apiNames.size === 0) return;
+    setCustomMerchants((prev) => {
+      const next = prev.filter((m) => !apiNames.has((m || "").trim().toLowerCase()));
+      if (next.length === prev.length) return prev;
+      localStorage.setItem("cat_custom_merchants", JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
   // ── API Merchant CRUD (via /userstore endpoints) ──
   const fetchApiMerchants = useCallback(async () => {
     const token = localStorage.getItem("token");
@@ -380,11 +397,12 @@ export const DataProvider = ({ children }) => {
         const merchants = Array.isArray(data) ? data.filter(m => m.store_name) : [];
         console.log("%c[Merchants] fetchApiMerchants response:", "color:#6366f1;font-weight:bold", merchants);
         setApiMerchants(merchants);
+        purgeCustomMerchantsMatchingApi(merchants);
         return merchants;
       }
     } catch (e) { console.error("[Merchants] fetchApiMerchants error", e); }
     return [];
-  }, []);
+  }, [purgeCustomMerchantsMatchingApi]);
 
   // Backend SQL does direct string concatenation — escape single quotes so they
   // don't break the query.  MySQL treats '' (doubled quote) as a literal apostrophe.
@@ -438,24 +456,10 @@ export const DataProvider = ({ children }) => {
       if (res.ok) {
         const data = await res.json();
         console.log("%c[Merchants] updateApiMerchant response:", "color:#f59e0b;font-weight:bold", data);
-        let nextMerchant = data;
-        setApiMerchants((prev) => {
-          const existing = prev.find((m) => String(getEntityId(m)) === String(id));
-          // Some backend variants return only {code, message}; keep merchant shape stable.
-          if (!data || typeof data !== "object" || !data.store_name) {
-            nextMerchant = {
-              ...(existing || {}),
-              id: existing?.id ?? id,
-              store_id: existing?.store_id ?? id,
-              fk_store_id: existing?.fk_store_id ?? id,
-              store_name: name.trim(),
-              store_image_url: logoUrl || existing?.store_image_url || "",
-            };
-          }
-          return prev.map((m) =>
-            String(getEntityId(m)) === String(id) ? nextMerchant : m
-          );
-        });
+        const freshList = await fetchApiMerchants();
+        const nextMerchant =
+          freshList.find((m) => String(getEntityId(m)) === String(id)) ||
+          (data?.store_name ? data : { id, store_name: name.trim(), store_image_url: logoUrl || "" });
         return { ok: true, data: nextMerchant, error: null };
       } else {
         console.warn("[Merchants] updateApiMerchant failed, status:", res.status);
@@ -528,7 +532,7 @@ export const DataProvider = ({ children }) => {
           }
           if (res.ok && isDeleteResponseSuccessful(data)) {
             console.log("%c[Merchants] deleteApiMerchant response:", "color:#ef4444;font-weight:bold", data);
-            setApiMerchants(prev => prev.filter(m => String(getEntityId(m)) !== String(id)));
+            await fetchApiMerchants();
             return { ok: true, data, error: null };
           }
           console.warn("[Merchants] deleteApiMerchant failed:", {
@@ -1248,6 +1252,7 @@ export const DataProvider = ({ children }) => {
           apiMerchantsData = Array.isArray(apiStoreJson) ? apiStoreJson.filter(m => m.store_name) : [];
           console.log("%c[fetchData] Merchants from API:", "color:#6366f1;font-weight:bold", apiMerchantsData);
           setApiMerchants(apiMerchantsData);
+          purgeCustomMerchantsMatchingApi(apiMerchantsData);
         }
       } catch (apiStoreErr) {
         console.error("[fetchData] fetchApiMerchants error", apiStoreErr);
@@ -2053,6 +2058,15 @@ setMerchantsWithImages(
       return next;
     });
   }, []);
+
+  // Hide default merchant labels superseded by renamed API stores (e.g. Target → Targetttt).
+  useEffect(() => {
+    DEFAULT_MERCHANTS_WITH_LOGOS.forEach((def) => {
+      if (def?.name && isMerchantSupersededByApi(def.name, apiMerchants)) {
+        hideMerchant(def.name);
+      }
+    });
+  }, [apiMerchants, hideMerchant]);
   const unhideMerchant = useCallback((name) => {
     setHiddenMerchants((prev) => {
       const next = new Set([...prev].filter((m) => m !== name));
@@ -2142,33 +2156,55 @@ setMerchantsWithImages(
     ...customMerchants.map((m) => (m || "").toLowerCase()),
   ]);
   const mergedMerchants = [
-    ...receiptMerchantsRaw.filter((m) => !isMerchantHidden(m)),
+    ...receiptMerchantsRaw.filter(
+      (m) => !isMerchantHidden(m) && !isMerchantSupersededByApi(m, apiMerchants)
+    ),
     ...customMerchants.filter((m) => !isMerchantHidden(m) && !_rmLower.has(m.toLowerCase())),
     ...DEFAULT_MERCHANTS_WITH_LOGOS
       .map((m) => m.name)
-      .filter((m) => m && !isMerchantHidden(m) && !_rmCustomLower.has((m || "").toLowerCase())),
+      .filter(
+        (m) =>
+          m &&
+          !isMerchantHidden(m) &&
+          !_rmCustomLower.has((m || "").toLowerCase()) &&
+          !isMerchantSupersededByApi(m, apiMerchants)
+      ),
   ].sort((a, b) =>
     (a || "").toString().toLowerCase().localeCompare((b || "").toString().toLowerCase())
   );
   const _miLower = new Set(receiptMerchWImgRaw.map((m) => (m.name || "").toLowerCase()));
+  const _miApiLower = new Set(
+    (apiMerchants || []).map((m) => (m?.store_name || "").trim().toLowerCase()).filter(Boolean)
+  );
   const _miCustomLower = new Set([
     ..._miLower,
+    ..._miApiLower,
     ...customMerchants.map((m) => (m || "").toLowerCase()),
   ]);
   const mergedMerchantsWithImages = [
-    ...receiptMerchWImgRaw.filter((m) => !isMerchantHidden(m.name)),
-    ...customMerchants
-      .filter((m) => !isMerchantHidden(m) && !_miLower.has(m.toLowerCase()))
-      .map((m) => ({ name: m, image: "" })),
-    // API merchants not already present from receipts or custom list
+    ...receiptMerchWImgRaw.filter(
+      (m) =>
+        !isMerchantHidden(m.name) && !isMerchantSupersededByApi(m.name, apiMerchants)
+    ),
+    // API merchants are the source of truth (before local custom list)
     ...apiMerchants
-      .filter((m) => m.store_name && !isMerchantHidden(m.store_name) && !_miCustomLower.has((m.store_name || "").toLowerCase()))
+      .filter((m) => m.store_name && !isMerchantHidden(m.store_name) && !_miLower.has((m.store_name || "").toLowerCase()))
       .map((m) => ({ name: m.store_name, image: m.store_image_url || "" })),
+    ...customMerchants
+      .filter(
+        (m) =>
+          !isMerchantHidden(m) &&
+          !_miLower.has(m.toLowerCase()) &&
+          !_miApiLower.has(m.toLowerCase()) &&
+          !isMerchantSupersededByApi(m, apiMerchants)
+      )
+      .map((m) => ({ name: m, image: "" })),
     ...DEFAULT_MERCHANTS_WITH_LOGOS.filter(
       (m) =>
         m.name &&
         !isMerchantHidden(m.name) &&
-        !_miCustomLower.has((m.name || "").toLowerCase())
+        !_miCustomLower.has((m.name || "").toLowerCase()) &&
+        !isMerchantSupersededByApi(m.name, apiMerchants)
     ),
   ].sort((a, b) =>
     (a?.name || "").toString().toLowerCase().localeCompare((b?.name || "").toString().toLowerCase())

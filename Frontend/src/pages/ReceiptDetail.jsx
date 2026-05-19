@@ -55,6 +55,7 @@ import {
   hasStoredTaxAmount,
 } from "../utils/taxTypeUtils";
 import { buildExpenseCategoryOptions } from "../utils/expenseCategories";
+import { findRenamedApiMerchant } from "../utils/merchantListUtils";
 
 // Default payment methods
 const defaultPaymentMethods = [
@@ -2200,15 +2201,18 @@ useEffect(() => {
         const id = m?.id ?? m?.store_id ?? m?.fk_store_id ?? null;
         return id != null && String(id) !== "" && String(id) !== "0" ? id : null;
       };
-      const matchIn = (list) =>
-        (list || []).find(
+      const resolveApiForEdit = (list) => {
+        const exact = (list || []).find(
           (m) => normalizeMatchKey(m.store_name) === normalizeMatchKey(oldName)
         );
-      let apiMatch = matchIn(apiMerchants);
+        if (getApiMerchantId(exact)) return exact;
+        return findRenamedApiMerchant(oldName, list);
+      };
+      let apiMatch = resolveApiForEdit(apiMerchants);
       let apiId = getApiMerchantId(apiMatch);
       if (apiId == null) {
         const fresh = await fetchApiMerchants();
-        apiMatch = matchIn(fresh);
+        apiMatch = resolveApiForEdit(fresh);
         apiId = getApiMerchantId(apiMatch);
       }
       if (apiId != null) {
@@ -2216,19 +2220,16 @@ useEffect(() => {
         if (!updateMerchantResult?.ok) {
           throw new Error(updateMerchantResult?.error || "Failed to update merchant");
         }
-        deleteCustomMerchant(oldName);
       } else {
         const addMerchantResult = await addApiMerchant(newName, newLogo);
         if (!addMerchantResult?.ok) {
           throw new Error(addMerchantResult?.error || "Failed to update merchant");
         }
       }
+      deleteCustomMerchant(oldName);
+      deleteCustomMerchant(newName);
       if (normalizeMatchKey(newName) !== normalizeMatchKey(oldName)) {
         hideMerchant(oldName);
-        deleteCustomMerchant(oldName);
-        addCustomMerchant(newName);
-      } else {
-        editCustomMerchant(oldName, newName);
       }
       if (newLogo) saveMerchLogo(newName, newLogo);
       // Update the currently viewed receipt's store fields if affected

@@ -9,6 +9,10 @@ import {
   propagateTaxRateChangeToReceipts,
   taxRatesDiffer,
 } from "../utils/taxTypeUtils";
+import {
+  findRenamedApiMerchant,
+  isMerchantSupersededByApi,
+} from "../utils/merchantListUtils";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Settings as SettingsIcon,
@@ -321,20 +325,17 @@ const ManageModal = ({ type, onClose }) => {
       }
       try {
         const directMerchantId = getApiMerchantId(item);
-        if (directMerchantId !== null) {
-          const result = await updateApiMerchant(directMerchantId, nextName, "");
+        const apiMatch = (apiMerchants || []).find(
+          (m) => normalizeMatchKey(m?.store_name) === normalizeMatchKey(item?.name)
+        );
+        const apiId = directMerchantId ?? getApiMerchantId(apiMatch);
+        if (apiId !== null) {
+          const result = await updateApiMerchant(apiId, nextName, "");
           if (!result?.ok) throw new Error(result?.error || "Failed to update merchant");
+          deleteCustomMerchant(item.name);
         } else {
-          const apiMatch = (apiMerchants || []).find(
-            (m) => normalizeMatchKey(m?.store_name) === normalizeMatchKey(item?.name)
-          );
-          const apiId = getApiMerchantId(apiMatch);
-          if (apiId !== null) {
-            const result = await updateApiMerchant(apiId, nextName, "");
-            if (!result?.ok) throw new Error(result?.error || "Failed to update merchant");
-          } else {
-            editCustomMerchant(item.key, nextName);
-          }
+          const addResult = await addApiMerchant(nextName, "");
+          if (!addResult?.ok) throw new Error(addResult?.error || "Failed to update merchant");
         }
         await fetchApiMerchants();
         toast("success", "Merchant Updated");
@@ -1615,13 +1616,18 @@ const ReceiptInfoInline = ({ type }) => {
       (list || []).find(
         (m) => normalizeMatchKey(m?.store_name) === normalizeMatchKey(merchantName)
       );
-    let match = matchIn(apiMerchants);
-    let apiId = getApiMerchantId(match);
-    if (apiId !== null) return { apiId, match };
+    const resolveFromList = (list) => {
+      let match = matchIn(list);
+      let apiId = getApiMerchantId(match);
+      if (apiId !== null) return { apiId, match };
+      match = findRenamedApiMerchant(merchantName, list);
+      apiId = getApiMerchantId(match);
+      return { apiId, match };
+    };
+    let resolved = resolveFromList(apiMerchants);
+    if (resolved.apiId !== null) return resolved;
     const fresh = await fetchApiMerchants();
-    match = matchIn(fresh);
-    apiId = getApiMerchantId(match);
-    return { apiId, match };
+    return resolveFromList(fresh);
   };
   const getApiEntityId = (obj) =>
     obj?.id ?? obj?.payment_method_id ?? obj?.fk_payment_method_id ?? null;
@@ -2005,36 +2011,19 @@ const isBlockedTaxRateInput = (val) => {
       if (apiId !== null) {
         const updateMerchantResult = await updateApiMerchant(apiId, newName, logo);
         if (!updateMerchantResult?.ok) throw new Error(updateMerchantResult?.error || "Failed to update merchant");
-        if ((customMerchants || []).some((m) => normalizeMatchKey(m) === normalizeMatchKey(oldName))) {
-          deleteCustomMerchant(oldName);
-        }
-      } else if (item.isReceiptItem || item.isDefaultItem) {
-        await addApiMerchant(newName, logo);
       } else {
-        editCustomMerchant(item.key, newName);
+        const addResult = await addApiMerchant(newName, logo);
+        if (!addResult?.ok) throw new Error(addResult?.error || "Failed to update merchant");
       }
 
-      if (item.isReceiptItem) {
-        if (keepLogo) saveMerchLogo(newName, keepLogo);
-        if (normalizeMatchKey(newName) !== normalizeMatchKey(oldName)) {
-          hideMerchant(item.key);
-          addCustomMerchant(newName);
-        }
-      } else if (item.isDefaultItem) {
-        if (normalizeMatchKey(newName) !== normalizeMatchKey(oldName)) {
-          hideMerchant(item.name);
-          addCustomMerchant(newName);
-        }
-        if (keepLogo) saveMerchLogo(newName, keepLogo);
-      } else if (item.isApiItem) {
-        if (keepLogo) saveMerchLogo(newName, keepLogo);
-        if (normalizeMatchKey(newName) !== normalizeMatchKey(oldName)) {
-          hideMerchant(item.name);
-          addCustomMerchant(newName);
-        }
-      } else if (keepLogo) {
-        saveMerchLogo(newName, keepLogo);
+      deleteCustomMerchant(oldName);
+      deleteCustomMerchant(newName);
+      if (item.isReceiptItem && normalizeMatchKey(newName) !== normalizeMatchKey(oldName)) {
+        hideMerchant(item.key);
+      } else if ((item.isDefaultItem || item.isApiItem) && normalizeMatchKey(newName) !== normalizeMatchKey(oldName)) {
+        hideMerchant(item.name);
       }
+      if (keepLogo) saveMerchLogo(newName, keepLogo);
       await Promise.all([refreshData(), fetchApiMerchants()]);
       toast("success", "Merchant Updated");
     } catch (e) { toast("error", e.message || "Update failed."); }
@@ -2048,28 +2037,24 @@ const isBlockedTaxRateInput = (val) => {
     if (!pendingMerchantDelete) return;
     const item = pendingMerchantDelete;
     try {
-      const apiMerchantMatch = (apiMerchants || []).find(
-        (m) => normalizeMatchKey(m.store_name) === normalizeMatchKey(item.name)
-      );
       const matching = getReceiptsByMerchant(item.name);
       if (matching.length > 0) {
         await Promise.all(
           matching.map((r) => updateReceipt(r.id, { storeName: "Miscellaneous" }))
         );
       }
+      const directApiId = item.isApiItem ? getApiMerchantId({ id: item.apiId }) : null;
+      const { apiId: resolvedApiId } = await resolveMerchantApiIdForName(item.name);
+      const apiId = directApiId ?? resolvedApiId;
+      if (apiId !== null) {
+        const deleteMerchantResult = await deleteApiMerchant(apiId);
+        if (!deleteMerchantResult?.ok) throw new Error(deleteMerchantResult?.error || "Failed to delete merchant");
+      }
+      deleteCustomMerchant(item.name);
       if (item.isReceiptItem) {
         hideMerchant(item.key);
-      } else if (item.isApiItem) {
-        const deleteMerchantResult = await deleteApiMerchant(item.apiId);
-        if (!deleteMerchantResult?.ok) throw new Error(deleteMerchantResult?.error || "Failed to delete merchant");
       } else if (item.isDefaultItem) {
         hideMerchant(item.name);
-      } else {
-        deleteCustomMerchant(item.key);
-      }
-      if (!item.isApiItem && apiMerchantMatch?.id) {
-        const deleteMerchantResult = await deleteApiMerchant(apiMerchantMatch.id);
-        if (!deleteMerchantResult?.ok) throw new Error(deleteMerchantResult?.error || "Failed to delete merchant");
       }
       setIsDeleteSyncing(true);
       await Promise.all([refreshData(), fetchApiMerchants()]);
@@ -2588,7 +2573,11 @@ const isBlockedTaxRateInput = (val) => {
   const buildAllItems = () => {
     if (type === "merchants") {
       const rItems = receiptMerchWImgRaw
-        .filter(m => !isMerchantHidden(m.name))
+        .filter(
+          (m) =>
+            !isMerchantHidden(m.name) &&
+            !isMerchantSupersededByApi(m.name, apiMerchants)
+        )
         .map(m => ({
           key: m.name, name: m.name,
           logo: merchLogos[m.name] || m.image || null,
@@ -2596,13 +2585,9 @@ const isBlockedTaxRateInput = (val) => {
           isApiItem: false,
         }));
       const rKeys = new Set(rItems.map(m => m.name.toLowerCase()));
-      const cItems = customMerchants
-        .filter(m => !rKeys.has(m.toLowerCase()) && !isMerchantHidden(m))
-        .map(m => ({ key: m, name: m, logo: merchLogos[m] || null, isReceiptItem: false, isApiItem: false }));
-      // API merchants (server-stored, shown below receipt-derived and custom)
-      const allExistingKeys = new Set([...rItems.map(m => m.name.toLowerCase()), ...cItems.map(m => m.name.toLowerCase())]);
+      // API merchants are the source of truth (GET /userstore/getStorev1)
       const apiItems = (apiMerchants || [])
-        .filter(m => m.store_name && !allExistingKeys.has((m.store_name || "").toLowerCase()) && !isMerchantHidden(m.store_name))
+        .filter(m => m.store_name && !rKeys.has((m.store_name || "").toLowerCase()) && !isMerchantHidden(m.store_name))
         .map(m => {
           const apiId = m?.id ?? m?.store_id ?? m?.fk_store_id ?? null;
           return {
@@ -2614,10 +2599,20 @@ const isBlockedTaxRateInput = (val) => {
             isApiItem: true,
           };
         });
-      const allWithApi = [...rItems, ...cItems, ...apiItems];
+      const apiNameKeys = new Set(apiItems.map((m) => m.name.toLowerCase()));
+      const cItems = customMerchants
+        .filter(m => !rKeys.has(m.toLowerCase()) && !apiNameKeys.has(m.toLowerCase()) && !isMerchantHidden(m))
+        .map(m => ({ key: m, name: m, logo: merchLogos[m] || null, isReceiptItem: false, isApiItem: false }));
+      const allWithApi = [...rItems, ...apiItems, ...cItems];
       const existingAfterApi = new Set(allWithApi.map((m) => (m.name || "").toLowerCase()));
       const defaultItems = SETTINGS_DEFAULT_MERCHANTS_WITH_LOGOS
-        .filter((m) => m.name && !existingAfterApi.has((m.name || "").toLowerCase()) && !isMerchantHidden(m.name))
+        .filter(
+          (m) =>
+            m.name &&
+            !existingAfterApi.has((m.name || "").toLowerCase()) &&
+            !isMerchantHidden(m.name) &&
+            !isMerchantSupersededByApi(m.name, apiMerchants)
+        )
         .map((m) => ({
           key: `default_${m.name}`,
           name: m.name,

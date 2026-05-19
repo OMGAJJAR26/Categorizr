@@ -37,6 +37,7 @@ import {
   isPdfUrl,
 } from "../../utils/mediaUrlUtils";
 import PdfThumbnail from "./PdfThumbnail";
+import { findRenamedApiMerchant } from "../../utils/merchantListUtils";
 
 // Payment method logos (for Add Payment Method modal card type list)
 const Visa              = "/payment-logos/Visa.png";
@@ -3127,15 +3128,18 @@ const handleFieldChange = (field, value) => {
         const id = m?.id ?? m?.store_id ?? m?.fk_store_id ?? null;
         return id != null && String(id) !== "" && String(id) !== "0" ? id : null;
       };
-      const matchIn = (list) =>
-        (list || []).find(
+      const resolveApiForEdit = (list) => {
+        const exact = (list || []).find(
           (m) => normalizeMatchKey(m.store_name) === normalizeMatchKey(oldName)
         );
-      let apiMatch = matchIn(apiMerchants);
+        if (getApiMerchantId(exact)) return exact;
+        return findRenamedApiMerchant(oldName, list);
+      };
+      let apiMatch = resolveApiForEdit(apiMerchants);
       let apiId = getApiMerchantId(apiMatch);
       if (apiId == null) {
         const fresh = await fetchApiMerchants();
-        apiMatch = matchIn(fresh);
+        apiMatch = resolveApiForEdit(fresh);
         apiId = getApiMerchantId(apiMatch);
       }
       if (apiId != null) {
@@ -3143,19 +3147,16 @@ const handleFieldChange = (field, value) => {
         if (!updateMerchantResult?.ok) {
           throw new Error(updateMerchantResult?.error || "Failed to update merchant");
         }
-        deleteCustomMerchant(oldName);
       } else {
         const addMerchantResult = await addApiMerchant(newName, newLogo);
         if (!addMerchantResult?.ok) {
           throw new Error(addMerchantResult?.error || "Failed to update merchant");
         }
       }
+      deleteCustomMerchant(oldName);
+      deleteCustomMerchant(newName);
       if (normalizeMatchKey(newName) !== normalizeMatchKey(oldName)) {
         hideMerchant(oldName);
-        deleteCustomMerchant(oldName);
-        addCustomMerchant(newName);
-      } else {
-        editCustomMerchant(oldName, newName);
       }
       if (newLogo) saveMerchLogo(newName, newLogo);
       // If the form currently has this merchant selected, update it too
