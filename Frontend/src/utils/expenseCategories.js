@@ -44,9 +44,41 @@ export function isValidExpenseCategory(category) {
   return true;
 }
 
+export function getExpenseCategoryRecordName(item) {
+  if (!item) return "";
+  if (typeof item === "string") return item.toString().trim();
+  return (
+    item.expense_category_name ??
+    item.name ??
+    item.category_name ??
+    ""
+  ).toString().trim();
+}
+
+/** Normalize add/get expense category API records to a stable shape for Settings lists. */
+export function normalizeExpenseCategoryApiItem(item, fallbackName = "") {
+  const expense_category_name =
+    getExpenseCategoryRecordName(item) || (fallbackName || "").toString().trim();
+  if (!expense_category_name || !isValidExpenseCategory(expense_category_name)) return null;
+  const id =
+    item?.id ??
+    item?.expense_category_id ??
+    item?.fk_expense_category_id ??
+    null;
+  return typeof item === "object" && item !== null
+    ? { ...item, id, expense_category_name }
+    : { id, expense_category_name };
+}
+
+export function normalizeExpenseCategoryApiList(items = []) {
+  return (items || [])
+    .map((item) => normalizeExpenseCategoryApiItem(item))
+    .filter(Boolean);
+}
+
 export function getExpenseCategoryNamesFromApi(apiExpenseCategories = []) {
   return (apiExpenseCategories || [])
-    .map((c) => (c?.expense_category_name ?? c?.name ?? "").toString().trim())
+    .map((c) => getExpenseCategoryRecordName(c))
     .filter(isValidExpenseCategory);
 }
 

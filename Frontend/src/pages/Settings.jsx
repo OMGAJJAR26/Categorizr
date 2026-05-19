@@ -71,6 +71,7 @@ import { useNavigate } from "react-router-dom";
 import { useData } from "../context/DataContext";
 import { getPaymentDisplayFromReceipt } from "../hooks/usePaymentDisplay";
 import { parsePaymentDisplay } from "../utils/paymentMethodUtils";
+import { getExpenseCategoryRecordName } from "../utils/expenseCategories";
 
 /* ─── Helpers ─────────────────────────────────────────── */
 
@@ -1314,7 +1315,7 @@ const ReceiptInfoInline = ({ type }) => {
   const {
     receipts, updateReceipt,
     receiptMerchWImgRaw, customMerchants, hiddenMerchants, hideMerchant, isMerchantHidden, addCustomMerchant, editCustomMerchant, deleteCustomMerchant,
-    receiptCategoriesRaw, customCategories, hiddenCategories, hideCategory, isCategoryHidden, addCustomCategory, editCustomCategory, deleteCustomCategory,
+    receiptCategoriesRaw, customCategories, hiddenCategories, hideCategory, unhideCategory, isCategoryHidden, addCustomCategory, editCustomCategory, deleteCustomCategory,
     receiptPaymentsRaw, customPaymentMethods, hiddenPaymentMethods, hidePaymentMethod, unhidePaymentMethod, addCustomPaymentMethod, editCustomPaymentMethod, deleteCustomPaymentMethod,
     taxData, addTax, updateTax, deleteTax, fetchTaxes,
     apiMerchants, fetchApiMerchants, addApiMerchant, updateApiMerchant, deleteApiMerchant,
@@ -1972,6 +1973,8 @@ const isBlockedTaxRateInput = (val) => {
       // which lets edit and delete work correctly via the API on the first try.
       const addCategoryResult = await addApiExpenseCategory(catName);
       if (!addCategoryResult?.ok) throw new Error(addCategoryResult?.error || "Failed to add expense category");
+      unhideCategory(catName);
+      await fetchApiExpenseCategories();
       resetAddFormState();
       toast("success", "Expense Category Added");
       return;
@@ -2636,19 +2639,25 @@ const isBlockedTaxRateInput = (val) => {
       // API expense categories not already present from receipts or custom, and not hidden
       const allExistingCatKeys = new Set([...rItems.map(c => c.name.toLowerCase()), ...cItems.map(c => c.name.toLowerCase())]);
       const apiItems = (apiExpenseCategories || [])
-        .filter(c =>
-          c.expense_category_name &&
-          !allExistingCatKeys.has((c.expense_category_name || "").toLowerCase()) &&
-          !hiddenCategories.has(c.expense_category_name)
-        )
-        .map(c => ({
-          key: `api_${c.id}`,
-          name: c.expense_category_name,
-          logo: null,
-          isReceiptItem: false,
-          isApiItem: true,
-          apiId: c.id,
-        }));
+        .map((c) => {
+          const categoryName = getExpenseCategoryRecordName(c);
+          if (!categoryName) return null;
+          const apiId = c?.id ?? c?.expense_category_id ?? c?.fk_expense_category_id ?? null;
+          return {
+            key: apiId != null ? `api_${apiId}` : `api_name_${categoryName.toLowerCase()}`,
+            name: categoryName,
+            logo: null,
+            isReceiptItem: false,
+            isApiItem: true,
+            apiId,
+          };
+        })
+        .filter(Boolean)
+        .filter(
+          (item) =>
+            !allExistingCatKeys.has((item.name || "").toLowerCase()) &&
+            !hiddenCategories.has(item.name)
+        );
       return [...rItems, ...cItems, ...apiItems];
     }
     if (type === "payments") {

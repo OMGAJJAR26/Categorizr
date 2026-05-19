@@ -5,6 +5,8 @@ import {
   parseExpenseCategoryApiResponse,
   getExpenseCategoryNamesFromApi,
   buildExpenseCategoryOptions,
+  normalizeExpenseCategoryApiItem,
+  normalizeExpenseCategoryApiList,
 } from "../utils/expenseCategories";
 import { enrichReceiptTaxValues } from "../utils/taxTypeUtils";
 import { isMerchantSupersededByApi } from "../utils/merchantListUtils";
@@ -852,7 +854,7 @@ export const DataProvider = ({ children }) => {
       });
       if (res.ok) {
         const data = await res.json();
-        const cats = parseExpenseCategoryApiResponse(data).filter((c) => c.expense_category_name);
+        const cats = normalizeExpenseCategoryApiList(parseExpenseCategoryApiResponse(data));
         console.log("%c[ExpenseCategories] fetchApiExpenseCategories response (full):", "color:#a855f7;font-weight:bold", data);
         console.log("%c[ExpenseCategories] filtered categories:", "color:#a855f7;font-weight:bold", cats);
         setApiExpenseCategories(cats);
@@ -875,8 +877,28 @@ export const DataProvider = ({ children }) => {
       if (res.ok) {
         const data = await res.json();
         console.log("%c[ExpenseCategories] addApiExpenseCategory response (full):", "color:#22c55e;font-weight:bold", data);
-        setApiExpenseCategories(prev => [...prev, data]);
-        return { ok: true, data, error: null };
+        let entity =
+          normalizeExpenseCategoryApiItem(data, name.trim()) ||
+          normalizeExpenseCategoryApiList(parseExpenseCategoryApiResponse(data)).find(
+            (c) => c.expense_category_name.toLowerCase() === name.trim().toLowerCase()
+          ) ||
+          normalizeExpenseCategoryApiList(parseExpenseCategoryApiResponse(data))[0] ||
+          normalizeExpenseCategoryApiItem(
+            { id: getEntityId(data), fk_user_id },
+            name.trim()
+          );
+        setApiExpenseCategories((prev) => {
+          const key = entity.expense_category_name.toLowerCase();
+          const existingIdx = prev.findIndex(
+            (c) =>
+              (c?.expense_category_name || c?.name || "").toString().trim().toLowerCase() === key
+          );
+          if (existingIdx === -1) return [...prev, entity];
+          const next = [...prev];
+          next[existingIdx] = { ...next[existingIdx], ...entity };
+          return next;
+        });
+        return { ok: true, data: entity, error: null };
       }
       return { ok: false, data: null, error: `Failed with status ${res.status}` };
     } catch (e) {
@@ -1466,8 +1488,8 @@ setMerchantsWithImages(
         });
         if (apiCatRes.ok) {
           const apiCatJson = await apiCatRes.json();
-          apiExpenseCategoriesData = parseExpenseCategoryApiResponse(apiCatJson).filter(
-            (c) => c.expense_category_name
+          apiExpenseCategoriesData = normalizeExpenseCategoryApiList(
+            parseExpenseCategoryApiResponse(apiCatJson)
           );
           setApiExpenseCategories(apiExpenseCategoriesData);
         }
