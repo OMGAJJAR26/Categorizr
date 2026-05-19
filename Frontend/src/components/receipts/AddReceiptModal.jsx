@@ -1571,6 +1571,7 @@ const handleFieldChange = (field, value) => {
         receipts,
         taxId: editingTaxId,
         oldRate: existingTax?.tax_rate,
+        oldName: existingTax?.tax_name,
         updateReceipt,
       });
       await updateTax({

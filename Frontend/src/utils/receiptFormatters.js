@@ -82,6 +82,17 @@ export const taxTypesMatch = (a, b) => {
   return keyA !== "" && keyA === keyB;
 };
 
+/** True when a receipt tax line belongs to a tax definition (same id or name, rate ignored). */
+export const taxDefinitionMatchesReceiptLine = (receiptLine, taxDefinition) => {
+  const defId = parseInt(taxDefinition?.id) || 0;
+  const lineId = parseInt(receiptLine?.fk_tax_id) || 0;
+  if (defId > 0 && lineId > 0 && defId === lineId) return true;
+  const defName = (taxDefinition?.tax_name || "").toString().trim().toLowerCase();
+  const lineName = (receiptLine?.tax_name || "").toString().trim().toLowerCase();
+  if (!defName || defName.includes("tip")) return false;
+  return defName === lineName;
+};
+
 export const toTaxLabel = (tax) => {
   const name = tax?.tax_name?.toString().trim() || "Unknown";
   if (name.toLowerCase().startsWith("tip")) return "Tip";

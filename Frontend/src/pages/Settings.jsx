@@ -2514,6 +2514,7 @@ const isBlockedTaxRateInput = (val) => {
         receipts,
         taxId: targetTax.id,
         oldRate: targetTax.tax_rate,
+        oldName: targetTax.tax_name,
         updateReceipt,
       });
       await updateTax({

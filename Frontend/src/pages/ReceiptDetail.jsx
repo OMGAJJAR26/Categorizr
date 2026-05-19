@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { NODE_API_URL, proxyImageUrl, unproxyImageUrl } from "../api/Axios";
-import { formatTaxRate, taxTypeDedupKey, taxTypesMatch } from "../utils/receiptFormatters";
+import { formatTaxRate, taxTypeDedupKey, taxTypesMatch, taxDefinitionMatchesReceiptLine } from "../utils/receiptFormatters";
 import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine,} from "lucide-react";
 import ReceiptAnnotator from "../components/receipts/ReceiptAnnotator";
 import PdfThumbnail from "../components/receipts/PdfThumbnail";
@@ -1584,7 +1584,7 @@ useEffect(() => {
         ) ||
         [];
 
-      if (prevTaxValues.some((t) => taxTypesMatch(t, tax))) {
+      if (prevTaxValues.some((t) => taxDefinitionMatchesReceiptLine(t, tax))) {
         return prev;
       }
       if (prevTaxValues.length >= MAX_RECEIPT_TAX_TYPES) return prev;
@@ -1599,13 +1599,17 @@ useEffect(() => {
 
       // Add the new tax entry with all required API fields
       const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
-      const taxRate = formatTaxRate(tax.tax_rate);
+      const defFromTaxData =
+        Array.isArray(taxData)
+          ? taxData.find((t) => parseInt(t.id) === parseInt(tax.id))
+          : null;
+      const taxRate = formatTaxRate(defFromTaxData?.tax_rate ?? tax.tax_rate);
       const newTaxEntry = {
         id: 0,
         fk_user_id: fk_user_id,
         fk_receipt_id: selectedReceipt?.id || 0,
         fk_tax_id: tax.id || 0,
-        tax_name: tax.tax_name,
+        tax_name: defFromTaxData?.tax_name || tax.tax_name,
         tax_rate: taxRate,
         tax_amount: 0,
         tax_number: tax.tax_number || "",
@@ -1931,6 +1935,7 @@ useEffect(() => {
         receipts,
         taxId: editingTaxId,
         oldRate: existingTax?.tax_rate,
+        oldName: existingTax?.tax_name,
         updateReceipt,
       });
       await updateTax({
@@ -5832,18 +5837,11 @@ Thank you for using our receipt management system.
                               (t) => !(t.tax_name || "").toLowerCase().includes("tip")
                             ) || [];
 
-                          const combinedTaxesMap = new Map();
-                          allTaxTypes.forEach(t => combinedTaxesMap.set(taxTypeDedupKey(t), t));
-                          currentTaxVals.forEach(t => {
-                             const key = taxTypeDedupKey(t);
-                             if (key && !combinedTaxesMap.has(key)) combinedTaxesMap.set(key, t);
-                          });
-
-                          const sortedTaxPills = Array.from(combinedTaxesMap.values())
+                          const sortedTaxPills = [...allTaxTypes]
                             .map((tax) => ({
                               ...tax,
                               _selIdx: currentTaxVals.findIndex((t) =>
-                                taxTypesMatch(t, tax)
+                                taxDefinitionMatchesReceiptLine(t, tax),
                               ),
                             }))
                             .sort((a, b) => {

@@ -81,15 +81,19 @@ export function inferReceiptSubtotal(receipt) {
 
 /**
  * Resolve the effective rate for a receipt tax line.
- * Prefers stored line rate, then rate inferred from stored amount, then definition rate.
+ * Prefers stored line rate, then rate inferred from stored amount.
+ * Definition rate is only used for new lines without a stored amount.
  */
 export function resolveReceiptTaxLineRate(tax, taxDefinition, subtotal = 0) {
   const direct = parseFloat(formatTaxRate(tax?.tax_rate));
   if (!isNaN(direct) && direct > 0) return formatTaxRate(direct);
 
-  if (hasStoredTaxAmount(tax) && subtotal > 0) {
-    const inferred = inferTaxRateFromAmount(tax.tax_amount, subtotal);
-    if (inferred && parseFloat(inferred) > 0) return inferred;
+  if (hasStoredTaxAmount(tax)) {
+    if (subtotal > 0) {
+      const inferred = inferTaxRateFromAmount(tax.tax_amount, subtotal);
+      if (inferred && parseFloat(inferred) > 0) return inferred;
+    }
+    return tax?.tax_rate || "0";
   }
 
   if (taxDefinition) {
@@ -160,19 +164,26 @@ export function convertReceiptTaxesToManualEntries(
   taxId,
   oldRate,
   subtotal = 0,
+  taxName = "",
 ) {
   const idStr = taxId != null ? String(taxId) : "";
+  const nameKey = normalizeTaxNameKey(taxName);
   const frozenRate = formatTaxRate(oldRate);
   return (receiptTaxValues || []).map((t) => {
-    if (idStr && String(t?.fk_tax_id || "") === idStr) {
+    const matchById = idStr && String(t?.fk_tax_id || "") === idStr;
+    const matchByName = nameKey && normalizeTaxNameKey(t?.tax_name) === nameKey;
+    if (matchById || matchByName) {
       const storedAmount = parseFloat(t?.tax_amount);
       let rateToFreeze = frozenRate || t.tax_rate || "0";
       if (subtotal > 0 && !isNaN(storedAmount) && storedAmount > 0) {
         const inferred = inferTaxRateFromAmount(storedAmount, subtotal);
         if (inferred) rateToFreeze = inferred;
+      } else if (t.tax_rate) {
+        rateToFreeze = formatTaxRate(t.tax_rate);
       }
       return {
         ...t,
+        fk_tax_id: t.fk_tax_id || (taxId != null ? taxId : t.fk_tax_id),
         tax_rate: rateToFreeze,
         tax_amount: hasStoredTaxAmount(t)
           ? parseFloat(storedAmount).toFixed(2)
@@ -217,9 +228,10 @@ export async function propagateTaxRateChangeToReceipts({
   receipts,
   taxId,
   oldRate,
+  oldName,
   updateReceipt,
 }) {
-  const matching = getReceiptsUsingTax(receipts, taxId, null);
+  const matching = getReceiptsUsingTax(receipts, taxId, oldName);
   if (matching.length === 0) return;
   await Promise.all(
     matching.map((r) => {
@@ -230,6 +242,7 @@ export async function propagateTaxRateChangeToReceipts({
           taxId,
           oldRate,
           subtotal,
+          oldName,
         ),
       });
     }),
