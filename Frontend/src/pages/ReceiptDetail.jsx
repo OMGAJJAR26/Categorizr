@@ -2216,14 +2216,27 @@ useEffect(() => {
             : m
         )
       );
-      const apiMatch = (apiMerchants || []).find(
-        (m) => normalizeMatchKey(m.store_name) === normalizeMatchKey(oldName)
-      );
-      if (apiMatch?.id) {
-        const updateMerchantResult = await updateApiMerchant(apiMatch.id, newName, newLogo);
+      const getApiMerchantId = (m) => {
+        const id = m?.id ?? m?.store_id ?? m?.fk_store_id ?? null;
+        return id != null && String(id) !== "" && String(id) !== "0" ? id : null;
+      };
+      const matchIn = (list) =>
+        (list || []).find(
+          (m) => normalizeMatchKey(m.store_name) === normalizeMatchKey(oldName)
+        );
+      let apiMatch = matchIn(apiMerchants);
+      let apiId = getApiMerchantId(apiMatch);
+      if (apiId == null) {
+        const fresh = await fetchApiMerchants();
+        apiMatch = matchIn(fresh);
+        apiId = getApiMerchantId(apiMatch);
+      }
+      if (apiId != null) {
+        const updateMerchantResult = await updateApiMerchant(apiId, newName, newLogo);
         if (!updateMerchantResult?.ok) {
           throw new Error(updateMerchantResult?.error || "Failed to update merchant");
         }
+        deleteCustomMerchant(oldName);
       } else {
         const addMerchantResult = await addApiMerchant(newName, newLogo);
         if (!addMerchantResult?.ok) {

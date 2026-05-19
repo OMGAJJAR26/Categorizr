@@ -1606,6 +1606,23 @@ const ReceiptInfoInline = ({ type }) => {
       .trim()
       .replace(/\s+/g, " ")
       .toLowerCase();
+  const getApiMerchantId = (obj) => {
+    const id = obj?.id ?? obj?.store_id ?? obj?.fk_store_id ?? obj?.apiId ?? null;
+    return id != null && String(id) !== "" && String(id) !== "0" ? id : null;
+  };
+  const resolveMerchantApiIdForName = async (merchantName) => {
+    const matchIn = (list) =>
+      (list || []).find(
+        (m) => normalizeMatchKey(m?.store_name) === normalizeMatchKey(merchantName)
+      );
+    let match = matchIn(apiMerchants);
+    let apiId = getApiMerchantId(match);
+    if (apiId !== null) return { apiId, match };
+    const fresh = await fetchApiMerchants();
+    match = matchIn(fresh);
+    apiId = getApiMerchantId(match);
+    return { apiId, match };
+  };
   const getApiEntityId = (obj) =>
     obj?.id ?? obj?.payment_method_id ?? obj?.fk_payment_method_id ?? null;
   const resolvePaymentApiMatches = (item) => {
@@ -1833,7 +1850,6 @@ const isBlockedTaxRateInput = (val) => {
         return toast("error", "Merchant already exists");
       }
       const selectedUrl = addLogoSel !== null ? (addLogoOpts[addLogoSel]?.displayUrl || addLogoOpts[addLogoSel]?.storeUrl || null) : null;
-      addCustomMerchant(name);
       if (selectedUrl) saveMerchLogo(name, selectedUrl);
       const addMerchantResult = await addApiMerchant(name, selectedUrl || "");
       if (!addMerchantResult?.ok) throw new Error(addMerchantResult?.error || "Failed to add merchant");
@@ -1980,50 +1996,44 @@ const isBlockedTaxRateInput = (val) => {
         );
       }
 
+      const oldName = item.name;
+      const { apiId: resolvedApiId, match: apiMatch } = await resolveMerchantApiIdForName(oldName);
+      const apiId =
+        (item.isApiItem ? getApiMerchantId({ id: item.apiId }) : null) ?? resolvedApiId;
+      const logo = keepLogo || apiMatch?.store_image_url || "";
+
+      if (apiId !== null) {
+        const updateMerchantResult = await updateApiMerchant(apiId, newName, logo);
+        if (!updateMerchantResult?.ok) throw new Error(updateMerchantResult?.error || "Failed to update merchant");
+        if ((customMerchants || []).some((m) => normalizeMatchKey(m) === normalizeMatchKey(oldName))) {
+          deleteCustomMerchant(oldName);
+        }
+      } else if (item.isReceiptItem || item.isDefaultItem) {
+        await addApiMerchant(newName, logo);
+      } else {
+        editCustomMerchant(item.key, newName);
+      }
+
       if (item.isReceiptItem) {
         if (keepLogo) saveMerchLogo(newName, keepLogo);
-        // If there's an API merchant with the same name, update it so /userstore/updateStorev1 fires.
-        const apiMatch = (apiMerchants || []).find(
-          (m) => normalizeMatchKey(m.store_name) === normalizeMatchKey(item.name)
-        );
-        if (apiMatch) {
-          const updateMerchantResult = await updateApiMerchant(apiMatch.id, newName, keepLogo || apiMatch.store_image_url || "");
-          if (!updateMerchantResult?.ok) throw new Error(updateMerchantResult?.error || "Failed to update merchant");
-        } else {
-          // No API entry yet — create one so it's persisted on the server.
-          await addApiMerchant(newName, keepLogo || "");
-        }
-        if (normalizeMatchKey(newName) !== normalizeMatchKey(item.name)) {
+        if (normalizeMatchKey(newName) !== normalizeMatchKey(oldName)) {
           hideMerchant(item.key);
           addCustomMerchant(newName);
         }
       } else if (item.isDefaultItem) {
-        if (normalizeMatchKey(newName) !== normalizeMatchKey(item.name)) {
+        if (normalizeMatchKey(newName) !== normalizeMatchKey(oldName)) {
           hideMerchant(item.name);
           addCustomMerchant(newName);
-        }
-        const apiMatch = (apiMerchants || []).find(
-          (m) => normalizeMatchKey(m?.store_name) === normalizeMatchKey(item.name)
-        );
-        if (apiMatch) {
-          const updateMerchantResult = await updateApiMerchant(apiMatch.id, newName, keepLogo || apiMatch.store_image_url || "");
-          if (!updateMerchantResult?.ok) throw new Error(updateMerchantResult?.error || "Failed to update merchant");
-        } else {
-          await addApiMerchant(newName, keepLogo || "");
         }
         if (keepLogo) saveMerchLogo(newName, keepLogo);
       } else if (item.isApiItem) {
-        const updateMerchantResult = await updateApiMerchant(item.apiId, newName, keepLogo || "");
-        if (!updateMerchantResult?.ok) throw new Error(updateMerchantResult?.error || "Failed to update merchant");
         if (keepLogo) saveMerchLogo(newName, keepLogo);
-        // Hide old name so receipt-derived list doesn't show both old and new after refresh
-        if (normalizeMatchKey(newName) !== normalizeMatchKey(item.name)) {
+        if (normalizeMatchKey(newName) !== normalizeMatchKey(oldName)) {
           hideMerchant(item.name);
           addCustomMerchant(newName);
         }
-      } else {
-        editCustomMerchant(item.key, newName);
-        if (keepLogo) saveMerchLogo(newName, keepLogo);
+      } else if (keepLogo) {
+        saveMerchLogo(newName, keepLogo);
       }
       await Promise.all([refreshData(), fetchApiMerchants()]);
       toast("success", "Merchant Updated");
@@ -2593,14 +2603,17 @@ const isBlockedTaxRateInput = (val) => {
       const allExistingKeys = new Set([...rItems.map(m => m.name.toLowerCase()), ...cItems.map(m => m.name.toLowerCase())]);
       const apiItems = (apiMerchants || [])
         .filter(m => m.store_name && !allExistingKeys.has((m.store_name || "").toLowerCase()) && !isMerchantHidden(m.store_name))
-        .map(m => ({
-          key: `api_${m.id}`,
-          name: m.store_name,
-          logo: m.store_image_url || null,
-          isReceiptItem: false,
-          apiId: m.id,
-          isApiItem: true,
-        }));
+        .map(m => {
+          const apiId = m?.id ?? m?.store_id ?? m?.fk_store_id ?? null;
+          return {
+            key: `api_${apiId ?? m.store_name}`,
+            name: m.store_name,
+            logo: m.store_image_url || null,
+            isReceiptItem: false,
+            apiId,
+            isApiItem: true,
+          };
+        });
       const allWithApi = [...rItems, ...cItems, ...apiItems];
       const existingAfterApi = new Set(allWithApi.map((m) => (m.name || "").toLowerCase()));
       const defaultItems = SETTINGS_DEFAULT_MERCHANTS_WITH_LOGOS

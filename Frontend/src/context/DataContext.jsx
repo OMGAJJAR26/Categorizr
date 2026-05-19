@@ -368,7 +368,7 @@ export const DataProvider = ({ children }) => {
   // ── API Merchant CRUD (via /userstore endpoints) ──
   const fetchApiMerchants = useCallback(async () => {
     const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!token) return [];
     try {
       console.log("%c[Merchants] GET /userstore/getStorev1", "color:#6366f1;font-weight:bold");
       const res = await fetch(`${BASE_URL}/userstore/getStorev1`, {
@@ -379,8 +379,10 @@ export const DataProvider = ({ children }) => {
         const merchants = Array.isArray(data) ? data.filter(m => m.store_name) : [];
         console.log("%c[Merchants] fetchApiMerchants response:", "color:#6366f1;font-weight:bold", merchants);
         setApiMerchants(merchants);
+        return merchants;
       }
     } catch (e) { console.error("[Merchants] fetchApiMerchants error", e); }
+    return [];
   }, []);
 
   // Backend SQL does direct string concatenation — escape single quotes so they
@@ -402,8 +404,14 @@ export const DataProvider = ({ children }) => {
       if (res.ok) {
         const data = await res.json();
         console.log("%c[Merchants] addApiMerchant response:", "color:#22c55e;font-weight:bold", data);
-        setApiMerchants(prev => [...prev, data]);
-        return { ok: true, data, error: null };
+        // Re-fetch so we always have the server-assigned store id before any edit.
+        const freshList = await fetchApiMerchants();
+        const created =
+          freshList.find(
+            (m) =>
+              String(m?.store_name || "").trim().toLowerCase() === name.trim().toLowerCase()
+          ) || (getEntityId(data) ? data : null);
+        return { ok: true, data: created || data, error: null };
       } else {
         console.warn("[Merchants] addApiMerchant failed, status:", res.status);
         return { ok: false, data: null, error: `Failed with status ${res.status}` };
