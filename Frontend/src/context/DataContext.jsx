@@ -6,6 +6,7 @@ import {
   getExpenseCategoryNamesFromApi,
   buildExpenseCategoryOptions,
 } from "../utils/expenseCategories";
+import { enrichReceiptTaxValues } from "../utils/taxTypeUtils";
 
 const DataContext = createContext();
 const BASE_URL = "/api";
@@ -1363,97 +1364,16 @@ setMerchantsWithImages(
         ),
       ]);
 
-      // Enrich receipt_tax_values with tax_name and tax_rate from taxData
-      // Also normalize receipts to include tax_name and tax_rate in receipt_tax_values
+      // Enrich receipt_tax_values without overwriting stored amounts or effective rates.
       receiptsWithIntegrations = receiptsWithIntegrations.map((r) => {
         if (Array.isArray(r.receipt_tax_values) && r.receipt_tax_values.length > 0) {
-          // Pre-calculate subtotal for this receipt so we can infer tax_rate from tax_amount
-          const total = parseFloat(r.purchasePrice) || 0;
-          const totalTaxFromApi =
-            r.receipt_tax_values.reduce(
-              (sum, t) => sum + (parseFloat(t.tax_amount) || 0),
-              0
-            ) || 0;
-          const tipEntryForRate = r.receipt_tax_values.find((t) =>
-            (t.tax_name || "").toString().toLowerCase().includes("tip")
-          );
-          const tipAmountForRate = tipEntryForRate
-            ? parseFloat(tipEntryForRate.tax_amount) || 0
-            : 0;
-          const subtotalForRate =
-            total > 0 ? Math.max(total - totalTaxFromApi - tipAmountForRate, 0) : 0;
-
-          const enrichedTaxValues = r.receipt_tax_values.map((tax) => {
-            // If tax already has tax_name and tax_rate, use them
-            if (tax.tax_name && tax.tax_rate) {
-              return tax;
-            }
-
-            // Try to find tax definition by fk_tax_id
-            const taxId = parseInt(tax.fk_tax_id) || 0;
-            if (taxId > 0 && Array.isArray(taxDataArray) && taxDataArray.length > 0) {
-              const taxDefinition = taxDataArray.find((t) => parseInt(t.id) === taxId);
-              if (taxDefinition) {
-                return {
-                  ...tax,
-                  fk_tax_id: taxId,
-                  tax_name: taxDefinition.tax_name || tax.tax_name || "",
-                  tax_rate: taxDefinition.tax_rate || tax.tax_rate || "0",
-                  tax_number: taxDefinition.tax_number || tax.tax_number || "",
-                };
-              }
-            }
-
-            // If fk_tax_id is 0 or not found, try to infer tax_rate from tax_amount and subtotal
-            // and then match to a tax definition with the same rate.
-            let inferredRate = 0;
-            const taxAmount = parseFloat(tax.tax_amount) || 0;
-            const isTip =
-              (tax.tax_name || "").toString().toLowerCase().includes("tip");
-
-            if (!isTip && subtotalForRate > 0 && taxAmount > 0) {
-              inferredRate = Math.round((taxAmount / subtotalForRate) * 100);
-            }
-
-            let matchedDefinition = null;
-            if (
-              inferredRate > 0 &&
-              Array.isArray(taxDataArray) &&
-              taxDataArray.length > 0
-            ) {
-              matchedDefinition = taxDataArray.find((tDef) => {
-                const defRate = parseFloat(tDef.tax_rate) || 0;
-                return Math.round(defRate) === inferredRate;
-              });
-            }
-
-            if (matchedDefinition) {
-              return {
-                ...tax,
-                fk_tax_id: parseInt(matchedDefinition.id) || taxId || 0,
-                tax_name: matchedDefinition.tax_name || tax.tax_name || "Tax",
-                tax_rate:
-                  matchedDefinition.tax_rate ||
-                  tax.tax_rate ||
-                  inferredRate.toString(),
-                tax_number: matchedDefinition.tax_number || tax.tax_number || "",
-              };
-            }
-
-            // Fallback: preserve whatever we have, but at least keep a sensible default name/rate
-            return {
-              ...tax,
-              fk_tax_id: taxId || 0,
-              tax_name: tax.tax_name || (isTip ? "Tip" : "Tax"),
-              tax_rate:
-                tax.tax_rate ||
-                (inferredRate > 0 ? inferredRate.toString() : "0"),
-            };
-          });
-
           return {
             ...r,
-            receipt_tax_values: enrichedTaxValues,
+            receipt_tax_values: enrichReceiptTaxValues(
+              r.receipt_tax_values,
+              taxDataArray,
+              r,
+            ),
           };
         }
         return r;

@@ -49,6 +49,10 @@ import {
   propagateTaxNameChangeToReceipts,
   propagateTaxRateChangeToReceipts,
   taxRatesDiffer,
+  enrichReceiptTaxValues,
+  preserveStoredReceiptTaxTotals,
+  resolveReceiptTaxLineRate,
+  hasStoredTaxAmount,
 } from "../utils/taxTypeUtils";
 import { buildExpenseCategoryOptions } from "../utils/expenseCategories";
 
@@ -492,25 +496,28 @@ const ReceiptDetail = ({
 
   // Resolve tax rate from receipt row or tax definition (taxData).
   const resolveTaxRateForReceipt = useCallback(
-    (tax) => {
-      const direct = parseFloat(formatTaxRate(tax?.tax_rate));
-      if (!isNaN(direct) && direct > 0) return direct;
+    (tax, subtotalOverride) => {
       const taxId = parseInt(tax?.fk_tax_id) || 0;
-      if (taxId > 0 && Array.isArray(taxData)) {
-        const def = taxData.find((t) => parseInt(t.id) === taxId);
-        if (def) {
-          const fromDef = parseFloat(formatTaxRate(def.tax_rate));
-          if (!isNaN(fromDef) && fromDef > 0) return fromDef;
-        }
-      }
-      return 0;
+      const def =
+        taxId > 0 && Array.isArray(taxData)
+          ? taxData.find((t) => parseInt(t.id) === taxId)
+          : null;
+      const subtotal =
+        subtotalOverride ??
+        (parseFloat(selectedReceipt?.subtotal) ||
+          parseFloat(selectedReceipt?.purchasePrice) ||
+          0);
+      return parseFloat(resolveReceiptTaxLineRate(tax, def, subtotal)) || 0;
     },
-    [taxData],
+    [taxData, selectedReceipt],
   );
 
   // Keep total fixed: derive subtotal and per-tax amounts from rates.
   const recalculateReceiptTotalsFromFixedTotal = useCallback(
     (total, taxValues, tip) => {
+      const preserved = preserveStoredReceiptTaxTotals(total, taxValues, tip);
+      if (preserved) return preserved;
+
       const totalNum = parseFloat(total) || 0;
       const tipNum = parseFloat(tip) || 0;
       const taxes = (taxValues || []).filter(
@@ -647,45 +654,11 @@ useEffect(() => {
       if (lastInitReceiptIdRef.current === selectedReceipt.id) return;
       lastInitReceiptIdRef.current = selectedReceipt.id;
 
-      // Enrich receipt_tax_values with tax_name and tax_rate from taxData
-      // This handles cases where the API returns taxes without tax_name/tax_rate
-      let enrichedTaxValues = (selectedReceipt.receipt_tax_values || []).map(
-        (tax) => {
-          // If tax already has tax_name and tax_rate, use them
-          if (tax.tax_name && tax.tax_rate) {
-            return tax;
-          }
-
-          // Try to find tax definition by fk_tax_id
-          const taxId = parseInt(tax.fk_tax_id) || 0;
-          if (taxId > 0 && Array.isArray(taxData) && taxData.length > 0) {
-            const taxDefinition = taxData.find((t) => parseInt(t.id) === taxId);
-            if (taxDefinition) {
-              return {
-                ...tax,
-                tax_name: taxDefinition.tax_name || tax.tax_name || "",
-                tax_rate: taxDefinition.tax_rate || tax.tax_rate || "0",
-              };
-            }
-          }
-
-          // If fk_tax_id is 0 or not found, calculate tax_rate from tax_amount and subtotal as fallback
-          const subtotal =
-            parseFloat(selectedReceipt.subtotal) ||
-            parseFloat(selectedReceipt.purchasePrice) ||
-            0;
-          const taxAmount = parseFloat(tax.tax_amount) || 0;
-          let calculatedRate = 0;
-          if (subtotal > 0 && taxAmount > 0) {
-            calculatedRate = Math.round((taxAmount / subtotal) * 100);
-          }
-
-          return {
-            ...tax,
-            tax_name: tax.tax_name || "Tax",
-            tax_rate: tax.tax_rate || calculatedRate.toString(),
-          };
-        }
+      // Enrich receipt_tax_values without overwriting stored amounts or effective rates.
+      const enrichedTaxValues = enrichReceiptTaxValues(
+        selectedReceipt.receipt_tax_values || [],
+        taxData,
+        selectedReceipt,
       );
 
       // Extract tip from receipt_tax_values
@@ -812,7 +785,7 @@ useEffect(() => {
     }
   }, [selectedReceipt, taxData, recalculateReceiptTotalsFromFixedTotal]);
 
-  // When tax definitions load, fill missing rates and recalc amounts from total.
+  // When tax definitions load, fill missing rates only — do not overwrite stored amounts.
   useEffect(() => {
     if (!selectedReceipt || !Array.isArray(taxData) || taxData.length === 0) return;
     setEditedReceipt((prev) => {
@@ -823,11 +796,18 @@ useEffect(() => {
         parseFloat(selectedReceipt.purchasePrice) ||
         0;
       if (!total) return prev;
+
+      const nonTipTaxes = taxes.filter(
+        (t) => !(t.tax_name || "").toLowerCase().includes("tip"),
+      );
+      if (nonTipTaxes.every(hasStoredTaxAmount)) return prev;
+
       const needsRate = taxes.some((t) => resolveTaxRateForReceipt(t) <= 0);
       const needsAmount = taxes.some(
-        (t) => !(parseFloat(t.tax_amount) > 0) && resolveTaxRateForReceipt(t) > 0,
+        (t) => !hasStoredTaxAmount(t) && resolveTaxRateForReceipt(t) > 0,
       );
       if (!needsRate && !needsAmount) return prev;
+
       const tip = parseFloat(prev.tip) || 0;
       const next = recalculateReceiptTotalsFromFixedTotal(total, taxes, tip);
       return { ...prev, subtotal: next.subtotal, receipt_tax_values: next.receipt_tax_values };
