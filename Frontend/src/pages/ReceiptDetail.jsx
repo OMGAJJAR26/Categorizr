@@ -34,6 +34,7 @@ import { useCurrency } from "../context/CurrencyContext";
 import MerchantAvatar from "../components/MerchantAvatar";
 import { getPaymentDisplayFromReceipt, usePaymentDisplay } from "../hooks/usePaymentDisplay";
 import {
+  apiPaymentMethodMatchesLabel,
   buildPaymentMethodStorageString,
   inferCardTypeFromPayment,
   isCustomCardIssuer,
@@ -1399,7 +1400,7 @@ useEffect(() => {
     }
     // Step 2 — find API ID via direct name match (most reliable)
     const apiMatch = (apiPaymentMethods || []).find(
-      (p) => (p.card_number || "").toLowerCase() === (method || "").toLowerCase()
+      (p) => apiPaymentMethodMatchesLabel(p, method)
     );
     const targetApiId = apiMatch
       ? (apiMatch.id ?? apiMatch.payment_method_id ?? apiMatch.fk_payment_method_id ?? null)
@@ -1425,7 +1426,7 @@ useEffect(() => {
     const _pct = readPayCardTypeMap();
     const cardType = _pct[method] || inferCardTypeFromPayment(method);
     const apiMatch = (apiPaymentMethods || []).find(
-      (p) => (p.card_number || "").toLowerCase() === (method || "").toLowerCase()
+      (p) => apiPaymentMethodMatchesLabel(p, method)
     );
     const apiId = apiMatch
       ? (apiMatch.id ?? apiMatch.payment_method_id ?? apiMatch.fk_payment_method_id ?? null)
@@ -1480,7 +1481,15 @@ useEffect(() => {
       const { name: oldName, apiId } = payModalEditMode;
       setPendingPayMethodFn(() => async () => {
         if (apiId != null) {
-          await updateApiPaymentMethod(apiId, newPayStr, logoUrl);
+          await updateApiPaymentMethod(
+            apiId,
+            {
+              cardIssuerName: storedIssuer,
+              cardTypeBrand: selectedCardTypeForLogo,
+              last4,
+            },
+            logoUrl
+          );
         }
         const matchingReceipts = (receipts || []).filter(
           (r) => getPaymentDisplayForReceipt(r).toLowerCase() === (oldName || "").toLowerCase()
@@ -1535,7 +1544,14 @@ useEffect(() => {
       } else {
         handleFieldChange("last_4_digit_card", "");
       }
-      await addApiPaymentMethod(newPayStr, logoUrl);
+      await addApiPaymentMethod(
+        {
+          cardIssuerName: storedIssuer,
+          cardTypeBrand: selectedCardTypeForLogo,
+          last4,
+        },
+        logoUrl
+      );
       const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
       _pct[newPayStr] = selectedCardTypeForLogo;
       localStorage.setItem("cat_pay_card_types", JSON.stringify(_pct));

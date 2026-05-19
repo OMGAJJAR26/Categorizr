@@ -9,7 +9,9 @@ import { useData } from "../../context/DataContext";
 import Toast from "../Toast";
 import { getPaymentDisplayFromReceipt, usePaymentDisplay } from "../../hooks/usePaymentDisplay";
 import {
+  apiPaymentMethodMatchesLabel,
   buildPaymentMethodStorageString,
+  getApiPaymentMethodDisplayName,
   getPaymentMethodListLabel,
   inferCardTypeFromPayment,
   isCustomCardIssuer,
@@ -3603,8 +3605,8 @@ const handleSelectLogo = (index) => {
     const { issuer, last4 } = parsePaymentDisplay(method);
     const _pct = readPayCardTypeMap();
     const cardType = _pct[method] || inferCardTypeFromPayment(method);
-    const apiMatch = (apiPaymentMethods || []).find(
-      (p) => (p.card_number || "").toLowerCase() === (method || "").toLowerCase()
+    const apiMatch = (apiPaymentMethods || []).find((p) =>
+      apiPaymentMethodMatchesLabel(p, method)
     );
     const apiId = apiMatch ? (apiMatch.id ?? apiMatch.payment_method_id ?? null) : null;
     setNewPaymentCardType(cardType);
@@ -3638,8 +3640,8 @@ const handleSelectLogo = (index) => {
         updateReceipt(r.id, { paymentType: "Cash", card_issuer_name: "", last_4_digit_card: "" })
       ));
     }
-    const apiMatch = (apiPaymentMethods || []).find(
-      (p) => (p.card_number || "").toLowerCase() === (method || "").toLowerCase()
+    const apiMatch = (apiPaymentMethods || []).find((p) =>
+      apiPaymentMethodMatchesLabel(p, method)
     );
     const targetApiId = apiMatch ? (apiMatch.id ?? apiMatch.payment_method_id ?? null) : null;
     await deleteApiPaymentMethod(targetApiId, method);
@@ -3717,7 +3719,16 @@ const handleSelectLogo = (index) => {
       );
       setPendingPayEditFn(() => async () => {
         if (apiId != null) {
-          await updateApiPaymentMethod(apiId, paymentMethodString, logoUrl, newPaymentCategoryType || "");
+          await updateApiPaymentMethod(
+            apiId,
+            {
+              cardIssuerName: storedIssuer,
+              cardTypeBrand: selectedCardTypeForLogo,
+              last4: last4Final,
+            },
+            logoUrl,
+            newPaymentCategoryType || ""
+          );
         }
         // Update receipts that used the old payment method name.
         // Use a broad match: exact display string OR same last4+issuer fields,
@@ -3786,7 +3797,15 @@ const handleSelectLogo = (index) => {
       setLocalPaymentMethods((prev) => [...prev, newPaymentMethod]);
 
       // Pass logoUrl and expenseType so card_type, icon_image, default_payment_category are all sent correctly
-      await addApiPaymentMethod(paymentMethodString, logoUrl, newPaymentCategoryType || "Personal");
+      await addApiPaymentMethod(
+        {
+          cardIssuerName: storedIssuer,
+          cardTypeBrand: selectedCardTypeForLogo,
+          last4: last4Final,
+        },
+        logoUrl,
+        newPaymentCategoryType || "Personal"
+      );
       const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
       _pct[paymentMethodString] = selectedCardTypeForLogo;
       localStorage.setItem("cat_pay_card_types", JSON.stringify(_pct));
@@ -3983,7 +4002,7 @@ const handleSelectLogo = (index) => {
     const allCandidates = [
       ...allPaymentMethods,
       ...localPaymentMethodStrings,
-      ...(apiPaymentMethods || []).map((p) => p?.card_number || ""),
+      ...(apiPaymentMethods || []).map((p) => getApiPaymentMethodDisplayName(p)),
     ];
     return allCandidates.some((item) => {
       const normalizedItem = normalizePaymentMethodKey(item);

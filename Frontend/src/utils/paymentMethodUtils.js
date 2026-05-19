@@ -92,3 +92,159 @@ export const readPayCardTypeMap = () => {
     return {};
   }
 };
+
+export const CARD_TYPE_INT_TO_BRAND = {
+  0: "American Express",
+  1: "MasterCard",
+  2: "Visa",
+  3: "Debit Card",
+  4: "Discover",
+  5: "Diners Club",
+  6: "PayPal",
+  7: "Cash",
+  8: "Other",
+};
+
+/** API enum for default_payment_category: "0" = Personal, "1" = Business */
+export const paymentCategoryToApiEnum = (value) => {
+  const v = String(value ?? "").trim().toLowerCase();
+  if (v === "1" || v === "business") return "1";
+  if (v === "0" || v === "personal" || v === "") return "0";
+  return "0";
+};
+
+export const paymentCategoryFromApiEnum = (value) => {
+  const v = String(value ?? "").trim();
+  if (v === "1") return "Business";
+  if (v === "0") return "Personal";
+  const lower = v.toLowerCase();
+  if (lower === "business") return "Business";
+  if (lower === "personal") return "Personal";
+  return "";
+};
+
+export const brandToCardTypeInt = (brand) => {
+  const v = (brand || "").toLowerCase();
+  if (v.includes("american") || v.includes("amex")) return 0;
+  if (v.includes("master")) return 1;
+  if (v.includes("visa")) return 2;
+  if (v.includes("debit")) return 3;
+  if (v.includes("discover")) return 4;
+  if (v.includes("diners")) return 5;
+  if (v.includes("paypal")) return 6;
+  if (v.includes("cash")) return 7;
+  return 8;
+};
+
+export const cardTypeIntToBrand = (cardType) => {
+  const n = parseInt(cardType, 10);
+  return Number.isFinite(n) ? CARD_TYPE_INT_TO_BRAND[n] || "" : "";
+};
+
+export const getLast4FromPaymentApiRecord = (m) => {
+  const cn = (m?.card_number || "").toString().trim();
+  if (!cn) return "";
+  const legacy = parsePaymentDisplay(cn);
+  if (legacy.last4) return legacy.last4;
+  const digits = cn.replace(/\D/g, "");
+  return digits.length >= 4 ? digits.slice(-4) : digits;
+};
+
+export const getBrandFromPaymentApiRecord = (m, payCardMap = {}) => {
+  const fromInt = cardTypeIntToBrand(m?.card_type);
+  if (fromInt) return fromInt;
+  const cn = (m?.card_number || "").toString().trim();
+  if (cn) {
+    const fromMap = payCardMap[cn] || payCardMap[cn.toLowerCase()];
+    if (fromMap) return fromMap;
+    const inferred = inferCardTypeFromPayment(cn);
+    if (inferred !== "Other") return inferred;
+  }
+  return inferCardTypeFromPayment(m?.card_issuer_name || "");
+};
+
+/** Display label for a GET /userpaymentmethod record (new + legacy shapes). */
+export const getApiPaymentMethodDisplayName = (m, brandOverride = "") => {
+  const issuerFromApi = (m?.card_issuer_name || "").toString().trim();
+  const last4 = getLast4FromPaymentApiRecord(m);
+  const brand = brandOverride || getBrandFromPaymentApiRecord(m);
+  const cn = (m?.card_number || "").toString().trim();
+
+  if (!issuerFromApi && cn && cn.includes("*")) {
+    return getPaymentMethodListLabel(cn, brand);
+  }
+
+  if (issuerFromApi) {
+    const raw = last4 ? `${issuerFromApi} *${last4}` : issuerFromApi;
+    return getPaymentMethodListLabel(raw, brand);
+  }
+
+  if (last4) {
+    return getPaymentMethodListLabel(`${brand} *${last4}`, brand);
+  }
+
+  return cn || brand || "";
+};
+
+export const normalizeApiPaymentMethodInput = (input, logoUrl = "", expenseType = "") => {
+  if (input && typeof input === "object" && !Array.isArray(input)) {
+    return {
+      cardIssuerName: (input.cardIssuerName ?? input.card_issuer_name ?? "").trim(),
+      cardTypeBrand: (input.cardTypeBrand ?? input.card_type_brand ?? input.cardType ?? "").trim(),
+      last4: String(input.last4 ?? input.last_4_digit_card ?? "").replace(/\D/g, "").slice(0, 4),
+      logoUrl: input.logoUrl ?? input.icon_image ?? logoUrl ?? "",
+      expenseType: input.expenseType ?? input.default_payment_category ?? expenseType ?? "",
+    };
+  }
+  const payStr = String(input || "").trim();
+  const { issuer, last4 } = parsePaymentDisplay(payStr);
+  const brand = inferCardTypeFromPayment(payStr);
+  return {
+    cardIssuerName: isCustomCardIssuer(issuer, brand) ? issuer : "",
+    cardTypeBrand: brand,
+    last4,
+    logoUrl: logoUrl || "",
+    expenseType: expenseType || "",
+  };
+};
+
+export const buildApiPaymentMethodPayload = (
+  { id = 0, fk_user_id = 0, cardIssuerName = "", cardTypeBrand = "", last4 = "", logoUrl = "", expenseType = "" },
+  escape = (s) => s
+) => {
+  const brand = (cardTypeBrand || "").trim() || inferCardTypeFromPayment(cardIssuerName);
+  const issuer = storedCardIssuerName(cardIssuerName, brand);
+  const l4 = String(last4 || "").replace(/\D/g, "").slice(0, 4);
+  return {
+    id,
+    fk_user_id,
+    card_number: escape(l4),
+    card_issuer_name: escape(issuer),
+    icon_image: logoUrl || "",
+    card_type: String(brandToCardTypeInt(brand)),
+    default_payment_category: paymentCategoryToApiEnum(expenseType),
+  };
+};
+
+export const paymentMethodPayloadToQuery = (payload) =>
+  new URLSearchParams(
+    Object.fromEntries(
+      Object.entries(payload).map(([k, v]) => [k, v == null ? "" : String(v)])
+    )
+  ).toString();
+
+export const apiPaymentMethodMatchesLabel = (m, label) => {
+  const normalized = normalizePaymentMatchKey(label);
+  if (!normalized) return false;
+  if (normalizePaymentMatchKey(getApiPaymentMethodDisplayName(m)) === normalized) return true;
+  return normalizePaymentMatchKey(m?.card_number) === normalized;
+};
+
+export const getApiPaymentMethodCacheKey = (m) => {
+  if (!m || typeof m !== "object") return String(m || "").trim().toLowerCase();
+  const issuer = (m.card_issuer_name || m.cardIssuerName || "").trim().toLowerCase();
+  const last4 = getLast4FromPaymentApiRecord(m);
+  const cardType = String(m.card_type ?? "").trim();
+  if (issuer || last4) return `${issuer}|${last4}|${cardType}`;
+  return (m.card_number || "").trim().toLowerCase();
+};

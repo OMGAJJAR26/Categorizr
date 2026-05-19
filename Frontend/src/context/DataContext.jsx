@@ -10,6 +10,13 @@ import {
 } from "../utils/expenseCategories";
 import { enrichReceiptTaxValues } from "../utils/taxTypeUtils";
 import { isMerchantSupersededByApi } from "../utils/merchantListUtils";
+import {
+  buildApiPaymentMethodPayload,
+  getApiPaymentMethodCacheKey,
+  getApiPaymentMethodDisplayName,
+  normalizeApiPaymentMethodInput,
+  paymentMethodPayloadToQuery,
+} from "../utils/paymentMethodUtils";
 
 const DataContext = createContext();
 const BASE_URL = "/api";
@@ -67,19 +74,12 @@ const getEntityId = (item) =>
   item?.fk_expense_category_id ??
   null;
 
-// Map a card name to the numeric card_type enum the backend expects:
-// 0=AmEx, 1=MasterCard, 2=Visa, 3=Debit, 4=Discover, 5=Diners, 6=PayPal, 7=Cash, 8=Other
-const inferCardTypeInt = (name) => {
-  const v = (name || "").toLowerCase();
-  if (v.includes("american") || v.includes("amex")) return 0;
-  if (v.includes("master")) return 1;
-  if (v.includes("visa")) return 2;
-  if (v.includes("debit")) return 3;
-  if (v.includes("discover")) return 4;
-  if (v.includes("diners")) return 5;
-  if (v.includes("paypal")) return 6;
-  if (v.includes("cash")) return 7;
-  return 8; // Other
+const isPaymentApiRecord = (m) => {
+  if (!m || typeof m !== "object") return false;
+  if (String(m.card_type || "").toLowerCase() === "merchant") return false;
+  const hasCard = (m.card_number || "").toString().trim();
+  const hasIssuer = (m.card_issuer_name || "").toString().trim();
+  return !!(hasCard || hasIssuer || m.id);
 };
 const isDeleteResponseSuccessful = (data) => {
   if (data === null || data === undefined) return false;
@@ -577,8 +577,8 @@ export const DataProvider = ({ children }) => {
   };
   const _extractPaymentId = (obj) =>
     obj?.id ?? obj?.payment_method_id ?? obj?.fk_payment_method_id ?? obj?.record_id ?? null;
-  const _resolvePaymentMethodIdByCardNumber = async (token, cardNumber) => {
-    if (!token || !cardNumber) return null;
+  const _resolvePaymentMethodIdByCardNumber = async (token, lookupKey) => {
+    if (!token || !lookupKey) return null;
     try {
       const res = await fetch(`${BASE_URL}/userpaymentmethod/getPaymentMethodv1`, {
         headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
@@ -586,13 +586,16 @@ export const DataProvider = ({ children }) => {
       if (!res.ok) return null;
       const data = await res.json();
       const rawList = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
-      const normalizedTarget = (cardNumber || "").trim().toLowerCase();
-      const matched = rawList.find(
-        (m) => (m?.card_number || "").toString().trim().toLowerCase() === normalizedTarget
-      );
+      const normalizedTarget = (lookupKey || "").trim().toLowerCase();
+      const matched = rawList.find((m) => {
+        const cacheKey = getApiPaymentMethodCacheKey(m);
+        if (cacheKey === normalizedTarget) return true;
+        const display = getApiPaymentMethodDisplayName(m).trim().toLowerCase();
+        return display === normalizedTarget;
+      });
       const resolvedId = _extractPaymentId(matched);
       if (resolvedId && resolvedId !== 0 && String(resolvedId) !== "0") {
-        _cachePaymentId(cardNumber, resolvedId);
+        _cachePaymentId(lookupKey, resolvedId);
         return resolvedId;
       }
       return null;
@@ -624,12 +627,13 @@ export const DataProvider = ({ children }) => {
             : Array.isArray(data?.data)
               ? data.data
               : [];
-        // Keep only payment records (card_number required); backfill id from sessionStorage if absent
+        // Keep payment records; backfill id from sessionStorage if absent
         const payments = rawList
-          .filter(m => m.card_number)
+          .filter(isPaymentApiRecord)
           .map(m => {
             if (m.id && m.id !== 0 && String(m.id) !== "0") return m; // id present — use it
-            const cachedId = _getCachedPaymentId(m.card_number);       // fall back to cache
+            const cacheKey = getApiPaymentMethodCacheKey(m);
+            const cachedId = _getCachedPaymentId(cacheKey) || _getCachedPaymentId(m.card_number);
             return cachedId ? { ...m, id: cachedId } : m;
           });
         console.log("%c[PaymentMethods] fetchApiPaymentMethods (with IDs):", "color:#8b5cf6;font-weight:bold", payments);
@@ -638,28 +642,19 @@ export const DataProvider = ({ children }) => {
     } catch (e) { console.error("[PaymentMethods] fetchApiPaymentMethods error", e); }
   }, []);
 
-  const addApiPaymentMethod = async (name, logoUrl = "", expenseType = "") => {
+  const addApiPaymentMethod = async (paymentInput, logoUrl = "", expenseType = "") => {
     const token = localStorage.getItem("token");
-    if (!token || !name.trim()) return { ok: false, data: null, error: "Missing token or payment method name" };
+    const normalized = normalizeApiPaymentMethodInput(paymentInput, logoUrl, expenseType);
+    if (!token) return { ok: false, data: null, error: "Missing token" };
+    if (!normalized.cardTypeBrand && !normalized.last4) {
+      return { ok: false, data: null, error: "Missing payment method details" };
+    }
     const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
-    // card_type must be the integer enum value (0-8), NOT the string "payment"
-    const payload = {
-      id: 0,
-      fk_user_id,
-      card_number: escapeSqlApostrophe(name.trim()),
-      icon_image: logoUrl || "",
-      card_type: inferCardTypeInt(name.trim()),
-      default_payment_category: expenseType || "",
-    };
-    // Send as both query-string AND JSON body so the backend reads it regardless of its parser
-    const addPayQuery = new URLSearchParams({
-      id:                       "0",
-      fk_user_id:               String(fk_user_id),
-      card_number:              payload.card_number,
-      icon_image:               payload.icon_image,
-      card_type:                String(payload.card_type),
-      default_payment_category: payload.default_payment_category,
-    }).toString();
+    const payload = buildApiPaymentMethodPayload(
+      { id: 0, fk_user_id, ...normalized },
+      escapeSqlApostrophe
+    );
+    const addPayQuery = paymentMethodPayloadToQuery(payload);
     console.log("%c[PaymentMethods] POST /userpaymentmethod/addPaymentMethodv1 →", "color:#06b6d4;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userpaymentmethod/addPaymentMethodv1?${addPayQuery}`, {
@@ -670,33 +665,31 @@ export const DataProvider = ({ children }) => {
       if (res.ok) {
         const data = await res.json();
         console.log("%c[PaymentMethods] addApiPaymentMethod response:", "color:#06b6d4;font-weight:bold", data);
-        // Build a stable entity; if the backend returns the full object use it, else synthesize
-        const entity = (data && typeof data === "object" && data.card_number)
-          ? data
-          : { ...payload, id: data?.id ?? data?.payment_method_id ?? data?.record_id ?? null };
-        // Cache card_number→id in sessionStorage so future deletes can find the ID
+        const entity =
+          data && typeof data === "object" && (data.card_number != null || data.card_issuer_name != null)
+            ? data
+            : { ...payload, id: data?.id ?? data?.payment_method_id ?? data?.record_id ?? null };
+        const cacheKey = getApiPaymentMethodCacheKey(entity);
         let resolvedId = _extractPaymentId(entity);
         if (!resolvedId || resolvedId === 0 || String(resolvedId) === "0") {
-          resolvedId = await _resolvePaymentMethodIdByCardNumber(token, entity.card_number || name.trim());
+          resolvedId = await _resolvePaymentMethodIdByCardNumber(token, cacheKey);
         }
         if (resolvedId && resolvedId !== 0 && String(resolvedId) !== "0") {
-          _cachePaymentId(entity.card_number || name.trim(), resolvedId);
+          _cachePaymentId(cacheKey, resolvedId);
         }
         const stableEntity = {
           ...entity,
           id: resolvedId || entity?.id || null,
-          // Preserve icon_image from payload when the API response omits it
-          icon_image: (entity.icon_image != null && entity.icon_image !== "")
-            ? entity.icon_image
-            : payload.icon_image,
+          icon_image:
+            entity.icon_image != null && entity.icon_image !== ""
+              ? entity.icon_image
+              : payload.icon_image,
         };
         console.log("%c[PaymentMethods] addApiPaymentMethod entity:", "color:#06b6d4", stableEntity, "resolvedId:", resolvedId);
-        setApiPaymentMethods(prev => {
-          const key = (stableEntity.card_number || "").toString().trim().toLowerCase();
+        setApiPaymentMethods((prev) => {
+          const key = getApiPaymentMethodCacheKey(stableEntity);
           if (!key) return [...prev, stableEntity];
-          const existingIdx = prev.findIndex(
-            (m) => (m?.card_number || "").toString().trim().toLowerCase() === key
-          );
+          const existingIdx = prev.findIndex((m) => getApiPaymentMethodCacheKey(m) === key);
           if (existingIdx === -1) return [...prev, stableEntity];
           const next = [...prev];
           next[existingIdx] = { ...next[existingIdx], ...stableEntity };
@@ -715,20 +708,16 @@ export const DataProvider = ({ children }) => {
     }
   };
 
-  const updateApiPaymentMethod = async (id, name, logoUrl = "", expenseType = "") => {
+  const updateApiPaymentMethod = async (id, paymentInput, logoUrl = "", expenseType = "") => {
     const token = localStorage.getItem("token");
     if (!token) return { ok: false, data: null, error: "Missing token" };
     const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
-    const payload = { id, fk_user_id, card_number: escapeSqlApostrophe(name.trim()), icon_image: logoUrl || "", card_type: inferCardTypeInt(name.trim()), default_payment_category: expenseType || "" };
-    // Send as both query-string AND JSON body so the backend reads it regardless of its parser
-    const updatePayQuery = new URLSearchParams({
-      id:                       String(id),
-      fk_user_id:               String(fk_user_id),
-      card_number:              payload.card_number,
-      icon_image:               payload.icon_image,
-      card_type:                String(payload.card_type),
-      default_payment_category: payload.default_payment_category,
-    }).toString();
+    const normalized = normalizeApiPaymentMethodInput(paymentInput, logoUrl, expenseType);
+    const payload = buildApiPaymentMethodPayload(
+      { id, fk_user_id, ...normalized },
+      escapeSqlApostrophe
+    );
+    const updatePayQuery = paymentMethodPayloadToQuery(payload);
     console.log("%c[PaymentMethods] POST /userpaymentmethod/updatePaymentMethodv1 →", "color:#f59e0b;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userpaymentmethod/updatePaymentMethodv1?${updatePayQuery}`, {
@@ -739,8 +728,13 @@ export const DataProvider = ({ children }) => {
       if (res.ok) {
         const data = await res.json();
         console.log("%c[PaymentMethods] updateApiPaymentMethod response:", "color:#f59e0b;font-weight:bold", data);
-        setApiPaymentMethods(prev => prev.map(m => m.id === id ? data : m));
-        return { ok: true, data, error: null };
+        const entity =
+          data && typeof data === "object" ? data : { ...payload };
+        setApiPaymentMethods((prev) =>
+          prev.map((m) => (String(m.id ?? "") === String(id) ? { ...m, ...entity, id } : m))
+        );
+        _cachePaymentId(getApiPaymentMethodCacheKey(entity), id);
+        return { ok: true, data: entity, error: null };
       } else {
         console.warn("[PaymentMethods] updateApiPaymentMethod failed, status:", res.status);
         return { ok: false, data: null, error: `Failed with status ${res.status}` };
@@ -818,7 +812,12 @@ export const DataProvider = ({ children }) => {
             // Remove from local state by numeric ID or card_number match
             setApiPaymentMethods(prev => prev.filter(m => {
               if (String(m.id ?? "") === String(resolvedId)) return false;
-              if (cardNumber && (m.card_number || "").toLowerCase() === cardNumber.toLowerCase()) return false;
+              if (cardNumber) {
+                const lookup = cardNumber.trim().toLowerCase();
+                if ((m.card_number || "").toLowerCase() === lookup) return false;
+                if (getApiPaymentMethodDisplayName(m).toLowerCase() === lookup) return false;
+                if (getApiPaymentMethodCacheKey(m) === lookup) return false;
+              }
               return true;
             }));
             return { ok: true, data, error: null };
@@ -1290,7 +1289,7 @@ export const DataProvider = ({ children }) => {
         if (apiPayRes.ok) {
           const apiPayJson = await apiPayRes.json();
           const allPayItems = Array.isArray(apiPayJson) ? apiPayJson : [];
-          apiPaymentMethodsData = allPayItems.filter(m => m.card_number && m.card_type !== "merchant");
+          apiPaymentMethodsData = allPayItems.filter(isPaymentApiRecord);
           console.log("%c[fetchData] Payment methods from API (raw all):", "color:#8b5cf6;font-weight:bold", allPayItems);
           console.log("%c[fetchData] Payment methods filtered (non-merchant):", "color:#8b5cf6;font-weight:bold", apiPaymentMethodsData);
           setApiPaymentMethods(apiPaymentMethodsData);
@@ -1441,9 +1440,11 @@ setMerchantsWithImages(
       // Use only payment methods for logo matching (merchants now use separate /userstore schema)
       const allApiItems = [...(apiPaymentMethodsData || [])];
       allApiItems.forEach(p => {
-         const key = (p.card_number || "").trim().toLowerCase();
-         if (key && p.icon_image) {
-            customLogoMap.set(key, p.icon_image);
+         const displayKey = getApiPaymentMethodDisplayName(p).trim().toLowerCase();
+         const legacyKey = (p.card_number || "").trim().toLowerCase();
+         if (p.icon_image) {
+           if (displayKey) customLogoMap.set(displayKey, p.icon_image);
+           if (legacyKey && legacyKey !== displayKey) customLogoMap.set(legacyKey, p.icon_image);
          }
       });
       
@@ -2265,8 +2266,9 @@ setMerchantsWithImages(
     ...customPaymentMethods.filter((p) => !isPaymentMethodHidden(p) && !_rpLower.has(p.toLowerCase())),
     // API payment methods not already present from receipts or custom list
     ...apiPaymentMethods
-      .filter((m) => m.card_number && !isPaymentMethodHidden(m.card_number) && !_rpCustomLower.has((m.card_number || "").toLowerCase()))
-      .map((m) => m.card_number),
+      .filter((m) => isPaymentApiRecord(m))
+      .map((m) => getApiPaymentMethodDisplayName(m))
+      .filter((name) => name && !isPaymentMethodHidden(name) && !_rpCustomLower.has(name.toLowerCase())),
     ...DEFAULT_PAYMENT_METHODS.filter(
       (m) =>
         m &&

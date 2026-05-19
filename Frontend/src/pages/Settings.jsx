@@ -70,7 +70,12 @@ import SimpleAlertModal from "../components/SimpleAlertModal";
 import { useNavigate } from "react-router-dom";
 import { useData } from "../context/DataContext";
 import { getPaymentDisplayFromReceipt } from "../hooks/usePaymentDisplay";
-import { parsePaymentDisplay } from "../utils/paymentMethodUtils";
+import {
+  getApiPaymentMethodDisplayName,
+  getLast4FromPaymentApiRecord,
+  parsePaymentDisplay,
+  paymentCategoryFromApiEnum,
+} from "../utils/paymentMethodUtils";
 import { getExpenseCategoryRecordName } from "../utils/expenseCategories";
 
 /* ─── Helpers ─────────────────────────────────────────── */
@@ -531,7 +536,7 @@ const ManageModal = ({ type, onClose }) => {
       const apiItems = (apiPaymentMethods || [])
         .map((p) => {
           const apiId = getApiPaymentId(p);
-          const cardName = (p?.card_number || "").toString().trim();
+          const cardName = getApiPaymentMethodDisplayName(p);
           if (!cardName || apiId === null) return null;
           return {
             key: `api_${apiId}`,
@@ -1639,11 +1644,12 @@ const ReceiptInfoInline = ({ type }) => {
     const itemIssuerKey = normalizeMatchKey(itemIssuer);
     const itemBrand = normalizeMatchKey(getPaymentBrand(itemName, inferCardTypeFromPayment(itemName)));
     const matches = (apiPaymentMethods || []).filter((p) => {
-      const apiName = p?.card_number || "";
+      const apiName = getApiPaymentMethodDisplayName(p);
       const apiNameKey = normalizeMatchKey(apiName);
       if (!apiNameKey) return false;
       if (apiNameKey === itemKey) return true;
-      const { issuer: apiIssuer, last4: apiLast4 } = parsePaymentDisplay(apiName);
+      const apiIssuer = (p?.card_issuer_name || "").trim() || parsePaymentDisplay(apiName).issuer;
+      const apiLast4 = getLast4FromPaymentApiRecord(p) || parsePaymentDisplay(apiName).last4;
       const apiIssuerKey = normalizeMatchKey(apiIssuer);
       if (itemLast4 && apiLast4 && itemLast4 === apiLast4 && itemIssuerKey === apiIssuerKey) return true;
       if (itemIssuerKey && apiIssuerKey === itemIssuerKey) return true;
@@ -1895,7 +1901,16 @@ const isBlockedTaxRateInput = (val) => {
           fn: async () => {
             // Update via API
             if (targetId != null) {
-              const res = await updateApiPaymentMethod(targetId, payStr, selectedLogoUrl, newExpenseType);
+              const res = await updateApiPaymentMethod(
+                targetId,
+                {
+                  cardIssuerName: storedCardIssuerName(issuer, ct),
+                  cardTypeBrand: ct,
+                  last4: last4.replace(/\D/g, "").slice(0, 4),
+                },
+                selectedLogoUrl,
+                newExpenseType
+              );
               if (!res?.ok) throw new Error(res?.error || "Failed to update payment method");
             }
             // Propagate to receipts that use old name.
@@ -1957,7 +1972,15 @@ const isBlockedTaxRateInput = (val) => {
       addCustomPaymentMethod(payStr);
       if (ct) savePayCard(payStr, ct);
       savePayExpenseType(payStr, newExpenseType);
-      const addPaymentResult = await addApiPaymentMethod(payStr, selectedLogoUrl, newExpenseType);
+      const addPaymentResult = await addApiPaymentMethod(
+        {
+          cardIssuerName: storedCardIssuerName(issuer, ct),
+          cardTypeBrand: ct,
+          last4: last4.replace(/\D/g, "").slice(0, 4),
+        },
+        selectedLogoUrl,
+        newExpenseType
+      );
       if (!addPaymentResult?.ok) throw new Error(addPaymentResult?.error || "Failed to add payment method");
       // Reset form fields and edit mode; keep the form OPEN so user can add the next method
       resetAddFormState();
@@ -2151,7 +2174,16 @@ const isBlockedTaxRateInput = (val) => {
     }
     if (item.isApiItem) {
       const existingApi = (apiPaymentMethods || []).find((p) => p.id === item.apiId);
-      const updatePaymentResult = await updateApiPaymentMethod(item.apiId, newName, existingApi?.icon_image || "", existingApi?.default_payment_category || "");
+      const updatePaymentResult = await updateApiPaymentMethod(
+        item.apiId,
+        {
+          cardIssuerName: storedCardIssuerName(newIssuer, newBrand),
+          cardTypeBrand: newBrand,
+          last4: newL4,
+        },
+        existingApi?.icon_image || "",
+        existingApi?.default_payment_category || ""
+      );
       if (!updatePaymentResult?.ok) throw new Error(updatePaymentResult?.error || "Failed to update payment method");
       // Propagate name change to all receipts that used the old payment method
       const { issuer: newIssuer, last4: newL4 } = parsePaymentDisplay(newName);
@@ -2682,25 +2714,24 @@ const isBlockedTaxRateInput = (val) => {
       });
       const apiItems = (apiPaymentMethods || [])
         .filter(m => {
-          if (!m.card_number || getApiEntityId(m) === null) return false;
-          if (allExistingPayKeys.has((m.card_number || "").toLowerCase())) return false;
-          if (hiddenPaymentMethods.has(m.card_number)) return false;
-          if (isCashVariant(m.card_number)) return false;
-          // Skip API entry if receipt/custom list already has a card with the same last4
-          const last4Match = /\*(\d{3,4})$/.exec((m.card_number || "").trim());
-          if (last4Match && existingLast4s.has(last4Match[1])) return false;
+          const displayName = getApiPaymentMethodDisplayName(m);
+          if (!displayName || getApiEntityId(m) === null) return false;
+          if (allExistingPayKeys.has(displayName.toLowerCase())) return false;
+          if (hiddenPaymentMethods.has(displayName)) return false;
+          if (isCashVariant(displayName)) return false;
+          const apiLast4 = getLast4FromPaymentApiRecord(m);
+          if (apiLast4 && existingLast4s.has(apiLast4)) return false;
           return true;
         })
         .map(m => {
-          // Prefer icon_image stored on the API (when it's from the stable /payment-logos/ folder
-          // or an absolute URL); fall back to keyword-based local detection for older entries.
+          const displayName = getApiPaymentMethodDisplayName(m);
           const storedLogo = (m.icon_image || "").trim();
           const logo = (storedLogo.startsWith("/payment-logos/") || /^https?:\/\//i.test(storedLogo))
             ? storedLogo
-            : getPayLogoResolved(m.card_number);
+            : getPayLogoResolved(displayName);
           return {
             key: `api_${getApiEntityId(m)}`,
-            name: m.card_number,
+            name: displayName,
             logo,
             isReceiptItem: false,
             isApiItem: true,
@@ -3121,7 +3152,11 @@ const isBlockedTaxRateInput = (val) => {
                                 // (e.g. "MasterCard *7979") so users know they can add a custom issuer.
                                 setNewIssuerName(isCustomCardIssuer(pIssuer, pBrand) ? pIssuer : "");
                                 setNewLast4(pLast4 || "");
-                                setNewExpenseType(payExpenseTypeMap[item.name] || "Personal");
+                                setNewExpenseType(
+                                  payExpenseTypeMap[item.name] ||
+                                    paymentCategoryFromApiEnum(pApiMatches[0]?.default_payment_category) ||
+                                    "Personal"
+                                );
                                 setPayEditMode({ item, apiId: pApiId });
                                 setShowAddForm(true);
                               } else {

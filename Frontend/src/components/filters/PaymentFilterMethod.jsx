@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useEffect } from "react";
 import { useData } from "../../context/DataContext";
 import { getPaymentDisplayFromReceipt } from "../../hooks/usePaymentDisplay";
 import {
+  getApiPaymentMethodDisplayName,
   getPaymentMethodListLabel,
   inferCardTypeFromPayment,
   normalizePaymentMatchKey,
@@ -307,14 +308,9 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
   };
 
   const apiLabelForMethod = useCallback((m) => {
-    const cardNumber = (m?.card_number || "").toString().trim();
-    if (!cardNumber) return "";
-    const typeInt = parseInt(m?.card_type, 10);
-    const brandFromApi = Number.isFinite(typeInt)
-      ? CARD_TYPE_INT_TO_NAME[typeInt]
-      : "";
-    const brand = brandFromApi || inferCardTypeFromPayment(cardNumber);
-    return normalizeLabel(getPaymentMethodListLabel(cardNumber, brand));
+    const displayName = getApiPaymentMethodDisplayName(m);
+    if (!displayName) return "";
+    return normalizeLabel(displayName);
   }, []);
 
   // All API payment methods + receipt-only methods (deduped, no bare *last4 when full label exists)
@@ -336,9 +332,10 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
     };
 
     (apiPaymentMethods || []).forEach((m) => {
-      if (!m?.card_number || isPaymentMethodHidden(m.card_number)) return;
+      const label = apiLabelForMethod(m);
+      if (!label || isPaymentMethodHidden(label)) return;
       if (String(m?.card_type || "").toLowerCase() === "merchant") return;
-      addLabel(apiLabelForMethod(m));
+      addLabel(label);
     });
 
     (receipts || []).forEach((r) => {
