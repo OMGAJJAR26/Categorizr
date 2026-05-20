@@ -75,6 +75,7 @@ import {
   getLast4FromPaymentApiRecord,
   parsePaymentDisplay,
   paymentCategoryFromApiEnum,
+  cardTypeIntToBrand,
 } from "../utils/paymentMethodUtils";
 import { getExpenseCategoryRecordName } from "../utils/expenseCategories";
 
@@ -3144,9 +3145,14 @@ const isBlockedTaxRateInput = (val) => {
                               if (type === "payments") {
                                 // Open Add form prefilled for edit
                                 const { issuer: pIssuer, last4: pLast4 } = parsePaymentDisplay(item.name);
-                                const pBrand = getPaymentBrand(item.name, inferCardTypeFromPayment(item.name));
                                 const pApiMatches = resolvePaymentApiMatches(item);
                                 const pApiId = item.apiId ?? getApiEntityId(pApiMatches[0]) ?? null;
+                                const pApiRecord = pApiMatches[0];
+                                // Prefer card_type from the API record (authoritative integer enum)
+                                // over keyword-matching the display name, which mis-classifies entries
+                                // like "Bank of America" (card_type=1 → MasterCard) as "Other".
+                                const brandFromApiType = pApiRecord ? cardTypeIntToBrand(pApiRecord.card_type) : "";
+                                const pBrand = brandFromApiType || getPaymentBrand(item.name, inferCardTypeFromPayment(item.name));
                                 setNewCardType(pBrand || "");
                                 // Leave Card Issuer empty when the name is only brand + last4
                                 // (e.g. "MasterCard *7979") so users know they can add a custom issuer.
