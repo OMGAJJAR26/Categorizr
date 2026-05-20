@@ -3147,7 +3147,11 @@ const isBlockedTaxRateInput = (val) => {
                                 const { issuer: pIssuer, last4: pLast4 } = parsePaymentDisplay(item.name);
                                 const pApiMatches = resolvePaymentApiMatches(item);
                                 const pApiId = item.apiId ?? getApiEntityId(pApiMatches[0]) ?? null;
-                                const pApiRecord = pApiMatches[0];
+                                // Direct ID lookup is most reliable; fall back to name-based match.
+                                const pApiRecord =
+                                  item.apiId != null
+                                    ? (apiPaymentMethods || []).find(p => String(getApiEntityId(p)) === String(item.apiId))
+                                    : pApiMatches[0];
                                 // Prefer card_type from the API record (authoritative integer enum)
                                 // over keyword-matching the display name, which mis-classifies entries
                                 // like "Bank of America" (card_type=1 → MasterCard) as "Other".

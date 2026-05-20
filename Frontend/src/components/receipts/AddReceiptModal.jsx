@@ -11,6 +11,7 @@ import { getPaymentDisplayFromReceipt, usePaymentDisplay } from "../../hooks/use
 import {
   apiPaymentMethodMatchesLabel,
   buildPaymentMethodStorageString,
+  cardTypeIntToBrand,
   getApiPaymentMethodDisplayName,
   getPaymentMethodListLabel,
   inferCardTypeFromPayment,
@@ -3633,11 +3634,14 @@ const handleSelectLogo = (index) => {
     if (isCashPaymentMethod(method)) return;
     const { issuer, last4 } = parsePaymentDisplay(method);
     const _pct = readPayCardTypeMap();
-    const cardType = _pct[method] || inferCardTypeFromPayment(method);
     const apiMatch = (apiPaymentMethods || []).find((p) =>
       apiPaymentMethodMatchesLabel(p, method)
     );
     const apiId = apiMatch ? (apiMatch.id ?? apiMatch.payment_method_id ?? null) : null;
+    // Use card_type from the API record (authoritative integer enum) so entries like
+    // "Bank of America" (card_type=1) correctly highlight MasterCard, not "Other".
+    const brandFromApiType = apiMatch ? cardTypeIntToBrand(apiMatch.card_type) : "";
+    const cardType = brandFromApiType || _pct[method] || inferCardTypeFromPayment(method);
     setNewPaymentCardType(cardType);
     // Leave Card Issuer empty when the name is only brand + last4 (same as Settings).
     setNewCardIssuerName(isCustomCardIssuer(issuer, cardType) ? issuer : "");
