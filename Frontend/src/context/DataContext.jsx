@@ -1200,6 +1200,30 @@ export const DataProvider = ({ children }) => {
               // The getPaymentLogo function will extract the card type from paymentType for logo detection
               // Don't modify paymentType here - it needs to contain the card type for logos to work
               
+              // The server's uploadmediaV1 API is cumulative: it can inject the
+              // user's most-recently-uploaded files into the emailAttachment field
+              // of ANY receipt that was stored with emailAttachment = "0" / null.
+              // This produces cross-receipt contamination where Receipt A ends up
+              // showing PDFs from Receipt B.
+              //
+              // To defend against this server-side bug we trust receipt_image
+              // (which is never contaminated) and only keep emailAttachment as a
+              // separate source for genuine email receipts (fk_incoming_email_id
+              // is set) or forwarded receipts (receipt_forwarded = "1").
+              // For all other receipts, mirror emailAttachment from receipt_image
+              // so the display layer sees a consistent, uncontaminated value.
+              const isEmailOriginatedReceipt =
+                r.fk_incoming_email_id &&
+                r.fk_incoming_email_id !== "0" &&
+                r.fk_incoming_email_id !== 0;
+              const isForwardedReceipt =
+                r.receipt_forwarded === "1" ||
+                r.receipt_forwarded === 1;
+              const sanitizedEmailAttachment =
+                (isEmailOriginatedReceipt || isForwardedReceipt)
+                  ? (r.emailAttachment ?? "")   // keep server value for email/forwarded receipts
+                  : receiptImage;               // mirror receipt_image for manually-added receipts
+
               const normalized = {
                 ...r,
                 // Overwrite with normalised values so downstream code can use
@@ -1210,6 +1234,9 @@ export const DataProvider = ({ children }) => {
                 product_name: productName,
                 purchasePrice: purchasePrice, // normalize snake_case purchase_price → camelCase
                 receipt_image: receiptImage,  // normalize camelCase receiptImage → snake_case
+                // Mirror emailAttachment from receipt_image for non-email receipts to
+                // prevent server-side contamination from uploadmediaV1 showing up.
+                emailAttachment: sanitizedEmailAttachment,
                 receipt_tax_values: receiptTaxValues,
                 paymentType: paymentType, // Keep paymentType as-is (e.g., "MasterCard *7836") - needed for logo detection
                 card_issuer_name: cardIssuerName,
