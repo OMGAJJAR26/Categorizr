@@ -170,7 +170,11 @@ export const getApiPaymentMethodDisplayName = (m, brandOverride = "") => {
   const brand = brandOverride || getBrandFromPaymentApiRecord(m);
   const cn = (m?.card_number || "").toString().trim();
 
-  if (!issuerFromApi && cn && cn.includes("*")) {
+  // "-" and "0" are server-side placeholder values meaning "no card number".
+  // Treat them the same as empty so we fall through to brand-name display.
+  const cnIsReal = cn && cn !== "-" && cn !== "0";
+
+  if (!issuerFromApi && cnIsReal && cn.includes("*")) {
     return getPaymentMethodListLabel(cn, brand);
   }
 
@@ -183,7 +187,9 @@ export const getApiPaymentMethodDisplayName = (m, brandOverride = "") => {
     return getPaymentMethodListLabel(`${brand} *${last4}`, brand);
   }
 
-  return cn || brand || "";
+  // Use a real card number if present; otherwise show the brand name derived
+  // from card_type so e.g. {card_number:"-", card_type:"7"} → "Cash" not "-".
+  return (cnIsReal ? cn : "") || brand || "";
 };
 
 export const normalizeApiPaymentMethodInput = (input, logoUrl = "", expenseType = "") => {
