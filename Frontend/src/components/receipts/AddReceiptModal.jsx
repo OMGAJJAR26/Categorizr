@@ -406,6 +406,19 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const categoryInputRef = useRef(null);
   const paymentInputRef = useRef(null);
 
+  const resetReceiptMediaState = useCallback((options = {}) => {
+    const { clearFiles = true } = options;
+    setUploadedMediaUrls([]);
+    setUploadedImageUrl(null);
+    setUploadedReceiptData(null);
+    setLocalImageFile(null);
+    setPdfPreviewUrl(null);
+    setDetectedMerchantLogo(null);
+    if (clearFiles) setFiles([]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (addPhotoInputRef.current) addPhotoInputRef.current.value = "";
+  }, []);
+
   // ── Add Photo / Annotation state ──────────────────────────────────────────
   const [isAddingPhoto, setIsAddingPhoto] = useState(false);
   const [annotatorUrl, setAnnotatorUrl] = useState(null); // URL being annotated
@@ -427,7 +440,11 @@ const [localMerchants, setLocalMerchants] = useState([]);
 
   // ── Pre-fill from initialData (duplicate mode) ───────────────────────────
   useEffect(() => {
-    if (!initialData) return;
+    if (!initialData) {
+      // Ensure plain "Add receipt" starts from a fully clean media state.
+      resetReceiptMediaState();
+      return;
+    }
     if (initialData.formData)        setFormData(initialData.formData);
     if (initialData.tags)            setTags(initialData.tags);
     if (initialData.uploadedMediaUrls) setUploadedMediaUrls(initialData.uploadedMediaUrls);
@@ -442,7 +459,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
     setStep("form");
     setIsDuplicateMode(true);
     setIsDuplicated(true); // prevent double-duplicate
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [initialData, resetReceiptMediaState]);
 
   // Ensure all media URLs from receipt payload are represented in the gallery.
   // Older flows may provide multiple URLs only in receipt_image/emailAttachment.
@@ -740,9 +757,17 @@ const [localMerchants, setLocalMerchants] = useState([]);
 
     // API returns array of { fullImageUrl: "string" }
     if (Array.isArray(data)) {
-      return data
+      const urls = data
         .map((item) => (item?.fullImageUrl || "").toString().trim())
         .filter((url) => isHttpUrl(url));
+      // uploadmediaV1 is cumulative — it returns ALL historical uploads for the
+      // user, not just the files in this request.  Always take the last N URLs
+      // (oldest-first ordering) so we only keep the files we just uploaded and
+      // never bleed URLs from a previous receipt into this one.
+      if (filesToUpload.length > 0) {
+        return urls.slice(-filesToUpload.length);
+      }
+      return urls;
     }
 
     // Fallback: single object
@@ -1732,6 +1757,8 @@ const handleFieldChange = (field, value) => {
     setError(null);
     setIsParsing(true);
     setParsedData(null);
+    // Start each upload session with a clean media state.
+    resetReceiptMediaState({ clearFiles: false });
 
     try {
       const token = localStorage.getItem("token");
@@ -2103,9 +2130,9 @@ const handleFieldChange = (field, value) => {
         (t) => !(t.tax_name || "").toLowerCase().includes("tip"),
       );
 
-      // When updating an existing uploaded receipt, link taxes to its ID.
-      // When creating new (no image), use 0 and the backend will set the correct ID.
-      const taxReceiptId = parseInt(uploadedReceiptData?.id) || 0;
+      // AddReceiptModal must always create a new receipt record. Never link taxes
+      // to a prior receipt ID, even if stale state accidentally exists.
+      const taxReceiptId = 0;
 
       let receiptTaxValuesPayload = nonTipTaxValues.map((t, index) => {
         const taxPayload = {
@@ -2315,11 +2342,9 @@ const handleFieldChange = (field, value) => {
         uploadedReceiptData?.store_image ||
         "";
 
-      // If the user uploaded an image, the backend already created a receipt during upload
-      // (addReceiptv1 was called in handleFileUpload). In that case, use the returned ID so
-      // the Save step UPDATES that same receipt instead of creating a duplicate.
-      // If no image was uploaded, id stays 0 and addReceiptv1 will create the receipt.
-      const uploadedId = parseInt(uploadedReceiptData?.id) || 0;
+      // Safety guard: AddReceiptModal is create-only. Force id=0 so we never update
+      // an older receipt due to stale in-memory state after navigation/login flows.
+      const uploadedId = 0;
       const fkUserId = parseInt(localStorage.getItem("fk_user_id")) || 0;
       const combinedImageUrls = buildCombinedMediaField([
         uploadedMediaUrls,
@@ -2328,7 +2353,7 @@ const handleFieldChange = (field, value) => {
         uploadedReceiptData?.emailAttachment,
       ]);
       const savePayload = {
-        id: uploadedId, // Use uploaded receipt ID to update, or 0 to create new
+        id: uploadedId, // Always 0 in Add flow (create-only)
         fk_user_id: fkUserId,
         storeName: formData.storeName || "",
         product_name: formData.product_name || "",
@@ -2589,6 +2614,9 @@ const handleFieldChange = (field, value) => {
         );
       }
 
+      // Clear transient media/upload state before closing.
+      resetReceiptMediaState();
+
       onClose();
     } catch (err) {
       console.error("Save error:", err);
@@ -2621,7 +2649,8 @@ const handleFieldChange = (field, value) => {
     ].join(",");
 
     const fkUserId = parseInt(localStorage.getItem("fk_user_id")) || 0;
-    const baseId = overrideId !== null ? overrideId : (parseInt(uploadedReceiptData?.id) || 0);
+    // Add flow should never inherit/patch an existing receipt id.
+    const baseId = overrideId !== null ? overrideId : 0;
     const combinedImageUrls = buildCombinedMediaField([
       uploadedMediaUrls,
       uploadedImageUrl,
@@ -4229,10 +4258,7 @@ const handleSelectLogo = (index) => {
                         type="button"
                         onClick={() => {
                           setStep("upload");
-                          setFiles([]);
-                          setUploadedReceiptData(null);
-                          setLocalImageFile(null);
-                          setDetectedMerchantLogo(null);
+                          resetReceiptMediaState();
                         }}
                         className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 bg-gray-100 hover:bg-red-50 rounded-full transition-colors group"
                         title="Remove and start over"

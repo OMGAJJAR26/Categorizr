@@ -2323,7 +2323,12 @@ useEffect(() => {
     });
     if (!response.ok) throw new Error(`Upload failed: ${response.status}`);
     const data = await response.json();
-    if (Array.isArray(data) && data[0]?.fullImageUrl) return data[0].fullImageUrl;
+    // uploadmediaV1 is cumulative (all historical uploads) — take the last entry
+    // which is the file we just uploaded, not a stale URL from a previous receipt.
+    if (Array.isArray(data) && data.length > 0) {
+      const last = data[data.length - 1];
+      if (last?.fullImageUrl) return last.fullImageUrl;
+    }
     if (data?.fullImageUrl) return data.fullImageUrl;
     throw new Error("No URL returned from upload");
   };
