@@ -41,6 +41,7 @@ import {
 } from "../../utils/mediaUrlUtils";
 import PdfThumbnail from "./PdfThumbnail";
 import { findRenamedApiMerchant } from "../../utils/merchantListUtils";
+import EditPaymentMethodModal from "./EditPaymentMethodModal";
 
 // Payment method logos (for Add Payment Method modal card type list)
 const Visa              = "/payment-logos/Visa.png";
@@ -3909,17 +3910,7 @@ const handleSelectLogo = (index) => {
       )
     : allExpenseCategories;
 
-  // Payment card types with logos - matching mobile app options
-  const paymentCardTypes = [
-    { name: "Visa", logo: Visa },
-    { name: "Mastercard", logo: MasterCard },
-    { name: "American Express", logo: AmericanExpress },
-    { name: "Discover", logo: Discover },
-    { name: "Diners Club", logo: DinersClub },
-    { name: "PayPal", logo: PayPal },
-    { name: "Debit Card", logo: DebitCard },
-    { name: "Other", logo: Creditdebitcardicon },
-  ];
+  // Payment card types are now defined in EditPaymentMethodModal (PAYMENT_CARD_TYPES)
 
   // Filter payment methods - show all options when dropdown opens, filter when typing
   // Convert localPaymentMethods objects to display format: cardIssuerName *last4 (not paymentType)
@@ -6240,196 +6231,24 @@ const handleSelectLogo = (index) => {
         )}
       </AnimatePresence>
 
-      {/* Add Payment Method Modal - Overlay on top of Add Receipt Modal */}
-      <AnimatePresence>
-        {showAddPaymentModal && (
-          <motion.div
-            initial="hidden"
-            animate="visible"
-            exit="hidden"
-            variants={backdropVariants}
-            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm"
-            onClick={() => { if (!isPayMethodSaving) handleCloseAddPaymentModal(); }}
-          >
-            <motion.div
-              variants={modalVariants}
-              className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-hidden"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {isPayMethodSaving && (
-                <div className="absolute inset-0 z-10 bg-white/80 flex flex-col items-center justify-center rounded-xl">
-                  <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                    className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full mb-3"
-                  />
-                  <p className="text-sm text-gray-600 font-medium">Updating payment method…</p>
-                </div>
-              )}
-              {/* Modal Header */}
-              <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 bg-white">
-                <h2 className="text-xl font-bold text-gray-900">
-                  {payModalEditMode ? "Edit Payment Method" : "Add Payment Method"}
-                </h2>
-                <button
-                  onClick={handleCloseAddPaymentModal}
-                  disabled={isPayMethodSaving}
-                  className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors disabled:opacity-50"
-                  aria-label="Close"
-                >
-                  <X size={20} className="text-gray-600" />
-                </button>
-              </div>
-
-              {/* Modal Content */}
-              <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
-                {/* Payment Card Type Selection */}
-                <div className="mb-6">
-                  <label className="block text-sm font-bold text-gray-700 mb-2">
-                    Payment Card Type <span className="text-red-500">*</span>
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 border border-gray-200 rounded-lg p-4 max-h-64 overflow-y-auto">
-                    {paymentCardTypes.map((cardType, index) => (
-                      <div
-                        key={index}
-                        className={`relative cursor-pointer border-2 rounded-lg transition-all flex flex-col items-center justify-center p-3 min-h-[100px] ${
-                          newPaymentCardType === cardType.name
-                            ? "border-blue-600 ring-2 ring-blue-300 bg-blue-50"
-                            : "border-gray-200 hover:border-gray-400"
-                        }`}
-                        onClick={() => setNewPaymentCardType(cardType.name)}
-                      >
-                        <div className="flex-shrink-0 mb-2 flex items-center justify-center w-full h-12">
-                          <img
-                            src={cardType.logo}
-                            alt={cardType.name}
-                            className="max-w-full max-h-12 w-auto h-auto object-contain"
-                            style={{ imageRendering: "auto" }}
-                            onError={(e) => {
-                              e.target.style.display = "none";
-                            }}
-                          />
-                        </div>
-                        <span className="text-xs font-medium text-center">
-                          {cardType.name}
-                        </span>
-                        {newPaymentCardType === cardType.name && (
-                          <div className="absolute top-1 right-1 bg-blue-600 rounded-full p-1 z-10">
-                            <svg
-                              className="w-4 h-4 text-white"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M5 13l4 4L19 7"
-                              />
-                            </svg>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Card Issuer Name & Last 4 Digits - Side by Side */}
-                <div className="mb-6">
-                  <label className="block text-sm font-bold text-gray-700 mb-2">
-                    Card Issuer <span className="font-normal text-gray-500">(optional)</span> & Last 4 Digits <span className="text-red-500">*</span>
-                  </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <input
-                        type="text"
-                        className={`${inputClass} w-full`}
-                        value={newCardIssuerName}
-                        onChange={(e) => {
-                          setNewCardIssuerName(e.target.value);
-                          if (error === "Payment Method already exists") setError(null);
-                        }}
-                        placeholder="Enter Card Issuer (e.g., SBI)"
-                      />
-                    </div>
-                    <div>
-                      <input
-                        type="text"
-                        className={`${inputClass} w-full`}
-                        value={newLast4Digits}
-                        onChange={(e) => {
-                          const value = e.target.value
-                            .replace(/\D/g, "")
-                            .slice(0, 4);
-                          setNewLast4Digits(value);
-                          if (error === "Payment Method already exists") setError(null);
-                        }}
-                        placeholder="0000"
-                        maxLength={4}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {paymentDuplicateError && (
-                  <div className="mb-4 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
-                    <AlertCircle size={14} />
-                    {paymentDuplicateError}
-                  </div>
-                )}
-
-                {/* Payment Category Type (Business/Personal) */}
-                <div className="mb-6">
-                  <label className="block text-sm font-bold text-gray-700 mb-2">
-                    Payment Category Type
-                  </label>
-                  <select
-                    className={inputClass}
-                    value={newPaymentCategoryType}
-                    onChange={(e) => setNewPaymentCategoryType(e.target.value)}
-                  >
-                    <option value="">Select Category Type</option>
-                    <option value="Personal">Personal</option>
-                    <option value="Business">Business</option>
-                  </select>
-                </div>
-
-                {/* Error Message */}
-                {error && (
-                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
-                    {error}
-                  </div>
-                )}
-
-                {/* Action Buttons */}
-                <div className="flex justify-end gap-3 mt-6">
-                  <button
-                    type="button"
-                    onClick={handleCloseAddPaymentModal}
-                    disabled={isPayMethodSaving}
-                    className="px-6 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleAddPaymentMethod}
-                    disabled={isPayMethodSaving || !newPaymentCardType || newLast4Digits.replace(/\D/g, "").length < 4 || !!paymentDuplicateError}
-                    className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    {isPayMethodSaving
-                      ? "Saving…"
-                      : payModalEditMode
-                        ? "Save Changes"
-                        : "Add Payment Method"}
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Add / Edit Payment Method Modal */}
+      <EditPaymentMethodModal
+        isOpen={showAddPaymentModal}
+        isSaving={isPayMethodSaving}
+        editMode={payModalEditMode}
+        cardType={newPaymentCardType}
+        cardIssuerName={newCardIssuerName}
+        last4Digits={newLast4Digits}
+        categoryType={newPaymentCategoryType}
+        duplicateError={paymentDuplicateError}
+        generalError={error}
+        onClose={handleCloseAddPaymentModal}
+        onSave={handleAddPaymentMethod}
+        onCardTypeChange={setNewPaymentCardType}
+        onIssuerChange={setNewCardIssuerName}
+        onLast4Change={setNewLast4Digits}
+        onCategoryChange={setNewPaymentCategoryType}
+      />
 
       {/* Edit Merchant Modal - Overlay on top of Add Receipt Modal */}
       <AnimatePresence>

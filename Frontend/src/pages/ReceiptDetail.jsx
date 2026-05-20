@@ -36,12 +36,14 @@ import { getPaymentDisplayFromReceipt, usePaymentDisplay } from "../hooks/usePay
 import {
   apiPaymentMethodMatchesLabel,
   buildPaymentMethodStorageString,
+  cardTypeIntToBrand,
   inferCardTypeFromPayment,
   isCustomCardIssuer,
   parsePaymentDisplay,
   readPayCardTypeMap,
   storedCardIssuerName,
 } from "../utils/paymentMethodUtils";
+import EditPaymentMethodModal from "../components/receipts/EditPaymentMethodModal";
 import { parseTaxRateInput, createTaxRateKeyDownHandler } from "../utils/taxRateInput";
 import { useTaxRateLimitAlert } from "../hooks/useTaxRateLimitAlert";
 import TaxRateChangeWarningModal from "../components/TaxRateChangeWarningModal";
@@ -1352,17 +1354,7 @@ useEffect(() => {
     });
   };
 
-  // Payment card types for Add Payment Method modal
-  const paymentCardTypes = [
-    { name: "Visa", logo: Visa },
-    { name: "Mastercard", logo: MasterCard },
-    { name: "American Express", logo: AmericanExpress },
-    { name: "Discover", logo: Discover },
-    { name: "Diners Club", logo: DinersClub },
-    { name: "PayPal", logo: PayPal },
-    { name: "Debit Card", logo: DebitCard },
-    { name: "Other", logo: Creditdebitcardicon },
-  ];
+  // Payment card types are now defined in EditPaymentMethodModal (PAYMENT_CARD_TYPES)
 
   const handleOpenAddPaymentModal = () => {
     setNewPaymentCardType("");
@@ -1424,13 +1416,15 @@ useEffect(() => {
     if (isCashPaymentMethod(method)) return;
     const { issuer, last4 } = parsePaymentDisplay(method);
     const _pct = readPayCardTypeMap();
-    const cardType = _pct[method] || inferCardTypeFromPayment(method);
     const apiMatch = (apiPaymentMethods || []).find(
       (p) => apiPaymentMethodMatchesLabel(p, method)
     );
     const apiId = apiMatch
       ? (apiMatch.id ?? apiMatch.payment_method_id ?? apiMatch.fk_payment_method_id ?? null)
       : null;
+    // Prefer the authoritative card_type integer from the API record over keyword inference
+    const brandFromApiType = apiMatch ? cardTypeIntToBrand(apiMatch.card_type) : "";
+    const cardType = brandFromApiType || _pct[method] || inferCardTypeFromPayment(method);
     setNewPaymentCardType(cardType);
     // Leave Card Issuer empty when the name is only brand + last4 (same as Settings).
     setNewCardIssuerName(isCustomCardIssuer(issuer, cardType) ? issuer : "");
@@ -6316,177 +6310,22 @@ Thank you for using our receipt management system.
         onClose={() => setToast((t) => ({ ...t, isVisible: false }))}
       />
 
-      {/* Add Payment Method Modal */}
-      <AnimatePresence>
-        {showAddPaymentModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm"
-            onClick={() => { if (!isPayMethodSaving) handleCloseAddPaymentModal(); }}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-hidden"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {isPayMethodSaving && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="absolute inset-0 z-10 bg-white/80 flex flex-col items-center justify-center rounded-xl"
-                >
-                  <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                    className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full mb-3"
-                  />
-                  <p className="text-sm text-gray-600 font-medium">Updating payment method…</p>
-                </motion.div>
-              )}
-              {/* Modal Header */}
-              <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 bg-white">
-                <h2 className="text-xl font-bold text-gray-900">
-                  {payModalEditMode ? "Edit Payment Method" : "Add Payment Method"}
-                </h2>
-                <button
-                  onClick={handleCloseAddPaymentModal}
-                  disabled={isPayMethodSaving}
-                  className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors disabled:opacity-50"
-                >
-                  <X size={20} className="text-gray-600" />
-                </button>
-              </div>
-
-              {/* Modal Content */}
-              <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
-                {/* Payment Card Type Selection */}
-                <div className="mb-6">
-                  <label className="block text-sm font-bold text-gray-700 mb-2">
-                    Payment Card Type <span className="text-red-500">*</span>
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 border border-gray-200 rounded-lg p-4 max-h-64 overflow-y-auto">
-                    {paymentCardTypes.map((cardType, index) => (
-                      <div
-                        key={index}
-                        className={`relative cursor-pointer border-2 rounded-lg transition-all flex flex-col items-center justify-center p-3 min-h-[100px] ${
-                          newPaymentCardType === cardType.name
-                            ? "border-blue-600 ring-2 ring-blue-300 bg-blue-50"
-                            : "border-gray-200 hover:border-gray-400"
-                        }`}
-                        onClick={() => setNewPaymentCardType(cardType.name)}
-                      >
-                        <div className="flex-shrink-0 mb-2 flex items-center justify-center w-full h-12">
-                          <img
-                            src={cardType.logo}
-                            alt={cardType.name}
-                            className="max-w-full max-h-12 w-auto h-auto object-contain"
-                            onError={(e) => {
-                              e.target.style.display = "none";
-                            }}
-                          />
-                        </div>
-                        <span className="text-xs font-medium text-center">
-                          {cardType.name}
-                        </span>
-                        {newPaymentCardType === cardType.name && (
-                          <div className="absolute top-1 right-1 bg-blue-600 rounded-full p-1 z-10">
-                            <svg
-                              className="w-4 h-4 text-white"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M5 13l4 4L19 7"
-                              />
-                            </svg>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Card Issuer Name & Last 4 Digits */}
-                <div className="mb-6">
-                  <label className="block text-sm font-bold text-gray-700 mb-2">
-                    Card Issuer <span className="font-normal text-gray-500">(optional)</span> & Last 4 Digits <span className="text-red-500">*</span>
-                  </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <input
-                      type="text"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      value={newCardIssuerName}
-                      onChange={(e) => setNewCardIssuerName(e.target.value)}
-                      placeholder="Enter Card Issuer (e.g., SBI)"
-                    />
-                    <input
-                      type="text"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      value={newLast4Digits}
-                      onChange={(e) => {
-                        const value = e.target.value
-                          .replace(/\D/g, "")
-                          .slice(0, 4);
-                        setNewLast4Digits(value);
-                      }}
-                      placeholder="0000"
-                      maxLength={4}
-                    />
-                  </div>
-                </div>
-
-                {/* Payment Category Type */}
-                <div className="mb-6">
-                  <label className="block text-sm font-bold text-gray-700 mb-2">
-                    Payment Category Type
-                  </label>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={newPaymentCategoryType}
-                    onChange={(e) => setNewPaymentCategoryType(e.target.value)}
-                  >
-                    <option value="">Select Category Type</option>
-                    <option value="Personal">Personal</option>
-                    <option value="Business">Business</option>
-                  </select>
-                </div>
-
-                {/* Action Buttons */}
-                <div className="flex justify-end gap-3 mt-6">
-                  <button
-                    type="button"
-                    onClick={handleCloseAddPaymentModal}
-                    disabled={isPayMethodSaving}
-                    className="px-6 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleAddPaymentMethod}
-                    disabled={isPayMethodSaving || !newPaymentCardType || newLast4Digits.replace(/\D/g, "").length < 4}
-                    className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    {isPayMethodSaving
-                      ? "Saving…"
-                      : payModalEditMode
-                        ? "Edit Payment Method"
-                        : "Add Payment Method"}
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Add / Edit Payment Method Modal */}
+      <EditPaymentMethodModal
+        isOpen={showAddPaymentModal}
+        isSaving={isPayMethodSaving}
+        editMode={payModalEditMode}
+        cardType={newPaymentCardType}
+        cardIssuerName={newCardIssuerName}
+        last4Digits={newLast4Digits}
+        categoryType={newPaymentCategoryType}
+        onClose={handleCloseAddPaymentModal}
+        onSave={handleAddPaymentMethod}
+        onCardTypeChange={setNewPaymentCardType}
+        onIssuerChange={setNewCardIssuerName}
+        onLast4Change={setNewLast4Digits}
+        onCategoryChange={setNewPaymentCategoryType}
+      />
 
       {/* Payment method add/edit confirmation (same copy pattern as Settings) */}
       <AnimatePresence>
