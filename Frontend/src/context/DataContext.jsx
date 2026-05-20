@@ -21,12 +21,8 @@ import {
 const DataContext = createContext();
 const BASE_URL = "/api";
 const onlyDigits = (s) => (s ?? "").toString().replace(/\D/g, "");
-const DEFAULT_PAYMENT_METHODS = [
-  "Cash",
-  "American Express",
-  "Bank of America",
-  "Citibank",
-];
+// DEFAULT_PAYMENT_METHODS removed — payment methods now come exclusively
+// from the getPaymentMethodv1 API (apiPaymentMethods) and from receipts.
 const DEFAULT_MERCHANTS_WITH_LOGOS = [
   { name: "Costco", image: "https://logo.clearbit.com/costco.com" },
   { name: "Home Depot", image: "https://logo.clearbit.com/homedepot.com" },
@@ -2296,12 +2292,6 @@ setMerchantsWithImages(
       .filter((m) => isPaymentApiRecord(m))
       .map((m) => getApiPaymentMethodDisplayName(m))
       .filter((name) => name && !isPaymentMethodHidden(name) && !_rpCustomLower.has(name.toLowerCase())),
-    ...DEFAULT_PAYMENT_METHODS.filter(
-      (m) =>
-        m &&
-        !isPaymentMethodHidden(m) &&
-        !_rpCustomLower.has((m || "").toLowerCase())
-    ),
   ];
   const normalizedPaymentMethods = Array.from(
     new Map(
