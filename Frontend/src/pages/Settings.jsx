@@ -2727,9 +2727,22 @@ const isBlockedTaxRateInput = (val) => {
         .map(m => {
           const displayName = getApiPaymentMethodDisplayName(m);
           const storedLogo = (m.icon_image || "").trim();
-          const logo = (storedLogo.startsWith("/payment-logos/") || /^https?:\/\//i.test(storedLogo))
-            ? storedLogo
-            : getPayLogoResolved(displayName);
+          // Logo priority:
+          // 1. icon_image from API (explicit stored logo)
+          // 2. card_type integer → brand → logo (most authoritative, avoids bank-name fallback)
+          // 3. keyword detection / receipt mapping via getPayLogoResolved
+          let logo;
+          if (storedLogo.startsWith("/payment-logos/") || /^https?:\/\//i.test(storedLogo)) {
+            logo = storedLogo;
+          } else {
+            const brandFromApiType = cardTypeIntToBrand(m.card_type);
+            if (brandFromApiType) {
+              const ct = PAYMENT_CARD_TYPES.find(c => c.name === brandFromApiType);
+              logo = ct ? ct.logo : getPayLogoResolved(displayName);
+            } else {
+              logo = getPayLogoResolved(displayName);
+            }
+          }
           return {
             key: `api_${getApiEntityId(m)}`,
             name: displayName,

@@ -5467,31 +5467,40 @@ const handleSelectLogo = (index) => {
                   }}
                 >
                   {(() => {
-                    // Logo = card type (Visa, MasterCard, etc.). Prefer receipt so we use its paymentType.
+                    // Logo priority:
+                    // 1. API card_type integer (most authoritative — fixes e.g. Citibank=Visa)
+                    // 2. Local method's selectedCardType
+                    // 3. Matching receipt's paymentType
+                    // 4. Settings-saved cat_pay_card_types map
+                    // 5. Raw method string keyword detection
                     let logo;
-                    if (
-                      matchingLocalMethod?.selectedCardType
-                    ) {
-                      logo = getPaymentLogo({
-                        paymentType:
-                          matchingLocalMethod.selectedCardType,
-                        card_issuer_name: issuerName,
-                      });
-                    } else {
-                      const matchingReceipt = (
-                        receipts || []
-                      ).find(
-                        (r) =>
-                          getPaymentDisplay(r) ===
-                          methodString,
-                      );
-                      if (matchingReceipt) {
-                        logo = getPaymentLogo(matchingReceipt);
+                    const apiRec = (apiPaymentMethods || []).find(
+                      (p) => apiPaymentMethodMatchesLabel(p, methodString)
+                    );
+                    if (apiRec) {
+                      const brandFromApi = cardTypeIntToBrand(apiRec.card_type);
+                      if (brandFromApi) {
+                        logo = getPaymentLogo({ paymentType: brandFromApi, card_issuer_name: issuerName });
+                      }
+                    }
+                    if (!logo) {
+                      if (matchingLocalMethod?.selectedCardType) {
+                        logo = getPaymentLogo({
+                          paymentType: matchingLocalMethod.selectedCardType,
+                          card_issuer_name: issuerName,
+                        });
                       } else {
-                        // Check Settings-saved card type map (cat_pay_card_types)
-                        const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
-                        const _ct = _pct[methodString];
-                        logo = getPaymentLogo({ paymentType: _ct || methodString, card_issuer_name: issuerName });
+                        const matchingReceipt = (receipts || []).find(
+                          (r) => getPaymentDisplay(r) === methodString,
+                        );
+                        if (matchingReceipt) {
+                          logo = getPaymentLogo(matchingReceipt);
+                        } else {
+                          // Check Settings-saved card type map (cat_pay_card_types)
+                          const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
+                          const _ct = _pct[methodString];
+                          logo = getPaymentLogo({ paymentType: _ct || methodString, card_issuer_name: issuerName });
+                        }
                       }
                     }
                     return logo ? (

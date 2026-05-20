@@ -5387,13 +5387,25 @@ Thank you for using our receipt management system.
                                   const matchingReceipt = receiptsToSearch.find(
                                     (r) => getPaymentDisplayName(r) === method
                                   );
-                                  // Check Settings-saved card type map (cat_pay_card_types) for correct logo
+                                  // Logo priority:
+                                  // 1. API card_type integer (most authoritative — fixes e.g. Citibank=Visa)
+                                  // 2. Matching receipt's paymentType
+                                  // 3. Settings-saved cat_pay_card_types map
+                                  // 4. Raw method string keyword detection
                                   const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
-                                  const logo = matchingReceipt
-                                    ? getPaymentLogo(matchingReceipt)
-                                    : _pct[method]
-                                      ? getPaymentLogo({ paymentType: _pct[method] })
-                                      : getPaymentLogo(method);
+                                  const apiRecForLogo = (apiPaymentMethods || []).find(
+                                    (p) => apiPaymentMethodMatchesLabel(p, method)
+                                  );
+                                  const brandFromApiType = apiRecForLogo
+                                    ? cardTypeIntToBrand(apiRecForLogo.card_type)
+                                    : "";
+                                  const logo = brandFromApiType
+                                    ? getPaymentLogo({ paymentType: brandFromApiType })
+                                    : matchingReceipt
+                                      ? getPaymentLogo(matchingReceipt)
+                                      : _pct[method]
+                                        ? getPaymentLogo({ paymentType: _pct[method] })
+                                        : getPaymentLogo(method);
                                   return (
                                     <div
                                       key={idx}
