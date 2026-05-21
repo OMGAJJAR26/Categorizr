@@ -56,6 +56,7 @@ import {
   preserveStoredReceiptTaxTotals,
   resolveReceiptTaxLineRate,
   hasStoredTaxAmount,
+  getReceiptTaxLineDisplay,
 } from "../utils/taxTypeUtils";
 import { buildExpenseCategoryOptions } from "../utils/expenseCategories";
 import { findRenamedApiMerchant } from "../utils/merchantListUtils";
@@ -1934,22 +1935,23 @@ useEffect(() => {
     if (isSavingTax || !pendingTaxUpdate || !editingTaxId) return;
     setShowTaxRateChangeWarning(false);
     const { newName, newRate, newNumber } = pendingTaxUpdate;
+    const taxIdBeingEdited = editingTaxId;
     setPendingTaxUpdate(null);
     setIsSavingTax(true);
     setTaxError(null);
     try {
       const fk_user_id = localStorage.getItem("fk_user_id") || "0";
       const allKnown = [...(taxData || []), ...localTaxTypes];
-      const existingTax = allKnown.find((t) => t.id === editingTaxId);
+      const existingTax = allKnown.find((t) => t.id === taxIdBeingEdited);
       await propagateTaxRateChangeToReceipts({
         receipts,
-        taxId: editingTaxId,
+        taxId: taxIdBeingEdited,
         oldRate: existingTax?.tax_rate,
         oldName: existingTax?.tax_name,
         updateReceipt,
       });
       await updateTax({
-        id: editingTaxId,
+        id: taxIdBeingEdited,
         fk_user_id: parseInt(fk_user_id),
         tax_name: newName,
         tax_rate: newRate,
@@ -1966,13 +1968,27 @@ useEffect(() => {
       ) {
         await propagateTaxNameChangeToReceipts({
           receipts,
-          taxId: editingTaxId,
+          taxId: taxIdBeingEdited,
           oldName: existingTax?.tax_name,
           newName,
           updateReceipt,
         });
       }
       await fetchTaxes();
+      // Refresh labels on the open edit form (amounts stay frozen on the line).
+      setEditedReceipt((prev) => {
+        if (!prev?.receipt_tax_values?.length) return prev;
+        const idStr = String(taxIdBeingEdited);
+        return {
+          ...prev,
+          receipt_tax_values: prev.receipt_tax_values.map((line) => {
+            if (String(line?.fk_tax_id || "") === idStr) {
+              return { ...line, tax_name: newName };
+            }
+            return line;
+          }),
+        };
+      });
       setNewTaxName("");
       setNewTaxRate("");
       setNewTaxNumber("");
@@ -5665,7 +5681,10 @@ Thank you for using our receipt management system.
                               <div className="mb-4 text-align-left">
                                 <div className="flex items-center justify-between">
                                   <label className="font-bold">
-                                    {`${currentTaxValues[0].tax_name} (${formatTaxRate(currentTaxValues[0].tax_rate)}%)`}
+                                    {(() => {
+                                      const d = getReceiptTaxLineDisplay(currentTaxValues[0], taxData);
+                                      return `${d.tax_name} (${d.tax_rate}%)`;
+                                    })()}
                                   </label>
                                   <div className="flex items-center gap-1">
                                     <button
@@ -5704,7 +5723,10 @@ Thank you for using our receipt management system.
                               <div className="mb-4 text-align-left">
                                 <div className="flex items-center justify-between">
                                   <label className="font-bold">
-                                    {`${currentTaxValues[1].tax_name} (${formatTaxRate(currentTaxValues[1].tax_rate)}%)`}
+                                    {(() => {
+                                      const d = getReceiptTaxLineDisplay(currentTaxValues[1], taxData);
+                                      return `${d.tax_name} (${d.tax_rate}%)`;
+                                    })()}
                                   </label>
                                   <div className="flex items-center gap-1">
                                     <button

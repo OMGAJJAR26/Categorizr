@@ -104,6 +104,19 @@ export function resolveReceiptTaxLineRate(tax, taxDefinition, subtotal = 0) {
   return tax?.tax_rate || "0";
 }
 
+/** Label text for a receipt tax line — uses current tax definition rate when linked by fk_tax_id. */
+export function getReceiptTaxLineDisplay(taxLine, taxDefinitions) {
+  const taxId = parseInt(taxLine?.fk_tax_id) || 0;
+  const def =
+    taxId > 0
+      ? (taxDefinitions || []).find((t) => parseInt(t.id) === taxId)
+      : null;
+  return {
+    tax_name: def?.tax_name || taxLine?.tax_name || "Tax",
+    tax_rate: formatTaxRate(def?.tax_rate ?? taxLine?.tax_rate ?? "0"),
+  };
+}
+
 /** Enrich receipt tax lines without overwriting stored amounts or effective rates. */
 export function enrichReceiptTaxValues(receiptTaxValues, taxDefinitions, receipt = {}) {
   const subtotal = inferReceiptSubtotal(receipt);
