@@ -37,11 +37,9 @@ export function parseExpenseCategoryApiResponse(data) {
 export function isValidExpenseCategory(category) {
   if (!category) return false;
   const val = category.toString().trim();
-  if (/^\d+$/.test(val)) return false;
-  if (val.length < 2) return false;
-  if (/^[\d\W]+$/.test(val)) return false;
-  if (/^\d+[a-zA-Z]?(-\d+)?$/.test(val)) return false;
-  return true;
+  // Only reject truly empty strings — numeric names like "999", "4" are valid
+  // user-chosen category names and must not be filtered out.
+  return val.length > 0;
 }
 
 export function getExpenseCategoryRecordName(item) {
