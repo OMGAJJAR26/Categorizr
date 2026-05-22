@@ -1195,7 +1195,15 @@ export const DataProvider = ({ children }) => {
               // IMPORTANT: Keep paymentType as-is from API (e.g., "MasterCard *7836")
               // The getPaymentLogo function will extract the card type from paymentType for logo detection
               // Don't modify paymentType here - it needs to contain the card type for logos to work
-              
+
+              // Whether receipt_image carries a real URL in this map context
+              // (hasReceiptImage in the .filter() above has a different scope and
+              // is not accessible here — we re-derive it from the local receiptImage).
+              const receiptImageHasUrl =
+                receiptImage &&
+                receiptImage.toString().trim() !== "" &&
+                receiptImage !== "0";
+
               // The server's uploadmediaV1 API is cumulative: it can inject the
               // user's most-recently-uploaded files into the emailAttachment field
               // of ANY receipt that was stored with emailAttachment = "0" / null.
@@ -1221,7 +1229,7 @@ export const DataProvider = ({ children }) => {
               const sanitizedEmailAttachment =
                 (isEmailOriginatedReceipt || isForwardedReceipt)
                   ? (r.emailAttachment ?? "")   // keep server value for email/forwarded receipts
-                  : hasReceiptImage
+                  : receiptImageHasUrl
                     ? receiptImage              // receipt_image has a URL → mirror it (contamination protection)
                     : (r.emailAttachment ?? ""); // receipt_image is "0" → trust server emailAttachment (mobile / new web format)
 
