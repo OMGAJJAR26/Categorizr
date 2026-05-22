@@ -1406,8 +1406,9 @@ setMerchantsWithImages(
   )
 );
 
-      // Extract unique payment methods from receipts
-      setPaymentMethods(buildPaymentMethods(receiptsWithIntegrations));
+      // NOTE: setPaymentMethods is called AFTER the enrichment step below so
+      // that renamed payment methods (e.g. "SomeName *1111" → "Diners Club *1111")
+      // are reflected in the payments list rather than the stale receipt values.
       setNote([
         ...new Set(
           receiptsWithIntegrations.map((r) => r.notes).filter(Boolean)
@@ -1564,8 +1565,11 @@ setMerchantsWithImages(
         return r;
       });
 
-      // Update receipts with enriched tax data and logos
+      // Update receipts with enriched data (payment fields + logos + tax) and
+      // build the payment methods list from the NOW-enriched receipts so renamed
+      // payment methods show the updated name, not the stale one.
       setReceipts(receiptsWithIntegrations);
+      setPaymentMethods(buildPaymentMethods(receiptsWithIntegrations));
 
       setExpenseType([
         ...new Set(

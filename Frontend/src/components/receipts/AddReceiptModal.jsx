@@ -13,6 +13,7 @@ import {
   buildPaymentMethodStorageString,
   cardTypeIntToBrand,
   getApiPaymentMethodDisplayName,
+  getLast4FromPaymentApiRecord,
   getPaymentMethodListLabel,
   inferCardTypeFromPayment,
   isCustomCardIssuer,
@@ -3950,11 +3951,14 @@ const handleSelectLogo = (index) => {
     return pm.paymentType || "";
   });
 
-  // Deduplicate payment methods - if a custom issuer name version exists, remove generic one
-  // Example: If "HelloPayPal *0000" exists, remove "PayPal *0000"
+  // Deduplicate payment methods by last4 — when two entries share the same
+  // last4 the winner is chosen by this priority:
+  //   1. Entry whose base name matches a known API card_type brand (most reliable)
+  //   2. Entry whose base name matches the current API payment method display name
+  //   3. Longer base name (old heuristic, last resort)
   const deduplicatePaymentMethods = (methods) => {
     const methodMap = new Map();
-    const last4ToMethods = new Map(); // Track methods by last4 digits
+    const last4ToMethods = new Map();
 
     methods.forEach((method) => {
       const methodStr =
@@ -3968,28 +3972,44 @@ const handleSelectLogo = (index) => {
         : methodStr;
 
       if (last4) {
-        // Group methods by last4 digits
-        if (!last4ToMethods.has(last4)) {
-          last4ToMethods.set(last4, []);
-        }
+        if (!last4ToMethods.has(last4)) last4ToMethods.set(last4, []);
         last4ToMethods.get(last4).push({ methodStr, baseName });
       } else {
-        // Methods without last4 - add directly
-        methodMap.set(methodStr, methodStr);
+        methodMap.set(methodStr.toLowerCase(), methodStr);
       }
     });
 
-    // For each last4 group, keep only the most specific issuer name
     last4ToMethods.forEach((methodsWithSameLast4, last4) => {
-      // Sort by length (longer = more specific, e.g., "HelloPayPal" > "PayPal")
-      methodsWithSameLast4.sort(
-        (a, b) => b.baseName.length - a.baseName.length,
+      if (methodsWithSameLast4.length === 1) {
+        methodMap.set(methodsWithSameLast4[0].methodStr.toLowerCase(), methodsWithSameLast4[0].methodStr);
+        return;
+      }
+
+      // Priority 1: whose base name matches the API record for this last4
+      const apiRec = (apiPaymentMethods || []).find(
+        p => getLast4FromPaymentApiRecord(p) === last4
       );
-      // Keep only the first (most specific) one
-      methodMap.set(
-        methodsWithSameLast4[0].methodStr,
-        methodsWithSameLast4[0].methodStr,
+      const apiDisplayName = apiRec ? getApiPaymentMethodDisplayName(apiRec) : null;
+      const apiBrand = apiRec ? cardTypeIntToBrand(apiRec.card_type) : null;
+
+      let winner = methodsWithSameLast4.find(m =>
+        apiDisplayName && m.methodStr.toLowerCase() === apiDisplayName.toLowerCase()
       );
+
+      // Priority 2: whose base name IS the known brand for this last4's card_type
+      if (!winner && apiBrand && apiBrand !== "Other") {
+        winner = methodsWithSameLast4.find(m =>
+          m.baseName.toLowerCase() === apiBrand.toLowerCase()
+        );
+      }
+
+      // Priority 3: fall back to longest base name (old heuristic)
+      if (!winner) {
+        methodsWithSameLast4.sort((a, b) => b.baseName.length - a.baseName.length);
+        winner = methodsWithSameLast4[0];
+      }
+
+      methodMap.set(winner.methodStr.toLowerCase(), winner.methodStr);
     });
 
     return Array.from(methodMap.values());
