@@ -883,9 +883,15 @@ export const DataProvider = ({ children }) => {
           normalizeExpenseCategoryApiItem(
             { id: getEntityId(data), fk_user_id },
             name.trim()
-          );
+          ) ||
+          // Hard fallback: all extraction attempts returned null (e.g. API returned a
+          // response whose name field failed isValidExpenseCategory validation, such as
+          // returning "0" or a numeric code).  Construct directly from the user's input.
+          { id: getEntityId(data) ?? null, fk_user_id, expense_category_name: name.trim() };
         setApiExpenseCategories((prev) => {
-          const key = entity.expense_category_name.toLowerCase();
+          const catName = (entity?.expense_category_name || "").toString().trim();
+          if (!catName) return prev; // nothing to add
+          const key = catName.toLowerCase();
           const existingIdx = prev.findIndex(
             (c) =>
               (c?.expense_category_name || c?.name || "").toString().trim().toLowerCase() === key
