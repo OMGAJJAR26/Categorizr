@@ -560,6 +560,13 @@ const ManageModal = ({ type, onClose }) => {
         ...receiptPaymentsRaw.map((p) => normalizeMatchKey(p)),
         ...customItems.map((p) => normalizeMatchKey(p.name)),
       ]);
+      // Also track last4s already covered by receipt/custom entries so we don't
+      // show a duplicate API entry after a rename (e.g. "OM *1111" AND "Discover *1111")
+      const existingLast4s = new Set(
+        [...receiptPaymentsRaw, ...customItems.map(i => i.name)]
+          .map(p => { const m = /\*(\d{3,4})$/.exec((p || "").trim()); return m ? m[1] : null; })
+          .filter(Boolean)
+      );
       const apiItems = (apiPaymentMethods || [])
         .map((p) => {
           const apiId = getApiPaymentId(p);
@@ -568,12 +575,18 @@ const ManageModal = ({ type, onClose }) => {
           return {
             key: `api_${apiId}`,
             name: cardName,
-            logo: getApiPaymentMethodLogo(p),  // Use card_type + icon_image, not just keyword detection
+            logo: getApiPaymentMethodLogo(p),
             apiId,
           };
         })
         .filter(Boolean)
-        .filter((p) => !existingNames.has(normalizeMatchKey(p.name)));
+        .filter((p) => {
+          if (existingNames.has(normalizeMatchKey(p.name))) return false;
+          // Skip if a receipt/custom entry already covers the same last4
+          const l4m = /\*(\d{3,4})$/.exec((p.name || "").trim());
+          if (l4m && existingLast4s.has(l4m[1])) return false;
+          return true;
+        });
       return [...customItems, ...apiItems];
     }
     return [];

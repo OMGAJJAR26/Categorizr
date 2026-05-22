@@ -12,8 +12,10 @@ import { enrichReceiptTaxValues } from "../utils/taxTypeUtils";
 import { isMerchantSupersededByApi } from "../utils/merchantListUtils";
 import {
   buildApiPaymentMethodPayload,
+  cardTypeIntToBrand,
   getApiPaymentMethodCacheKey,
   getApiPaymentMethodDisplayName,
+  getLast4FromPaymentApiRecord,
   normalizeApiPaymentMethodInput,
   paymentMethodPayloadToQuery,
 } from "../utils/paymentMethodUtils";
@@ -1471,41 +1473,95 @@ setMerchantsWithImages(
       }
       setReceiptTaxValues(Array.from(uniqueTaxMap.values()));
       
-      // Enrich receipts with custom payment method logos if they are missing
-      const customLogoMap = new Map();
-      // Use only payment methods for logo matching (merchants now use separate /userstore schema)
+      // Enrich receipts with current API payment method data.
+      // This syncs card_issuer_name + paymentType so a renamed payment method
+      // (e.g. "OM *1111" → "Discover *1111") is reflected immediately without
+      // needing a server-side receipt update.
       const allApiItems = [...(apiPaymentMethodsData || [])];
+
+      // Build a map: last4 → API records that have that last4
+      const last4ToApiRecs = new Map();
       allApiItems.forEach(p => {
-         const displayKey = getApiPaymentMethodDisplayName(p).trim().toLowerCase();
-         const legacyKey = (p.card_number || "").trim().toLowerCase();
-         if (p.icon_image) {
-           if (displayKey) customLogoMap.set(displayKey, p.icon_image);
-           if (legacyKey && legacyKey !== displayKey) customLogoMap.set(legacyKey, p.icon_image);
-         }
+        const l4 = getLast4FromPaymentApiRecord(p);
+        if (!l4 || l4 === "0" || l4 === "-") return;
+        if (!last4ToApiRecs.has(l4)) last4ToApiRecs.set(l4, []);
+        last4ToApiRecs.get(l4).push(p);
       });
-      
+
       receiptsWithIntegrations = receiptsWithIntegrations.map(r => {
-         if (!r.payment_logo_url && !r.paymentLogoUrl) {
-            const issuer = (r.card_issuer_name || r.cardIssuerName || "").toString().trim();
-            const last4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
-            const type = (r.paymentType || r.payment_type || "").toString().trim();
-            
-            let matchedLogo = null;
-            if (issuer && last4 && last4 !== "0") {
-               matchedLogo = customLogoMap.get(`${issuer.toLowerCase()} *${last4}`);
+        const issuer  = (r.card_issuer_name  || r.cardIssuerName  || "").toString().trim();
+        const last4   = (r.last_4_digit_card  || r.last4DigitCard  || "").toString().trim();
+        const type    = (r.paymentType        || r.payment_type    || "").toString().trim();
+
+        // ── Find the matching API payment-method record ────────────────────────
+        let matchedRec = null;
+
+        if (last4 && last4 !== "0") {
+          const candidates = last4ToApiRecs.get(last4) || [];
+          // 1. Exact issuer + last4 match (current name in API matches receipt)
+          matchedRec = candidates.find(p => {
+            const pIssuer = (p.card_issuer_name || "").trim().toLowerCase();
+            return pIssuer && pIssuer === issuer.toLowerCase();
+          });
+          // 2. If no exact match, use the sole candidate (covers renames where
+          //    the API issuer changed but last4 is still the same card)
+          if (!matchedRec && candidates.length === 1) {
+            matchedRec = candidates[0];
+          }
+          // 3. Multiple candidates with same last4 but no issuer match — try
+          //    matching by card_type brand (paymentType often has the brand)
+          if (!matchedRec && candidates.length > 1 && type) {
+            const typeBase = type.replace(/\s*\*\d{3,4}$/, "").trim().toLowerCase();
+            matchedRec = candidates.find(p => {
+              const brand = cardTypeIntToBrand(p.card_type).toLowerCase();
+              return brand && typeBase.includes(brand.split(" ")[0]);
+            });
+          }
+        }
+
+        if (matchedRec) {
+          const enriched  = { ...r };
+          const newIssuer = (matchedRec.card_issuer_name || "").trim();
+          const newBrand  = cardTypeIntToBrand(matchedRec.card_type); // e.g. "Diners Club"
+
+          // Sync card_issuer_name if the API record has a different value
+          // (covers renames: "OM" → "" means card shows as "Discover *1111" now)
+          if (newIssuer !== issuer) {
+            enriched.card_issuer_name = newIssuer;
+          }
+
+          // Sync paymentType to the authoritative brand from card_type
+          if (newBrand && newBrand !== "Other") {
+            const l4Suffix = last4 && last4 !== "0" ? ` *${last4}` : "";
+            const desiredType = `${newBrand}${l4Suffix}`;
+            if (enriched.paymentType !== desiredType) {
+              enriched.paymentType = desiredType;
             }
-            if (!matchedLogo && issuer && issuer !== "0") {
-               matchedLogo = customLogoMap.get(issuer.toLowerCase());
-            }
-            if (!matchedLogo && type && type !== "0") {
-               matchedLogo = customLogoMap.get(type.toLowerCase());
-            }
-            
-            if (matchedLogo) {
-               return { ...r, payment_logo_url: matchedLogo };
-            }
-         }
-         return r;
+          }
+
+          // Sync payment_logo_url if not already set
+          if (!enriched.payment_logo_url && matchedRec.icon_image) {
+            enriched.payment_logo_url = matchedRec.icon_image;
+          }
+
+          return enriched;
+        }
+
+        // No API record found — fall back to logo-only enrichment via display key
+        if (!r.payment_logo_url && !r.paymentLogoUrl) {
+          const logoByIssuerLast4 = allApiItems
+            .filter(p => p.icon_image)
+            .find(p => {
+              const pKey = getApiPaymentMethodDisplayName(p).trim().toLowerCase();
+              const rKey = issuer && last4 ? `${issuer.toLowerCase()} *${last4}` : issuer.toLowerCase();
+              return pKey === rKey || (p.card_number || "").trim().toLowerCase() === last4;
+            });
+          if (logoByIssuerLast4) {
+            return { ...r, payment_logo_url: logoByIssuerLast4.icon_image };
+          }
+        }
+
+        return r;
       });
 
       // Update receipts with enriched tax data and logos
@@ -2297,14 +2353,30 @@ setMerchantsWithImages(
     ..._rpLower,
     ...customPaymentMethods.map((p) => (p || "").toLowerCase()),
   ]);
+  // Build a set of last4s already covered by receipt-derived + custom entries so
+  // we don't add a duplicate API entry for the same physical card after a rename.
+  // e.g. receipt has "Discover *1111" (post-enrichment), API also has "Discover *1111" → skip API copy.
+  const _rpLast4s = new Set(
+    [...receiptPaymentsRaw, ...customPaymentMethods]
+      .map((p) => { const m = /\*(\d{3,4})$/.exec((p || "").trim()); return m ? m[1] : null; })
+      .filter(Boolean)
+  );
   const mergedPaymentMethods = [
     ...receiptPaymentsRaw.filter((p) => !isPaymentMethodHidden(p)),
     ...customPaymentMethods.filter((p) => !isPaymentMethodHidden(p) && !_rpLower.has(p.toLowerCase())),
-    // API payment methods not already present from receipts or custom list
+    // API payment methods not already present from receipts or custom list.
+    // Also exclude API entries whose last4 is already covered — this prevents a
+    // stale old-name entry surviving alongside the newly-renamed API entry.
     ...apiPaymentMethods
       .filter((m) => isPaymentApiRecord(m))
       .map((m) => getApiPaymentMethodDisplayName(m))
-      .filter((name) => name && !isPaymentMethodHidden(name) && !_rpCustomLower.has(name.toLowerCase())),
+      .filter((name) => {
+        if (!name || isPaymentMethodHidden(name) || _rpCustomLower.has(name.toLowerCase())) return false;
+        // De-duplicate by last4 — skip if any receipt/custom entry already has the same last4
+        const l4Match = /\*(\d{3,4})$/.exec(name.trim());
+        if (l4Match && _rpLast4s.has(l4Match[1])) return false;
+        return true;
+      }),
   ];
   const normalizedPaymentMethods = Array.from(
     new Map(
