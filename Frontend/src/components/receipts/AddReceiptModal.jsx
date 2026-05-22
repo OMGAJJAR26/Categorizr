@@ -4055,10 +4055,17 @@ const handleSelectLogo = (index) => {
     const normalizedLast4 = (last4 || "").replace(/\D/g, "").slice(0, 4);
     if (!normalizedCardType || normalizedLast4.length !== 4) return false;
 
+    // Strip trailing " *XXXX" from paymentType before comparing brand names.
+    // Old receipts store "Diners Club" (brand only); new receipts store "Diners Club *3334".
+    // Without stripping, old-format receipts would falsely match the brand even for
+    // different cards if they happen to share the same brand name.
+    const extractBrand = (str) =>
+      (str || "").toString().trim().toLowerCase().replace(/\s*\*\d{3,4}\s*$/, "").trim();
+
     const inReceipts = (receipts || []).some((r) => {
-      const existingCardType = (r.paymentType || r.payment_type || "").toString().trim().toLowerCase();
+      const existingBrand = extractBrand(r.paymentType || r.payment_type || "");
       const existingLast4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().replace(/\D/g, "").slice(-4);
-      return existingCardType === normalizedCardType && existingLast4 === normalizedLast4;
+      return existingBrand === normalizedCardType && existingLast4 === normalizedLast4;
     });
     if (inReceipts) return true;
 

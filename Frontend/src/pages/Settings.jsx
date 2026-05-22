@@ -1937,11 +1937,19 @@ const isBlockedTaxRateInput = (val) => {
       if (payEditMode) {
         const oldName  = payEditMode.item.name;
         const targetId = payEditMode.apiId;
-        // Duplicate check (skip self)
+        // Duplicate check (skip self and skip receipt-derived items that share the same
+        // last4 — they represent the SAME physical card under a different display name,
+        // so renaming the API record should never be blocked by enriched receipt entries).
+        const editedLast4 = (parsePaymentDisplay(payEditMode.item.name).last4 || "").trim();
+        const newSig = getPaymentSignature(payStr, ct);
         const dupExists = buildAllItems().some((i) => {
           if (i.key === payEditMode.item.key) return false;
+          // Receipt items with the same last4 are the same physical card — not a duplicate
+          if (i.isReceiptItem) {
+            const iLast4 = (parsePaymentDisplay(i.name).last4 || "").trim();
+            if (editedLast4 && iLast4 && editedLast4 === iLast4) return false;
+          }
           const sig = getPaymentSignature(i.name);
-          const newSig = getPaymentSignature(payStr, ct);
           return sig && newSig && sig === newSig;
         });
         if (dupExists) return toast("error", "Payment Method already exists");
@@ -2013,6 +2021,10 @@ const isBlockedTaxRateInput = (val) => {
       }
       const nextSignature = getPaymentSignature(payStr, ct);
       const duplicateExists = buildAllItems().some((item) => {
+        // Receipt-derived items are passive (they come from past receipts, not explicit
+        // registrations). The user should be able to explicitly add any card even if it
+        // appeared in a receipt — only check API/custom/default items.
+        if (item.isReceiptItem) return false;
         const sig = getPaymentSignature(item.name);
         return sig && sig === nextSignature;
       });
@@ -2414,8 +2426,14 @@ const isBlockedTaxRateInput = (val) => {
     if (type === "payments") {
       const fallbackBrand = getPaymentBrand(item.name, newCardType || "");
       const newSignature = getPaymentSignature(newName, fallbackBrand);
+      const editedLast4Inline = (parsePaymentDisplay(item.name).last4 || "").trim();
       const duplicatePayment = buildAllItems().some((other) => {
         if (other.key === item.key) return false;
+        // Receipt items for the same physical card (same last4) are not true duplicates
+        if (other.isReceiptItem) {
+          const oLast4 = (parsePaymentDisplay(other.name).last4 || "").trim();
+          if (editedLast4Inline && oLast4 && editedLast4Inline === oLast4) return false;
+        }
         const sig = getPaymentSignature(other.name);
         return sig && sig === newSignature;
       });

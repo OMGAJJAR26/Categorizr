@@ -952,10 +952,14 @@ useEffect(() => {
     const normalizedCardType = (cardType || "").trim().toLowerCase();
     const normalizedLast4 = (last4 || "").replace(/\D/g, "").slice(0, 4);
     if (!normalizedCardType || normalizedLast4.length !== 4) return false;
+    // Strip trailing " *XXXX" from paymentType before comparing brand names so that
+    // "Diners Club *3334" correctly reduces to "diners club" for the brand comparison.
+    const extractBrand = (str) =>
+      (str || "").toString().trim().toLowerCase().replace(/\s*\*\d{3,4}\s*$/, "").trim();
     return (receipts || []).some((rct) => {
-      const existingCardType = (rct.paymentType || rct.payment_type || "").toString().trim().toLowerCase();
+      const existingBrand = extractBrand(rct.paymentType || rct.payment_type || "");
       const existingLast4 = (rct.last_4_digit_card || rct.last4DigitCard || "").toString().replace(/\D/g, "").slice(-4);
-      return existingCardType === normalizedCardType && existingLast4 === normalizedLast4;
+      return existingBrand === normalizedCardType && existingLast4 === normalizedLast4;
     });
   };
 
