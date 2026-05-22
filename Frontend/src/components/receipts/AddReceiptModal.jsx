@@ -4087,8 +4087,11 @@ const handleSelectLogo = (index) => {
     const target = normalizePaymentMethodKey(name);
     const excluded = normalizePaymentMethodKey(excludeName);
     if (!target) return false;
+    // Only check explicitly registered methods (API records + methods added locally in
+    // this session). Do NOT include allPaymentMethods / paymentMethods here — that list
+    // blends in receipt-derived names (enriched paymentType strings from past receipts)
+    // which should never prevent a user from explicitly registering a payment method.
     const allCandidates = [
-      ...allPaymentMethods,
       ...localPaymentMethodStrings,
       ...(apiPaymentMethods || []).map((p) => getApiPaymentMethodDisplayName(p)),
     ];
