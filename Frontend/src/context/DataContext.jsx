@@ -1202,12 +1202,15 @@ export const DataProvider = ({ children }) => {
               // This produces cross-receipt contamination where Receipt A ends up
               // showing PDFs from Receipt B.
               //
-              // To defend against this server-side bug we trust receipt_image
-              // (which is never contaminated) and only keep emailAttachment as a
-              // separate source for genuine email receipts (fk_incoming_email_id
-              // is set) or forwarded receipts (receipt_forwarded = "1").
-              // For all other receipts, mirror emailAttachment from receipt_image
-              // so the display layer sees a consistent, uncontaminated value.
+              // Contamination defence: when receipt_image has a valid URL (old web
+              // format), mirror it into emailAttachment so both fields stay in sync
+              // and any contaminated emailAttachment value is replaced by the known-
+              // good receipt_image URL.
+              //
+              // IMPORTANT: mobile apps (and our new web upload flow) set
+              // receipt_image = "0" and store the image only in emailAttachment.
+              // When receipt_image is "0" we MUST trust the server's emailAttachment
+              // directly — overwriting it with "0" would hide all those images.
               const isEmailOriginatedReceipt =
                 r.fk_incoming_email_id &&
                 r.fk_incoming_email_id !== "0" &&
@@ -1218,7 +1221,9 @@ export const DataProvider = ({ children }) => {
               const sanitizedEmailAttachment =
                 (isEmailOriginatedReceipt || isForwardedReceipt)
                   ? (r.emailAttachment ?? "")   // keep server value for email/forwarded receipts
-                  : receiptImage;               // mirror receipt_image for manually-added receipts
+                  : hasReceiptImage
+                    ? receiptImage              // receipt_image has a URL → mirror it (contamination protection)
+                    : (r.emailAttachment ?? ""); // receipt_image is "0" → trust server emailAttachment (mobile / new web format)
 
               const normalized = {
                 ...r,

@@ -770,6 +770,11 @@ useEffect(() => {
         receipt_tax_values: initTaxValues,
         tip: tipEntry ? (tipEntry.tax_amount ?? "") : "",
         store_image: selectedReceipt.store_image || "",
+        // Explicitly carry image fields so the Receipt Images section renders
+        // without relying on the `?? r.*` fallback (which can miss updates when
+        // selectedReceipt changes while editedReceipt is already mounted).
+        receipt_image: selectedReceipt.receipt_image ?? "0",
+        emailAttachment: selectedReceipt.emailAttachment ?? "",
       });
       // Show TIP field if receipt already has a tip value
       setTipVisible(!!tipEntry && parseFloat(tipEntry.tax_amount) > 0);
