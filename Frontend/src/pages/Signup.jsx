@@ -72,10 +72,11 @@ const Signup = () => {
         const country = await getBrowserCountry();
 
         // ── 2. Build signup payload ──────────────────────────────────────────
-        // recoveryEmail and duplicate_eReciept_email mirror the primary email.
+        // emailAddress is the Categorizr username (same as mobile), not the recovery email.
+        // recoveryEmail and duplicate_eReciept_email use the user's real email.
         const signupPayload = {
           userName:                 values.userName,
-          emailAddress:             values.emailAddress,
+          emailAddress:             values.userName,
           password:                 values.password,
           recoveryEmail:            values.emailAddress,
           duplicate_eReciept_email: values.emailAddress,
