@@ -150,6 +150,26 @@ export const usePaymentDisplay = () => {
       return LOGO_MAP.other;
     }
 
+    const networkFromStr = (s) => {
+      if (!s || s === "0") return null;
+      const base = s.replace(/\s*\*\d{3,4}$/, "").trim();
+      if (!base || base === "0") return null;
+      const network = detectCardNetwork(base);
+      return network ? LOGO_MAP[network] : null;
+    };
+
+    // Standard network detection runs FIRST — if paymentType or paymentBrand
+    // matches a known network (Visa, MasterCard, Diners Club, etc.) return the
+    // built-in logo immediately, before checking any custom payment_logo_url.
+    // This prevents a broken custom logo from hiding the correct network logo.
+    const logo1 = networkFromStr(paymentType);
+    if (logo1) return logo1;
+
+    const logo2 = networkFromStr(paymentBrand);
+    if (logo2) return logo2;
+
+    // Only reach here for custom / unrecognised payment types.
+    // Now check for an explicitly stored logo URL.
     if (isObject) {
       const explicitLogo =
         paymentTypeOrReceipt.payment_logo_url ||
@@ -162,20 +182,6 @@ export const usePaymentDisplay = () => {
         return explicitLogo.trim();
       }
     }
-
-    const networkFromStr = (s) => {
-      if (!s || s === "0") return null;
-      const base = s.replace(/\s*\*\d{3,4}$/, "").trim();
-      if (!base || base === "0") return null;
-      const network = detectCardNetwork(base);
-      return network ? LOGO_MAP[network] : null;
-    };
-
-    const logo1 = networkFromStr(paymentType);
-    if (logo1) return logo1;
-
-    const logo2 = networkFromStr(paymentBrand);
-    if (logo2) return logo2;
 
     if (cardIssuerName && cardIssuerName !== "0") {
       const issuerLower = cardIssuerName.toLowerCase().trim();
