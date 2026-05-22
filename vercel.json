@@ -6,7 +6,7 @@
   "rewrites": [
     {
       "source": "/api/imageproxy",
-      "destination": "https://categorizr-chatbot.onrender.com/api/imageproxy"
+      "destination": "https://categorizr-chatbot-staging.onrender.com/api/imageproxy"
     },
     {
       "source": "/api/:path*",

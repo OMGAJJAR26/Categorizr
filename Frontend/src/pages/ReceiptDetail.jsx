@@ -6149,7 +6149,7 @@ Thank you for using our receipt management system.
                                 ) : (
                                   <img
                                     key={normalizeMediaUrl(u)}
-                                    src={`${proxyImageUrl(u)}${proxyImageUrl(u).includes("?") ? "&" : "?"}_v=${encodeURIComponent(normalizeMediaUrl(u).slice(-24))}`}
+                                    src={proxyImageUrl(u)}
                                     alt="Receipt"
                                     className="w-24 h-auto rounded cursor-pointer border border-gray-200"
                                     onClick={() => window.open(u, "_blank")}

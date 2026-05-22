@@ -728,13 +728,33 @@ const [localMerchants, setLocalMerchants] = useState([]);
     }
   }, []);
 
+  // Sanitize a file's name before upload so the PHP backend stores a safe GCS
+  // object key.  macOS screenshot filenames contain U+202F (narrow no-break
+  // space) which the backend preserves literally, producing un-fetchable URLs.
+  // We rename to "image_<timestamp>_<random>.<ext>" – the same style the
+  // mobile apps use – to guarantee a safe filename regardless of the source.
+  const sanitizeUploadFile = useCallback((file) => {
+    const original = file.name || "";
+    const dotIdx = original.lastIndexOf(".");
+    const rawExt = dotIdx >= 0 ? original.slice(dotIdx + 1).toLowerCase() : "";
+    const safeExts = ["jpg", "jpeg", "png", "gif", "webp", "pdf", "heic", "heif", "bmp", "tiff", "tif"];
+    const ext = safeExts.includes(rawExt) ? rawExt : (file.type === "application/pdf" ? "pdf" : "jpg");
+    const ts = Date.now();
+    const rnd = Math.random().toString(36).slice(2, 8);
+    const safeName = `image_${ts}_${rnd}.${ext}`;
+    // Only rename if the original has non-ASCII or non-URL-safe characters
+    const needsRename = /[^\x20-\x7E]/.test(original) || /[%#?&=+]/.test(original);
+    if (!needsRename) return file;
+    return new File([file], safeName, { type: file.type, lastModified: file.lastModified });
+  }, []);
+
   // Upload files to /user/uploadmediaV1 and return array of fullImageUrls
   const uploadFilesToMedia = useCallback(async (filesToUpload) => {
     const token = localStorage.getItem("token");
 
     const formData = new FormData();
     filesToUpload.forEach((file) => {
-      formData.append("file", file); // API field name is "file", supports multiple
+      formData.append("file", sanitizeUploadFile(file)); // API field name is "file", supports multiple
     });
 
     const response = await fetch("/api/user/uploadmediaV1", {
@@ -2374,7 +2394,9 @@ const handleFieldChange = (field, value) => {
         receipt_category: parseInt(formData.receipt_category) || 0,
         product_date: productDate,
         expense_type: formData.expense_type || "",
-        receipt_image: combinedImageUrls,
+        // Mobile always stores images in emailAttachment; receipt_image stays "0".
+        // Matching that pattern keeps QuickBooks and display logic consistent.
+        receipt_image: "0",
         store_image:
           getMerchantImage(formData.storeName) ||
           detectedMerchantLogo ||
@@ -2677,7 +2699,7 @@ const handleFieldChange = (field, value) => {
       receipt_category: parseInt(formData.receipt_category) || 0,
       product_date: productDate,
       expense_type: formData.expense_type || "",
-      receipt_image: combinedImageUrls,
+      receipt_image: "0", // Match mobile: images live in emailAttachment only
       store_image: getMerchantImage(formData.storeName) || detectedMerchantLogo || uploadedReceiptData?.store_image || "",
       notes: formData.notes || "",
       receipt_forwarded: uploadedReceiptData?.receipt_forwarded || "0",
