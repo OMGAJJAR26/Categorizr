@@ -313,52 +313,40 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
     return normalizeLabel(displayName);
   }, []);
 
-  // All API payment methods + receipt-only methods (deduped, no bare *last4 when full label exists)
+  // Build the payment method list using normalizedPaymentMethods (DataContext) as the
+  // single source of truth — same list that Add Receipt / Edit Receipt show — then
+  // append any API-registered methods that aren't already covered (by exact name or last4).
+  // This guarantees all four places (Filter, Add, Edit, Settings) show the same entries.
   const uniqueMethods = useMemo(() => {
-    const byKey = new Map();
+    const seen = new Map(); // normalizedKey → label
+    const seenLast4 = new Set();
 
     const addLabel = (rawLabel) => {
       const label = normalizeLabel((rawLabel || "").toString().trim());
       if (!label || label === "-") return;
       const key = normalizePaymentMatchKey(label);
-      const last4 = (label.match(/\*(\d{3,4})$/)?.[1] || "").replace(/\D/g, "");
-      const isBareLast4 = /^\*\d{3,4}$/.test(label);
-      const dedupeKey = last4 ? `last4:${last4}` : key;
-      const existing = byKey.get(dedupeKey) || byKey.get(key);
-      if (!existing || (existing.isBare && !isBareLast4)) {
-        byKey.set(dedupeKey, { label, isBare: isBareLast4, key });
-        if (dedupeKey !== key) byKey.set(key, { label, isBare: isBareLast4, key });
-      }
+      if (seen.has(key)) return;
+      const last4 = label.match(/\*(\d{3,4})$/)?.[1];
+      if (last4 && seenLast4.has(last4)) return;
+      seen.set(key, label);
+      if (last4) seenLast4.add(last4);
     };
 
-    (apiPaymentMethods || []).forEach((m) => {
-      const label = apiLabelForMethod(m);
-      if (!label || isPaymentMethodHidden(label)) return;
-      if (String(m?.card_type || "").toLowerCase() === "merchant") return;
-      addLabel(label);
-    });
-
-    (receipts || []).forEach((r) => {
-      addLabel(getPaymentDisplayFromReceipt(r));
-    });
-
-    // Include default payment methods (Cash, American Express, Bank of America, Citibank)
-    // that may not appear via API or receipt entries
+    // 1. normalizedPaymentMethods is the canonical list (receipt-enriched names, deduplicated)
     (paymentMethods || []).forEach((m) => {
       if (!isPaymentMethodHidden(m)) addLabel(m);
     });
 
-    const seen = new Set();
-    return Array.from(byKey.values())
-      .map((v) => v.label)
-      .filter((label) => {
-        const k = normalizePaymentMatchKey(label);
-        if (seen.has(k)) return false;
-        seen.add(k);
-        return true;
-      })
-      .sort((a, b) => a.localeCompare(b));
-  }, [apiPaymentMethods, receipts, paymentMethods, isPaymentMethodHidden, apiLabelForMethod]);
+    // 2. Add API-registered methods not already present (e.g. cards with no receipts yet)
+    (apiPaymentMethods || []).forEach((m) => {
+      if (String(m?.card_type || "").toLowerCase() === "merchant") return;
+      const label = apiLabelForMethod(m);
+      if (!label || isPaymentMethodHidden(label)) return;
+      addLabel(label);
+    });
+
+    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
+  }, [apiPaymentMethods, paymentMethods, isPaymentMethodHidden, apiLabelForMethod]);
 
   // ✅ Select all
   const handleSelectAll = () => {

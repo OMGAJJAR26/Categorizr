@@ -641,25 +641,40 @@ const [localMerchants, setLocalMerchants] = useState([]);
     return null;
   };
 
-  // Filter out invalid payment methods from existing data
-  // These come from user's actual receipts (like "Bank of America *1111", "Visa *0177", etc.)
-  const validExistingPayments = (paymentMethods || []).filter((p) => {
-    if (!p) return false;
-    const val = p.toString().trim();
-    // Filter out "0", "0*0", "0*123" type invalid values
-    if (val === "0" || val === "0*0" || /^0\*\d*$/.test(val)) return false;
-    if (val.length < 2) return false;
-    // Filter out "Cash *0", "Cash*0" variations - keep only "Cash"
-    if (/^cash\s*\*\s*0$/i.test(val)) return false;
-    // Filter out any payment ending with *0 (invalid card number)
-    if (/\*\s*0$/.test(val)) return false;
-    return true;
-  });
+  // Build canonical payment method list — same source as Filter and Edit Receipt so
+  // all four places show the same entries:
+  // 1. normalizedPaymentMethods (receipt-enriched, deduplicated) as base
+  // 2. API-registered cards not yet covered (no receipts for that card yet)
+  const allPaymentMethods = useMemo(() => {
+    const seen = new Map();   // lowercaseKey → display string
+    const seenLast4 = new Set();
 
-  // Sort existing payments alphabetically
-  const allPaymentMethods = [...new Set(validExistingPayments)]
-    .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b));
+    const addEntry = (raw) => {
+      if (!raw) return;
+      const val = raw.toString().trim();
+      if (!val || val === "0" || val === "0*0" || /^0\*\d*$/.test(val)) return;
+      if (val.length < 2) return;
+      if (/^cash\s*\*\s*0$/i.test(val)) return;
+      if (/\*\s*0$/.test(val)) return;
+      const key = val.toLowerCase();
+      if (seen.has(key)) return;
+      const last4 = val.match(/\*(\d{3,4})$/)?.[1];
+      if (last4 && seenLast4.has(last4)) return;
+      seen.set(key, val);
+      if (last4) seenLast4.add(last4);
+    };
+
+    // Step 1: canonical DataContext list (receipt-enriched names win)
+    (paymentMethods || []).forEach(addEntry);
+
+    // Step 2: API records not already covered (cards with no receipts yet)
+    (apiPaymentMethods || []).forEach((m) => {
+      if (String(m?.card_type || "").toLowerCase() === "merchant") return;
+      addEntry(getApiPaymentMethodDisplayName(m));
+    });
+
+    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
+  }, [paymentMethods, apiPaymentMethods]);
 
   // allTaxTypes is declared earlier (before isDuplicateTaxName) to avoid a TDZ crash.
 

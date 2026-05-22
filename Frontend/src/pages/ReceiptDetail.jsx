@@ -37,6 +37,8 @@ import {
   apiPaymentMethodMatchesLabel,
   buildPaymentMethodStorageString,
   cardTypeIntToBrand,
+  getApiPaymentMethodDisplayName,
+  getLast4FromPaymentApiRecord,
   inferCardTypeFromPayment,
   isCustomCardIssuer,
   parsePaymentDisplay,
@@ -445,24 +447,39 @@ const ReceiptDetail = ({
   // Get all payment methods - use actual user payment methods from receipts
   // (like "Bank of America *1111", "Visa *0177", etc.)
   const allPaymentMethods = React.useMemo(() => {
-    const validExisting = (paymentMethods || []).filter((p) => {
-      if (!p) return false;
-      const val = p.toString().trim();
-      if (val === "0" || val === "0*0" || /^0\*\d*$/.test(val)) return false;
-      if (val.length < 2) return false;
-      // Filter out "Cash *0", "Cash*0" variations - keep only "Cash"
-      if (/^cash\s*\*\s*0$/i.test(val)) return false;
-      // Filter out any payment ending with *0 (invalid card number)
-      if (/\*\s*0$/.test(val)) return false;
-      // Filter out Cash variants like "Cash *0700" — only canonical "Cash" is allowed
-      if (isCashPaymentMethod(val) && val.toLowerCase() !== "cash") return false;
-      return true;
+    // Build the same canonical list that Add Receipt / Filter use:
+    // 1. normalizedPaymentMethods (receipt-enriched, deduplicated) as base
+    // 2. API-registered cards not yet covered (no receipts for that card yet)
+    const seen = new Map();   // normalizedKey → display string
+    const seenLast4 = new Set();
+
+    const addEntry = (raw) => {
+      if (!raw) return;
+      const val = raw.toString().trim();
+      if (!val || val === "0" || val === "0*0" || /^0\*\d*$/.test(val)) return;
+      if (val.length < 2) return;
+      if (/^cash\s*\*\s*0$/i.test(val)) return;
+      if (/\*\s*0$/.test(val)) return;
+      if (isCashPaymentMethod(val) && val.toLowerCase() !== "cash") return;
+      const key = val.toLowerCase();
+      if (seen.has(key)) return;
+      const last4 = val.match(/\*(\d{3,4})$/)?.[1];
+      if (last4 && seenLast4.has(last4)) return;
+      seen.set(key, val);
+      if (last4) seenLast4.add(last4);
+    };
+
+    // Step 1: canonical DataContext list (receipt-enriched names win)
+    (paymentMethods || []).forEach(addEntry);
+
+    // Step 2: API records not already covered (cards with no receipts yet)
+    (apiPaymentMethods || []).forEach((m) => {
+      if (String(m?.card_type || "").toLowerCase() === "merchant") return;
+      addEntry(getApiPaymentMethodDisplayName(m));
     });
-    // Sort alphabetically - same as mobile app
-    return [...new Set(validExisting)]
-      .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b));
-  }, [paymentMethods]);
+
+    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
+  }, [paymentMethods, apiPaymentMethods]);
 
   // Get all tax types - merge taxData (API) with session-only localTaxTypes, exclude Tip
   const allTaxTypes = React.useMemo(() => {
