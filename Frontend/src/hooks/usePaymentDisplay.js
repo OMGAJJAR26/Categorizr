@@ -145,11 +145,6 @@ export const usePaymentDisplay = () => {
       paymentType = paymentTypeOrReceipt.toString().trim();
     }
 
-    // Card type "Other" → always generic credit-card icon (ignore stale cached logos)
-    if (isOtherCardType(paymentType)) {
-      return LOGO_MAP.other;
-    }
-
     const networkFromStr = (s) => {
       if (!s || s === "0") return null;
       const base = s.replace(/\s*\*\d{3,4}$/, "").trim();
@@ -158,18 +153,20 @@ export const usePaymentDisplay = () => {
       return network ? LOGO_MAP[network] : null;
     };
 
-    // Standard network detection runs FIRST — if paymentType or paymentBrand
-    // matches a known network (Visa, MasterCard, Diners Club, etc.) return the
-    // built-in logo immediately, before checking any custom payment_logo_url.
-    // This prevents a broken custom logo from hiding the correct network logo.
+    // 1. Standard network detection — highest priority.
+    //    If paymentType or paymentBrand matches a known network keyword return
+    //    the built-in logo immediately (prevents broken custom URLs overriding it).
     const logo1 = networkFromStr(paymentType);
     if (logo1) return logo1;
 
     const logo2 = networkFromStr(paymentBrand);
     if (logo2) return logo2;
 
-    // Only reach here for custom / unrecognised payment types.
-    // Now check for an explicitly stored logo URL.
+    // 2. Explicit logo URL — custom payment methods (including ones mis-tagged
+    //    as "Other" because the brand couldn't be detected at save time).
+    //    Check this BEFORE the isOtherCardType gate so that a receipt stored as
+    //    paymentType:"Other *3334" but enriched with payment_logo_url (e.g.
+    //    "/payment-logos/DinersClub.png" from the API record) still shows its logo.
     if (isObject) {
       const explicitLogo =
         paymentTypeOrReceipt.payment_logo_url ||
@@ -178,9 +175,14 @@ export const usePaymentDisplay = () => {
         paymentTypeOrReceipt.paymentLogo ||
         paymentTypeOrReceipt.payment_display?.logoUrl ||
         paymentTypeOrReceipt.paymentDisplay?.logoUrl;
-      if (isValidUrl(explicitLogo) && !isOtherCardType(paymentType)) {
+      if (isValidUrl(explicitLogo)) {
         return explicitLogo.trim();
       }
+    }
+
+    // 3. Card type "Other" with no custom logo → generic credit-card icon.
+    if (isOtherCardType(paymentType)) {
+      return LOGO_MAP.other;
     }
 
     if (cardIssuerName && cardIssuerName !== "0") {

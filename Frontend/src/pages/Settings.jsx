@@ -111,6 +111,23 @@ const getPaymentLogo = (name) => {
   return null;
 };
 
+/** Resolve logo for an API payment-method record using card_type (authoritative)
+ *  then icon_image, then keyword detection on the display name. */
+const getApiPaymentMethodLogo = (p) => {
+  if (!p) return null;
+  // card_type integer is authoritative (0=AmEx…5=DinersClub…8=Other)
+  const brand = cardTypeIntToBrand(p.card_type);
+  const brandLogo = brand ? getPaymentLogo(brand) : null;
+  if (brandLogo) return brandLogo;
+  // fall back to icon_image if it's a valid logo path / URL
+  const img = (p.icon_image || "").trim();
+  if (img && (img.startsWith("/payment-logos/") || /^https?:\/\//.test(img) || img.startsWith("data:image"))) {
+    return img;
+  }
+  // last resort: keyword detection on display name
+  return getPaymentLogo(getApiPaymentMethodDisplayName(p));
+};
+
 const normalizePaymentDisplayKey = (value) => {
   const { issuer, last4 } = parsePaymentDisplay(value);
   const base = (issuer || "").replace(/\s+/g, " ").trim();
@@ -497,7 +514,16 @@ const ManageModal = ({ type, onClose }) => {
   const buildReceiptItems = () => {
     if (type === "merchants")  return receiptMerchWImgRaw.filter(m => !isMerchantHidden(m.name)).map(m => ({ key: m.name, name: m.name, logo: m.image || null }));
     if (type === "categories") return receiptCategoriesRaw.filter(c => !hiddenCategories.has(c)).map(c => ({ key: c, name: c, logo: null }));
-    if (type === "payments")   return receiptPaymentsRaw.filter(p => !hiddenPaymentMethods.has(p)).map(p => ({ key: p, name: p, logo: getPaymentLogo(p) }));
+    if (type === "payments") {
+      return receiptPaymentsRaw.filter(p => !hiddenPaymentMethods.has(p)).map(p => {
+        // Try to resolve logo via the API payment methods list (authoritative card_type)
+        const apiRec = (apiPaymentMethods || []).find(ap => {
+          try { return (getApiPaymentMethodDisplayName(ap) || "").toLowerCase() === p.toLowerCase(); } catch { return false; }
+        });
+        const logo = apiRec ? getApiPaymentMethodLogo(apiRec) : getPaymentLogo(p);
+        return { key: p, name: p, logo };
+      });
+    }
     return [];
   };
   const buildCustomItems = () => {
@@ -542,7 +568,7 @@ const ManageModal = ({ type, onClose }) => {
           return {
             key: `api_${apiId}`,
             name: cardName,
-            logo: getPaymentLogo(cardName),
+            logo: getApiPaymentMethodLogo(p),  // Use card_type + icon_image, not just keyword detection
             apiId,
           };
         })
@@ -1522,6 +1548,16 @@ const ReceiptInfoInline = ({ type }) => {
   // Get the correct logo for a payment string
   const getPayLogoResolved = (payStr) => {
     const normalizedKey = normalizePaymentDisplayKey(payStr);
+    // Priority 0: API payment methods card_type integer (most authoritative)
+    const apiRec = (apiPaymentMethods || []).find(ap => {
+      try {
+        return normalizePaymentDisplayKey(getApiPaymentMethodDisplayName(ap)) === normalizedKey;
+      } catch { return false; }
+    });
+    if (apiRec) {
+      const apiLogo = getApiPaymentMethodLogo(apiRec);
+      if (apiLogo) return apiLogo;
+    }
     // Priority 1: localStorage mapping (saved when added via Settings)
     const stored = payCardMap[payStr] || (normalizedKey ? payCardMap[normalizedKey] : null);
     if (stored) {

@@ -5159,40 +5159,40 @@ const handleSelectLogo = (index) => {
           let cardType = cardIssuerName; // Default to issuer name
 
           // Use selectedCardType from localPaymentMethod if available (for logo)
-          if (
-            matchingLocalMethod &&
-            matchingLocalMethod.selectedCardType
-          ) {
-            cardType =
-              matchingLocalMethod.selectedCardType;
+          if (matchingLocalMethod && matchingLocalMethod.selectedCardType) {
+            cardType = matchingLocalMethod.selectedCardType;
           } else {
-            // Try to detect card type from card issuer name for logo detection
-            const issuerLower =
-              cardIssuerName.toLowerCase();
+            // 1. API card_type is authoritative
+            const _apiRecForChange = (apiPaymentMethods || []).find(
+              (p) => apiPaymentMethodMatchesLabel(p, inputValue)
+            );
+            const _brandForChange = _apiRecForChange ? cardTypeIntToBrand(_apiRecForChange.card_type) : null;
 
-            // Check if issuer name contains a known card type
-            if (issuerLower.includes("paypal"))
-              cardType = "PayPal";
-            else if (issuerLower.includes("visa"))
-              cardType = "Visa";
-            else if (issuerLower.includes("master"))
-              cardType = "MasterCard";
-            else if (
-              issuerLower.includes("amex") ||
-              issuerLower.includes("american express")
-            )
-              cardType = "American Express";
-            else if (issuerLower.includes("discover"))
-              cardType = "Discover";
-            else if (issuerLower.includes("diners"))
-              cardType = "Diners Club";
-            else if (issuerLower.includes("debit"))
-              cardType = "Debit Card";
-            else if (issuerLower.includes("cash"))
-              cardType = "Cash";
-            else if (issuerLower === "other")
-              cardType = "Other";
-            // If no card type detected, keep the issuer name (will show generic logo)
+            if (_brandForChange && _brandForChange !== "Other") {
+              cardType = _brandForChange;
+            } else {
+              // 2. Keyword detection on issuer name
+              const issuerLower = cardIssuerName.toLowerCase();
+              if (issuerLower.includes("paypal"))
+                cardType = "PayPal";
+              else if (issuerLower.includes("visa"))
+                cardType = "Visa";
+              else if (issuerLower.includes("master"))
+                cardType = "MasterCard";
+              else if (issuerLower.includes("amex") || issuerLower.includes("american express"))
+                cardType = "American Express";
+              else if (issuerLower.includes("discover"))
+                cardType = "Discover";
+              else if (issuerLower.includes("diners"))
+                cardType = "Diners Club";
+              else if (issuerLower.includes("debit"))
+                cardType = "Debit Card";
+              else if (issuerLower.includes("cash"))
+                cardType = "Cash";
+              else if (issuerLower === "other")
+                cardType = "Other";
+              // If no card type detected, keep the issuer name (will show generic logo)
+            }
           }
 
           // Update paymentType (for API - card type for logo detection)
@@ -5336,122 +5336,69 @@ const handleSelectLogo = (index) => {
                         ),
                       );
                     } else {
-                      // For methods from allPaymentMethods, extract card type from the issuer name for logo
-                      // But use the issuer name as card_issuer_name for display
-                      const baseName =
-                        cardIssuerName.toLowerCase();
-                      let cardType = cardIssuerName; // Default to issuer name
+                      // For methods from allPaymentMethods, resolve cardType for logo detection.
+                      // Priority: 1) API card_type integer  2) issuer keyword  3) receipt lookup  4) saved map
+                      const baseName = cardIssuerName.toLowerCase();
+                      let cardType = cardIssuerName; // Default
 
-                      // Try to detect card type from issuer name
-                      if (baseName.includes("visa"))
+                      // 1. API card_type is authoritative (e.g. card_type=5 → "Diners Club")
+                      const _apiRecForClick = (apiPaymentMethods || []).find(
+                        (p) => apiPaymentMethodMatchesLabel(p, methodString)
+                      );
+                      const _brandFromApi = _apiRecForClick ? cardTypeIntToBrand(_apiRecForClick.card_type) : null;
+
+                      if (_brandFromApi && _brandFromApi !== "Other") {
+                        cardType = _brandFromApi;
+                      } else if (baseName.includes("visa")) {
                         cardType = "Visa";
-                      else if (
-                        baseName.includes("master")
-                      )
+                      } else if (baseName.includes("master")) {
                         cardType = "MasterCard";
-                      else if (
-                        baseName.includes("paypal")
-                      )
+                      } else if (baseName.includes("paypal")) {
                         cardType = "PayPal";
-                      else if (
-                        baseName.includes("amex") ||
-                        baseName.includes(
-                          "american express",
-                        )
-                      )
+                      } else if (baseName.includes("amex") || baseName.includes("american express")) {
                         cardType = "American Express";
-                      else if (
-                        baseName.includes("discover")
-                      )
+                      } else if (baseName.includes("discover")) {
                         cardType = "Discover";
-                      else if (
-                        baseName.includes("diners")
-                      )
+                      } else if (baseName.includes("diners")) {
                         cardType = "Diners Club";
-                      else if (baseName.includes("debit"))
+                      } else if (baseName.includes("debit")) {
                         cardType = "Debit Card";
-                      else if (baseName.includes("cash"))
+                      } else if (baseName.includes("cash")) {
                         cardType = "Cash";
-                      else {
-                        // Issuer name doesn't contain a known card network keyword
-                        // (e.g. "Chase", "Bank of America"). Look up the matching
-                        // receipt to get its actual paymentType (e.g. "MasterCard *7836"),
-                        // which carries the real card network for logo detection.
-                        const matchingReceiptForCardType =
-                          (receipts || []).find(
-                            (r) =>
-                              getPaymentDisplay(r) ===
-                              methodString,
-                          );
+                      } else {
+                        // Issuer name doesn't contain a known card network keyword.
+                        // Look up a matching receipt for its paymentType.
+                        const matchingReceiptForCardType = (receipts || []).find(
+                          (r) => getPaymentDisplay(r) === methodString,
+                        );
                         const receiptPaymentType = (
                           matchingReceiptForCardType?.paymentType ||
                           matchingReceiptForCardType?.payment_type ||
                           ""
-                        )
-                          .replace(/\s*\*\d{3,4}$/, "")
-                          .trim();
+                        ).replace(/\s*\*\d{3,4}$/, "").trim();
 
-                        // Use the receipt's card network type if it's a known network;
-                        // otherwise fall back to the issuer name so the bank logo
-                        // detection in getPaymentLogo can still match bank names.
-                        const receiptTypeLower =
-                          receiptPaymentType.toLowerCase();
-                        if (
-                          receiptTypeLower.includes(
-                            "visa",
-                          )
-                        )
+                        const receiptTypeLower = receiptPaymentType.toLowerCase();
+                        if (receiptTypeLower.includes("visa"))
                           cardType = "Visa";
-                        else if (
-                          receiptTypeLower.includes(
-                            "master",
-                          )
-                        )
+                        else if (receiptTypeLower.includes("master"))
                           cardType = "MasterCard";
-                        else if (
-                          receiptTypeLower.includes(
-                            "paypal",
-                          )
-                        )
+                        else if (receiptTypeLower.includes("paypal"))
                           cardType = "PayPal";
-                        else if (
-                          receiptTypeLower.includes(
-                            "amex",
-                          ) ||
-                          receiptTypeLower.includes(
-                            "american express",
-                          )
-                        )
+                        else if (receiptTypeLower.includes("amex") || receiptTypeLower.includes("american express"))
                           cardType = "American Express";
-                        else if (
-                          receiptTypeLower.includes(
-                            "discover",
-                          )
-                        )
+                        else if (receiptTypeLower.includes("discover"))
                           cardType = "Discover";
-                        else if (
-                          receiptTypeLower.includes(
-                            "diners",
-                          )
-                        )
+                        else if (receiptTypeLower.includes("diners"))
                           cardType = "Diners Club";
-                        else if (
-                          receiptTypeLower.includes(
-                            "debit",
-                          )
-                        )
+                        else if (receiptTypeLower.includes("debit"))
                           cardType = "Debit Card";
                         else {
-                          // Check Settings-saved card type map before falling back to bank detection
                           const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
                           cardType = _pct[methodString] || cardIssuerName;
                         }
                       }
 
-                      handleFieldChange(
-                        "paymentType",
-                        cardType,
-                      );
+                      handleFieldChange("paymentType", cardType);
                       handleFieldChange(
                         "card_issuer_name",
                         storedCardIssuerName(cardIssuerName, cardType),
