@@ -3055,7 +3055,7 @@ const handleFieldChange = (field, value) => {
         receipt_category: parseInt(category) || 0,
         product_date: productDate,
         expense_type: expenseType || formData.expense_type || "",
-        receipt_image: combinedImageUrls,
+        receipt_image: "0",
         store_image: getMerchantImage(formData.storeName) || detectedMerchantLogo || "",
         notes: "",
         receipt_forwarded: "0",

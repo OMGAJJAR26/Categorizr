@@ -7,6 +7,7 @@ import PdfThumbnail from "../components/receipts/PdfThumbnail";
 import {
   splitMediaField,
   buildCombinedMediaField,
+  collectReceiptMediaUrls,
   normalizeMediaUrl,
   mediaUrlsEqual,
   replaceUrlInMediaCsv,
@@ -675,6 +676,9 @@ useEffect(() => {
       // from resetting editedReceipt and wiping the newly added tax entry.
       if (lastInitReceiptIdRef.current === selectedReceipt.id) return;
       lastInitReceiptIdRef.current = selectedReceipt.id;
+
+      setAdditionalPhotoUrls([]);
+      pendingAnnotatedMediaRef.current = null;
 
       // Enrich receipt_tax_values without overwriting stored amounts or effective rates.
       const enrichedTaxValues = enrichReceiptTaxValues(
@@ -2960,13 +2964,12 @@ useEffect(() => {
         setIsSaving(false);
         return;
       }
-      const combinedReceiptImages =
-        mediaUrlsForSave.length > 0 ? mediaUrlsForSave.join(",") : "0";
+      const combinedReceiptImages = buildCombinedMediaField(mediaUrlsForSave);
 
       const updatedData = {
         ...selectedReceipt, // Include all original fields
         ...editedReceipt, // Override with edited fields
-        receipt_image: combinedReceiptImages,
+        receipt_image: "0",
         emailAttachment: combinedReceiptImages,
         receipt_tag: receiptTag,
         receipt_tax_values: receiptTaxValuesPayload,
@@ -3204,21 +3207,15 @@ useEffect(() => {
 
     const finalPaymentTypeForAPI = basePaymentType || paymentType;
 
-    // Promote additionalPhotoUrls[0] into emailAttachment if that slot is a duplicate
-    const si2 = normalizeMediaUrl(editedReceipt.receipt_image  ?? selectedReceipt.receipt_image  ?? "") || "0";
-    const ea2 = normalizeMediaUrl(editedReceipt.emailAttachment ?? selectedReceipt.emailAttachment ?? "") || "0";
-    const emptyV2 = new Set(["0", "null", "", "undefined"]);
-    let finalEA2 = ea2;
-    if ((emptyV2.has(ea2) || ea2 === si2) && additionalPhotoUrls.length > 0) {
-      finalEA2 = normalizeMediaUrl(additionalPhotoUrls[0]) || ea2;
-    }
+    const mediaUrlsForSave = collectReceiptMediaUrlsForSave();
+    const combinedReceiptImages = buildCombinedMediaField(mediaUrlsForSave);
 
     // Merge edited data with original receipt fields
     const updatedData = {
       ...selectedReceipt,
       ...editedReceipt,
-      receipt_image: si2,
-      emailAttachment: finalEA2,
+      receipt_image: "0",
+      emailAttachment: combinedReceiptImages,
       receipt_tag: receiptTag,
       receipt_tax_values: receiptTaxValuesPayload,
       store_image: storeImageToSave,
@@ -6121,12 +6118,12 @@ Thank you for using our receipt management system.
                           // images (and newly added photos) are reflected
                           // immediately in the thumbnails without waiting for
                           // a server round-trip.
-                          const urls = [
-                            ...new Set([
-                              ...(splitMediaField(editedReceipt.emailAttachment ?? r.emailAttachment)),
-                              ...(splitMediaField(editedReceipt.receipt_image ?? r.receipt_image)),
-                            ]),
-                          ].filter((url) => {
+                          const urls = collectReceiptMediaUrls({
+                            emailAttachment:
+                              editedReceipt.emailAttachment ?? r.emailAttachment,
+                            receipt_image:
+                              editedReceipt.receipt_image ?? r.receipt_image,
+                          }).filter((url) => {
                             if (!url || typeof url !== "string") return false;
                             const trimmed = url.trim();
                             if (

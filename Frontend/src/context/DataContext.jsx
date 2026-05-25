@@ -9,6 +9,7 @@ import {
   normalizeExpenseCategoryApiList,
 } from "../utils/expenseCategories";
 import { enrichReceiptTaxValues } from "../utils/taxTypeUtils";
+import { dedupeReceiptMediaAcrossReceipts } from "../utils/mediaUrlUtils";
 import { isMerchantSupersededByApi } from "../utils/merchantListUtils";
 import {
   buildApiPaymentMethodPayload,
@@ -397,6 +398,19 @@ export const DataProvider = ({ children }) => {
         const merchants = Array.isArray(data) ? data.filter(m => m.store_name) : [];
         console.log("%c[Merchants] fetchApiMerchants response:", "color:#6366f1;font-weight:bold", merchants);
         setApiMerchants(merchants);
+        // Server-backed stores must stay visible in Manage Merchants even if the name
+        // was previously added to cat_hidden_merchants via receipt/default cleanup.
+        setHiddenMerchants((prev) => {
+          const normalizeKey = (value) =>
+            String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+          const apiKeys = new Set(
+            merchants.map((m) => normalizeKey(m.store_name)).filter(Boolean)
+          );
+          const next = new Set([...prev].filter((h) => !apiKeys.has(normalizeKey(h))));
+          if (next.size === prev.size) return prev;
+          localStorage.setItem("cat_hidden_merchants", JSON.stringify([...next]));
+          return next;
+        });
         purgeCustomMerchantsMatchingApi(merchants);
         return merchants;
       }
@@ -1277,10 +1291,14 @@ export const DataProvider = ({ children }) => {
               };
             })
         : [];
-      
+
+      // Remove cross-receipt media contamination from uploadmediaV1 / stale API data.
+      const formattedReceiptsDeduped =
+        dedupeReceiptMediaAcrossReceipts(formattedReceipts);
+
       // Merge in locally tracked QuickBooks-linked state, so users can see which
       // receipts have already been sent to QuickBooks even after a reload.
-      let receiptsWithIntegrations = formattedReceipts;
+      let receiptsWithIntegrations = formattedReceiptsDeduped;
       try {
         const storedQbIds = JSON.parse(
           localStorage.getItem("qbLinkedReceipts") || "[]"
@@ -1291,7 +1309,7 @@ export const DataProvider = ({ children }) => {
             : []
         );
 
-        receiptsWithIntegrations = formattedReceipts.map((r) =>
+        receiptsWithIntegrations = formattedReceiptsDeduped.map((r) =>
           qbIdSet.has(r.id?.toString())
             ? { ...r, quickbooksLinked: true }
             : r
@@ -1301,7 +1319,7 @@ export const DataProvider = ({ children }) => {
           "Failed to read QuickBooks-linked receipts from localStorage:",
           e
         );
-        receiptsWithIntegrations = formattedReceipts;
+        receiptsWithIntegrations = formattedReceiptsDeduped;
       }
 
 
@@ -2037,7 +2055,7 @@ setMerchantsWithImages(
           }, 0);
         }
 
-        return updatedReceipts;
+        return dedupeReceiptMediaAcrossReceipts(updatedReceipts);
       });
 
       if (!success) {
@@ -2050,7 +2068,7 @@ setMerchantsWithImages(
         const updatedReceipts = prevReceipts.map(receipt =>
           receipt.id === receiptId ? { ...receipt, ...updates } : receipt
         );
-        return updatedReceipts;
+        return dedupeReceiptMediaAcrossReceipts(updatedReceipts);
       });
       return true;
     }
@@ -2313,7 +2331,7 @@ setMerchantsWithImages(
     ),
     // API merchants are the source of truth (before local custom list)
     ...apiMerchants
-      .filter((m) => m.store_name && !isMerchantHidden(m.store_name) && !_miLower.has((m.store_name || "").toLowerCase()))
+      .filter((m) => m.store_name && !_miLower.has((m.store_name || "").toLowerCase()))
       .map((m) => ({ name: m.store_name, image: m.store_image_url || "" })),
     ...customMerchants
       .filter(

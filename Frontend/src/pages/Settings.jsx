@@ -2691,7 +2691,7 @@ const isBlockedTaxRateInput = (val) => {
       const rKeys = new Set(rItems.map(m => m.name.toLowerCase()));
       // API merchants are the source of truth (GET /userstore/getStorev1)
       const apiItems = (apiMerchants || [])
-        .filter(m => m.store_name && !rKeys.has((m.store_name || "").toLowerCase()) && !isMerchantHidden(m.store_name))
+        .filter(m => m.store_name && !rKeys.has((m.store_name || "").toLowerCase()))
         .map(m => {
           const apiId = m?.id ?? m?.store_id ?? m?.fk_store_id ?? null;
           return {

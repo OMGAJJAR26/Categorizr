@@ -95,3 +95,88 @@ export function isPdfUrl(url) {
     /\.pdf(\?|$)/i.test(url) || /^data:application\/pdf/i.test(url)
   );
 }
+
+/** Email / forwarded receipts keep server media as-is. */
+export function isProtectedReceiptMedia(receipt) {
+  if (!receipt) return false;
+  const hasIncomingEmailId =
+    receipt.fk_incoming_email_id &&
+    receipt.fk_incoming_email_id !== "0" &&
+    receipt.fk_incoming_email_id !== 0;
+  const isForwardedReceipt =
+    receipt.receipt_forwarded === "1" || receipt.receipt_forwarded === 1;
+  return !!(hasIncomingEmailId || isForwardedReceipt);
+}
+
+/** Higher rank = newer receipt (wins duplicate media URLs). */
+export function receiptMediaRank(receipt) {
+  const id = parseInt(receipt?.id, 10);
+  const date = parseInt(receipt?.product_date, 10);
+  const idPart = Number.isFinite(id) ? id : 0;
+  const datePart = Number.isFinite(date) ? date : 0;
+  return idPart * 1e10 + datePart;
+}
+
+/** Ordered unique media URLs from a receipt's image fields. */
+export function collectReceiptMediaUrls(receipt) {
+  if (!receipt) return [];
+  const ordered = [];
+  const seen = new Set();
+  [...splitMediaField(receipt.emailAttachment), ...splitMediaField(receipt.receipt_image)].forEach(
+    (url) => {
+      if (!url || seen.has(url)) return;
+      seen.add(url);
+      ordered.push(url);
+    }
+  );
+  return ordered;
+}
+
+/**
+ * When uploadmediaV1 pollutes older receipts, the same CDN URL can appear on
+ * multiple receipts. Assign each URL to the newest receipt (by id, then date).
+ */
+export function dedupeReceiptMediaAcrossReceipts(receipts) {
+  if (!Array.isArray(receipts) || receipts.length <= 1) return receipts;
+
+  const urlOwner = new Map();
+
+  receipts.forEach((receipt, index) => {
+    if (isProtectedReceiptMedia(receipt)) return;
+    const rank = receiptMediaRank(receipt);
+    collectReceiptMediaUrls(receipt).forEach((url) => {
+      const prev = urlOwner.get(url);
+      if (
+        !prev ||
+        rank > prev.rank ||
+        (rank === prev.rank && index > prev.index)
+      ) {
+        urlOwner.set(url, { rank, index });
+      }
+    });
+  });
+
+  return receipts.map((receipt, index) => {
+    if (isProtectedReceiptMedia(receipt)) return receipt;
+
+    const owned = collectReceiptMediaUrls(receipt).filter((url) => {
+      const owner = urlOwner.get(url);
+      return owner && owner.index === index;
+    });
+
+    const hadReceiptImageUrl =
+      receipt.receipt_image &&
+      receipt.receipt_image.toString().trim() !== "" &&
+      receipt.receipt_image !== "0";
+
+    if (owned.length === 0) {
+      return { ...receipt, receipt_image: "0", emailAttachment: "0" };
+    }
+
+    const emailAttachment = buildCombinedMediaField(owned);
+    const receipt_image =
+      hadReceiptImageUrl && owned.length === 1 ? owned[0] : "0";
+
+    return { ...receipt, receipt_image, emailAttachment };
+  });
+}
