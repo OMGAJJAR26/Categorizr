@@ -198,6 +198,7 @@ const ReceiptDetail = ({
   const [newCardIssuerName, setNewCardIssuerName] = useState("");
   const [newLast4Digits, setNewLast4Digits] = useState("");
   const [newPaymentCategoryType, setNewPaymentCategoryType] = useState("");
+  const [payModalError, setPayModalError] = useState(null);
   const [localPaymentMethods, setLocalPaymentMethods] = useState([]);
   const [showPayMethodConfirm, setShowPayMethodConfirm] = useState(false);
   const [pendingPayMethodFn, setPendingPayMethodFn] = useState(null);
@@ -1401,6 +1402,7 @@ useEffect(() => {
   // Payment card types are now defined in EditPaymentMethodModal (PAYMENT_CARD_TYPES)
 
   const handleOpenAddPaymentModal = () => {
+    setPayModalError(null);
     setNewPaymentCardType("");
     setNewCardIssuerName("");
     setNewLast4Digits("");
@@ -1417,6 +1419,7 @@ useEffect(() => {
     setNewPaymentCategoryType("");
     setShowAddPaymentModal(false);
     setPayModalEditMode(null);
+    setPayModalError(null);
   };
 
   // ── Payment method delete from dropdown ───────────────────────────────────
@@ -1476,19 +1479,21 @@ useEffect(() => {
     const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
     setNewPaymentCategoryType(_pet[method] || "");
     setPayModalEditMode({ name: method, apiId });
+    setPayModalError(null);
     setShowAddPaymentModal(true);
     setShowPaymentDropdown(false);
   };
 
   const handleAddPaymentMethod = async () => {
     if (!newPaymentCardType || newPaymentCardType.trim().length === 0) {
-      setToast({ isVisible: true, message: "Select Card Type", type: "error" });
+      setPayModalError("Select Card Type");
       return;
     }
     if (!newLast4Digits || newLast4Digits.trim().replace(/\D/g, "").length < 4) {
-      setToast({ isVisible: true, message: "Please enter last 4 digits of card number", type: "error" });
+      setPayModalError("Please enter last 4 digits of card number");
       return;
     }
+    setPayModalError(null);
 
     // Resolve card type display name
     const cardTypeLower = newPaymentCardType.trim().toLowerCase();
@@ -1570,7 +1575,7 @@ useEffect(() => {
 
     // ── ADD MODE ─────────────────────────────────────────────────────────────
     if (paymentMethodDuplicateExists(selectedCardTypeForLogo, last4)) {
-      setToast({ isVisible: true, message: "Payment Method already exists", type: "error" });
+      setPayModalError("Payment Method already exists");
       return;
     }
     setPendingPayMethodFn(() => async () => {
@@ -6437,12 +6442,13 @@ Thank you for using our receipt management system.
         cardIssuerName={newCardIssuerName}
         last4Digits={newLast4Digits}
         categoryType={newPaymentCategoryType}
+        generalError={payModalError}
         onClose={handleCloseAddPaymentModal}
         onSave={handleAddPaymentMethod}
-        onCardTypeChange={setNewPaymentCardType}
-        onIssuerChange={setNewCardIssuerName}
-        onLast4Change={setNewLast4Digits}
-        onCategoryChange={setNewPaymentCategoryType}
+        onCardTypeChange={(v) => { setNewPaymentCardType(v); setPayModalError(null); }}
+        onIssuerChange={(v) => { setNewCardIssuerName(v); setPayModalError(null); }}
+        onLast4Change={(v) => { setNewLast4Digits(v); setPayModalError(null); }}
+        onCategoryChange={(v) => { setNewPaymentCategoryType(v); setPayModalError(null); }}
       />
 
       {/* Payment method add/edit confirmation (same copy pattern as Settings) */}

@@ -93,11 +93,8 @@ export default function EditPaymentMethodModal({
   const inputCls =
     "w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
 
-  const saveDisabled =
-    isSaving ||
-    !cardType ||
-    (last4Digits || "").replace(/\D/g, "").length < 4 ||
-    !!duplicateError;
+  // Keep Save enabled for incomplete last4 (Settings parity); validation runs in onSave.
+  const saveDisabled = isSaving || !!duplicateError;
 
   return (
     <AnimatePresence>
@@ -252,9 +249,10 @@ export default function EditPaymentMethodModal({
                 </select>
               </div>
 
-              {/* ── General error ──────────────────────────────────────────── */}
+              {/* ── Validation error (e.g. last 4 digits) ─────────────────── */}
               {generalError && (
-                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+                <div className="mb-4 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+                  <AlertCircle size={14} />
                   {generalError}
                 </div>
               )}

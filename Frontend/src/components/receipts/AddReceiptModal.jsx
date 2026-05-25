@@ -183,6 +183,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const [newCardIssuerName, setNewCardIssuerName] = useState("");
   const [newLast4Digits, setNewLast4Digits] = useState("");
   const [newPaymentCategoryType, setNewPaymentCategoryType] = useState(""); // Business/Personal
+  const [payModalError, setPayModalError] = useState(null);
   const [localPaymentMethods, setLocalPaymentMethods] = useState([]); // Local list of payment methods
   const [uploadedMediaUrls, setUploadedMediaUrls] = useState([]);
 
@@ -3622,6 +3623,7 @@ const handleSelectLogo = (index) => {
   // Handle opening Add Payment Method modal
   const handleOpenAddPaymentModal = () => {
     setPayModalEditMode(null);
+    setPayModalError(null);
     setNewPaymentCardType(
       formData.paymentType ? formData.paymentType.split(" *")[0] : "",
     );
@@ -3643,7 +3645,7 @@ const handleSelectLogo = (index) => {
     setNewPaymentCategoryType("");
     setPayModalEditMode(null);
     setShowAddPaymentModal(false);
-    setError(null);
+    setPayModalError(null);
   };
 
   // ── Payment method helpers (same logic as ReceiptDetail) ──────────────────
@@ -3669,6 +3671,7 @@ const handleSelectLogo = (index) => {
     const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
     setNewPaymentCategoryType(_pet[method] || "");
     setPayModalEditMode({ name: method, apiId });
+    setPayModalError(null);
     setShowAddPaymentModal(true);
     setShowPaymentDropdown(false);
   };
@@ -3707,17 +3710,18 @@ const handleSelectLogo = (index) => {
   // Handle adding new payment method
   const handleAddPaymentMethod = async () => {
     if (!newPaymentCardType || newPaymentCardType.trim().length === 0) {
-      setError("Select Card Type");
+      setPayModalError("Select Card Type");
       return;
     }
     if (!newLast4Digits || newLast4Digits.trim().replace(/\D/g, "").length < 4) {
-      setError("Please enter last 4 digits of card number");
+      setPayModalError("Please enter last 4 digits of card number");
       return;
     }
     if (paymentDuplicateError) {
-      setError("Payment Method already exists");
+      setPayModalError("Payment Method already exists");
       return;
     }
+    setPayModalError(null);
 
     const customIssuer = newCardIssuerName.trim();
     const cardTypeLower = newPaymentCardType.trim().toLowerCase();
@@ -3750,7 +3754,7 @@ const handleSelectLogo = (index) => {
     // Skip receipt-based duplicate check in edit mode — the receipts that use this card
     // ARE the card being edited; finding them is expected, not a duplicate.
     if (!payModalEditMode && paymentMethodDuplicateExists(selectedCardTypeForLogo, last4Final)) {
-      setError("Payment Method already exists");
+      setPayModalError("Payment Method already exists");
       return;
     }
 
@@ -6247,13 +6251,13 @@ const handleSelectLogo = (index) => {
         last4Digits={newLast4Digits}
         categoryType={newPaymentCategoryType}
         duplicateError={paymentDuplicateError}
-        generalError={error}
+        generalError={payModalError}
         onClose={handleCloseAddPaymentModal}
         onSave={handleAddPaymentMethod}
-        onCardTypeChange={setNewPaymentCardType}
-        onIssuerChange={setNewCardIssuerName}
-        onLast4Change={setNewLast4Digits}
-        onCategoryChange={setNewPaymentCategoryType}
+        onCardTypeChange={(v) => { setNewPaymentCardType(v); setPayModalError(null); }}
+        onIssuerChange={(v) => { setNewCardIssuerName(v); setPayModalError(null); }}
+        onLast4Change={(v) => { setNewLast4Digits(v); setPayModalError(null); }}
+        onCategoryChange={(v) => { setNewPaymentCategoryType(v); setPayModalError(null); }}
       />
 
       {/* Edit Merchant Modal - Overlay on top of Add Receipt Modal */}
