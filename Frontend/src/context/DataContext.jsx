@@ -2315,7 +2315,13 @@ setMerchantsWithImages(
   ].sort((a, b) =>
     (a || "").toString().toLowerCase().localeCompare((b || "").toString().toLowerCase())
   );
-  const _miLower = new Set(receiptMerchWImgRaw.map((m) => (m.name || "").toLowerCase()));
+  const visibleReceiptMerchWImg = receiptMerchWImgRaw.filter(
+    (m) =>
+      !isMerchantHidden(m.name) && !isMerchantSupersededByApi(m.name, apiMerchants)
+  );
+  const _miLower = new Set(
+    visibleReceiptMerchWImg.map((m) => (m.name || "").toLowerCase())
+  );
   const _miApiLower = new Set(
     (apiMerchants || []).map((m) => (m?.store_name || "").trim().toLowerCase()).filter(Boolean)
   );
@@ -2325,10 +2331,7 @@ setMerchantsWithImages(
     ...customMerchants.map((m) => (m || "").toLowerCase()),
   ]);
   const mergedMerchantsWithImages = [
-    ...receiptMerchWImgRaw.filter(
-      (m) =>
-        !isMerchantHidden(m.name) && !isMerchantSupersededByApi(m.name, apiMerchants)
-    ),
+    ...visibleReceiptMerchWImg,
     // API merchants are the source of truth (before local custom list)
     ...apiMerchants
       .filter((m) => m.store_name && !_miLower.has((m.store_name || "").toLowerCase()))

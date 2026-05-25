@@ -18,6 +18,21 @@ export const findApiMerchantByName = (name, apiList) =>
   );
 
 /**
+ * True when apiName extends base as a concatenated rename (Target → Targetttt),
+ * not a distinct store that shares a prefix (Walmart vs Walmart AA).
+ */
+export const isConcatenatedApiRename = (baseName, apiName) => {
+  const base = normalizeMerchantKey(baseName);
+  const api = normalizeMerchantKey(apiName);
+  if (!base || !api || api === base || !api.startsWith(base) || api.length <= base.length) {
+    return false;
+  }
+  const suffix = api.slice(base.length);
+  // A space after the base means a separate qualifier (e.g. "Walmart AA"), not a rename.
+  return !/^\s/.test(suffix);
+};
+
+/**
  * Find API store renamed from a default/receipt name (e.g. Target → Targetttt).
  * Used when fk_store_meta_id is 0 after rename.
  */
@@ -29,7 +44,7 @@ export const findRenamedApiMerchant = (oldName, apiList) => {
       const apiName = normalizeMerchantKey(m?.store_name);
       if (!apiName) return false;
       if (apiName === base) return true;
-      return apiName.startsWith(base) && apiName.length > base.length;
+      return isConcatenatedApiRename(base, apiName);
     }) || null
   );
 };
@@ -44,7 +59,7 @@ export const isMerchantSupersededByApi = (name, apiList) => {
   return (apiList || []).some((m) => {
     const apiName = normalizeMerchantKey(m?.store_name);
     if (!apiName || apiName === base) return false;
-    return apiName.startsWith(base) && apiName.length > base.length;
+    return isConcatenatedApiRename(base, apiName);
   });
 };
 
