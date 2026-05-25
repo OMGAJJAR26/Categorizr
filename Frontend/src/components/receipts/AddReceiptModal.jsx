@@ -39,6 +39,7 @@ import {
   normalizeMediaUrl as normalizeMediaUrlCore,
   replaceUrlInMediaCsv,
   isPdfUrl,
+  sanitizeUploadFile,
 } from "../../utils/mediaUrlUtils";
 import PdfThumbnail from "./PdfThumbnail";
 import { findRenamedApiMerchant } from "../../utils/merchantListUtils";
@@ -742,26 +743,6 @@ const [localMerchants, setLocalMerchants] = useState([]);
         });
       }
     }
-  }, []);
-
-  // Sanitize a file's name before upload so the PHP backend stores a safe GCS
-  // object key.  macOS screenshot filenames contain U+202F (narrow no-break
-  // space) which the backend preserves literally, producing un-fetchable URLs.
-  // We rename to "image_<timestamp>_<random>.<ext>" – the same style the
-  // mobile apps use – to guarantee a safe filename regardless of the source.
-  const sanitizeUploadFile = useCallback((file) => {
-    const original = file.name || "";
-    const dotIdx = original.lastIndexOf(".");
-    const rawExt = dotIdx >= 0 ? original.slice(dotIdx + 1).toLowerCase() : "";
-    const safeExts = ["jpg", "jpeg", "png", "gif", "webp", "pdf", "heic", "heif", "bmp", "tiff", "tif"];
-    const ext = safeExts.includes(rawExt) ? rawExt : (file.type === "application/pdf" ? "pdf" : "jpg");
-    const ts = Date.now();
-    const rnd = Math.random().toString(36).slice(2, 8);
-    const safeName = `image_${ts}_${rnd}.${ext}`;
-    // Only rename if the original has non-ASCII or non-URL-safe characters
-    const needsRename = /[^\x20-\x7E]/.test(original) || /[%#?&=+]/.test(original);
-    if (!needsRename) return file;
-    return new File([file], safeName, { type: file.type, lastModified: file.lastModified });
   }, []);
 
   // Upload files to /user/uploadmediaV1 and return array of fullImageUrls

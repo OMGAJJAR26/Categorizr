@@ -13,6 +13,7 @@ import {
   replaceUrlInMediaCsv,
   getPdfProxyUrl,
   isPdfUrl,
+  sanitizeUploadFile,
 } from "../utils/mediaUrlUtils";
 import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationDialog";
 import "../App.css";
@@ -2415,7 +2416,7 @@ useEffect(() => {
   const uploadPhotoToMedia = async (file) => {
     const token = localStorage.getItem("token");
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", sanitizeUploadFile(file));
     const response = await fetch("/api/user/uploadmediaV1", {
       method: "POST",
       headers: { Accesstoken: token },

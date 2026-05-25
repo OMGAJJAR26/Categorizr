@@ -80,6 +80,44 @@ export function replaceUrlInMediaCsv(csv, normalizedOld, replacement) {
   return next.join(",");
 }
 
+const SAFE_UPLOAD_EXTENSIONS = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "webp",
+  "pdf",
+  "heic",
+  "heif",
+  "bmp",
+  "tiff",
+  "tif",
+]);
+
+/**
+ * Rename a File before upload so the backend stores a safe GCS object key.
+ * Commas/spaces in names like "Costco - Feb 27, 2026.pdf" break comma-separated
+ * receipt_image fields and can produce un-fetchable CDN URLs.
+ */
+export function sanitizeUploadFile(file) {
+  if (!file) return file;
+  const original = file.name || "";
+  const dotIdx = original.lastIndexOf(".");
+  const rawExt = dotIdx >= 0 ? original.slice(dotIdx + 1).toLowerCase() : "";
+  const ext = SAFE_UPLOAD_EXTENSIONS.has(rawExt)
+    ? rawExt
+    : file.type === "application/pdf"
+      ? "pdf"
+      : "jpg";
+  const ts = Date.now();
+  const rnd = Math.random().toString(36).slice(2, 8);
+  const safeName = `image_${ts}_${rnd}.${ext}`;
+  return new File([file], safeName, {
+    type: file.type,
+    lastModified: file.lastModified,
+  });
+}
+
 export function getPdfProxyUrl(url) {
   if (!url || typeof url !== "string") return "";
   const trimmed = url.trim();
