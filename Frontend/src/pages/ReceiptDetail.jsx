@@ -63,6 +63,7 @@ import {
 } from "../utils/taxTypeUtils";
 import { buildExpenseCategoryOptions } from "../utils/expenseCategories";
 import { findRenamedApiMerchant } from "../utils/merchantListUtils";
+import { containsEmoji } from "../utils/emojiUtils";
 
 // Default payment methods
 const defaultPaymentMethods = [
@@ -207,6 +208,7 @@ const ReceiptDetail = ({
   const [newMerchantName, setNewMerchantName] = useState("");
   const [newMerchantLogo, setNewMerchantLogo] = useState("");
   const [isSavingMerchant, setIsSavingMerchant] = useState(false);
+  const [addMerchantError, setAddMerchantError] = useState(null);
   const [logoOptions, setLogoOptions] = useState([]);
   const [selectedLogoIndex, setSelectedLogoIndex] = useState(null);
   const [isFetchingLogos, setIsFetchingLogos] = useState(false);
@@ -353,6 +355,16 @@ const ReceiptDetail = ({
     });
     return Array.from(uniqueMap.values());
   }, [merchantsWithImages, localMerchants]);
+
+  const merchantExists = (name, excludeName = "") => {
+    const normalized = (name || "").trim().toLowerCase();
+    const excluded = (excludeName || "").trim().toLowerCase();
+    if (!normalized) return false;
+    return allMerchantsWithImages.some((m) => {
+      const mn = (m.name || "").trim().toLowerCase();
+      return mn === normalized && mn !== excluded;
+    });
+  };
 
   // Get merchant image by name
   const getMerchantImage = (name) => {
@@ -2161,6 +2173,7 @@ useEffect(() => {
     setNewMerchantLogo("");
     setLogoOptions([]);
     setSelectedLogoIndex(null);
+    setAddMerchantError(null);
     setShowAddMerchantModal(true);
     setShowMerchantDropdown(false);
   };
@@ -2170,6 +2183,7 @@ useEffect(() => {
     setNewMerchantLogo("");
     setLogoOptions([]);
     setSelectedLogoIndex(null);
+    setAddMerchantError(null);
     setShowAddMerchantModal(false);
   };
 
@@ -2191,17 +2205,63 @@ useEffect(() => {
     }
   };
 
-  const handleAddMerchant = () => {
-    if (!newMerchantName || newMerchantName.trim().length === 0) return;
-    // Add merchant to local list only — the logo will be persisted when the
-    // receipt is saved. No separate DB receipt should be created here as that
-    // causes a blank duplicate receipt in the database.
-    const newMerchant = { name: newMerchantName.trim(), image: newMerchantLogo.trim() };
-    setLocalMerchants((prev) => [...prev, newMerchant]);
-    handleFieldChange("storeName", newMerchant.name);
-    handleFieldChange("store_image", newMerchant.image || "");
-    handleCloseAddMerchantModal();
-    setToast({ isVisible: true, message: "Merchant added successfully!", type: "success" });
+  const handleAddMerchant = async () => {
+    const name = (newMerchantName || "").trim();
+    const normalizedName = name.toLowerCase();
+
+    if (!name) {
+      setAddMerchantError("Please enter Merchant Name");
+      return;
+    }
+
+    if (containsEmoji(name)) {
+      setAlertMsg("Emojis are not allowed in merchant names. Please use plain text.");
+      return;
+    }
+
+    if (merchantExists(name)) {
+      setAddMerchantError("Merchant already exists");
+      return;
+    }
+
+    const selectedLogoUrl =
+      selectedLogoIndex !== null
+        ? logoOptions[selectedLogoIndex]?.storeUrl || ""
+        : newMerchantLogo || "";
+
+    setIsSavingMerchant(true);
+    setAddMerchantError(null);
+    try {
+      const addResult = await addApiMerchant(name, selectedLogoUrl);
+      if (!addResult?.ok) {
+        setAddMerchantError(addResult?.error || "Failed to add merchant");
+        return;
+      }
+
+      if (selectedLogoUrl) saveMerchLogo(name, selectedLogoUrl);
+      setLocalMerchants((prev) => {
+        const existingIndex = prev.findIndex(
+          (m) => (m.name || "").toString().trim().toLowerCase() === normalizedName
+        );
+        if (existingIndex >= 0) {
+          const next = [...prev];
+          next[existingIndex] = {
+            ...next[existingIndex],
+            name,
+            image: selectedLogoUrl || next[existingIndex].image || "",
+          };
+          return next;
+        }
+        return [...prev, { name, image: selectedLogoUrl || "" }];
+      });
+
+      handleFieldChange("storeName", name);
+      handleFieldChange("store_image", selectedLogoUrl || "");
+      handleCloseAddMerchantModal();
+      setToast({ isVisible: true, message: "Merchant added successfully!", type: "success" });
+    } finally {
+      setIsSavingMerchant(false);
+    }
   };
 
   // ── Edit Merchant handlers ────────────────────────────────────────────────
@@ -6736,6 +6796,11 @@ Thank you for using our receipt management system.
                     </div>
                   )}
                 </div>
+                {addMerchantError && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+                    {addMerchantError}
+                  </div>
+                )}
                 {/* Buttons */}
                 <div className="flex justify-end gap-3 mt-4">
                   <button
@@ -6748,7 +6813,7 @@ Thank you for using our receipt management system.
                   <button
                     type="button"
                     onClick={handleAddMerchant}
-                    disabled={!newMerchantName || isSavingMerchant}
+                    disabled={!newMerchantName || isSavingMerchant || isFetchingLogos}
                     className="px-5 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     {isSavingMerchant ? "Adding..." : "Add Merchant"}
