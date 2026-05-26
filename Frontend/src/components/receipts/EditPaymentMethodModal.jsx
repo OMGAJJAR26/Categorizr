@@ -276,7 +276,7 @@ export default function EditPaymentMethodModal({
                   {isSaving
                     ? "Saving…"
                     : editMode
-                      ? "Save Changes"
+                      ? "Save"
                       : "Add Payment Method"}
                 </button>
               </div>

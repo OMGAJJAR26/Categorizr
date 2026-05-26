@@ -2998,7 +2998,7 @@ const isBlockedTaxRateInput = (val) => {
                 ))}
               </div>
             </div>
-            <button type="button" onClick={handleAdd}  className={`px-4 py-2 rounded-xl text-white text-sm font-semibold self-start ${colors.btn}`}>Add</button>
+            <button type="button" onClick={handleAdd}  className={`px-4 py-2 rounded-xl text-white text-sm font-semibold self-start ${colors.btn}`}>{payEditMode ? "Save" : "Add"}</button>
           </>
         )}
 
