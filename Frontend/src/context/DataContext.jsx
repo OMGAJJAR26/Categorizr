@@ -21,6 +21,7 @@ import {
   getApiPaymentMethodCacheKey,
   getApiPaymentMethodDisplayName,
   getLast4FromPaymentApiRecord,
+  mergePaymentMethodLabels,
   normalizeApiPaymentMethodInput,
   paymentMethodPayloadToQuery,
 } from "../utils/paymentMethodUtils";
@@ -213,6 +214,8 @@ export const DataProvider = ({ children }) => {
   // that re-contaminate the same receipts are always fixed.  Give up after 5
   // consecutive failed attempts to avoid hammering a broken endpoint.
   const healAttemptMapRef = useRef(new Map());
+  /** Raw receipt rows from the last fetch (before cross-receipt media dedupe). */
+  const lastRawReceiptsRef = useRef([]);
   const [error, setError] = useState(null);
   const [receiptCategory, setReceiptCategory] = useState([]);
   const [expenseType, setExpenseType] = useState([]);
@@ -1264,6 +1267,7 @@ export const DataProvider = ({ children }) => {
         : [];
 
       // Remove cross-receipt media contamination from uploadmediaV1 / stale API data.
+      lastRawReceiptsRef.current = formattedReceipts;
       const formattedReceiptsDeduped =
         dedupeReceiptMediaAcrossReceipts(formattedReceipts);
 
@@ -1821,6 +1825,11 @@ setMerchantsWithImages(
           body: JSON.stringify(payload),
         });
         if (response.ok) return true;
+        const errText = await response.text().catch(() => "");
+        console.warn(
+          `[Media heal] ${endpoint} HTTP ${response.status}:`,
+          errText.slice(0, 200)
+        );
       } catch (err) {
         console.warn(`[Media heal] ${endpoint} failed:`, err.message);
       }
@@ -1877,7 +1886,8 @@ setMerchantsWithImages(
   const healContaminatedReceiptMediaOnServer = async (
     rawReceipts,
     cleanedReceipts,
-    token
+    token,
+    { force = false } = {}
   ) => {
     if (!token || mediaHealInFlightRef.current) return;
     if (!Array.isArray(rawReceipts) || !Array.isArray(cleanedReceipts)) return;
@@ -1893,27 +1903,26 @@ setMerchantsWithImages(
           receiptMediaStorageKey(raw) !== receiptMediaStorageKey(cleaned)
       );
 
-    if (toHeal.length === 0) return;
+    if (toHeal.length === 0) return true;
 
     const signature = toHeal
       .map(({ raw, cleaned }) => `${raw.id}:${receiptMediaStorageKey(cleaned)}`)
       .sort()
       .join("|");
 
-    // Allow re-healing the same contamination pattern after 60 s.
-    // uploadmediaV1 re-contaminates all receipts on every upload, so we must
-    // keep healing on each fetchData cycle.  Give up after 5 consecutive
-    // failures so we don't hammer a broken endpoint indefinitely.
-    const HEAL_COOLDOWN_MS = 60_000;
-    const MAX_FAIL_COUNT   = 5;
+    const HEAL_COOLDOWN_MS = 15_000;
+    const MAX_FAIL_COUNT = 8;
     const now = Date.now();
     const prev = healAttemptMapRef.current.get(signature);
-    if (prev) {
+    if (!force && prev) {
       if (prev.failCount >= MAX_FAIL_COUNT) {
-        console.warn("[Media heal] Giving up on signature after 5 failed attempts:", signature);
+        console.warn(
+          "[Media heal] Giving up on signature after repeated failures:",
+          signature
+        );
         return;
       }
-      if (now - prev.lastAttemptTs < HEAL_COOLDOWN_MS) return; // too soon
+      if (now - prev.lastAttemptTs < HEAL_COOLDOWN_MS) return;
     }
 
     mediaHealInFlightRef.current = true;
@@ -1950,10 +1959,66 @@ setMerchantsWithImages(
           "color:#22c55e;font-weight:bold"
         );
       }
+      return !anyFailed;
     } finally {
       mediaHealInFlightRef.current = false;
     }
   };
+
+  /**
+   * Push deduped media to the server (iOS only ever stores one receipt's URL).
+   * Call with force:true right after uploadmediaV1 — that endpoint re-contaminates
+   * every receipt on the backend until we write the cleaned values back.
+   */
+  const fetchRawReceiptsForMediaHeal = async (token) => {
+    const fk_user_id = localStorage.getItem("fk_user_id");
+    if (!fk_user_id) return [];
+    const receiptRes = await fetch(
+      `${BASE_URL}/user/getreceiptfromdatev1?fk_user_id=${fk_user_id}&date_time_stamp=14000997`,
+      {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Accesstoken: token,
+        },
+      }
+    );
+    if (!receiptRes.ok) return [];
+    const receiptData = await receiptRes.json();
+    if (Array.isArray(receiptData)) return receiptData;
+    if (Array.isArray(receiptData?.receipts)) return receiptData.receipts;
+    return [];
+  };
+
+  const repairReceiptMediaOnServer = useCallback(
+    async ({ force = false } = {}) => {
+      const token = localStorage.getItem("token");
+      if (!token) return false;
+
+      let raw = lastRawReceiptsRef.current;
+      if (force || !Array.isArray(raw) || raw.length === 0) {
+        const fresh = await fetchRawReceiptsForMediaHeal(token);
+        if (fresh.length > 0) {
+          raw = fresh;
+          lastRawReceiptsRef.current = fresh;
+        }
+      }
+      if (!Array.isArray(raw) || raw.length === 0) return false;
+
+      const cleaned = dedupeReceiptMediaAcrossReceipts(raw);
+      const ok = await healContaminatedReceiptMediaOnServer(
+        raw,
+        cleaned,
+        token,
+        { force }
+      );
+      if (ok && force) {
+        await silentRefreshData(0);
+      }
+      return ok;
+    },
+    [silentRefreshData]
+  );
 
   // Update receipt function - calls backend API to persist changes
   // API expects id field in the body for update
@@ -2521,35 +2586,16 @@ setMerchantsWithImages(
     includeDefaultsWhenEmpty: true,
   });
   const _rpLower = new Set(receiptPaymentsRaw.map((p) => (p || "").toLowerCase()));
-  const _rpCustomLower = new Set([
-    ..._rpLower,
-    ...customPaymentMethods.map((p) => (p || "").toLowerCase()),
-  ]);
-  // Build a set of last4s already covered by receipt-derived + custom entries so
-  // we don't add a duplicate API entry for the same physical card after a rename.
-  // e.g. receipt has "Discover *1111" (post-enrichment), API also has "Discover *1111" → skip API copy.
-  const _rpLast4s = new Set(
-    [...receiptPaymentsRaw, ...customPaymentMethods]
-      .map((p) => { const m = /\*(\d{3,4})$/.exec((p || "").trim()); return m ? m[1] : null; })
-      .filter(Boolean)
-  );
-  const mergedPaymentMethods = [
-    ...receiptPaymentsRaw.filter((p) => !isPaymentMethodHidden(p)),
-    ...customPaymentMethods.filter((p) => !isPaymentMethodHidden(p) && !_rpLower.has(p.toLowerCase())),
-    // API payment methods not already present from receipts or custom list.
-    // Also exclude API entries whose last4 is already covered — this prevents a
-    // stale old-name entry surviving alongside the newly-renamed API entry.
-    ...apiPaymentMethods
-      .filter((m) => isPaymentApiRecord(m))
-      .map((m) => getApiPaymentMethodDisplayName(m))
-      .filter((name) => {
-        if (!name || isPaymentMethodHidden(name) || _rpCustomLower.has(name.toLowerCase())) return false;
-        // De-duplicate by last4 — skip if any receipt/custom entry already has the same last4
-        const l4Match = /\*(\d{3,4})$/.exec(name.trim());
-        if (l4Match && _rpLast4s.has(l4Match[1])) return false;
-        return true;
-      }),
-  ];
+  const mergedPaymentMethods = mergePaymentMethodLabels({
+    baseLabels: [
+      ...receiptPaymentsRaw.filter((p) => !isPaymentMethodHidden(p)),
+      ...customPaymentMethods.filter(
+        (p) => !isPaymentMethodHidden(p) && !_rpLower.has((p || "").toLowerCase())
+      ),
+    ],
+    apiPaymentMethods: (apiPaymentMethods || []).filter((m) => isPaymentApiRecord(m)),
+    isHidden: isPaymentMethodHidden,
+  });
   const normalizedPaymentMethods = Array.from(
     new Map(
       mergedPaymentMethods
@@ -2600,6 +2646,7 @@ setMerchantsWithImages(
         updateReceiptStatus,
         deleteReceipt,
         updateReceipt,
+        repairReceiptMediaOnServer,
         addExpenseCategory,
         // Tax management functions
         fetchTaxes,

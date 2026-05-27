@@ -148,11 +148,39 @@ export function isProtectedReceiptMedia(receipt) {
 
 /** Higher rank = newer receipt (wins duplicate media URLs). */
 export function receiptMediaRank(receipt) {
-  const id = parseInt(receipt?.id, 10);
-  const date = parseInt(receipt?.product_date, 10);
+  const createDate = parseInt(receipt?.create_date, 10) || 0;
+  const id = parseInt(receipt?.id, 10) || 0;
+  const createPart =
+    Number.isFinite(createDate) && createDate >= 1_000_000 ? createDate : 0;
   const idPart = Number.isFinite(id) ? id : 0;
-  const datePart = Number.isFinite(date) ? date : 0;
-  return idPart * 1e10 + datePart;
+  // Prefer create_date (when the receipt row was created) over product_date.
+  return createPart * 1e10 + idPart;
+}
+
+/**
+ * iOS sets a single receiptData.emailAttachmentURL on create/update.
+ * Web must send only URLs from the current upload session — never a cumulative
+ * uploadmediaV1 history list and never another receipt's attachment field.
+ */
+export function buildSessionEmailAttachmentForApi(sources) {
+  const urls = [];
+  const push = (candidate) => {
+    splitMediaField(candidate).forEach((url) => {
+      if (url && !urls.includes(url)) urls.push(url);
+    });
+  };
+
+  if (Array.isArray(sources)) {
+    sources.forEach((item) => {
+      if (Array.isArray(item)) item.forEach((u) => push(u));
+      else push(item);
+    });
+  } else {
+    push(sources);
+  }
+
+  if (urls.length === 0) return "0";
+  return buildCombinedMediaField(urls);
 }
 
 /** Ordered unique media URLs from a receipt's image fields. */
@@ -167,20 +195,92 @@ export function collectReceiptMediaUrls(receipt) {
       ordered.push(url);
     }
   );
-  return ordered;
+
+  // Some email-ingestion flows persist the same PDF twice:
+  //   1) as an email-server attachment URL (categorizr.com/emailserver/attechment_images/...)
+  //   2) as the underlying stored file (storage.googleapis.com/.../mediafiles/...)
+  // The web UI should prefer the stored URL and hide the proxy attachment duplicate.
+  return dedupeEmailAttachmentPdfUrls(ordered);
+}
+
+/**
+ * If both the email-server attachment proxy PDF and the underlying stored GCS PDF
+ * exist for the same receipt, hide the proxy one.
+ *
+ * This doesn't try to prove "same content"; it implements a safe preference rule:
+ * when we can display the GCS-backed file, the UI should not show an additional
+ * emailserver proxy copy alongside it.
+ */
+export function dedupeEmailAttachmentPdfUrls(urls) {
+  if (!Array.isArray(urls) || urls.length === 0) return urls;
+
+  const hasGcsStoredPdf = urls.some(
+    (u) =>
+      isPdfUrl(u) &&
+      /storage\.googleapis\.com\/.*\/mediafiles\//i.test(u) &&
+      /shared/gi.test(u) === false // keep this matcher narrow; ignore unrelated google storage URLs
+  );
+
+  if (!hasGcsStoredPdf) return urls;
+
+  const filtered = urls.filter((u) => {
+    if (!isPdfUrl(u)) return true;
+    return !/\/emailserver\/(?:attechment_images|attachment_images)\//i.test(u);
+  });
+
+  // If filtering would remove everything, fall back to the original list.
+  return filtered.length > 0 ? filtered : urls;
 }
 
 /**
  * When uploadmediaV1 pollutes older receipts, the same CDN URL can appear on
  * multiple receipts. Assign each URL to the newest receipt (by id, then date).
  */
+/** Stable key for comparing a receipt's media fields before/after dedupe. */
+export function receiptMediaStorageKey(receipt) {
+  if (!receipt) return "";
+  const attachment = buildCombinedMediaField(collectReceiptMediaUrls(receipt));
+  const image =
+    receipt.receipt_image &&
+    receipt.receipt_image.toString().trim() !== "" &&
+    receipt.receipt_image !== "0"
+      ? normalizeMediaUrl(receipt.receipt_image)
+      : "0";
+  return `${attachment}|${image}`;
+}
+
+/**
+ * After cross-receipt dedupe, return the emailAttachment / receipt_image values
+ * that should be sent to updateReceiptv1 for one receipt.
+ */
+export function resolveReceiptMediaFieldsForApi(receiptId, updates, allReceipts) {
+  if (!receiptId || !Array.isArray(allReceipts)) {
+    return { emailAttachment: "0", receipt_image: "0" };
+  }
+
+  const idStr = receiptId.toString();
+  const mergedList = allReceipts.map((r) =>
+    r?.id?.toString() === idStr ? { ...r, ...(updates || {}) } : r
+  );
+  const deduped = dedupeReceiptMediaAcrossReceipts(mergedList);
+  const row = deduped.find((r) => r?.id?.toString() === idStr);
+
+  if (!row) {
+    return { emailAttachment: "0", receipt_image: "0" };
+  }
+
+  return {
+    emailAttachment: row.emailAttachment ?? "0",
+    receipt_image: row.receipt_image ?? "0",
+  };
+}
+
 export function dedupeReceiptMediaAcrossReceipts(receipts) {
   if (!Array.isArray(receipts) || receipts.length <= 1) return receipts;
 
   const urlOwner = new Map();
 
   receipts.forEach((receipt, index) => {
-    if (isProtectedReceiptMedia(receipt)) return;
     const rank = receiptMediaRank(receipt);
     collectReceiptMediaUrls(receipt).forEach((url) => {
       const prev = urlOwner.get(url);
@@ -195,8 +295,6 @@ export function dedupeReceiptMediaAcrossReceipts(receipts) {
   });
 
   return receipts.map((receipt, index) => {
-    if (isProtectedReceiptMedia(receipt)) return receipt;
-
     const owned = collectReceiptMediaUrls(receipt).filter((url) => {
       const owner = urlOwner.get(url);
       return owner && owner.index === index;

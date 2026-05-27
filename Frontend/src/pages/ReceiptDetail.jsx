@@ -14,6 +14,7 @@ import {
   getPdfProxyUrl,
   isPdfUrl,
   sanitizeUploadFile,
+  dedupeEmailAttachmentPdfUrls,
 } from "../utils/mediaUrlUtils";
 import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationDialog";
 import "../App.css";
@@ -42,6 +43,7 @@ import {
   getApiPaymentMethodDisplayName,
   getLast4FromPaymentApiRecord,
   inferCardTypeFromPayment,
+  mergePaymentMethodLabels,
   isCustomCardIssuer,
   parsePaymentDisplay,
   readPayCardTypeMap,
@@ -335,6 +337,7 @@ const ReceiptDetail = ({
     editCustomPaymentMethod,
     deleteCustomPaymentMethod,
     hidePaymentMethod,
+    repairReceiptMediaOnServer,
   } = useData();
   const { formatCurrency } = useCurrency();
   const { getPaymentLogo } = usePaymentDisplay();
@@ -459,42 +462,14 @@ const ReceiptDetail = ({
   const isCashPaymentMethod = (name) =>
     (name || "").toString().replace(/\s*\*\s*\d{3,4}\s*$/, "").trim().toLowerCase() === "cash";
 
-  // Get all payment methods - use actual user payment methods from receipts
-  // (like "Bank of America *1111", "Visa *0177", etc.)
-  const allPaymentMethods = React.useMemo(() => {
-    // Build the same canonical list that Add Receipt / Filter use:
-    // 1. normalizedPaymentMethods (receipt-enriched, deduplicated) as base
-    // 2. API-registered cards not yet covered (no receipts for that card yet)
-    const seen = new Map();   // normalizedKey → display string
-    const seenLast4 = new Set();
-
-    const addEntry = (raw) => {
-      if (!raw) return;
-      const val = raw.toString().trim();
-      if (!val || val === "0" || val === "0*0" || /^0\*\d*$/.test(val)) return;
-      if (val.length < 2) return;
-      if (/^cash\s*\*\s*0$/i.test(val)) return;
-      if (/\*\s*0$/.test(val)) return;
-      if (isCashPaymentMethod(val) && val.toLowerCase() !== "cash") return;
-      const key = val.toLowerCase();
-      if (seen.has(key)) return;
-      const last4 = val.match(/\*(\d{3,4})$/)?.[1];
-      if (last4 && seenLast4.has(last4)) return;
-      seen.set(key, val);
-      if (last4) seenLast4.add(last4);
-    };
-
-    // Step 1: canonical DataContext list (receipt-enriched names win)
-    (paymentMethods || []).forEach(addEntry);
-
-    // Step 2: API records not already covered (cards with no receipts yet)
-    (apiPaymentMethods || []).forEach((m) => {
-      if (String(m?.card_type || "").toLowerCase() === "merchant") return;
-      addEntry(getApiPaymentMethodDisplayName(m));
-    });
-
-    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
-  }, [paymentMethods, apiPaymentMethods]);
+  const allPaymentMethods = React.useMemo(
+    () =>
+      mergePaymentMethodLabels({
+        baseLabels: paymentMethods || [],
+        apiPaymentMethods: apiPaymentMethods || [],
+      }),
+    [paymentMethods, apiPaymentMethods]
+  );
 
   // Get all tax types - merge taxData (API) with session-only localTaxTypes, exclude Tip
   const allTaxTypes = React.useMemo(() => {
@@ -1278,7 +1253,10 @@ useEffect(() => {
       }
     }
 
-    return urls.filter((u) => u && !u.startsWith("data:") && !u.startsWith("blob:"));
+    const cleaned = urls.filter(
+      (u) => u && !u.startsWith("data:") && !u.startsWith("blob:")
+    );
+    return dedupeEmailAttachmentPdfUrls(cleaned);
   };
 
   const normalizeMatchKey = (value) =>
@@ -2491,6 +2469,10 @@ useEffect(() => {
           return [...prev, normalizedUrl];
         });
       }
+
+      if (repairReceiptMediaOnServer) {
+        void repairReceiptMediaOnServer({ force: true });
+      }
     } catch (err) {
       console.error("Add photo failed:", err);
     } finally {
@@ -2602,7 +2584,7 @@ useEffect(() => {
         (r) => (r.expense_type || "").toLowerCase() === oldName.toLowerCase()
       );
       for (const r of affected) {
-        await putUpdateReceipt({ ...r, expense_type: newName });
+        await updateReceipt(r.id, { expense_type: newName });
       }
       // Find and call the update API
       const apiMatch = (apiExpenseCategories || []).find(
@@ -2641,7 +2623,7 @@ useEffect(() => {
         (r) => (r.expense_type || "").toLowerCase() === deletingCategory.toLowerCase()
       );
       for (const r of affected) {
-        await putUpdateReceipt({ ...r, expense_type: "" });
+        await updateReceipt(r.id, { expense_type: "" });
       }
       if ((editedReceipt.expense_type || "").toLowerCase() === deletingCategory.toLowerCase()) {
         handleFieldChange("expense_type", "");

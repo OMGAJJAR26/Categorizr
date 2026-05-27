@@ -246,6 +246,70 @@ export const apiPaymentMethodMatchesLabel = (m, label) => {
   return normalizePaymentMatchKey(m?.card_number) === normalized;
 };
 
+/** Canonical list label (Cash normalization for filters/dropdowns). */
+export const normalizePaymentListLabel = (method) => {
+  const m = (method || "").toString().trim();
+  const lower = m.toLowerCase();
+  if (lower === "cash" || lower.startsWith("cash *")) return "Cash";
+  return m;
+};
+
+export const isValidPaymentMethodLabel = (value) => {
+  const val = (value || "").toString().trim();
+  if (!val || val === "0" || val === "0*0" || /^0\*\d*$/.test(val)) return false;
+  if (val.length < 2) return false;
+  if (/^cash\s*\*\s*0$/i.test(val)) return false;
+  if (/\*\s*0$/.test(val)) return false;
+  return true;
+};
+
+/** e.g. "Cash *0700" — not the canonical "Cash" row. */
+export const isCashPaymentVariant = (name) => {
+  const base = (name || "")
+    .toString()
+    .replace(/\s*\*\s*\d{3,4}\s*$/, "")
+    .trim()
+    .toLowerCase();
+  return base === "cash" && (name || "").toString().trim().toLowerCase() !== "cash";
+};
+
+/**
+ * Single merge for payment method labels — used by DataContext, Settings, Filter,
+ * Add Receipt, and Edit Receipt so every surface shows the same API-backed list.
+ */
+export const mergePaymentMethodLabels = ({
+  baseLabels = [],
+  apiPaymentMethods = [],
+  isHidden = () => false,
+  skipMerchantCardType = true,
+} = {}) => {
+  const seen = new Map();
+  const seenLast4 = new Set();
+
+  const addLabel = (rawLabel) => {
+    const label = normalizePaymentListLabel((rawLabel || "").toString().trim());
+    if (!isValidPaymentMethodLabel(label) || label === "-") return;
+    if (isCashPaymentVariant(label)) return;
+    if (isHidden(label)) return;
+    const key = normalizePaymentMatchKey(label);
+    if (seen.has(key)) return;
+    const last4 = label.match(/\*(\d{3,4})$/)?.[1];
+    if (last4 && seenLast4.has(last4)) return;
+    seen.set(key, label);
+    if (last4) seenLast4.add(last4);
+  };
+
+  (baseLabels || []).forEach(addLabel);
+  (apiPaymentMethods || []).forEach((m) => {
+    if (skipMerchantCardType && String(m?.card_type || "").toLowerCase() === "merchant") {
+      return;
+    }
+    addLabel(getApiPaymentMethodDisplayName(m));
+  });
+
+  return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
+};
+
 export const getApiPaymentMethodCacheKey = (m) => {
   if (!m || typeof m !== "object") return String(m || "").trim().toLowerCase();
   const issuer = (m.card_issuer_name || m.cardIssuerName || "").trim().toLowerCase();

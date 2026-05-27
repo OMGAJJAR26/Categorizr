@@ -16,6 +16,7 @@ import {
   getLast4FromPaymentApiRecord,
   getPaymentMethodListLabel,
   inferCardTypeFromPayment,
+  mergePaymentMethodLabels,
   isCustomCardIssuer,
   parsePaymentDisplay,
   readPayCardTypeMap,
@@ -36,6 +37,7 @@ import {
 import {
   splitMediaField,
   buildCombinedMediaField,
+  buildSessionEmailAttachmentForApi,
   normalizeMediaUrl as normalizeMediaUrlCore,
   replaceUrlInMediaCsv,
   isPdfUrl,
@@ -147,6 +149,7 @@ const AddReceiptModal = ({ onClose, onReceiptAdded, initialData = null, onDuplic
     editCustomPaymentMethod,
     deleteCustomPaymentMethod,
     hidePaymentMethod,
+    repairReceiptMediaOnServer,
   } = useData();
   const { getPaymentLogo, getPaymentDisplay } = usePaymentDisplay();
 
@@ -466,10 +469,10 @@ const [localMerchants, setLocalMerchants] = useState([]);
     setIsDuplicated(true); // prevent double-duplicate
   }, [initialData, resetReceiptMediaState]);
 
-  // Ensure all media URLs from receipt payload are represented in the gallery.
-  // Older flows may provide multiple URLs only in receipt_image/emailAttachment.
+  // Duplicate flow only: pull existing receipt media into the gallery.
+  // Do not merge uploadedReceiptData on new receipts — it can carry contaminated URLs.
   useEffect(() => {
-    if (!uploadedReceiptData) return;
+    if (!uploadedReceiptData || !initialData) return;
     const receiptFieldUrls = [
       ...splitMediaField(uploadedReceiptData.receipt_image),
       ...splitMediaField(uploadedReceiptData.emailAttachment),
@@ -490,7 +493,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
       });
       return next;
     });
-  }, [uploadedReceiptData]);
+  }, [uploadedReceiptData, initialData]);
 
   const acceptedFileTypes = [
     "image/jpeg",
@@ -643,40 +646,14 @@ const [localMerchants, setLocalMerchants] = useState([]);
     return null;
   };
 
-  // Build canonical payment method list — same source as Filter and Edit Receipt so
-  // all four places show the same entries:
-  // 1. normalizedPaymentMethods (receipt-enriched, deduplicated) as base
-  // 2. API-registered cards not yet covered (no receipts for that card yet)
-  const allPaymentMethods = useMemo(() => {
-    const seen = new Map();   // lowercaseKey → display string
-    const seenLast4 = new Set();
-
-    const addEntry = (raw) => {
-      if (!raw) return;
-      const val = raw.toString().trim();
-      if (!val || val === "0" || val === "0*0" || /^0\*\d*$/.test(val)) return;
-      if (val.length < 2) return;
-      if (/^cash\s*\*\s*0$/i.test(val)) return;
-      if (/\*\s*0$/.test(val)) return;
-      const key = val.toLowerCase();
-      if (seen.has(key)) return;
-      const last4 = val.match(/\*(\d{3,4})$/)?.[1];
-      if (last4 && seenLast4.has(last4)) return;
-      seen.set(key, val);
-      if (last4) seenLast4.add(last4);
-    };
-
-    // Step 1: canonical DataContext list (receipt-enriched names win)
-    (paymentMethods || []).forEach(addEntry);
-
-    // Step 2: API records not already covered (cards with no receipts yet)
-    (apiPaymentMethods || []).forEach((m) => {
-      if (String(m?.card_type || "").toLowerCase() === "merchant") return;
-      addEntry(getApiPaymentMethodDisplayName(m));
-    });
-
-    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
-  }, [paymentMethods, apiPaymentMethods]);
+  const allPaymentMethods = useMemo(
+    () =>
+      mergePaymentMethodLabels({
+        baseLabels: paymentMethods || [],
+        apiPaymentMethods: apiPaymentMethods || [],
+      }),
+    [paymentMethods, apiPaymentMethods]
+  );
 
   // allTaxTypes is declared earlier (before isDuplicateTaxName) to avoid a TDZ crash.
 
@@ -775,28 +752,27 @@ const [localMerchants, setLocalMerchants] = useState([]);
     const isHttpUrl = (value) =>
       typeof value === "string" && /^https?:\/\//i.test(value.trim());
 
-    // API returns array of { fullImageUrl: "string" }
+    let urls = [];
     if (Array.isArray(data)) {
-      const urls = data
+      urls = data
         .map((item) => (item?.fullImageUrl || "").toString().trim())
         .filter((url) => isHttpUrl(url));
-      // uploadmediaV1 is cumulative — it returns ALL historical uploads for the
-      // user, not just the files in this request.  Always take the last N URLs
-      // (oldest-first ordering) so we only keep the files we just uploaded and
-      // never bleed URLs from a previous receipt into this one.
-      if (filesToUpload.length > 0) {
-        return urls.slice(-filesToUpload.length);
-      }
-      return urls;
+    } else if (isHttpUrl(data?.fullImageUrl)) {
+      urls = [data.fullImageUrl.toString().trim()];
     }
 
-    // Fallback: single object
-    if (isHttpUrl(data?.fullImageUrl)) {
-      return [data.fullImageUrl.toString().trim()];
+    // uploadmediaV1 is cumulative — keep only the file(s) from this request.
+    if (filesToUpload.length > 0 && urls.length > 0) {
+      urls = urls.slice(-filesToUpload.length);
     }
 
-    return [];
-  }, []);
+    // Server attaches the new URL to every receipt — write cleaned values back.
+    if (urls.length > 0 && repairReceiptMediaOnServer) {
+      void repairReceiptMediaOnServer({ force: true });
+    }
+
+    return urls;
+  }, [repairReceiptMediaOnServer]);
 
   const handleFileSelect = async (e) => {
     setError(null);
@@ -2366,11 +2342,9 @@ const handleFieldChange = (field, value) => {
       // an older receipt due to stale in-memory state after navigation/login flows.
       const uploadedId = 0;
       const fkUserId = parseInt(localStorage.getItem("fk_user_id")) || 0;
-      const combinedImageUrls = buildCombinedMediaField([
+      const combinedImageUrls = buildSessionEmailAttachmentForApi([
         uploadedMediaUrls,
         uploadedImageUrl,
-        uploadedReceiptData?.receipt_image,
-        uploadedReceiptData?.emailAttachment,
       ]);
       const savePayload = {
         id: uploadedId, // Always 0 in Add flow (create-only)
@@ -2615,18 +2589,12 @@ const handleFieldChange = (field, value) => {
       // Refresh data from backend to get the newly created/updated receipt with all fields
       // This ensures payment method logos and all other data are correctly loaded
       // The onReceiptAdded callback will trigger refreshData() in HomePage
+      if (repairReceiptMediaOnServer) {
+        await repairReceiptMediaOnServer({ force: true });
+      }
+
       if (onReceiptAdded) {
-        onReceiptAdded({
-          ...savePayload,
-          receipt_image: buildCombinedMediaField([
-            savePayload.receipt_image,
-            savePayload.emailAttachment,
-            uploadedMediaUrls,
-            uploadedImageUrl,
-            uploadedReceiptData?.receipt_image,
-            uploadedReceiptData?.emailAttachment,
-          ]),
-        });
+        onReceiptAdded({ ...savePayload });
       } else {
         // If no callback, we still need to refresh data
         // But we can't call refreshData directly here, so just close modal
@@ -2673,11 +2641,9 @@ const handleFieldChange = (field, value) => {
     const fkUserId = parseInt(localStorage.getItem("fk_user_id")) || 0;
     // Add flow should never inherit/patch an existing receipt id.
     const baseId = overrideId !== null ? overrideId : 0;
-    const combinedImageUrls = buildCombinedMediaField([
+    const combinedImageUrls = buildSessionEmailAttachmentForApi([
       uploadedMediaUrls,
       uploadedImageUrl,
-      uploadedReceiptData?.receipt_image,
-      uploadedReceiptData?.emailAttachment,
     ]);
 
     return {
@@ -3012,11 +2978,9 @@ const handleFieldChange = (field, value) => {
       }
       if (!productDate) productDate = Math.floor(Date.now() / 1000);
       const receiptTag = ["0","0","0","0","0","0","0"].join(",");
-      const combinedImageUrls = buildCombinedMediaField([
+      const combinedImageUrls = buildSessionEmailAttachmentForApi([
         uploadedMediaUrls,
         uploadedImageUrl,
-        uploadedReceiptData?.receipt_image,
-        uploadedReceiptData?.emailAttachment,
       ]);
 
       // Helper: build a receipt payload from a set of amounts + metadata

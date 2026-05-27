@@ -3,8 +3,8 @@ import { useData } from "../../context/DataContext";
 import { getPaymentDisplayFromReceipt } from "../../hooks/usePaymentDisplay";
 import {
   getApiPaymentMethodDisplayName,
-  getPaymentMethodListLabel,
-  inferCardTypeFromPayment,
+  mergePaymentMethodLabels,
+  normalizePaymentListLabel,
   normalizePaymentMatchKey,
 } from "../../utils/paymentMethodUtils";
 
@@ -248,7 +248,7 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
       const methodKey = normalizePaymentMatchKey(method);
       const matchingReceipt = receipts.find((r) => {
         const displayName = getPaymentDisplayFromReceipt(r);
-        return normalizePaymentMatchKey(normalizeLabel(displayName)) === methodKey;
+        return normalizePaymentMatchKey(normalizePaymentListLabel(displayName)) === methodKey;
       });
       
       const logo = matchingReceipt
@@ -299,54 +299,18 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
     localStorage.removeItem("selectedPaymentMethods");
   };
 
-  // ✅ Normalize label
-  const normalizeLabel = (method) => {
-    const m = (method || "").toString();
-    const lower = m.toLowerCase();
-    if (lower === "cash" || lower.startsWith("cash *")) return "Cash";
-    return method;
-  };
+  const apiLabelForMethod = useCallback((m) => getApiPaymentMethodDisplayName(m), []);
 
-  const apiLabelForMethod = useCallback((m) => {
-    const displayName = getApiPaymentMethodDisplayName(m);
-    if (!displayName) return "";
-    return normalizeLabel(displayName);
-  }, []);
-
-  // Build the payment method list using normalizedPaymentMethods (DataContext) as the
-  // single source of truth — same list that Add Receipt / Edit Receipt show — then
-  // append any API-registered methods that aren't already covered (by exact name or last4).
-  // This guarantees all four places (Filter, Add, Edit, Settings) show the same entries.
-  const uniqueMethods = useMemo(() => {
-    const seen = new Map(); // normalizedKey → label
-    const seenLast4 = new Set();
-
-    const addLabel = (rawLabel) => {
-      const label = normalizeLabel((rawLabel || "").toString().trim());
-      if (!label || label === "-") return;
-      const key = normalizePaymentMatchKey(label);
-      if (seen.has(key)) return;
-      const last4 = label.match(/\*(\d{3,4})$/)?.[1];
-      if (last4 && seenLast4.has(last4)) return;
-      seen.set(key, label);
-      if (last4) seenLast4.add(last4);
-    };
-
-    // 1. normalizedPaymentMethods is the canonical list (receipt-enriched names, deduplicated)
-    (paymentMethods || []).forEach((m) => {
-      if (!isPaymentMethodHidden(m)) addLabel(m);
-    });
-
-    // 2. Add API-registered methods not already present (e.g. cards with no receipts yet)
-    (apiPaymentMethods || []).forEach((m) => {
-      if (String(m?.card_type || "").toLowerCase() === "merchant") return;
-      const label = apiLabelForMethod(m);
-      if (!label || isPaymentMethodHidden(label)) return;
-      addLabel(label);
-    });
-
-    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
-  }, [apiPaymentMethods, paymentMethods, isPaymentMethodHidden, apiLabelForMethod]);
+  // Same merge as DataContext / Settings / Add Receipt — API-backed canonical list.
+  const uniqueMethods = useMemo(
+    () =>
+      mergePaymentMethodLabels({
+        baseLabels: paymentMethods || [],
+        apiPaymentMethods: apiPaymentMethods || [],
+        isHidden: isPaymentMethodHidden,
+      }),
+    [apiPaymentMethods, paymentMethods, isPaymentMethodHidden]
+  );
 
   // ✅ Select all
   const handleSelectAll = () => {
@@ -364,7 +328,7 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
             const methodKey = normalizePaymentMatchKey(paymentMethod);
             const matchingReceipt = receipts.find((r) => {
               const displayName = getPaymentDisplayFromReceipt(r);
-              return normalizePaymentMatchKey(normalizeLabel(displayName)) === methodKey;
+              return normalizePaymentMatchKey(normalizePaymentListLabel(displayName)) === methodKey;
             });
             const matchingApi = (apiPaymentMethods || []).find(
               (m) => normalizePaymentMatchKey(apiLabelForMethod(m)) === methodKey

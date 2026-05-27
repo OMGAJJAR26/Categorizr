@@ -71,8 +71,11 @@ import { useNavigate } from "react-router-dom";
 import { useData } from "../context/DataContext";
 import { getPaymentDisplayFromReceipt } from "../hooks/usePaymentDisplay";
 import {
+  apiPaymentMethodMatchesLabel,
   getApiPaymentMethodDisplayName,
   getLast4FromPaymentApiRecord,
+  isCashPaymentVariant,
+  mergePaymentMethodLabels,
   parsePaymentDisplay,
   paymentCategoryFromApiEnum,
   cardTypeIntToBrand,
@@ -1361,7 +1364,8 @@ const ReceiptInfoInline = ({ type }) => {
     receipts, updateReceipt,
     receiptMerchWImgRaw, customMerchants, hiddenMerchants, hideMerchant, isMerchantHidden, addCustomMerchant, editCustomMerchant, deleteCustomMerchant,
     receiptCategoriesRaw, customCategories, hiddenCategories, hideCategory, unhideCategory, isCategoryHidden, addCustomCategory, editCustomCategory, deleteCustomCategory,
-    receiptPaymentsRaw, customPaymentMethods, hiddenPaymentMethods, hidePaymentMethod, unhidePaymentMethod, addCustomPaymentMethod, editCustomPaymentMethod, deleteCustomPaymentMethod,
+    paymentMethods,
+    receiptPaymentsRaw, customPaymentMethods, hiddenPaymentMethods, hidePaymentMethod, unhidePaymentMethod, isPaymentMethodHidden, addCustomPaymentMethod, editCustomPaymentMethod, deleteCustomPaymentMethod,
     taxData, addTax, updateTax, deleteTax, fetchTaxes,
     apiMerchants, fetchApiMerchants, addApiMerchant, updateApiMerchant, deleteApiMerchant,
     apiPaymentMethods, fetchApiPaymentMethods, addApiPaymentMethod, updateApiPaymentMethod, deleteApiPaymentMethod,
@@ -1957,19 +1961,27 @@ const isBlockedTaxRateInput = (val) => {
         // Show confirmation before touching API or receipts
         setPendingPaymentEdit({
           fn: async () => {
-            // Update via API
+            const paymentPayload = {
+              cardIssuerName: storedCardIssuerName(issuer, ct),
+              cardTypeBrand: ct,
+              last4: last4.replace(/\D/g, "").slice(0, 4),
+            };
+            // Update existing API record, or create one for default/custom-only entries.
             if (targetId != null) {
               const res = await updateApiPaymentMethod(
                 targetId,
-                {
-                  cardIssuerName: storedCardIssuerName(issuer, ct),
-                  cardTypeBrand: ct,
-                  last4: last4.replace(/\D/g, "").slice(0, 4),
-                },
+                paymentPayload,
                 selectedLogoUrl,
                 newExpenseType
               );
               if (!res?.ok) throw new Error(res?.error || "Failed to update payment method");
+            } else {
+              const res = await addApiPaymentMethod(
+                paymentPayload,
+                selectedLogoUrl,
+                newExpenseType
+              );
+              if (!res?.ok) throw new Error(res?.error || "Failed to add payment method");
             }
             // Propagate to receipts that use old name.
             // Use a broad match so receipts added via AddReceiptModal (which may store
@@ -2001,13 +2013,23 @@ const isBlockedTaxRateInput = (val) => {
             // Update localStorage mappings
             savePayCard(payStr, ct);
             savePayExpenseType(payStr, newExpenseType);
-            // If it was a custom entry, rename it too
-            if (!payEditMode.item.isApiItem) editCustomPaymentMethod(oldName, payStr);
+            const editedItem = payEditMode.item;
+            const nameChanged = normalizeMatchKey(oldName) !== normalizeMatchKey(payStr);
+            deleteCustomPaymentMethod(oldName);
+            deleteCustomPaymentMethod(payStr);
+            if (editedItem.isDefaultItem || editedItem.isReceiptItem) {
+              if (nameChanged) hidePaymentMethod(editedItem.isDefaultItem ? oldName : (editedItem.key || oldName));
+            } else if (!editedItem.isApiItem) {
+              editCustomPaymentMethod(oldName, payStr);
+              if (nameChanged) hidePaymentMethod(oldName);
+            } else if (nameChanged) {
+              hidePaymentMethod(oldName);
+            }
             // Reset & refresh
             setPayEditMode(null);
             setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
             setShowAddForm(false);
-            await Promise.all([silentRefreshData(0), fetchApiPaymentMethods()]);
+            await Promise.all([refreshData(), fetchApiPaymentMethods()]);
             toast("success", "Payment Method Updated");
           },
         });
@@ -2029,9 +2051,8 @@ const isBlockedTaxRateInput = (val) => {
         return sig && sig === nextSignature;
       });
       if (duplicateExists) return toast("error", "Payment Method already exists");
-      // Unhide first in case this name was previously deleted/hidden, then add to local state
       unhidePaymentMethod(payStr);
-      addCustomPaymentMethod(payStr);
+      deleteCustomPaymentMethod(payStr);
       if (ct) savePayCard(payStr, ct);
       savePayExpenseType(payStr, newExpenseType);
       const addPaymentResult = await addApiPaymentMethod(
@@ -2230,11 +2251,16 @@ const isBlockedTaxRateInput = (val) => {
         last_4_digit_card: last4 || (r.last_4_digit_card || r.last4DigitCard || ""),
       })));
       savePayCard(newName, getPaymentBrand(currentName, inferCardTypeFromPayment(currentName)));
-      hidePaymentMethod(item.key); addCustomPaymentMethod(newName);
+      hidePaymentMethod(item.key || currentName);
+      deleteCustomPaymentMethod(currentName);
+      deleteCustomPaymentMethod(newName);
+      await Promise.all([refreshData(), fetchApiPaymentMethods()]);
       toast("success", "Payment Method Updated");
       return;
     }
     if (item.isApiItem) {
+      const { issuer: newIssuer, last4: newL4 } = parsePaymentDisplay(newName);
+      const newBrand = getPaymentBrand(newName, inferCardTypeFromPayment(newName));
       const existingApi = (apiPaymentMethods || []).find((p) => p.id === item.apiId);
       const updatePaymentResult = await updateApiPaymentMethod(
         item.apiId,
@@ -2247,9 +2273,6 @@ const isBlockedTaxRateInput = (val) => {
         existingApi?.default_payment_category || ""
       );
       if (!updatePaymentResult?.ok) throw new Error(updatePaymentResult?.error || "Failed to update payment method");
-      // Propagate name change to all receipts that used the old payment method
-      const { issuer: newIssuer, last4: newL4 } = parsePaymentDisplay(newName);
-      const newBrand = getPaymentBrand(newName, inferCardTypeFromPayment(newName));
       const matchingReceipts = getReceiptsByPaymentDisplay(item.name);
       if (matchingReceipts.length > 0) {
         await Promise.all(matchingReceipts.map(r => updateReceipt(r.id, {
@@ -2259,12 +2282,25 @@ const isBlockedTaxRateInput = (val) => {
         })));
       }
       savePayCard(newName, getPaymentBrand(item.name, newCardType || ""));
-      await Promise.all([silentRefreshData(0), fetchApiPaymentMethods()]);
+      if (normalizeMatchKey(currentName) !== normalizeMatchKey(newName)) {
+        hidePaymentMethod(currentName);
+      }
+      await Promise.all([refreshData(), fetchApiPaymentMethods()]);
       toast("success", "Payment Method Updated");
       return;
     }
-    editCustomPaymentMethod(item.key, newName);
+    if (item.isDefaultItem) {
+      hidePaymentMethod(currentName);
+      deleteCustomPaymentMethod(currentName);
+      deleteCustomPaymentMethod(newName);
+    } else {
+      editCustomPaymentMethod(item.key, newName);
+      if (normalizeMatchKey(currentName) !== normalizeMatchKey(newName)) {
+        hidePaymentMethod(currentName);
+      }
+    }
     savePayCard(newName, getPaymentBrand(item.key, inferCardTypeFromPayment(item.key)));
+    await Promise.all([refreshData(), fetchApiPaymentMethods()]);
     toast("success", "Payment Method Updated");
   };
 
@@ -2761,77 +2797,69 @@ const isBlockedTaxRateInput = (val) => {
       return [...rItems, ...cItems, ...apiItems];
     }
     if (type === "payments") {
-      // Helper: is this a Cash variant like "Cash *0700" (not the canonical "Cash")?
-      const isCashVariant = (p) => isCashMethod(p) && (p || "").toLowerCase() !== "cash";
-      const rItems = receiptPaymentsRaw
-        .filter(p => !hiddenPaymentMethods.has(p) && !isCashVariant(p))
-        .map(p => ({ key: p, name: p, logo: getPayLogoResolved(p), isReceiptItem: true, isApiItem: false }));
-      const rKeys  = new Set(rItems.map(p => p.name.toLowerCase()));
-      const cItems = customPaymentMethods
-        .filter(p => !rKeys.has(p.toLowerCase()) && !hiddenPaymentMethods.has(p) && !isCashVariant(p))
-        .map(p => ({ key: p, name: p, logo: getPayLogoResolved(p), isReceiptItem: false, isApiItem: false }));
-      // API payment methods not already in receipt-derived or custom lists
-      const allExistingPayKeys = new Set([...rItems.map(p => p.name.toLowerCase()), ...cItems.map(p => p.name.toLowerCase())]);
-      // Build set of last4 digits already shown by receipt/custom items to avoid showing
-      // a stale API entry for the same physical card (e.g. after a rename where only
-      // receipts were updated but the API card_number still has the old name)
-      const existingLast4s = new Set();
-      [...rItems, ...cItems].forEach(p => {
-        const m = /\*(\d{3,4})$/.exec((p.name || "").trim());
-        if (m) existingLast4s.add(m[1]);
-      });
-      const apiItems = (apiPaymentMethods || [])
-        .filter(m => {
-          const displayName = getApiPaymentMethodDisplayName(m);
-          if (!displayName || getApiEntityId(m) === null) return false;
-          if (allExistingPayKeys.has(displayName.toLowerCase())) return false;
-          if (hiddenPaymentMethods.has(displayName)) return false;
-          if (isCashVariant(displayName)) return false;
-          const apiLast4 = getLast4FromPaymentApiRecord(m);
-          if (apiLast4 && existingLast4s.has(apiLast4)) return false;
-          return true;
-        })
-        .map(m => {
-          const displayName = getApiPaymentMethodDisplayName(m);
-          const storedLogo = (m.icon_image || "").trim();
-          // Logo priority:
-          // 1. icon_image from API (explicit stored logo)
-          // 2. card_type integer → brand → logo (most authoritative, avoids bank-name fallback)
-          // 3. keyword detection / receipt mapping via getPayLogoResolved
-          let logo;
-          if (storedLogo.startsWith("/payment-logos/") || /^https?:\/\//i.test(storedLogo)) {
-            logo = storedLogo;
-          } else {
-            const brandFromApiType = cardTypeIntToBrand(m.card_type);
-            if (brandFromApiType) {
-              const ct = PAYMENT_CARD_TYPES.find(c => c.name === brandFromApiType);
-              logo = ct ? ct.logo : getPayLogoResolved(displayName);
-            } else {
-              logo = getPayLogoResolved(displayName);
-            }
-          }
+      const resolvePaymentLogoFromApi = (m, displayName) => {
+        const storedLogo = (m?.icon_image || "").trim();
+        if (storedLogo.startsWith("/payment-logos/") || /^https?:\/\//i.test(storedLogo)) {
+          return storedLogo;
+        }
+        const brandFromApiType = cardTypeIntToBrand(m?.card_type);
+        if (brandFromApiType) {
+          const ct = PAYMENT_CARD_TYPES.find((c) => c.name === brandFromApiType);
+          return ct ? ct.logo : getPayLogoResolved(displayName);
+        }
+        return getPayLogoResolved(displayName);
+      };
+
+      const buildPaymentItemFromLabel = (label) => {
+        if (!label || isCashPaymentVariant(label)) return null;
+        const labelKey = normalizeMatchKey(label);
+        const apiRec = (apiPaymentMethods || []).find((m) =>
+          apiPaymentMethodMatchesLabel(m, label)
+        );
+        const apiId = apiRec ? getApiEntityId(apiRec) : null;
+        if (apiId != null) {
           return {
-            key: `api_${getApiEntityId(m)}`,
-            name: displayName,
-            logo,
+            key: `api_${apiId}`,
+            name: label,
+            logo: resolvePaymentLogoFromApi(apiRec, label),
             isReceiptItem: false,
             isApiItem: true,
-            apiId: getApiEntityId(m),
+            apiId,
           };
-        });
-      const allWithApi = [...rItems, ...cItems, ...apiItems];
-      const existingAfterApi = new Set(allWithApi.map((p) => (p.name || "").toLowerCase()));
-      const defaultItems = SETTINGS_DEFAULT_PAYMENT_METHODS
-        .filter((name) => !existingAfterApi.has((name || "").toLowerCase()))
-        .map((name) => ({
-          key: `default_${name}`,
-          name,
-          logo: getPayLogoResolved(name),
-          isReceiptItem: false,
+        }
+        const isFromReceipt = (receiptPaymentsRaw || []).some(
+          (p) => normalizeMatchKey(p) === labelKey && !isPaymentMethodHidden(p)
+        );
+        return {
+          key: label,
+          name: label,
+          logo: getPayLogoResolved(label),
+          isReceiptItem: isFromReceipt,
           isApiItem: false,
-          isDefaultItem: true,
-        }));
-      return [...allWithApi, ...defaultItems];
+        };
+      };
+
+      // Same canonical labels as Filter / Add Receipt / Edit Receipt (API-backed).
+      const canonicalLabels = mergePaymentMethodLabels({
+        baseLabels: paymentMethods || [],
+        apiPaymentMethods: apiPaymentMethods || [],
+        isHidden: isPaymentMethodHidden,
+      });
+      const managedItems = canonicalLabels
+        .map(buildPaymentItemFromLabel)
+        .filter(Boolean);
+      const managedKeys = new Set(managedItems.map((p) => normalizeMatchKey(p.name)));
+      const defaultItems = SETTINGS_DEFAULT_PAYMENT_METHODS.filter(
+        (name) => !managedKeys.has(normalizeMatchKey(name)) && !isPaymentMethodHidden(name)
+      ).map((name) => ({
+        key: `default_${name}`,
+        name,
+        logo: getPayLogoResolved(name),
+        isReceiptItem: false,
+        isApiItem: false,
+        isDefaultItem: true,
+      }));
+      return [...managedItems, ...defaultItems];
     }
     return [];
   };
