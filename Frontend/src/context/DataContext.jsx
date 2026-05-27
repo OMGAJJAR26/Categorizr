@@ -9,7 +9,11 @@ import {
   normalizeExpenseCategoryApiList,
 } from "../utils/expenseCategories";
 import { enrichReceiptTaxValues } from "../utils/taxTypeUtils";
-import { dedupeReceiptMediaAcrossReceipts } from "../utils/mediaUrlUtils";
+import {
+  dedupeReceiptMediaAcrossReceipts,
+  resolveReceiptMediaFieldsForApi,
+  receiptMediaStorageKey,
+} from "../utils/mediaUrlUtils";
 import { isMerchantSupersededByApi } from "../utils/merchantListUtils";
 import {
   buildApiPaymentMethodPayload,
@@ -203,6 +207,12 @@ export const DataProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   // Ref used by fetchData to skip the loading spinner for background (silent) refreshes.
   const silentRefreshRef = useRef(false);
+  const mediaHealInFlightRef = useRef(false);
+  // Map of signature → { lastAttemptTs: number, failCount: number }
+  // We allow re-healing the same contamination pattern after 60 s so new uploads
+  // that re-contaminate the same receipts are always fixed.  Give up after 5
+  // consecutive failed attempts to avoid hammering a broken endpoint.
+  const healAttemptMapRef = useRef(new Map());
   const [error, setError] = useState(null);
   const [receiptCategory, setReceiptCategory] = useState([]);
   const [expenseType, setExpenseType] = useState([]);
@@ -1218,43 +1228,6 @@ export const DataProvider = ({ children }) => {
               // The getPaymentLogo function will extract the card type from paymentType for logo detection
               // Don't modify paymentType here - it needs to contain the card type for logos to work
 
-              // Whether receipt_image carries a real URL in this map context
-              // (hasReceiptImage in the .filter() above has a different scope and
-              // is not accessible here — we re-derive it from the local receiptImage).
-              const receiptImageHasUrl =
-                receiptImage &&
-                receiptImage.toString().trim() !== "" &&
-                receiptImage !== "0";
-
-              // The server's uploadmediaV1 API is cumulative: it can inject the
-              // user's most-recently-uploaded files into the emailAttachment field
-              // of ANY receipt that was stored with emailAttachment = "0" / null.
-              // This produces cross-receipt contamination where Receipt A ends up
-              // showing PDFs from Receipt B.
-              //
-              // Contamination defence: when receipt_image has a valid URL (old web
-              // format), mirror it into emailAttachment so both fields stay in sync
-              // and any contaminated emailAttachment value is replaced by the known-
-              // good receipt_image URL.
-              //
-              // IMPORTANT: mobile apps (and our new web upload flow) set
-              // receipt_image = "0" and store the image only in emailAttachment.
-              // When receipt_image is "0" we MUST trust the server's emailAttachment
-              // directly — overwriting it with "0" would hide all those images.
-              const isEmailOriginatedReceipt =
-                r.fk_incoming_email_id &&
-                r.fk_incoming_email_id !== "0" &&
-                r.fk_incoming_email_id !== 0;
-              const isForwardedReceipt =
-                r.receipt_forwarded === "1" ||
-                r.receipt_forwarded === 1;
-              const sanitizedEmailAttachment =
-                (isEmailOriginatedReceipt || isForwardedReceipt)
-                  ? (r.emailAttachment ?? "")   // keep server value for email/forwarded receipts
-                  : receiptImageHasUrl
-                    ? receiptImage              // receipt_image has a URL → mirror it (contamination protection)
-                    : (r.emailAttachment ?? ""); // receipt_image is "0" → trust server emailAttachment (mobile / new web format)
-
               const normalized = {
                 ...r,
                 // Overwrite with normalised values so downstream code can use
@@ -1265,9 +1238,7 @@ export const DataProvider = ({ children }) => {
                 product_name: productName,
                 purchasePrice: purchasePrice, // normalize snake_case purchase_price → camelCase
                 receipt_image: receiptImage,  // normalize camelCase receiptImage → snake_case
-                // Mirror emailAttachment from receipt_image for non-email receipts to
-                // prevent server-side contamination from uploadmediaV1 showing up.
-                emailAttachment: sanitizedEmailAttachment,
+                emailAttachment: (r.emailAttachment ?? "").toString(),
                 receipt_tax_values: receiptTaxValues,
                 paymentType: paymentType, // Keep paymentType as-is (e.g., "MasterCard *7836") - needed for logo detection
                 card_issuer_name: cardIssuerName,
@@ -1593,6 +1564,14 @@ setMerchantsWithImages(
       // build the payment methods list from the NOW-enriched receipts so renamed
       // payment methods show the updated name, not the stale one.
       setReceipts(receiptsWithIntegrations);
+      // Heal runs on EVERY fetchData call (including silentRefreshData) so that
+      // each new upload that re-contaminates older receipts is fixed promptly.
+      // The function itself rate-limits per-signature (60 s cooldown, 5 retries).
+      void healContaminatedReceiptMediaOnServer(
+        formattedReceipts,
+        formattedReceiptsDeduped,
+        token
+      );
       setPaymentMethods(buildPaymentMethods(receiptsWithIntegrations));
 
       setExpenseType([
@@ -1825,6 +1804,157 @@ setMerchantsWithImages(
     return false;
   };
 
+  const postReceiptUpdatePayload = async (payload, token) => {
+    if (!token || !payload?.id) return false;
+    const editEndpoints = [
+      `${BASE_URL}/receipt/updateReceiptv1`,
+      `${BASE_URL}/receipt/editReceiptv1`,
+    ];
+    for (const endpoint of editEndpoints) {
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accesstoken: token,
+          },
+          body: JSON.stringify(payload),
+        });
+        if (response.ok) return true;
+      } catch (err) {
+        console.warn(`[Media heal] ${endpoint} failed:`, err.message);
+      }
+    }
+    return false;
+  };
+
+  const buildReceiptUpdatePayloadFromRow = (receipt) => {
+    const rawPaymentType = (receipt.paymentType ?? "").toString().trim();
+    const normalizedPaymentType = rawPaymentType.replace(/\s*\*\d{3,4}/g, "").trim();
+    const rawLast4 = (receipt.last_4_digit_card ?? "").toString().trim();
+    const inferredLast4 = (() => {
+      if (!rawPaymentType.includes("*")) return "";
+      const matches = [...rawPaymentType.matchAll(/\*(\d{3,4})/g)];
+      return matches.length > 0 ? matches[matches.length - 1][1] : "";
+    })();
+
+    return {
+      id: parseInt(receipt.id),
+      storeName: receipt.storeName ?? "",
+      product_name: receipt.product_name ?? "",
+      emailAttachment: receipt.emailAttachment ?? "0",
+      purchasePrice: (receipt.purchasePrice ?? receipt.total_amount ?? "0").toString(),
+      total_amount: (receipt.total_amount ?? receipt.purchasePrice ?? "0").toString(),
+      payment_category_type: parseInt(receipt.payment_category_type ?? 0) || 0,
+      status: parseInt(receipt.status ?? 0) || 0,
+      paymentType: normalizedPaymentType,
+      last_4_digit_card: rawLast4 || inferredLast4 || "",
+      card_issuer_name: receipt.card_issuer_name ?? "",
+      fk_original_receipt_id: receipt.fk_original_receipt_id ?? "0",
+      fk_forward_from_receipt_id: receipt.fk_forward_from_receipt_id ?? "0",
+      receipt_category: parseInt(receipt.receipt_category ?? 0) || 0,
+      product_date: parseInt(receipt.product_date ?? 0) || 0,
+      expense_type: receipt.expense_type ?? "",
+      receipt_image: receipt.receipt_image ?? "0",
+      store_image: receipt.store_image ?? "",
+      notes: receipt.notes ?? "",
+      receipt_forwarded: receipt.receipt_forwarded ?? "0",
+      receipt_tag: receipt.receipt_tag ?? "",
+      is_draft: parseInt(receipt.is_draft ?? 0) || 0,
+      is_verify: parseInt(receipt.is_verify ?? 0) || 0,
+      create_date: receipt.create_date ?? "",
+      receipt_tax_values: Array.isArray(receipt.receipt_tax_values)
+        ? receipt.receipt_tax_values
+        : [],
+    };
+  };
+
+  /**
+   * uploadmediaV1 can attach the same file URL to many receipts on the server.
+   * Push deduped media back via updateReceiptv1 so Android and future fetches
+   * receive only each receipt's owned attachments.
+   */
+  const healContaminatedReceiptMediaOnServer = async (
+    rawReceipts,
+    cleanedReceipts,
+    token
+  ) => {
+    if (!token || mediaHealInFlightRef.current) return;
+    if (!Array.isArray(rawReceipts) || !Array.isArray(cleanedReceipts)) return;
+
+    const cleanedById = new Map(
+      cleanedReceipts.map((r) => [r.id?.toString(), r])
+    );
+    const toHeal = rawReceipts
+      .map((raw) => ({ raw, cleaned: cleanedById.get(raw.id?.toString()) }))
+      .filter(
+        ({ raw, cleaned }) =>
+          cleaned &&
+          receiptMediaStorageKey(raw) !== receiptMediaStorageKey(cleaned)
+      );
+
+    if (toHeal.length === 0) return;
+
+    const signature = toHeal
+      .map(({ raw, cleaned }) => `${raw.id}:${receiptMediaStorageKey(cleaned)}`)
+      .sort()
+      .join("|");
+
+    // Allow re-healing the same contamination pattern after 60 s.
+    // uploadmediaV1 re-contaminates all receipts on every upload, so we must
+    // keep healing on each fetchData cycle.  Give up after 5 consecutive
+    // failures so we don't hammer a broken endpoint indefinitely.
+    const HEAL_COOLDOWN_MS = 60_000;
+    const MAX_FAIL_COUNT   = 5;
+    const now = Date.now();
+    const prev = healAttemptMapRef.current.get(signature);
+    if (prev) {
+      if (prev.failCount >= MAX_FAIL_COUNT) {
+        console.warn("[Media heal] Giving up on signature after 5 failed attempts:", signature);
+        return;
+      }
+      if (now - prev.lastAttemptTs < HEAL_COOLDOWN_MS) return; // too soon
+    }
+
+    mediaHealInFlightRef.current = true;
+    healAttemptMapRef.current.set(signature, {
+      lastAttemptTs: now,
+      failCount: prev?.failCount ?? 0,
+    });
+
+    try {
+      console.log(
+        `%c[Media heal] Persisting cleaned attachments for ${toHeal.length} receipt(s)`,
+        "color:#0ea5e9;font-weight:bold"
+      );
+      let anyFailed = false;
+      for (const { cleaned } of toHeal) {
+        const ok = await postReceiptUpdatePayload(
+          buildReceiptUpdatePayloadFromRow(cleaned),
+          token
+        );
+        if (!ok) {
+          anyFailed = true;
+          console.warn(`[Media heal] updateReceiptv1 failed for receipt ${cleaned.id}`);
+        }
+      }
+      // Update fail counter so we can give up after persistent failures
+      const cur = healAttemptMapRef.current.get(signature) ?? { lastAttemptTs: now, failCount: 0 };
+      healAttemptMapRef.current.set(signature, {
+        lastAttemptTs: cur.lastAttemptTs,
+        failCount: anyFailed ? cur.failCount + 1 : 0, // reset on full success
+      });
+      if (!anyFailed) {
+        console.log(
+          `%c[Media heal] Successfully cleaned ${toHeal.length} receipt(s) — Android will now receive correct attachments`,
+          "color:#22c55e;font-weight:bold"
+        );
+      }
+    } finally {
+      mediaHealInFlightRef.current = false;
+    }
+  };
+
   // Update receipt function - calls backend API to persist changes
   // API expects id field in the body for update
   const updateReceipt = async (receiptId, updates) => {
@@ -1904,13 +2034,24 @@ setMerchantsWithImages(
         return matches.length > 0 ? matches[matches.length - 1][1] : "";
       })();
 
+      // Never persist uploadmediaV1 cross-receipt contamination: each receipt may
+      // only store media URLs it owns after global dedupe (newest receipt wins).
+      const receiptsForMediaResolve = receipts.map((r) =>
+        r.id?.toString() === receiptId?.toString() ? { ...r, ...apiUpdates } : r
+      );
+      const apiMediaFields = resolveReceiptMediaFieldsForApi(
+        receiptId,
+        apiUpdates,
+        receiptsForMediaResolve
+      );
+
       // Build the update payload matching API model
       // Only update fields that are provided, preserve existing values for others
       const updatePayload = {
         id: parseInt(receiptId),
         storeName: getValue("storeName", ""),
         product_name: getValue("product_name", ""),
-        emailAttachment: getValue("emailAttachment", "0"),
+        emailAttachment: apiMediaFields.emailAttachment,
         // Preserve purchasePrice - only update if explicitly provided
         purchasePrice: (() => {
           const val = getValue("purchasePrice");
@@ -1960,7 +2101,7 @@ setMerchantsWithImages(
           // If not in updates, preserve existing value
           return existingReceipt?.expense_type ?? "";
         })(),
-        receipt_image: getValue("receipt_image", "0"),
+        receipt_image: apiMediaFields.receipt_image,
         store_image: getValue("store_image", ""),
         notes: getValue("notes", ""),
         receipt_forwarded: getValue("receipt_forwarded", "0"),
