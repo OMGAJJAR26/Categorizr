@@ -3715,12 +3715,6 @@ const handleSelectLogo = (index) => {
     }
 
     const last4Final = newLast4Digits.trim().replace(/\D/g, "").slice(0, 4);
-    // Skip receipt-based duplicate check in edit mode — the receipts that use this card
-    // ARE the card being edited; finding them is expected, not a duplicate.
-    if (!payModalEditMode && paymentMethodDuplicateExists(selectedCardTypeForLogo, last4Final)) {
-      setPayModalError("Payment Method already exists");
-      return;
-    }
 
     const storedIssuer = storedCardIssuerName(customIssuer, selectedCardTypeForLogo);
     const paymentMethodString = buildPaymentMethodStorageString(

@@ -226,7 +226,7 @@ export default function EditPaymentMethodModal({
               </div>
 
               {/* ── Duplicate error ────────────────────────────────────────── */}
-              {duplicateError && (
+              {!isSaving && duplicateError && (
                 <div className="mb-4 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
                   <AlertCircle size={14} />
                   {duplicateError}
@@ -250,7 +250,7 @@ export default function EditPaymentMethodModal({
               </div>
 
               {/* ── Validation error (e.g. last 4 digits) ─────────────────── */}
-              {generalError && (
+              {!isSaving && generalError && (
                 <div className="mb-4 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
                   <AlertCircle size={14} />
                   {generalError}

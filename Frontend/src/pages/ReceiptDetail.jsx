@@ -941,20 +941,58 @@ useEffect(() => {
     });
   };
 
-  const paymentMethodDuplicateExists = (cardType, last4) => {
-    const normalizedCardType = (cardType || "").trim().toLowerCase();
-    const normalizedLast4 = (last4 || "").replace(/\D/g, "").slice(0, 4);
-    if (!normalizedCardType || normalizedLast4.length !== 4) return false;
-    // Strip trailing " *XXXX" from paymentType before comparing brand names so that
-    // "Diners Club *3334" correctly reduces to "diners club" for the brand comparison.
-    const extractBrand = (str) =>
-      (str || "").toString().trim().toLowerCase().replace(/\s*\*\d{3,4}\s*$/, "").trim();
-    return (receipts || []).some((rct) => {
-      const existingBrand = extractBrand(rct.paymentType || rct.payment_type || "");
-      const existingLast4 = (rct.last_4_digit_card || rct.last4DigitCard || "").toString().replace(/\D/g, "").slice(-4);
-      return existingBrand === normalizedCardType && existingLast4 === normalizedLast4;
+  const normalizePaymentMethodKey = (value) =>
+    String(value || "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .replace(/\s*\*\s*/, " *")
+      .toLowerCase();
+
+  const localPaymentMethodStrings = React.useMemo(
+    () =>
+      (localPaymentMethods || []).map((pm) => {
+        const issuerName = pm.cardIssuerName || "";
+        const last4 = pm.last4DigitCard || "";
+        const brand = pm.selectedCardType || inferCardTypeFromPayment(pm.paymentType || "");
+        if (issuerName && last4) {
+          return isCustomCardIssuer(issuerName, brand)
+            ? `${issuerName} *${last4}`
+            : `${brand} *${last4}`;
+        }
+        if (issuerName) return issuerName;
+        if (brand && last4) return `${brand} *${last4}`;
+        return pm.paymentType || "";
+      }),
+    [localPaymentMethods]
+  );
+
+  const paymentMethodNameExists = (name, excludeName = "") => {
+    const target = normalizePaymentMethodKey(name);
+    const excluded = normalizePaymentMethodKey(excludeName);
+    if (!target) return false;
+    const allCandidates = [
+      ...localPaymentMethodStrings,
+      ...(apiPaymentMethods || []).map((p) => getApiPaymentMethodDisplayName(p)),
+    ];
+    return allCandidates.some((item) => {
+      const normalizedItem = normalizePaymentMethodKey(item);
+      return normalizedItem === target && normalizedItem !== excluded;
     });
   };
+
+  const paymentMethodDraftName = (() => {
+    const cardType = (newPaymentCardType || "").trim();
+    const issuer = (newCardIssuerName || "").trim();
+    const last4 = (newLast4Digits || "").replace(/\D/g, "").slice(0, 4);
+    if (!cardType || last4.length < 4) return "";
+    return buildPaymentMethodStorageString(issuer, cardType, last4);
+  })();
+
+  const paymentDuplicateError =
+    paymentMethodDraftName &&
+    paymentMethodNameExists(paymentMethodDraftName, payModalEditMode?.name || "")
+      ? "Payment Method already exists"
+      : "";
 
   // Toggle tag
   const toggleTag = (tagName) => {
@@ -1471,6 +1509,10 @@ useEffect(() => {
       setPayModalError("Please enter last 4 digits of card number");
       return;
     }
+    if (paymentDuplicateError) {
+      setPayModalError("Payment Method already exists");
+      return;
+    }
     setPayModalError(null);
 
     // Resolve card type display name
@@ -1552,10 +1594,6 @@ useEffect(() => {
     }
 
     // ── ADD MODE ─────────────────────────────────────────────────────────────
-    if (paymentMethodDuplicateExists(selectedCardTypeForLogo, last4)) {
-      setPayModalError("Payment Method already exists");
-      return;
-    }
     setPendingPayMethodFn(() => async () => {
       handleFieldChange("paymentType", selectedCardTypeForLogo);
       handleFieldChange("paymentBrand", "");
@@ -6424,6 +6462,7 @@ Thank you for using our receipt management system.
         cardIssuerName={newCardIssuerName}
         last4Digits={newLast4Digits}
         categoryType={newPaymentCategoryType}
+        duplicateError={paymentDuplicateError}
         generalError={payModalError}
         onClose={handleCloseAddPaymentModal}
         onSave={handleAddPaymentMethod}
