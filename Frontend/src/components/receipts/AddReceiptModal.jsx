@@ -1950,10 +1950,7 @@ const handleFieldChange = (field, value) => {
   const handleSaveEditCategory = () => {
     const newName = editCategoryName.trim();
     if (!newName) { setEditCategoryError("Please enter Expense Category"); return; }
-    if (expenseCategoryExists(newName, editingCategory)) {
-      setEditCategoryError("Expense Category already exists");
-      return;
-    }
+    if (editCategoryDuplicateError) return;
     // Validation passed — show styled confirmation popup
     setShowCategoryEditConfirm(true);
   };
@@ -4063,6 +4060,16 @@ const handleSelectLogo = (index) => {
   const editMerchantDuplicateError =
     editMerchantName.trim() && merchantExists(editMerchantName, editingMerchant?.name || "")
       ? "Merchant already exists"
+      : "";
+
+  const addCategoryDuplicateError =
+    newCategoryName.trim() && expenseCategoryExists(newCategoryName.trim())
+      ? "Expense Category already exists"
+      : "";
+
+  const editCategoryDuplicateError =
+    editCategoryName.trim() && expenseCategoryExists(editCategoryName.trim(), editingCategory || "")
+      ? "Expense Category already exists"
       : "";
 
   const filteredPaymentMethods = (() => {
@@ -7093,10 +7100,7 @@ const handleSelectLogo = (index) => {
                         setError("Please enter Expense Category");
                         return;
                       }
-                      if (expenseCategoryExists(nextCategory)) {
-                        setError("Expense Category already exists");
-                        return;
-                      }
+                      if (addCategoryDuplicateError) return;
                       // Immediate local state so the dropdown shows it right away
                       addExpenseCategory(nextCategory);
                       handleFieldChange("expense_type", nextCategory);
@@ -7111,20 +7115,23 @@ const handleSelectLogo = (index) => {
                     }
                   }}
                 />
+                {addCategoryDuplicateError && (
+                  <div className="mb-4 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+                    <AlertCircle size={14} />
+                    {addCategoryDuplicateError}
+                  </div>
+                )}
                 <div className="flex justify-end">
                   <button
                     type="button"
-                    disabled={!newCategoryName.trim()}
+                    disabled={!newCategoryName.trim() || !!addCategoryDuplicateError}
                     onClick={async () => {
                       const nextCategory = newCategoryName.trim();
                       if (!nextCategory) {
                         setError("Please enter Expense Category");
                         return;
                       }
-                      if (expenseCategoryExists(nextCategory)) {
-                        setError("Expense Category already exists");
-                        return;
-                      }
+                      if (addCategoryDuplicateError) return;
                       // Immediate local state so the dropdown shows it right away
                       addExpenseCategory(nextCategory);
                       handleFieldChange("expense_type", nextCategory);
@@ -7185,13 +7192,22 @@ const handleSelectLogo = (index) => {
                   type="text"
                   className="w-full border border-blue-400 text-sm px-3 py-2 rounded-md bg-white text-gray-800 mb-4"
                   value={editCategoryName}
-                  onChange={(e) => setEditCategoryName(e.target.value)}
+                  onChange={(e) => {
+                    setEditCategoryName(e.target.value);
+                    if (editCategoryError === "Expense Category already exists") setEditCategoryError(null);
+                  }}
                   placeholder="Enter category name"
                   autoFocus
                   disabled={isSavingEditCategory}
-                  onKeyDown={(e) => { if (e.key === "Enter" && editCategoryName.trim()) handleSaveEditCategory(); }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && editCategoryName.trim() && !editCategoryDuplicateError) handleSaveEditCategory(); }}
                 />
-                {editCategoryError && (
+                {editCategoryDuplicateError && (
+                  <div className="mb-4 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+                    <AlertCircle size={14} />
+                    {editCategoryDuplicateError}
+                  </div>
+                )}
+                {editCategoryError && editCategoryError !== "Expense Category already exists" && (
                   <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
                     {editCategoryError}
                   </div>
@@ -7208,7 +7224,7 @@ const handleSelectLogo = (index) => {
                   <button
                     type="button"
                     onClick={handleSaveEditCategory}
-                    disabled={!editCategoryName.trim() || isSavingEditCategory}
+                    disabled={!editCategoryName.trim() || isSavingEditCategory || !!editCategoryDuplicateError}
                     className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     {isSavingEditCategory ? "Saving…" : "Okay"}

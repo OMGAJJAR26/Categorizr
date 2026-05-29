@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { NODE_API_URL, proxyImageUrl, unproxyImageUrl } from "../api/Axios";
 import { formatTaxRate, taxTypeDedupKey, taxTypesMatch, taxDefinitionMatchesReceiptLine } from "../utils/receiptFormatters";
-import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine,} from "lucide-react";
+import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine, AlertCircle,} from "lucide-react";
 import ReceiptAnnotator from "../components/receipts/ReceiptAnnotator";
 import PdfThumbnail from "../components/receipts/PdfThumbnail";
 import {
@@ -992,6 +992,16 @@ useEffect(() => {
     paymentMethodDraftName &&
     paymentMethodNameExists(paymentMethodDraftName, payModalEditMode?.name || "")
       ? "Payment Method already exists"
+      : "";
+
+  const addCategoryDuplicateError =
+    newCategoryName.trim() && expenseCategoryExists(newCategoryName.trim())
+      ? "Expense Category already exists"
+      : "";
+
+  const editCategoryDuplicateError =
+    editCategoryName.trim() && expenseCategoryExists(editCategoryName.trim(), editingCategory || "")
+      ? "Expense Category already exists"
       : "";
 
   // Toggle tag
@@ -2609,10 +2619,7 @@ useEffect(() => {
   const handleSaveEditCategory = async () => {
     const newName = editCategoryName.trim();
     if (!newName) { setEditCategoryError("Please enter Expense Category"); return; }
-    if (expenseCategoryExists(newName, editingCategory)) {
-      setEditCategoryError("Expense Category already exists");
-      return;
-    }
+    if (editCategoryDuplicateError) return;
     setIsSavingEditCategory(true);
     setEditCategoryError(null);
     const oldName = editingCategory;
@@ -7193,10 +7200,7 @@ Thank you for using our receipt management system.
                         setToast({ isVisible: true, message: "Please enter Expense Category", type: "error" });
                         return;
                       }
-                      if (expenseCategoryExists(nextCategory)) {
-                        setToast({ isVisible: true, message: "Expense Category already exists", type: "error" });
-                        return;
-                      }
+                      if (addCategoryDuplicateError) return;
                       // Immediate local state so dropdown shows it right away
                       addExpenseCategory(nextCategory);
                       handleFieldChange("expense_type", nextCategory);
@@ -7211,20 +7215,23 @@ Thank you for using our receipt management system.
                     }
                   }}
                 />
+                {addCategoryDuplicateError && (
+                  <div className="mb-4 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+                    <AlertCircle size={14} />
+                    {addCategoryDuplicateError}
+                  </div>
+                )}
                 <div className="flex justify-end">
                   <button
                     type="button"
-                    disabled={!newCategoryName.trim()}
+                    disabled={!newCategoryName.trim() || !!addCategoryDuplicateError}
                     onClick={async () => {
                       const nextCategory = newCategoryName.trim();
                       if (!nextCategory) {
                         setToast({ isVisible: true, message: "Please enter Expense Category", type: "error" });
                         return;
                       }
-                      if (expenseCategoryExists(nextCategory)) {
-                        setToast({ isVisible: true, message: "Expense Category already exists", type: "error" });
-                        return;
-                      }
+                      if (addCategoryDuplicateError) return;
                       // Immediate local state so dropdown shows it right away
                       addExpenseCategory(nextCategory);
                       handleFieldChange("expense_type", nextCategory);
@@ -7288,13 +7295,22 @@ Thank you for using our receipt management system.
                   type="text"
                   className="w-full border border-blue-400 text-sm px-3 py-2 rounded-md bg-white text-gray-800 mb-4"
                   value={editCategoryName}
-                  onChange={(e) => setEditCategoryName(e.target.value)}
+                  onChange={(e) => {
+                    setEditCategoryName(e.target.value);
+                    if (editCategoryError === "Expense Category already exists") setEditCategoryError(null);
+                  }}
                   placeholder="Enter category name"
                   autoFocus
                   disabled={isSavingEditCategory}
-                  onKeyDown={(e) => { if (e.key === "Enter" && editCategoryName.trim()) handleSaveEditCategory(); }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && editCategoryName.trim() && !editCategoryDuplicateError) handleSaveEditCategory(); }}
                 />
-                {editCategoryError && (
+                {editCategoryDuplicateError && (
+                  <div className="mb-4 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+                    <AlertCircle size={14} />
+                    {editCategoryDuplicateError}
+                  </div>
+                )}
+                {editCategoryError && editCategoryError !== "Expense Category already exists" && (
                   <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
                     {editCategoryError}
                   </div>
@@ -7311,7 +7327,7 @@ Thank you for using our receipt management system.
                   <button
                     type="button"
                     onClick={handleSaveEditCategory}
-                    disabled={!editCategoryName.trim() || isSavingEditCategory}
+                    disabled={!editCategoryName.trim() || isSavingEditCategory || !!editCategoryDuplicateError}
                     className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     {isSavingEditCategory ? "Saving…" : "Okay"}
