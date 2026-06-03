@@ -2,15 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { FileText } from "lucide-react";
 import CustomizedReport from "../../pages/CustomizedReport";
 import TaxTypePopup from "../filters/TaxTypePopup";
-
-const toTaxLabel = (tax) => {
-  const name = (tax?.tax_name ?? "").toString().trim() || "Unknown";
-  if (name.toLowerCase().startsWith("tip")) return "Tip";
-  const val = tax?.tax_rate != null ? parseFloat(String(tax.tax_rate).replace(/%/g, "")) : 0;
-  const rounded = Math.round(isNaN(val) ? 0 : val);
-  return `${name} | ${rounded}%`;
-};
-
+import { toTaxLabel } from "../../utils/receiptFormatters";
 const ReportOptions = ({ 
   activeMenu, 
   setActiveMenu, 

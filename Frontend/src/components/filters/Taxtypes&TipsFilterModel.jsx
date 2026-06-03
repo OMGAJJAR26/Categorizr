@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useData } from "../../context/DataContext";
+import { toTaxLabel } from "../../utils/receiptFormatters";
 
 const TaxtypesAndTipsFilterModel = ({
   onClose,
@@ -27,15 +28,6 @@ const TaxtypesAndTipsFilterModel = ({
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [onClose]);
-
-  const toLabel = useCallback((t) => {
-    const name = t?.tax_name?.toString().trim() || "Unknown";
-    if (name.toLowerCase().startsWith("tip")) return "Tip";
-    const val =
-      t?.tax_rate != null ? parseFloat(String(t.tax_rate).replace(/%/g, "")) : 0;
-    const rounded = Math.round(isNaN(val) ? 0 : val);
-    return `${name} | ${rounded}%`;
-  }, []);
 
   const labels = useMemo(() => {
     // Combine taxData from API with receiptTaxValues
@@ -70,12 +62,12 @@ const TaxtypesAndTipsFilterModel = ({
     }
     
     const allTaxes = Array.from(taxMap.values());
-    const unique = new Set(allTaxes.map(toLabel));
+    const unique = new Set(allTaxes.map(toTaxLabel));
     const items = Array.from(unique).sort((a, b) => a.localeCompare(b));
     const tips = items.filter((i) => i.toLowerCase().startsWith("tip"));
     const rest = items.filter((i) => !i.toLowerCase().startsWith("tip"));
     return [...rest, ...tips];
-  }, [receiptTaxValues, taxData, toLabel]);
+  }, [receiptTaxValues, taxData]);
 
   const [selectedTaxAndTipsTypes, setSelectedTaxAndTipsTypes] =
     useState(initialSelected);

@@ -1,6 +1,7 @@
 // src/components/TaxTypePopup.jsx
 import { X } from "lucide-react";
 import { useData } from "../../context/DataContext";
+import { formatTaxRate } from "../../utils/receiptFormatters";
 // Remove the import for generateTaxReportPDF since we don't want auto-download
 // import { generateTaxReportPDF } from "../../generatePDF";
 
@@ -115,7 +116,7 @@ export default function TaxTypePopup({
                   }}
                 />
                 <span>
-                 {tax.tax_name} ({Math.round(tax.tax_rate)}%)
+                 {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
                 </span>
               </label>
             );
