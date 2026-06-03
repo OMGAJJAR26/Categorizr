@@ -1,5 +1,9 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { formatTaxRate, taxTypeDedupKey, taxTypesMatch } from "../../utils/receiptFormatters";
+import {
+  parseDateInputToUnix,
+  todayLocalCalendarUnix,
+} from "../../utils/receiptDate";
 import { containsEmoji, stripEmoji } from "../../utils/emojiUtils";
 import SimpleAlertModal from "../SimpleAlertModal";
 import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus, MoreHorizontal, Minus, ChevronLeft, ChevronRight, Pencil, Camera, PenLine, AlertCircle } from "lucide-react";
@@ -2064,18 +2068,11 @@ const handleFieldChange = (field, value) => {
 
       // Build payload matching API model structure
       // Validate date - ensure it's valid and not empty
-      let productDate = 0;
-      if (formData.product_date) {
-        const [yr, mo, dy] = formData.product_date.split("-").map(Number);
-        const dateObj = new Date(Date.UTC(yr, mo - 1, dy));
-        if (!isNaN(dateObj.getTime())) {
-          productDate = Math.floor(dateObj.getTime() / 1000);
-        }
-      }
+      let productDate = parseDateInputToUnix(formData.product_date);
 
-      // If date is still invalid, use current date
+      // If date is still invalid, use today's local calendar date (not Date.now())
       if (productDate === 0 || productDate < 1000000) {
-        productDate = Math.floor(new Date().getTime() / 1000);
+        productDate = todayLocalCalendarUnix();
       }
 
       const purchasePrice = parseFloat(formData.purchasePrice) || 0;
@@ -2617,13 +2614,8 @@ const handleFieldChange = (field, value) => {
 
   /** Build a minimal receipt API payload from current form state */
   const buildQuickPayload = (overrideId = null) => {
-    let productDate = 0;
-    if (formData.product_date) {
-      const [yr, mo, dy] = formData.product_date.split("-").map(Number);
-      const d = new Date(Date.UTC(yr, mo - 1, dy));
-      if (!isNaN(d.getTime())) productDate = Math.floor(d.getTime() / 1000);
-    }
-    if (!productDate) productDate = Math.floor(Date.now() / 1000);
+    let productDate = parseDateInputToUnix(formData.product_date);
+    if (!productDate) productDate = todayLocalCalendarUnix();
 
     const receiptTag = [
       "0",
@@ -2968,12 +2960,8 @@ const handleFieldChange = (field, value) => {
     setError(null);
     try {
       const fkUserId = parseInt(localStorage.getItem("fk_user_id")) || 0;
-      let productDate = 0;
-      if (formData.product_date) {
-        const d = new Date(formData.product_date);
-        if (!isNaN(d.getTime())) productDate = Math.floor(d.getTime() / 1000);
-      }
-      if (!productDate) productDate = Math.floor(Date.now() / 1000);
+      let productDate = parseDateInputToUnix(formData.product_date);
+      if (!productDate) productDate = todayLocalCalendarUnix();
       const receiptTag = ["0","0","0","0","0","0","0"].join(",");
       const combinedImageUrls = buildSessionEmailAttachmentForApi([
         uploadedMediaUrls,

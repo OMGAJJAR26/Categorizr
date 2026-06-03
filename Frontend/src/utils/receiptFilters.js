@@ -1,5 +1,6 @@
 import { parseReceiptTags } from "./receiptFormatters";
 import { TAG_STATUS_GROUPS } from "./tagStatusGroups";
+import { formatReceiptDate } from "./receiptDate";
 
 // Helper function for search aliases
 const getSearchAliases = (issuer) => {
@@ -40,13 +41,7 @@ const matchesSearch = (receipt, searchTerm) => {
     catText,
     (receipt.purchasePrice ?? "").toString().toLowerCase(),
     receipt.product_date
-      ? new Date(Number(receipt.product_date) * 1000)
-          .toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          })
-          .toLowerCase()
+      ? formatReceiptDate(receipt).toLowerCase()
       : "",
   ].filter(Boolean);
 

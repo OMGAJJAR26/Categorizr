@@ -67,6 +67,12 @@ import {
 import { buildExpenseCategoryOptions } from "../utils/expenseCategories";
 import { findRenamedApiMerchant } from "../utils/merchantListUtils";
 import { containsEmoji } from "../utils/emojiUtils";
+import {
+  formatReceiptDateLong,
+  parseDateInputToUnix,
+  productDateToInputValue,
+  todayLocalCalendarUnix,
+} from "../utils/receiptDate";
 
 // Default payment methods
 const defaultPaymentMethods = [
@@ -1247,13 +1253,10 @@ useEffect(() => {
 
   const formatDate = (timestamp) => {
     if (!timestamp) return "";
-    const date = new Date(Number(timestamp) * 1000);
-    return date.toLocaleDateString("en-US", {
-      timeZone: "UTC",
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-    });
+    return formatReceiptDateLong(
+      timestamp,
+      selectedReceipt?.create_date ?? editedReceipt?.create_date,
+    );
   };
 
   const sanitizeMoneyInput = (raw) => {
@@ -2854,13 +2857,10 @@ useEffect(() => {
         (selectedReceipt?.card_issuer_name ?? selectedReceipt?.cardIssuerName ?? "")
           .toString()
           .trim();
-      let productDate  = 0;
-      const dateVal    = editedReceipt.product_date || selectedReceipt?.product_date;
-      if (dateVal) {
-        const d = new Date(dateVal);
-        if (!isNaN(d.getTime())) productDate = Math.floor(d.getTime() / 1000);
+      let productDate = Number(editedReceipt.product_date || selectedReceipt?.product_date) || 0;
+      if (!productDate || productDate < 1000000) {
+        productDate = todayLocalCalendarUnix();
       }
-      if (!productDate) productDate = Math.floor(Date.now() / 1000);
       const receiptTag = ["0","0","0","0","0","0","0"].join(",");
 
       // Create a new receipt for each split
@@ -3614,17 +3614,6 @@ useEffect(() => {
       const receipt = r;
       const paymentDisplayName = getPaymentDisplayName(receipt);
 
-      const formatDate = (timestamp) => {
-        if (!timestamp) return "";
-        const date = new Date(Number(timestamp) * 1000);
-        return date.toLocaleDateString("en-US", {
-          timeZone: "UTC",
-          month: "long",
-          day: "numeric",
-          year: "numeric",
-        });
-      };
-
       const formatCurrencyFixed2 = (amount) => {
         const num = Number(amount) || 0;
         try {
@@ -4110,17 +4099,6 @@ Thank you for using our receipt management system.
       const html2pdf = (await import("html2pdf.js")).default;
       const receipt = r;
       const paymentDisplayName = getPaymentDisplayName(receipt);
-
-      const formatDate = (timestamp) => {
-        if (!timestamp) return "";
-        const date = new Date(Number(timestamp) * 1000);
-        return date.toLocaleDateString("en-US", {
-          timeZone: "UTC",
-          month: "long",
-          day: "numeric",
-          year: "numeric",
-        });
-      };
 
       const formatCurrencyFixed2 = (amount) => {
         const num = Number(amount) || 0;
@@ -5160,16 +5138,14 @@ Thank you for using our receipt management system.
                           <input
                             type="date"
                             className={inputClass}
-                            value={(() => {
-                              if (!editedReceipt.product_date) return "";
-                              const d = new Date(Number(editedReceipt.product_date) * 1000);
-                              return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-                            })()}
+                            value={productDateToInputValue(
+                              editedReceipt.product_date,
+                              selectedReceipt?.create_date ?? editedReceipt?.create_date,
+                            )}
                             onChange={(e) => {
                               if (!e.target.value) return;
-                              const [yr, mo, dy] = e.target.value.split("-").map(Number);
-                              const utcMidnight = new Date(Date.UTC(yr, mo - 1, dy));
-                              handleFieldChange("product_date", Math.floor(utcMidnight.getTime() / 1000));
+                              const unix = parseDateInputToUnix(e.target.value);
+                              if (unix) handleFieldChange("product_date", unix);
                             }}
                           />
                         </div>

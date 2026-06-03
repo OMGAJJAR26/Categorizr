@@ -3,6 +3,7 @@ import { Trash2, Link2, Loader2 } from "lucide-react";
 import MerchantAvatar from "../MerchantAvatar";
 import ReceiptBadges from "../ReceiptBadges";
 import SimpleAlertModal from "../SimpleAlertModal";
+import { formatReceiptDate } from "../../utils/receiptDate";
 
 const ReceiptsTable = ({
   receipt,
@@ -37,16 +38,7 @@ const ReceiptsTable = ({
     return () => document.removeEventListener("mousedown", handler);
   }, [showIntegrateMenu]);
 
-  const getFormattedDate = () => {
-    return receipt.product_date
-      ? new Date(Number(receipt.product_date) * 1000).toLocaleDateString("en-US", {
-          timeZone: "UTC",
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-        })
-      : "—";
-  };
+  const getFormattedDate = () => formatReceiptDate(receipt);
 
   const getReceiptType = () => {
     return receipt.receipt_category == 0

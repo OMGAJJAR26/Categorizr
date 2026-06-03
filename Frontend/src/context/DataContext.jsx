@@ -25,6 +25,10 @@ import {
   normalizeApiPaymentMethodInput,
   paymentMethodPayloadToQuery,
 } from "../utils/paymentMethodUtils";
+import {
+  parseReceiptUnix,
+  resolveReceiptCalendarUnix,
+} from "../utils/receiptDate";
 
 const DataContext = createContext();
 const BASE_URL = "/api";
@@ -1102,8 +1106,10 @@ export const DataProvider = ({ children }) => {
               // - backend sends UNIX seconds
               // - some receipts (especially from mobile/manual) may have product_date=0
               //   but a valid create_date; use create_date as a fallback
-              const rawProductDate = parseInt(r.product_date) || 0;
-              const createDate = parseInt(r.create_date) || 0;
+              const rawProductDate = parseReceiptUnix(r.product_date);
+              const createDate = parseReceiptUnix(
+                r.create_date ?? r.createDate,
+              );
 
               let normalisedProductDate = rawProductDate;
 
@@ -1115,6 +1121,15 @@ export const DataProvider = ({ children }) => {
                   normalisedProductDate = 0;
                 }
               }
+
+              normalisedProductDate = resolveReceiptCalendarUnix(
+                normalisedProductDate,
+                createDate,
+                {
+                  isDraft: r.is_draft === "1" || r.is_draft === 1,
+                  fk_incoming_email_id: r.fk_incoming_email_id,
+                },
+              );
 
               return {
                 ...r,
