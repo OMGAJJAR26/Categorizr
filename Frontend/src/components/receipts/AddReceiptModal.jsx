@@ -4952,22 +4952,22 @@ const handleSelectLogo = (index) => {
                       </div>
                       {/* Edit / Delete — hidden for Miscellaneous, visible on hover */}
                       {!isMisc && (
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                        <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); handleOpenEditMerchant(merchant); }}
-                            className="p-1 rounded hover:bg-blue-100 text-blue-500"
                             title="Edit merchant"
+                            style={{ padding: "2px 5px", borderRadius: 6, background: "#eff6ff", border: "1px solid #bfdbfe", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
                           >
-                            <Pencil size={13} />
+                            <Pencil size={11} style={{ color: "#2563eb" }} />
                           </button>
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); handleDeleteMerchant(merchant); }}
-                            className="p-1 rounded hover:bg-red-100 text-red-400"
                             title="Delete merchant"
+                            style={{ padding: "2px 5px", borderRadius: 6, background: "#fef2f2", border: "1px solid #fecaca", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
                           >
-                            <Trash2 size={13} />
+                            <Trash2 size={11} style={{ color: "#dc2626" }} />
                           </button>
                         </div>
                       )}
@@ -5040,22 +5040,22 @@ const handleSelectLogo = (index) => {
                 >
                   {category}
                 </span>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); handleOpenEditCategory(category); }}
-                    className="p-1 rounded hover:bg-blue-100 text-gray-400 hover:text-blue-600 transition-colors"
                     title="Edit category"
+                    style={{ padding: "2px 5px", borderRadius: 6, background: "#eff6ff", border: "1px solid #bfdbfe", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
                   >
-                    <Pencil size={13} />
+                    <Pencil size={11} style={{ color: "#2563eb" }} />
                   </button>
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); setDeletingCategory(category); setShowDeleteCategoryConfirm(true); setShowCategoryDropdown(false); }}
-                    className="p-1 rounded hover:bg-red-100 text-gray-400 hover:text-red-600 transition-colors"
                     title="Delete category"
+                    style={{ padding: "2px 5px", borderRadius: 6, background: "#fef2f2", border: "1px solid #fecaca", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
                   >
-                    <Trash2 size={13} />
+                    <Trash2 size={11} style={{ color: "#dc2626" }} />
                   </button>
                 </div>
               </div>
