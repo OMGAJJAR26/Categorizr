@@ -13,10 +13,10 @@ import MobileTagsModal from "./MobileTagsModal";
 
 const FILTER_OPTIONS = [
   { key: "date", label: "Date", modal: DateFilterModal },
-  { key: "expenseCategory", label: "Expense Category", modal: ExpenseTypeFilterModel },
-  { key: "merchant", label: "Merchant", modal: MerchantFilterModal },
-  { key: "paymentMethod", label: "Payment Method", modal: PaymentFilterMethod },
   { key: "receiptCategory", label: "Expense Type", modal: ReceiptCategoryFilterModel },
+  { key: "merchant", label: "Merchant", modal: MerchantFilterModal },
+  { key: "expenseCategory", label: "Expense Category", modal: ExpenseTypeFilterModel },
+  { key: "paymentMethod", label: "Payment Method", modal: PaymentFilterMethod },
   { key: "taxTypes", label: "Tax Types & Tips", modal: TaxtypesAndTipsFilterModel },
   { key: "price", label: "Total", modal: TotalFilterModel },
 ];
