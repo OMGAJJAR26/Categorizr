@@ -2047,7 +2047,11 @@ setMerchantsWithImages(
 
     try {
       // Get existing receipt to preserve values for fields not being updated
-      const existingReceipt = receipts.find(r => r.id?.toString() === receiptId?.toString());
+      const receiptIdStr = receiptId?.toString();
+      const existingReceipt = receipts.find(
+        (r) => r.id?.toString() === receiptIdStr
+      );
+      const receiptMatchesId = (r) => r.id?.toString() === receiptIdStr;
       
       // Filter out frontend-only fields that shouldn't be sent to API
       const frontendOnlyFields = ['quickbooksLinked', 'paymentDisplay', 'badgeStatus', 'subtotal'];
@@ -2064,7 +2068,7 @@ setMerchantsWithImages(
         // Update local state for frontend-only fields
         setReceipts(prevReceipts => {
           return prevReceipts.map(receipt =>
-            receipt.id === receiptId ? { ...receipt, ...updates } : receipt
+            receiptMatchesId(receipt) ? { ...receipt, ...updates } : receipt
           );
         });
         return true;
@@ -2075,7 +2079,7 @@ setMerchantsWithImages(
         // Still update local state
         setReceipts(prevReceipts => {
           return prevReceipts.map(receipt =>
-            receipt.id === receiptId ? { ...receipt, ...updates } : receipt
+            receiptMatchesId(receipt) ? { ...receipt, ...updates } : receipt
           );
         });
         return false;
@@ -2117,7 +2121,7 @@ setMerchantsWithImages(
       // Never persist uploadmediaV1 cross-receipt contamination: each receipt may
       // only store media URLs it owns after global dedupe (newest receipt wins).
       const receiptsForMediaResolve = receipts.map((r) =>
-        r.id?.toString() === receiptId?.toString() ? { ...r, ...apiUpdates } : r
+        receiptMatchesId(r) ? { ...r, ...apiUpdates } : r
       );
       const apiMediaFields = resolveReceiptMediaFieldsForApi(
         receiptId,
@@ -2247,7 +2251,7 @@ setMerchantsWithImages(
           updates.card_issuer_name !== undefined ||
           updates.last_4_digit_card !== undefined;
         const updatedReceipts = prevReceipts.map(receipt => {
-          if (receipt.id !== receiptId) return receipt;
+          if (!receiptMatchesId(receipt)) return receipt;
           const merged = { ...receipt, ...updates };
           if (paymentFieldsChanged) {
             merged.payment_logo_url = "";
@@ -2287,7 +2291,7 @@ setMerchantsWithImages(
       console.warn("Update failed:", error.message);
       setReceipts(prevReceipts => {
         const updatedReceipts = prevReceipts.map(receipt =>
-          receipt.id === receiptId ? { ...receipt, ...updates } : receipt
+          receiptMatchesId(receipt) ? { ...receipt, ...updates } : receipt
         );
         return dedupeReceiptMediaAcrossReceipts(updatedReceipts);
       });

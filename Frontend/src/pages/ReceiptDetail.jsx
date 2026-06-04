@@ -1,6 +1,13 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from "react";
 import { NODE_API_URL, proxyImageUrl, unproxyImageUrl } from "../api/Axios";
-import { formatTaxRate, taxTypeDedupKey, taxTypesMatch, taxDefinitionMatchesReceiptLine } from "../utils/receiptFormatters";
+import {
+  encodeReceiptTags,
+  formatTaxRate,
+  parseReceiptTags,
+  taxTypeDedupKey,
+  taxTypesMatch,
+  taxDefinitionMatchesReceiptLine,
+} from "../utils/receiptFormatters";
 import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine, AlertCircle,} from "lucide-react";
 import ReceiptAnnotator from "../components/receipts/ReceiptAnnotator";
 import PdfThumbnail from "../components/receipts/PdfThumbnail";
@@ -128,6 +135,36 @@ const findReceiptIndexInList = (list, id) => {
   return list.findIndex((r) => String(r?.id) === target);
 };
 
+const RECEIPT_DEFAULT_TAGS = {
+  locked: false,
+  starred: false,
+  flagged: false,
+  verified: false,
+  reconciled: false,
+  reimbursed: false,
+  warrantied: false,
+};
+
+const findContextReceipt = (receipts, incoming) => {
+  if (!incoming) return null;
+  if (!incoming.id || !Array.isArray(receipts) || receipts.length === 0) return incoming;
+  return receipts.find((r) => String(r.id) === String(incoming.id)) || incoming;
+};
+
+const editedTagsFromReceiptTag = (receiptTagString) => {
+  const parsed = parseReceiptTags(receiptTagString);
+  if (!parsed) return RECEIPT_DEFAULT_TAGS;
+  return {
+    locked: !!parsed.locked,
+    starred: !!parsed.starred,
+    flagged: !!parsed.flagged,
+    verified: !!parsed.verified,
+    reconciled: !!parsed.reconciled,
+    reimbursed: !!parsed.reimbursed,
+    warrantied: !!parsed.warrantied,
+  };
+};
+
 const SWIPE_IGNORE_SELECTOR =
   'input, textarea, select, button, a, label, canvas, [role="button"], [contenteditable="true"], .receipt-annotator-root';
 
@@ -142,16 +179,56 @@ const ReceiptDetail = ({
 }) => {
   const MAX_NOTES_LENGTH = 500;
   const MAX_DESCRIPTION_LENGTH = 100;
-  const DEFAULT_TAGS = {
-    locked: false,
-    starred: false,
-    flagged: false,
-    verified: false,
-    reconciled: false,
-    reimbursed: false,
-    warrantied: false,
-  };
-  const [selectedReceipt, setSelectedReceipt] = useState(receipt || null);
+  const DEFAULT_TAGS = RECEIPT_DEFAULT_TAGS;
+
+  const {
+    receipts,
+    updateReceiptStatus,
+    updateReceipt,
+    deleteReceipt,
+    expenseCategories,
+    paymentMethods,
+    merchantsWithImages,
+    taxData,
+    refreshData,
+    silentRefreshData,
+    addTax,
+    updateTax,
+    deleteTax,
+    fetchTaxes,
+    addExpenseCategory,
+    addCustomCategory,
+    editCustomCategory,
+    deleteCustomCategory,
+    hideCategory,
+    addCustomMerchant,
+    editCustomMerchant,
+    deleteCustomMerchant,
+    hideMerchant,
+    addApiMerchant,
+    saveMerchLogo,
+    apiMerchants,
+    fetchApiMerchants,
+    updateApiMerchant,
+    deleteApiMerchant,
+    apiExpenseCategories,
+    fetchApiExpenseCategories,
+    addApiExpenseCategory,
+    updateApiExpenseCategory,
+    deleteApiExpenseCategory,
+    apiPaymentMethods,
+    fetchApiPaymentMethods,
+    deleteApiPaymentMethod,
+    updateApiPaymentMethod,
+    addApiPaymentMethod,
+    editCustomPaymentMethod,
+    deleteCustomPaymentMethod,
+    hidePaymentMethod,
+    repairReceiptMediaOnServer,
+  } = useData();
+
+  const openingReceipt = findContextReceipt(receipts, receipt);
+  const [selectedReceipt, setSelectedReceipt] = useState(openingReceipt);
   const [sortedReceipts, setSortedReceipts] = useState([]);
   const [startX, setStartX] = useState(null);
   const [direction, setDirection] = useState(0);
@@ -285,6 +362,8 @@ const ReceiptDetail = ({
   const addPhotoInputRef = useRef(null);
   // Track which receipt ID has been initialized so taxData changes don't reset editedReceipt
   const lastInitReceiptIdRef = useRef(null);
+  /** True while the user is toggling tags; blocks external receipt_tag from overwriting edits */
+  const tagsDirtyRef = useRef(false);
 
   // ── Character-limit overflow banners ─────────────────────────────────────
   const [descriptionOverflow, setDescriptionOverflow] = useState(false);
@@ -298,54 +377,11 @@ const ReceiptDetail = ({
   /** Latest annotated CDN URL — used on Save Changes if React state hasn't flushed yet */
   const pendingAnnotatedMediaRef = useRef(null);
 
-  // Editable tags state
-  const [editedTags, setEditedTags] = useState(DEFAULT_TAGS);
+  // Editable tags state — initialized from context so tags are correct on first paint
+  const [editedTags, setEditedTags] = useState(() =>
+    editedTagsFromReceiptTag(openingReceipt?.receipt_tag),
+  );
 
-  const {
-    receipts,
-    updateReceiptStatus,
-    updateReceipt,
-    deleteReceipt,
-    expenseCategories,
-    paymentMethods,
-    merchantsWithImages,
-    taxData,
-    refreshData,
-    silentRefreshData,
-    addTax,
-    updateTax,
-    deleteTax,
-    fetchTaxes,
-    addExpenseCategory,
-    addCustomCategory,
-    editCustomCategory,
-    deleteCustomCategory,
-    hideCategory,
-    addCustomMerchant,
-    editCustomMerchant,
-    deleteCustomMerchant,
-    hideMerchant,
-    addApiMerchant,
-    saveMerchLogo,
-    apiMerchants,
-    fetchApiMerchants,
-    updateApiMerchant,
-    deleteApiMerchant,
-    apiExpenseCategories,
-    fetchApiExpenseCategories,
-    addApiExpenseCategory,
-    updateApiExpenseCategory,
-    deleteApiExpenseCategory,
-    apiPaymentMethods,
-    fetchApiPaymentMethods,
-    deleteApiPaymentMethod,
-    updateApiPaymentMethod,
-    addApiPaymentMethod,
-    editCustomPaymentMethod,
-    deleteCustomPaymentMethod,
-    hidePaymentMethod,
-    repairReceiptMediaOnServer,
-  } = useData();
   const { formatCurrency } = useCurrency();
   const { getPaymentLogo } = usePaymentDisplay();
 
@@ -672,6 +708,7 @@ useEffect(() => {
       // from resetting editedReceipt and wiping the newly added tax entry.
       if (lastInitReceiptIdRef.current === selectedReceipt.id) return;
       lastInitReceiptIdRef.current = selectedReceipt.id;
+      tagsDirtyRef.current = false;
 
       setAdditionalPhotoUrls([]);
       pendingAnnotatedMediaRef.current = null;
@@ -796,21 +833,20 @@ useEffect(() => {
       // Show TIP field if receipt already has a tip value
       setTipVisible(!!tipEntry && parseFloat(tipEntry.tax_amount) > 0);
 
-      // Initialize tags from receipt_tag
-      const tags = parseReceiptTags(selectedReceipt.receipt_tag);
-      if (tags) {
-        setEditedTags({
-          locked: tags.locked || false,
-          starred: tags.starred || false,
-          flagged: tags.flagged || false,
-          verified: tags.verified || false,
-          reconciled: tags.reconciled || false,
-          reimbursed: tags.reimbursed || false,
-          warrantied: tags.warrantied || false,
-        });
-      }
+      setEditedTags(editedTagsFromReceiptTag(selectedReceipt.receipt_tag));
     }
   }, [selectedReceipt, taxData, recalculateReceiptTotalsFromFixedTotal]);
+
+  // Keep tags aligned with context receipt_tag before paint (avoids stale list flash on reopen).
+  useLayoutEffect(() => {
+    if (!selectedReceipt?.id || tagsDirtyRef.current) return;
+    const contextReceipt = findContextReceipt(receipts, selectedReceipt);
+    const tagStr = contextReceipt?.receipt_tag ?? selectedReceipt.receipt_tag ?? "";
+    setEditedTags((prev) => {
+      if (encodeReceiptTags(prev) === tagStr) return prev;
+      return editedTagsFromReceiptTag(tagStr);
+    });
+  }, [receipts, selectedReceipt?.id, selectedReceipt?.receipt_tag]);
 
   // When tax definitions load, fill missing rates only — do not overwrite stored amounts.
   useEffect(() => {
@@ -1013,19 +1049,18 @@ useEffect(() => {
 
   // Toggle tag
   const toggleTag = (tagName) => {
+    tagsDirtyRef.current = true;
     setEditedTags((prev) => ({
       ...prev,
       [tagName]: !prev[tagName],
     }));
   };
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const hasExplicitList = Array.isArray(receiptList) && receiptList.length > 0;
     const receiptsToUse = hasExplicitList ? receiptList : receipts;
     if (!receiptsToUse || receiptsToUse.length === 0) return;
 
-    // Preserve caller order when receiptList is provided (Home page visual order).
-    // Fallback to date sort only for legacy/default receipts source.
     const orderedReceipts = hasExplicitList
       ? [...receiptsToUse]
       : [...receiptsToUse].sort(
@@ -1033,9 +1068,6 @@ useEffect(() => {
         );
     setSortedReceipts(orderedReceipts);
 
-    // Keep the current card selected during silent refreshes so the modal
-    // doesn't jump to the first receipt. Only re-anchor when we can resolve
-    // the current or originally opened id in the updated list.
     const currentSelectedId = currentSelectedIdRef.current;
     let nextIndex = findReceiptIndexInList(orderedReceipts, currentSelectedId);
     if (nextIndex === -1) {
@@ -1044,12 +1076,25 @@ useEffect(() => {
     if (nextIndex === -1) return;
 
     const nextSelected = orderedReceipts[nextIndex];
-    if (
+    const contextReceipt = findContextReceipt(receipts, nextSelected);
+    const resolvedReceipt = contextReceipt || nextSelected;
+    const isDifferentReceipt =
       currentSelectedId == null ||
-      String(currentSelectedId) !== String(nextSelected.id)
+      String(currentSelectedId) !== String(resolvedReceipt.id);
+    if (isDifferentReceipt) {
+      tagsDirtyRef.current = false;
+      setSelectedReceipt(resolvedReceipt);
+      currentSelectedIdRef.current = resolvedReceipt.id;
+      lastInitReceiptIdRef.current = null;
+    } else if (
+      resolvedReceipt.receipt_tag != null &&
+      resolvedReceipt.receipt_tag !== selectedReceipt?.receipt_tag
     ) {
-      setSelectedReceipt(nextSelected);
-      currentSelectedIdRef.current = nextSelected.id;
+      setSelectedReceipt((prev) =>
+        prev
+          ? { ...prev, receipt_tag: resolvedReceipt.receipt_tag }
+          : resolvedReceipt
+      );
     }
     if (setSelectedIndex && lastReportedIndexRef.current !== nextIndex) {
       setSelectedIndex(nextIndex);
@@ -1151,7 +1196,8 @@ useEffect(() => {
     const prevReceipt = sortedReceipts[prevIndex];
     if (!prevReceipt) return;
     setDirection(-1);
-    setEditedTags(DEFAULT_TAGS);
+    tagsDirtyRef.current = false;
+    lastInitReceiptIdRef.current = null;
     setSelectedReceipt(prevReceipt);
     currentSelectedIdRef.current = prevReceipt.id;
     if (setSelectedIndex) {
@@ -1166,7 +1212,8 @@ useEffect(() => {
     const nextReceipt = sortedReceipts[nextIndex];
     if (!nextReceipt) return;
     setDirection(1);
-    setEditedTags(DEFAULT_TAGS);
+    tagsDirtyRef.current = false;
+    lastInitReceiptIdRef.current = null;
     setSelectedReceipt(nextReceipt);
     currentSelectedIdRef.current = nextReceipt.id;
     if (setSelectedIndex) {
@@ -3077,6 +3124,7 @@ useEffect(() => {
 
       const success = await updateReceipt(selectedReceipt.id, updatedData);
       if (success) {
+        tagsDirtyRef.current = false;
         pendingAnnotatedMediaRef.current = null;
         // If the user entered a custom expense category, add it to context immediately
         // so it appears in Filter → Expense Category without waiting for a refresh.

@@ -14,6 +14,18 @@ export const parseReceiptTags = (receiptTagString) => {
   };
 };
 
+/** Serialize tag booleans to the API `receipt_tag` comma-separated format. */
+export const encodeReceiptTags = (tags) =>
+  [
+    tags.locked ? "1" : "0",
+    tags.starred ? "1" : "0",
+    tags.flagged ? "1" : "0",
+    tags.verified ? "1" : "0",
+    tags.reconciled ? "1" : "0",
+    tags.reimbursed ? "1" : "0",
+    tags.warrantied ? "1" : "0",
+  ].join(",");
+
 export const getTagDisplayName = (tagName) => {
   const displayNames = {
     verified: "Verified",

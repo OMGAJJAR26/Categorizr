@@ -400,7 +400,9 @@ const HomePage = () => {
     if (receipt.status === "0") {
       await updateReceiptStatus(receipt.id, "1");
     }
-    setSelectedReceipt(receipt);
+    const fresh =
+      receipts.find((r) => String(r.id) === String(receipt.id)) || receipt;
+    setSelectedReceipt(fresh);
     setSelectedIndex(index);
   };
 
