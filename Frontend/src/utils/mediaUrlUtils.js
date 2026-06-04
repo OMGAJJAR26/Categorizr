@@ -80,6 +80,17 @@ export function replaceUrlInMediaCsv(csv, normalizedOld, replacement) {
   return next.join(",");
 }
 
+/** Remove one URL from a receipt's media fields (web save shape: images in emailAttachment). */
+export function removeUrlFromReceiptMedia(receipt, urlToRemove) {
+  const remaining = collectReceiptMediaUrls(receipt).filter(
+    (u) => !mediaUrlsEqual(u, urlToRemove)
+  );
+  return {
+    receipt_image: "0",
+    emailAttachment: buildCombinedMediaField(remaining),
+  };
+}
+
 const SAFE_UPLOAD_EXTENSIONS = new Set([
   "jpg",
   "jpeg",

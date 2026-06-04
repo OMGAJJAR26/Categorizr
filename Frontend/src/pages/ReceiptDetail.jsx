@@ -11,6 +11,7 @@ import {
   normalizeMediaUrl,
   mediaUrlsEqual,
   replaceUrlInMediaCsv,
+  removeUrlFromReceiptMedia,
   getPdfProxyUrl,
   isPdfUrl,
   sanitizeUploadFile,
@@ -162,7 +163,7 @@ const ReceiptDetail = ({
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showImageDeleteConfirm, setShowImageDeleteConfirm] = useState(false);
-  const [pendingImageDelete, setPendingImageDelete] = useState(null); // { type: "additional"|"existing", index?: number, field?: string, clearBoth?: boolean }
+  const [pendingImageDelete, setPendingImageDelete] = useState(null); // { type: "additional"|"existing", index?: number, url?: string }
   const containerRef = useRef(null);
   const dropdownRef = useRef();
   const scrollContentRef = useRef(null);
@@ -3131,17 +3132,19 @@ useEffect(() => {
           prev.filter((_, i) => i !== pendingImageDelete.index)
         );
       } else if (pendingImageDelete.type === "existing") {
-        const updates = pendingImageDelete.clearBoth
-          ? { emailAttachment: "0", receipt_image: "0" }
-          : { [pendingImageDelete.field]: "0" };
+        const urlToRemove = pendingImageDelete.url;
+        if (!urlToRemove) throw new Error("No image URL to delete");
+        const mediaSource = {
+          emailAttachment:
+            editedReceipt.emailAttachment ?? selectedReceipt.emailAttachment,
+          receipt_image:
+            editedReceipt.receipt_image ?? selectedReceipt.receipt_image,
+        };
+        const updates = removeUrlFromReceiptMedia(mediaSource, urlToRemove);
         const success = await updateReceipt(selectedReceipt.id, updates);
         if (!success) throw new Error("Failed to delete image from receipt");
-        if (updates.emailAttachment !== undefined) {
-          handleFieldChange("emailAttachment", updates.emailAttachment);
-        }
-        if (updates.receipt_image !== undefined) {
-          handleFieldChange("receipt_image", updates.receipt_image);
-        }
+        setEditedReceipt((prev) => ({ ...prev, ...updates }));
+        setSelectedReceipt((prev) => ({ ...prev, ...updates }));
       }
     } catch (error) {
       console.error("Image delete error:", error);
@@ -6262,20 +6265,10 @@ Thank you for using our receipt management system.
                                       setShowImageDeleteConfirm(true);
                                       return;
                                     }
-                                    const currentEmail = normalizeMediaUrl(
-                                      editedReceipt.emailAttachment ?? r.emailAttachment
-                                    );
-                                    const currentReceiptImage = normalizeMediaUrl(
-                                      editedReceipt.receipt_image ?? r.receipt_image
-                                    );
                                     const currentUrl = normalizeMediaUrl(u);
-                                    const isEmail = !!currentUrl && currentUrl === currentEmail;
-                                    const isReceiptImage =
-                                      !!currentUrl && currentUrl === currentReceiptImage;
                                     setPendingImageDelete({
                                       type: "existing",
-                                      field: isEmail ? "emailAttachment" : "receipt_image",
-                                      clearBoth: isEmail && isReceiptImage,
+                                      url: currentUrl,
                                     });
                                     setShowImageDeleteConfirm(true);
                                   }}

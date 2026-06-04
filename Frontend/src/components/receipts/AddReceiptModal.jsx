@@ -41,8 +41,8 @@ import {
 import {
   splitMediaField,
   buildCombinedMediaField,
-  buildSessionEmailAttachmentForApi,
   normalizeMediaUrl as normalizeMediaUrlCore,
+  mediaUrlsEqual,
   replaceUrlInMediaCsv,
   isPdfUrl,
   sanitizeUploadFile,
@@ -420,6 +420,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
 
   const resetReceiptMediaState = useCallback((options = {}) => {
     const { clearFiles = true } = options;
+    pendingAnnotatedMediaRef.current = null;
     setUploadedMediaUrls([]);
     setUploadedImageUrl(null);
     setUploadedReceiptData(null);
@@ -434,7 +435,9 @@ const [localMerchants, setLocalMerchants] = useState([]);
   // ── Add Photo / Annotation state ──────────────────────────────────────────
   const [isAddingPhoto, setIsAddingPhoto] = useState(false);
   const [annotatorUrl, setAnnotatorUrl] = useState(null); // URL being annotated
-  const [annotatorIndex, setAnnotatorIndex] = useState(null); // index in uploadedMediaUrls (-1 = new blank)
+  const [annotatorIndex, setAnnotatorIndex] = useState(null); // index in uploadedMediaUrls (-1 = preview-only slot)
+  /** Latest annotated CDN URL — applied on Save if React state has not flushed yet */
+  const pendingAnnotatedMediaRef = useRef(null);
 
   // ── Edit / Delete Merchant ────────────────────────────────────────────────
   const [showEditMerchantModal, setShowEditMerchantModal] = useState(false);
@@ -778,6 +781,72 @@ const [localMerchants, setLocalMerchants] = useState([]);
     return urls;
   }, [repairReceiptMediaOnServer]);
 
+  const collectAddReceiptMediaUrlsForSave = useCallback(() => {
+    const urls = [];
+    const pushUnique = (candidate) => {
+      const normalized = normalizeMediaUrlCore(candidate);
+      if (!normalized || normalized === "0" || urls.includes(normalized)) return;
+      urls.push(normalized);
+    };
+
+    if (uploadedMediaUrls.length > 0) {
+      uploadedMediaUrls.forEach(pushUnique);
+    } else {
+      const preview = nonEmptyUrl(uploadedImageUrl);
+      if (preview) pushUnique(preview);
+    }
+
+    const pending = pendingAnnotatedMediaRef.current;
+    if (pending?.persistUrl && pending.normOld) {
+      const persist = normalizeMediaUrlCore(pending.persistUrl);
+      if (persist) {
+        const idx = urls.findIndex((u) => mediaUrlsEqual(u, pending.normOld));
+        if (idx >= 0) urls[idx] = persist;
+        else if (!urls.some((u) => mediaUrlsEqual(u, persist))) urls.unshift(persist);
+      }
+    }
+
+    return urls.filter((u) => u && !u.startsWith("blob:"));
+  }, [uploadedMediaUrls, uploadedImageUrl]);
+
+  const persistMediaUrlForApi = useCallback(
+    async (url) => {
+      const trimmed = (url || "").toString().trim();
+      if (!trimmed || trimmed === "0") return null;
+      if (/^https?:\/\//i.test(trimmed)) {
+        return normalizeMediaUrlCore(trimmed) || null;
+      }
+      if (trimmed.startsWith("data:") || trimmed.startsWith("blob:")) {
+        try {
+          const blob = await fetch(trimmed).then((r) => r.blob());
+          const file = new File([blob], `receipt_${Date.now()}.png`, {
+            type: blob.type || "image/png",
+          });
+          const uploaded = await uploadFilesToMedia([file]);
+          return uploaded[0] || null;
+        } catch (err) {
+          console.error("persistMediaUrlForApi failed:", err);
+          return null;
+        }
+      }
+      return normalizeMediaUrlCore(trimmed) || null;
+    },
+    [uploadFilesToMedia]
+  );
+
+  const resolveAddReceiptEmailAttachment = useCallback(async () => {
+    const rawUrls = collectAddReceiptMediaUrlsForSave();
+    const persisted = [];
+    for (const url of rawUrls) {
+      const persistedUrl = await persistMediaUrlForApi(url);
+      if (persistedUrl) persisted.push(persistedUrl);
+    }
+    return {
+      rawCount: rawUrls.length,
+      combined: buildCombinedMediaField(persisted),
+    };
+  }, [collectAddReceiptMediaUrlsForSave, persistMediaUrlForApi]);
+
   const handleFileSelect = async (e) => {
     setError(null);
     const selectedFiles = e.target.files;
@@ -839,29 +908,47 @@ const [localMerchants, setLocalMerchants] = useState([]);
   };
 
   // ── Annotation save handler ──────────────────────────────────────────────
-  const handleAnnotationSave = (dataUrl) => {
+  const handleAnnotationSave = (savedUrl) => {
+    const persistUrl =
+      normalizeMediaUrlCore(savedUrl) ||
+      (typeof savedUrl === "string" ? savedUrl.trim() : "");
+
+    if (!persistUrl) {
+      setError("Could not save annotation. Please try again.");
+      return;
+    }
+
     const rawReplaced =
       annotatorIndex !== null && annotatorIndex >= 0
         ? uploadedMediaUrls[annotatorIndex]
         : annotatorUrl;
     const neReplaced = nonEmptyUrl(rawReplaced);
-    const normOld = neReplaced ? normalizeMediaUrl(neReplaced) : "";
+    const normOld = neReplaced ? normalizeMediaUrlCore(neReplaced) : "";
 
     if (annotatorIndex !== null && annotatorIndex >= 0) {
       setUploadedMediaUrls((prev) =>
-        prev.map((url, i) => (i === annotatorIndex ? dataUrl : url))
+        prev.map((url, i) => {
+          if (i === annotatorIndex) return persistUrl;
+          if (normOld && mediaUrlsEqual(url, normOld)) return persistUrl;
+          return url;
+        })
       );
     } else {
-      setUploadedMediaUrls((prev) => [...prev, dataUrl]);
+      setUploadedMediaUrls([persistUrl]);
     }
+
+    setUploadedImageUrl((prev) => {
+      if (!prev || !normOld || mediaUrlsEqual(prev, normOld)) return persistUrl;
+      return prev;
+    });
 
     if (normOld && normOld !== "0") {
       setUploadedReceiptData((prev) => {
         if (!prev) return prev;
         const email0 = (prev.emailAttachment ?? "").toString();
         const receipt0 = (prev.receipt_image ?? "").toString();
-        const mergedEmail = replaceUrlInMediaCsv(email0, normOld, dataUrl);
-        const mergedReceipt = replaceUrlInMediaCsv(receipt0, normOld, dataUrl);
+        const mergedEmail = replaceUrlInMediaCsv(email0, normOld, persistUrl);
+        const mergedReceipt = replaceUrlInMediaCsv(receipt0, normOld, persistUrl);
         if (mergedEmail === email0 && mergedReceipt === receipt0) return prev;
         return {
           ...prev,
@@ -869,6 +956,9 @@ const [localMerchants, setLocalMerchants] = useState([]);
           receipt_image: normalizeMediaUrl(mergedReceipt) || "0",
         };
       });
+      if (!persistUrl.startsWith("data:") && !persistUrl.startsWith("blob:")) {
+        pendingAnnotatedMediaRef.current = { normOld, persistUrl };
+      }
     }
 
     setAnnotatorUrl(null);
@@ -2336,10 +2426,15 @@ const handleFieldChange = (field, value) => {
       // an older receipt due to stale in-memory state after navigation/login flows.
       const uploadedId = 0;
       const fkUserId = parseInt(localStorage.getItem("fk_user_id")) || 0;
-      const combinedImageUrls = buildSessionEmailAttachmentForApi([
-        uploadedMediaUrls,
-        uploadedImageUrl,
-      ]);
+      const { rawCount: mediaRawCount, combined: combinedImageUrls } =
+        await resolveAddReceiptEmailAttachment();
+      if (mediaRawCount > 0 && combinedImageUrls === "0") {
+        setError(
+          "Receipt image could not be uploaded. Please save the annotation again or re-upload the photo."
+        );
+        setIsSaving(false);
+        return;
+      }
       const savePayload = {
         id: uploadedId, // Always 0 in Add flow (create-only)
         fk_user_id: fkUserId,
@@ -2630,10 +2725,9 @@ const handleFieldChange = (field, value) => {
     const fkUserId = parseInt(localStorage.getItem("fk_user_id")) || 0;
     // Add flow should never inherit/patch an existing receipt id.
     const baseId = overrideId !== null ? overrideId : 0;
-    const combinedImageUrls = buildSessionEmailAttachmentForApi([
-      uploadedMediaUrls,
-      uploadedImageUrl,
-    ]);
+    const combinedImageUrls = buildCombinedMediaField(
+      collectAddReceiptMediaUrlsForSave()
+    );
 
     return {
       id: baseId,
@@ -2963,10 +3057,15 @@ const handleFieldChange = (field, value) => {
       let productDate = parseDateInputToUnix(formData.product_date);
       if (!productDate) productDate = todayLocalCalendarUnix();
       const receiptTag = ["0","0","0","0","0","0","0"].join(",");
-      const combinedImageUrls = buildSessionEmailAttachmentForApi([
-        uploadedMediaUrls,
-        uploadedImageUrl,
-      ]);
+      const { rawCount: splitMediaRawCount, combined: combinedImageUrls } =
+        await resolveAddReceiptEmailAttachment();
+      if (splitMediaRawCount > 0 && combinedImageUrls === "0") {
+        setError(
+          "Receipt image could not be uploaded. Please save the annotation again or re-upload the photo."
+        );
+        setIsSavingSplits(false);
+        return;
+      }
 
       // Helper: build a receipt payload from a set of amounts + metadata
       const buildSplitPayload = ({ total, subtotalVal, taxVals, category, expenseType, productName }) => ({
