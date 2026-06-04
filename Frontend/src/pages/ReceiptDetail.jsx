@@ -612,14 +612,14 @@ const ReceiptDetail = ({
   // Also expose a helper to check by id or by is_default_tax on the allTaxTypes object itself
   const defaultTaxIds = useMemo(() => {
     return (taxData || [])
-      .filter(t => parseInt(t.is_default_tax) === 1)
-      .map(t => t.id);
+      .filter((t) => parseInt(t.is_default_tax, 10) === 1)
+      .map((t) => t.id);
   }, [taxData]);
 
   // Returns true if a tax row (from allTaxTypes) is a default tax
   const isTaxDefault = useCallback((tax) => {
     // Primary: check is_default_tax flag on the object itself (now preserved in allTaxTypes)
-    if (parseInt(tax?.is_default_tax) === 1) return true;
+    if (parseInt(tax?.is_default_tax, 10) === 1) return true;
     // Fallback: check against defaultTaxIds list
     return defaultTaxIds.includes(tax?.id);
   }, [defaultTaxIds]);
@@ -1925,13 +1925,8 @@ useEffect(() => {
         created: 0,
         udpated: 0,
       };
-      const savedTax = await addTax(taxPayload);
-      
-      // Cache values for local update
-      const addedTaxName = newTaxName.trim();
-      const addedTaxRate = newTaxRate.trim();
-      const addedTaxNumber = newTaxNumber.trim();
-      
+      await addTax(taxPayload);
+
       // Reset form immediately to prevent flashing error state
       setNewTaxName("");
       setNewTaxRate("");
@@ -1939,19 +1934,6 @@ useEffect(() => {
       clearTaxRateLimitAlert();
       setShowAddTaxForm(false);
       
-      if (savedTax) {
-        // addTax already refreshed taxData via fetchTaxes — do not also push localTaxTypes
-        // (that caused duplicate rows when API rate format differed, e.g. "18" vs "18.000")
-        addTaxToReceipt(
-          {
-            id: savedTax.id || 0,
-            tax_name: savedTax.tax_name || addedTaxName,
-            tax_rate: formatTaxRate(savedTax.tax_rate ?? addedTaxRate),
-            tax_number: savedTax.tax_number ?? addedTaxNumber ?? "",
-          },
-          { silent: true }
-        );
-      }
       setToast({ isVisible: true, message: "Tax Type Added", type: "success" });
     } catch (err) {
       console.error("Error adding tax:", err);

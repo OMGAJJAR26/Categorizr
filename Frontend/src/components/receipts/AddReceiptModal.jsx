@@ -295,6 +295,8 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const [localTaxTypes, setLocalTaxTypes] = useState([]);
   const [showAddTaxForm, setShowAddTaxForm] = useState(false);
   const manageTaxModalBodyRef = useRef(null);
+  /** Apply account default taxes at most once per form visit (not on every taxData refresh). */
+  const defaultTaxesAppliedRef = useRef(false);
   const [taxRateFocused, setTaxRateFocused] = useState(false);
   const [showTaxRateChangeWarning, setShowTaxRateChangeWarning] = useState(false);
   const [pendingTaxUpdate, setPendingTaxUpdate] = useState(null);
@@ -384,7 +386,9 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const taxFormHasError = !!(taxNameError || taxRateError || taxNumberError);
 
   const defaultTaxIds = useMemo(() => {
-    return (taxData || []).filter(t => parseInt(t.is_default_tax) === 1).map(t => t.id);
+    return (taxData || [])
+      .filter((t) => parseInt(t.is_default_tax, 10) === 1)
+      .map((t) => t.id);
   }, [taxData]);
 
   const toggleDefaultTax = async (taxId) => {
@@ -1502,9 +1506,6 @@ const handleFieldChange = (field, value) => {
 
       // Reset form fields immediately so that during the waits below,
       // the duplicate check doesn't show an inline error banner for the new tax.
-      const addedTaxName = newTaxName.trim();
-      const addedTaxRate = newTaxRate.trim();
-      const addedTaxNumber = newTaxNumber.trim();
       setNewTaxName("");
       setNewTaxRate("");
       clearTaxRateLimitAlert();
@@ -1528,27 +1529,9 @@ const handleFieldChange = (field, value) => {
       // Force re-render of tax dropdown
       setTaxDropdownKey((prev) => prev + 1);
 
-      // Create tax object for adding to receipt
-      const newTax = {
-        tax_name: savedTax.tax_name || addedTaxName,
-        tax_rate: savedTax.tax_rate || addedTaxRate,
-        tax_amount: "",
-        tax_number: savedTax.tax_number || addedTaxNumber || "",
-        id: savedTax.id || 0,
-        fk_user_id: savedTax.fk_user_id || parseInt(fk_user_id),
-      };
-
       console.log("Form reset, modal closed");
       console.log("=== handleAddTaxType SUCCESS ===");
 
-      // addTax already refreshed taxData — normalize rate for receipt selection
-      const normalizedTax = {
-        ...newTax,
-        tax_rate: formatTaxRate(newTax.tax_rate),
-      };
-
-      // Add to receipt only if under per-receipt limit (no alert when saving from Manage Tax Types)
-      addTaxType(normalizedTax, { silent: true });
       setToast({ isVisible: true, message: "Tax Type Added", type: "success" });
     } catch (err) {
       console.error("=== handleAddTaxType ERROR ===");
@@ -3480,16 +3463,25 @@ const handleFieldChange = (field, value) => {
     }
   }, [editingTaxId, showAddTaxForm]);
 
-  // Auto-apply default tax types when entering the form step (if no taxes already set)
+  // Auto-apply default tax types once when entering the form step (if no taxes already set).
+  // Do not re-run when taxData refreshes (e.g. after Manage Tax Types closes).
   useEffect(() => {
-    if (step !== "form") return;
-    if (formData.receipt_tax_values.length > 0) return; // OCR already set taxes — don't override
+    if (step !== "form") {
+      if (step === "upload") defaultTaxesAppliedRef.current = false;
+      return;
+    }
+    if (defaultTaxesAppliedRef.current) return;
+    if (formData.receipt_tax_values.length > 0) {
+      defaultTaxesAppliedRef.current = true;
+      return;
+    }
     if (!taxData?.length) return;
-    
-    const defaultTaxes = taxData.filter(t => parseInt(t.is_default_tax) === 1);
+
+    const defaultTaxes = taxData.filter((t) => parseInt(t.is_default_tax, 10) === 1);
+    defaultTaxesAppliedRef.current = true;
     if (defaultTaxes.length === 0) return;
-    
-    const toApply = defaultTaxes.map(t => ({
+
+    const toApply = defaultTaxes.map((t) => ({
       id: t.id || 0,
       fk_user_id: t.fk_user_id || 0,
       fk_receipt_id: 0,
@@ -3501,9 +3493,7 @@ const handleFieldChange = (field, value) => {
       created: 0,
       updated: 0,
     }));
-    if (toApply.length > 0) {
-      setFormData(prev => ({ ...prev, receipt_tax_values: toApply }));
-    }
+    setFormData((prev) => ({ ...prev, receipt_tax_values: toApply }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, taxData]);
   // Cleanup PDF preview URL on unmount
