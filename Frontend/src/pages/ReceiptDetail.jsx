@@ -71,6 +71,9 @@ import {
   resolveReceiptTaxLineRate,
   hasStoredTaxAmount,
   getReceiptTaxLineDisplay,
+  buildReceiptTipTaxEntry,
+  filterNonTipReceiptTaxValues,
+  findTipLineInReceiptTaxValues,
 } from "../utils/taxTypeUtils";
 import { buildExpenseCategoryOptions } from "../utils/expenseCategories";
 import { findRenamedApiMerchant } from "../utils/merchantListUtils";
@@ -362,6 +365,7 @@ const ReceiptDetail = ({
   const addPhotoInputRef = useRef(null);
   // Track which receipt ID has been initialized so taxData changes don't reset editedReceipt
   const lastInitReceiptIdRef = useRef(null);
+  const receiptTaxValuesSigRef = useRef("");
   /** True while the user is toggling tags; blocks external receipt_tag from overwriting edits */
   const tagsDirtyRef = useRef(false);
 
@@ -700,6 +704,16 @@ useEffect(() => {
     fetchQBStatus();
   }, [shareMenu]);
 
+  // Allow re-init when server/context updates tax lines for the same receipt (e.g. after save + refresh).
+  useEffect(() => {
+    if (!selectedReceipt) return;
+    const sig = JSON.stringify(selectedReceipt.receipt_tax_values || []);
+    if (sig !== receiptTaxValuesSigRef.current) {
+      receiptTaxValuesSigRef.current = sig;
+      lastInitReceiptIdRef.current = null;
+    }
+  }, [selectedReceipt?.receipt_tax_values]);
+
   // Initialize edited receipt when selected receipt changes
   useEffect(() => {
     if (selectedReceipt) {
@@ -720,16 +734,16 @@ useEffect(() => {
         selectedReceipt,
       );
 
-      // Extract tip from receipt_tax_values
-      const tipEntry = enrichedTaxValues.find((t) =>
-        (t.tax_name || "").toLowerCase().includes("tip")
+      // Extract tip from receipt_tax_values (fallback: legacy top-level tip field)
+      const tipEntry = findTipLineInReceiptTaxValues(enrichedTaxValues);
+      const nonTipTaxValues = filterNonTipReceiptTaxValues(enrichedTaxValues).sort(
+        (a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""),
       );
-      const nonTipTaxValues = enrichedTaxValues
-        .filter((t) => !(t.tax_name || "").toLowerCase().includes("tip"))
-        .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""));
 
       const receiptTotal = parseFloat(selectedReceipt.purchasePrice) || 0;
-      const receiptTip = tipEntry ? parseFloat(tipEntry.tax_amount) || 0 : 0;
+      const receiptTip = tipEntry
+        ? parseFloat(tipEntry.tax_amount) || 0
+        : parseFloat(selectedReceipt.tip) || 0;
       const { subtotal: initSubtotal, receipt_tax_values: initTaxValues } =
         recalculateReceiptTotalsFromFixedTotal(
           receiptTotal,
@@ -822,7 +836,12 @@ useEffect(() => {
         product_name: selectedReceipt.product_name || "",
         notes: selectedReceipt.notes || "",
         receipt_tax_values: initTaxValues,
-        tip: tipEntry ? (tipEntry.tax_amount ?? "") : "",
+        tip:
+          tipEntry
+            ? (tipEntry.tax_amount ?? "")
+            : receiptTip > 0
+              ? receiptTip.toFixed(2)
+              : selectedReceipt.tip || "",
         store_image: selectedReceipt.store_image || "",
         // Explicitly carry image fields so the Receipt Images section renders
         // without relying on the `?? r.*` fallback (which can miss updates when
@@ -831,7 +850,7 @@ useEffect(() => {
         emailAttachment: selectedReceipt.emailAttachment ?? "",
       });
       // Show TIP field if receipt already has a tip value
-      setTipVisible(!!tipEntry && parseFloat(tipEntry.tax_amount) > 0);
+      setTipVisible(receiptTip > 0);
 
       setEditedTags(editedTagsFromReceiptTag(selectedReceipt.receipt_tag));
     }
@@ -3002,13 +3021,15 @@ useEffect(() => {
         editedTags.warrantied ? "1" : "0",
       ].join(",");
 
-      // Build receipt_tax_values including tip
+      // Build receipt_tax_values including tip (linked to Tip tax definition when available)
       const tipAmount = parseFloat(editedReceipt.tip) || 0;
       const subtotal = parseFloat(editedReceipt.subtotal) || 0;
       const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
-      // Ensure each tax entry has all required API fields
-      let receiptTaxValuesPayload = (
-        editedReceipt.receipt_tax_values || []
+      const existingTipLine = findTipLineInReceiptTaxValues(
+        selectedReceipt.receipt_tax_values,
+      );
+      let receiptTaxValuesPayload = filterNonTipReceiptTaxValues(
+        editedReceipt.receipt_tax_values,
       ).map((t) => ({
         id: parseInt(t.id) || 0,
         fk_user_id: parseInt(t.fk_user_id) || fk_user_id,
@@ -3021,21 +3042,15 @@ useEffect(() => {
         updated: parseInt(t.updated) || 0,
       }));
 
-      if (tipAmount > 0) {
-        const tipPercentage =
-          subtotal > 0 ? Math.round((tipAmount / subtotal) * 100) : 0;
-        receiptTaxValuesPayload.push({
-          id: 0,
-          fk_user_id: 0,
-          fk_receipt_id: selectedReceipt.id,
-          fk_tax_id: 0,
-          tax_name: "Tip",
-          tax_rate: tipPercentage.toString(),
-          tax_amount: tipAmount.toString(),
-          created: 0,
-          updated: 0,
-        });
-      }
+      const tipLine = buildReceiptTipTaxEntry({
+        tipAmount,
+        subtotal,
+        taxDefinitions: taxData,
+        existingTipLine,
+        fk_receipt_id: selectedReceipt.id,
+        fk_user_id,
+      });
+      if (tipLine) receiptTaxValuesPayload.push(tipLine);
 
       // Get store_image from selected merchant if changed
       const selectedMerchantImage = getMerchantImage(editedReceipt.storeName);
@@ -3273,26 +3288,36 @@ useEffect(() => {
       editedTags.warrantied ? "1" : "0",
     ].join(",");
 
-    // Build receipt_tax_values including tip
+    // Build receipt_tax_values including tip (linked to Tip tax definition when available)
     const tipAmount = parseFloat(editedReceipt.tip) || 0;
     const subtotal = parseFloat(editedReceipt.subtotal) || 0;
-    let receiptTaxValuesPayload = [...(editedReceipt.receipt_tax_values || [])];
+    const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
+    const existingTipLine = findTipLineInReceiptTaxValues(
+      selectedReceipt.receipt_tax_values,
+    );
+    let receiptTaxValuesPayload = filterNonTipReceiptTaxValues(
+      editedReceipt.receipt_tax_values,
+    ).map((t) => ({
+      id: parseInt(t.id) || 0,
+      fk_user_id: parseInt(t.fk_user_id) || fk_user_id,
+      fk_receipt_id: parseInt(t.fk_receipt_id) || selectedReceipt.id || 0,
+      fk_tax_id: parseInt(t.fk_tax_id) || 0,
+      tax_name: t.tax_name || "",
+      tax_rate: t.tax_rate || "0",
+      tax_amount: (parseFloat(t.tax_amount) || 0).toString(),
+      created: parseInt(t.created) || 0,
+      updated: parseInt(t.updated) || 0,
+    }));
 
-    if (tipAmount > 0) {
-      const tipPercentage =
-        subtotal > 0 ? Math.round((tipAmount / subtotal) * 100) : 0;
-      receiptTaxValuesPayload.push({
-        id: 0,
-        fk_user_id: 0,
-        fk_receipt_id: selectedReceipt.id,
-        fk_tax_id: 0,
-        tax_name: "Tip",
-        tax_rate: tipPercentage.toString(),
-        tax_amount: tipAmount.toString(),
-        created: 0,
-        updated: 0,
-      });
-    }
+    const tipLine = buildReceiptTipTaxEntry({
+      tipAmount,
+      subtotal,
+      taxDefinitions: taxData,
+      existingTipLine,
+      fk_receipt_id: selectedReceipt.id,
+      fk_user_id,
+    });
+    if (tipLine) receiptTaxValuesPayload.push(tipLine);
 
     // Get store_image from selected merchant if changed
     const selectedMerchantImage = getMerchantImage(editedReceipt.storeName);

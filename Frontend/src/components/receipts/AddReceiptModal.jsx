@@ -37,6 +37,9 @@ import {
   propagateTaxNameChangeToReceipts,
   propagateTaxRateChangeToReceipts,
   taxRatesDiffer,
+  buildReceiptTipTaxEntry,
+  filterNonTipReceiptTaxValues,
+  findTipLineInReceiptTaxValues,
 } from "../../utils/taxTypeUtils";
 import {
   splitMediaField,
@@ -2191,8 +2194,9 @@ const handleFieldChange = (field, value) => {
       console.log("Number of tax values to use:", taxValuesToUse.length);
 
       // Filter out tip entries (tip is handled separately)
-      const nonTipTaxValues = taxValuesToUse.filter(
-        (t) => !(t.tax_name || "").toLowerCase().includes("tip"),
+      const nonTipTaxValues = filterNonTipReceiptTaxValues(taxValuesToUse);
+      const existingTipLine = findTipLineInReceiptTaxValues(
+        uploadedReceiptData?.receipt_tax_values || taxValuesToUse,
       );
 
       // AddReceiptModal must always create a new receipt record. Never link taxes
@@ -2226,37 +2230,16 @@ const handleFieldChange = (field, value) => {
         receiptTaxValuesPayload,
       );
 
-      // Add tip as a tax entry if tip amount is provided
-      if (tipAmount > 0) {
-        const tipPercentage =
-          subtotal > 0 ? Math.round((tipAmount / subtotal) * 100) : 0;
-
-        // Try to align tip structure with existing tax records so backend & mobile app treat it the same
-        // 1) Prefer an existing "Tip" tax definition from receiptTaxValues (global tax types)
-        let baseTipTax = null;
-        if (Array.isArray(taxData) && taxData.length > 0) {
-          baseTipTax = taxData.find((t) =>
-            (t.tax_name || "").toString().toLowerCase().includes("tip"),
-          );
-        }
-
-        const fkUserId = parseInt(localStorage.getItem("fk_user_id")) || 0;
-
-        const tipTaxPayload = {
-          // Reuse id/fk_tax_id from a known "Tip" tax record when possible so mobile app recognizes it
-          id: baseTipTax ? parseInt(baseTipTax.id) || 0 : 0,
-          fk_user_id: fkUserId,
-          fk_receipt_id: 0, // Always 0 for new receipts - backend will set it when creating via addReceiptv1
-          fk_tax_id: baseTipTax
-            ? parseInt(baseTipTax.fk_tax_id) || parseInt(baseTipTax.id) || 0
-            : 0,
-          tax_name: (baseTipTax?.tax_name || "Tip").toString(),
-          tax_rate: tipPercentage.toString(),
-          tax_amount: tipAmount.toString(),
-          created: baseTipTax ? parseInt(baseTipTax.created) || 0 : 0,
-          updated: baseTipTax ? parseInt(baseTipTax.updated) || 0 : 0,
-        };
-
+      // Add tip as a tax entry if tip amount is provided (linked to Tip tax definition)
+      const tipTaxPayload = buildReceiptTipTaxEntry({
+        tipAmount,
+        subtotal,
+        taxDefinitions: taxData,
+        existingTipLine,
+        fk_receipt_id: 0,
+        fk_user_id: parseInt(localStorage.getItem("fk_user_id")) || 0,
+      });
+      if (tipTaxPayload) {
         console.log("Tip tax payload to save:", tipTaxPayload);
         receiptTaxValuesPayload.push(tipTaxPayload);
       }

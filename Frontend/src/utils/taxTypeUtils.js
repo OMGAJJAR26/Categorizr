@@ -3,8 +3,66 @@ import { formatTaxRate } from "./receiptFormatters";
 export const normalizeTaxNameKey = (name) =>
   (name || "").toString().trim().toLowerCase();
 
-const isTipTax = (tax) =>
+export const isTipTax = (tax) =>
   (tax?.tax_name || "").toString().toLowerCase().includes("tip");
+
+/** User-defined Tip tax type from Settings (is_tips) or name containing "tip". */
+export function findTipTaxDefinition(taxDefinitions) {
+  if (!Array.isArray(taxDefinitions)) return null;
+  return (
+    taxDefinitions.find(
+      (t) =>
+        parseInt(t?.is_tips, 10) === 1 || isTipTax(t),
+    ) || null
+  );
+}
+
+export function filterNonTipReceiptTaxValues(taxValues) {
+  return (taxValues || []).filter((t) => !isTipTax(t));
+}
+
+export function findTipLineInReceiptTaxValues(taxValues) {
+  return (taxValues || []).find(isTipTax) || null;
+}
+
+/**
+ * Build a receipt_tax_values line for tip so the API/mobile persist it like other taxes.
+ */
+export function buildReceiptTipTaxEntry({
+  tipAmount,
+  subtotal = 0,
+  taxDefinitions = [],
+  existingTipLine = null,
+  fk_receipt_id = 0,
+  fk_user_id = 0,
+}) {
+  const amount = parseFloat(tipAmount) || 0;
+  if (amount <= 0) return null;
+
+  const tipPercentage =
+    subtotal > 0 ? Math.round((amount / subtotal) * 100) : 0;
+  const baseTipTax = findTipTaxDefinition(taxDefinitions);
+
+  return {
+    id: parseInt(existingTipLine?.id, 10) || 0,
+    fk_user_id:
+      parseInt(existingTipLine?.fk_user_id, 10) ||
+      parseInt(fk_user_id, 10) ||
+      0,
+    fk_receipt_id:
+      parseInt(fk_receipt_id, 10) ||
+      parseInt(existingTipLine?.fk_receipt_id, 10) ||
+      0,
+    fk_tax_id: baseTipTax
+      ? parseInt(baseTipTax.id, 10) || 0
+      : parseInt(existingTipLine?.fk_tax_id, 10) || 0,
+    tax_name: (baseTipTax?.tax_name || existingTipLine?.tax_name || "Tip").toString(),
+    tax_rate: tipPercentage.toString(),
+    tax_amount: amount.toFixed(2),
+    created: parseInt(existingTipLine?.created, 10) || 0,
+    updated: parseInt(existingTipLine?.updated, 10) || 0,
+  };
+}
 
 /** Next available name like "GST (1)" when base is taken. */
 export function buildIncrementedTaxName(baseName, existingNames) {

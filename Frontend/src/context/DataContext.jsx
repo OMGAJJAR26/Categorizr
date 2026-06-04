@@ -1008,6 +1008,9 @@ export const DataProvider = ({ children }) => {
     const purchasePrice = parseFloat(receipt.purchasePrice) || 0;
     const totalTax =
       receipt.receipt_tax_values?.reduce((sum, tax) => {
+        if ((tax?.tax_name || "").toString().toLowerCase().includes("tip")) {
+          return sum;
+        }
         return sum + (parseFloat(tax.tax_amount) || 0);
       }, 0) || 0;
     return purchasePrice - totalTax;
