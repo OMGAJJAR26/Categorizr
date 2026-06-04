@@ -156,12 +156,6 @@ const DEFAULT_PAYMENT_CARD_MAP = {
   "Visa": "Visa",
   "Cash": "Cash",
 };
-const SETTINGS_DEFAULT_PAYMENT_METHODS = [
-  "Cash",
-  "American Express",
-  "Bank of America",
-  "Citibank",
-];
 const SETTINGS_DEFAULT_MERCHANTS_WITH_LOGOS = [
   { name: "Costco", image: "https://logo.clearbit.com/costco.com" },
   { name: "Home Depot", image: "https://logo.clearbit.com/homedepot.com" },
@@ -1705,8 +1699,8 @@ const ReceiptInfoInline = ({ type }) => {
       const apiIssuer = (p?.card_issuer_name || "").trim() || parsePaymentDisplay(apiName).issuer;
       const apiLast4 = getLast4FromPaymentApiRecord(p) || parsePaymentDisplay(apiName).last4;
       const apiIssuerKey = normalizeMatchKey(apiIssuer);
-      if (itemLast4 && apiLast4 && itemLast4 === apiLast4 && itemIssuerKey === apiIssuerKey) return true;
-      if (itemIssuerKey && apiIssuerKey === itemIssuerKey) return true;
+      if (!itemLast4 || !apiLast4 || itemLast4 !== apiLast4) return false;
+      if (itemIssuerKey && apiIssuerKey && itemIssuerKey === apiIssuerKey) return true;
       const apiBrand = normalizeMatchKey(getPaymentBrand(apiName, inferCardTypeFromPayment(apiName)));
       if (itemBrand && apiBrand && itemBrand === apiBrand) return true;
       return false;
@@ -2845,21 +2839,7 @@ const isBlockedTaxRateInput = (val) => {
         apiPaymentMethods: apiPaymentMethods || [],
         isHidden: isPaymentMethodHidden,
       });
-      const managedItems = canonicalLabels
-        .map(buildPaymentItemFromLabel)
-        .filter(Boolean);
-      const managedKeys = new Set(managedItems.map((p) => normalizeMatchKey(p.name)));
-      const defaultItems = SETTINGS_DEFAULT_PAYMENT_METHODS.filter(
-        (name) => !managedKeys.has(normalizeMatchKey(name)) && !isPaymentMethodHidden(name)
-      ).map((name) => ({
-        key: `default_${name}`,
-        name,
-        logo: getPayLogoResolved(name),
-        isReceiptItem: false,
-        isApiItem: false,
-        isDefaultItem: true,
-      }));
-      return [...managedItems, ...defaultItems];
+      return canonicalLabels.map(buildPaymentItemFromLabel).filter(Boolean);
     }
     return [];
   };

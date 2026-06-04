@@ -141,9 +141,15 @@ export const cardTypeIntToBrand = (cardType) => {
   return Number.isFinite(n) ? CARD_TYPE_INT_TO_BRAND[n] || "" : "";
 };
 
+/** Admin/API placeholder when no card number is stored yet. */
+export const isPlaceholderCardNumber = (cn) => {
+  const v = (cn ?? "").toString().trim();
+  return !v || v === "-" || v === "0";
+};
+
 export const getLast4FromPaymentApiRecord = (m) => {
   const cn = (m?.card_number || "").toString().trim();
-  if (!cn) return "";
+  if (isPlaceholderCardNumber(cn)) return "";
   const legacy = parsePaymentDisplay(cn);
   if (legacy.last4) return legacy.last4;
   const digits = cn.replace(/\D/g, "");
@@ -154,7 +160,7 @@ export const getBrandFromPaymentApiRecord = (m, payCardMap = {}) => {
   const fromInt = cardTypeIntToBrand(m?.card_type);
   if (fromInt) return fromInt;
   const cn = (m?.card_number || "").toString().trim();
-  if (cn) {
+  if (!isPlaceholderCardNumber(cn)) {
     const fromMap = payCardMap[cn] || payCardMap[cn.toLowerCase()];
     if (fromMap) return fromMap;
     const inferred = inferCardTypeFromPayment(cn);
@@ -243,7 +249,11 @@ export const apiPaymentMethodMatchesLabel = (m, label) => {
   const normalized = normalizePaymentMatchKey(label);
   if (!normalized) return false;
   if (normalizePaymentMatchKey(getApiPaymentMethodDisplayName(m)) === normalized) return true;
-  return normalizePaymentMatchKey(m?.card_number) === normalized;
+  const cn = (m?.card_number || "").toString().trim();
+  // Legacy rows may store the full display string in card_number; bare last-4 values
+  // (e.g. "3333") are shared by many cards and must not match a label.
+  if (cn.includes("*") && normalizePaymentMatchKey(cn) === normalized) return true;
+  return false;
 };
 
 /** Canonical list label (Cash normalization for filters/dropdowns). */
@@ -284,7 +294,6 @@ export const mergePaymentMethodLabels = ({
   skipMerchantCardType = true,
 } = {}) => {
   const seen = new Map();
-  const seenLast4 = new Set();
 
   const addLabel = (rawLabel) => {
     const label = normalizePaymentListLabel((rawLabel || "").toString().trim());
@@ -293,10 +302,7 @@ export const mergePaymentMethodLabels = ({
     if (isHidden(label)) return;
     const key = normalizePaymentMatchKey(label);
     if (seen.has(key)) return;
-    const last4 = label.match(/\*(\d{3,4})$/)?.[1];
-    if (last4 && seenLast4.has(last4)) return;
     seen.set(key, label);
-    if (last4) seenLast4.add(last4);
   };
 
   (baseLabels || []).forEach(addLabel);
@@ -312,9 +318,17 @@ export const mergePaymentMethodLabels = ({
 
 export const getApiPaymentMethodCacheKey = (m) => {
   if (!m || typeof m !== "object") return String(m || "").trim().toLowerCase();
+  const id = m.id ?? m.payment_method_id ?? m.fk_payment_method_id;
+  if (id != null && String(id) !== "" && String(id) !== "0") {
+    return `id:${String(id)}`;
+  }
   const issuer = (m.card_issuer_name || m.cardIssuerName || "").trim().toLowerCase();
   const last4 = getLast4FromPaymentApiRecord(m);
   const cardType = String(m.card_type ?? "").trim();
   if (issuer || last4) return `${issuer}|${last4}|${cardType}`;
-  return (m.card_number || "").trim().toLowerCase();
+  const brand = (cardTypeIntToBrand(cardType) || "").trim().toLowerCase();
+  if (brand) return `brand:${brand}|${cardType}`;
+  const cn = (m.card_number || "").toString().trim();
+  if (!isPlaceholderCardNumber(cn)) return cn.toLowerCase();
+  return `type:${cardType || "unknown"}`;
 };

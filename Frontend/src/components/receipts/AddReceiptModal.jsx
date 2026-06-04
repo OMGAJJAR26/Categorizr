@@ -153,6 +153,7 @@ const AddReceiptModal = ({ onClose, onReceiptAdded, initialData = null, onDuplic
     editCustomPaymentMethod,
     deleteCustomPaymentMethod,
     hidePaymentMethod,
+    isPaymentMethodHidden,
     repairReceiptMediaOnServer,
   } = useData();
   const { getPaymentLogo, getPaymentDisplay } = usePaymentDisplay();
@@ -662,8 +663,9 @@ const [localMerchants, setLocalMerchants] = useState([]);
       mergePaymentMethodLabels({
         baseLabels: paymentMethods || [],
         apiPaymentMethods: apiPaymentMethods || [],
+        isHidden: isPaymentMethodHidden,
       }),
-    [paymentMethods, apiPaymentMethods]
+    [paymentMethods, apiPaymentMethods, isPaymentMethodHidden]
   );
 
   // allTaxTypes is declared earlier (before isDuplicateTaxName) to avoid a TDZ crash.
@@ -3662,9 +3664,7 @@ const handleSelectLogo = (index) => {
   const handleOpenAddPaymentModal = () => {
     setPayModalEditMode(null);
     setPayModalError(null);
-    setNewPaymentCardType(
-      formData.paymentType ? formData.paymentType.split(" *")[0] : "",
-    );
+    setNewPaymentCardType("");
     setNewCardIssuerName("");
     setNewLast4Digits("");
     setNewPaymentCategoryType(
@@ -3985,67 +3985,18 @@ const handleSelectLogo = (index) => {
     return pm.paymentType || "";
   });
 
-  // Deduplicate payment methods by last4 — when two entries share the same
-  // last4 the winner is chosen by this priority:
-  //   1. Entry whose base name matches a known API card_type brand (most reliable)
-  //   2. Entry whose base name matches the current API payment method display name
-  //   3. Longer base name (old heuristic, last resort)
+  // Deduplicate by full display label only — multiple cards may share the same last4.
   const deduplicatePaymentMethods = (methods) => {
     const methodMap = new Map();
-    const last4ToMethods = new Map();
-
     methods.forEach((method) => {
       const methodStr =
         typeof method === "string"
           ? method
           : method?.paymentType || String(method);
-      const last4Match = methodStr.match(/\*(\d{3,4})$/);
-      const last4 = last4Match ? last4Match[1] : null;
-      const baseName = last4Match
-        ? methodStr.replace(/\s*\*\d{3,4}$/, "").trim()
-        : methodStr;
-
-      if (last4) {
-        if (!last4ToMethods.has(last4)) last4ToMethods.set(last4, []);
-        last4ToMethods.get(last4).push({ methodStr, baseName });
-      } else {
-        methodMap.set(methodStr.toLowerCase(), methodStr);
-      }
+      const key = normalizePaymentMethodKey(methodStr);
+      if (!key) return;
+      if (!methodMap.has(key)) methodMap.set(key, methodStr);
     });
-
-    last4ToMethods.forEach((methodsWithSameLast4, last4) => {
-      if (methodsWithSameLast4.length === 1) {
-        methodMap.set(methodsWithSameLast4[0].methodStr.toLowerCase(), methodsWithSameLast4[0].methodStr);
-        return;
-      }
-
-      // Priority 1: whose base name matches the API record for this last4
-      const apiRec = (apiPaymentMethods || []).find(
-        p => getLast4FromPaymentApiRecord(p) === last4
-      );
-      const apiDisplayName = apiRec ? getApiPaymentMethodDisplayName(apiRec) : null;
-      const apiBrand = apiRec ? cardTypeIntToBrand(apiRec.card_type) : null;
-
-      let winner = methodsWithSameLast4.find(m =>
-        apiDisplayName && m.methodStr.toLowerCase() === apiDisplayName.toLowerCase()
-      );
-
-      // Priority 2: whose base name IS the known brand for this last4's card_type
-      if (!winner && apiBrand && apiBrand !== "Other") {
-        winner = methodsWithSameLast4.find(m =>
-          m.baseName.toLowerCase() === apiBrand.toLowerCase()
-        );
-      }
-
-      // Priority 3: fall back to longest base name (old heuristic)
-      if (!winner) {
-        methodsWithSameLast4.sort((a, b) => b.baseName.length - a.baseName.length);
-        winner = methodsWithSameLast4[0];
-      }
-
-      methodMap.set(winner.methodStr.toLowerCase(), winner.methodStr);
-    });
-
     return Array.from(methodMap.values());
   };
 

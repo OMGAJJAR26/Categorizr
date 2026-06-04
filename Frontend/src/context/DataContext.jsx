@@ -662,7 +662,7 @@ export const DataProvider = ({ children }) => {
           .map(m => {
             if (m.id && m.id !== 0 && String(m.id) !== "0") return m; // id present — use it
             const cacheKey = getApiPaymentMethodCacheKey(m);
-            const cachedId = _getCachedPaymentId(cacheKey) || _getCachedPaymentId(m.card_number);
+            const cachedId = cacheKey ? _getCachedPaymentId(cacheKey) : null;
             return cachedId ? { ...m, id: cachedId } : m;
           });
         console.log("%c[PaymentMethods] fetchApiPaymentMethods (with IDs):", "color:#8b5cf6;font-weight:bold", payments);
@@ -838,17 +838,10 @@ export const DataProvider = ({ children }) => {
             authErrorMessage = data.message || "Session Token Invalid";
           }
           if (res.ok && isDeleteResponseSuccessful(data)) {
-            // Remove from local state by numeric ID or card_number match
-            setApiPaymentMethods(prev => prev.filter(m => {
-              if (String(m.id ?? "") === String(resolvedId)) return false;
-              if (cardNumber) {
-                const lookup = cardNumber.trim().toLowerCase();
-                if ((m.card_number || "").toLowerCase() === lookup) return false;
-                if (getApiPaymentMethodDisplayName(m).toLowerCase() === lookup) return false;
-                if (getApiPaymentMethodCacheKey(m) === lookup) return false;
-              }
-              return true;
-            }));
+            // Remove only the record with this numeric id (last-4 is not unique).
+            setApiPaymentMethods(prev =>
+              prev.filter(m => String(m.id ?? "") !== String(resolvedId))
+            );
             return { ok: true, data, error: null };
           }
           console.warn("[PaymentMethods] deleteApiPaymentMethod failed:", { status: res.status, data });
@@ -2615,18 +2608,17 @@ setMerchantsWithImages(
     apiPaymentMethods: (apiPaymentMethods || []).filter((m) => isPaymentApiRecord(m)),
     isHidden: isPaymentMethodHidden,
   });
-  const normalizedPaymentMethods = Array.from(
-    new Map(
-      mergedPaymentMethods
-        .map((p) => (p || "").toString().trim())
-        .filter(Boolean)
-        .map((p) => {
-          const base = p.replace(/\s*\*\s*\d{3,4}\s*$/g, "").trim().toLowerCase();
-          const normalized = base === "cash" ? "Cash" : p;
-          return [normalized.toLowerCase(), normalized];
-        })
-    ).values()
-  ).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  // mergePaymentMethodLabels already dedupes by full label; do not re-key by last4/base
+  // or admin defaults (card_number "-") collapse to one entry.
+  const normalizedPaymentMethods = mergedPaymentMethods
+    .map((p) => {
+      const trimmed = (p || "").toString().trim();
+      if (!trimmed) return "";
+      const base = trimmed.replace(/\s*\*\s*\d{3,4}\s*$/g, "").trim().toLowerCase();
+      return base === "cash" ? "Cash" : trimmed;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 
   return (
     <DataContext.Provider
