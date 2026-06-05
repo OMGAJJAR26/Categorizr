@@ -3229,14 +3229,13 @@ const handleFieldChange = (field, value) => {
         hideMerchant(oldName);
       }
       if (newLogo) saveMerchLogo(newName, newLogo);
-      // If the form currently has this merchant selected, update it too
-      if ((formData.storeName || "").toLowerCase() === oldName.toLowerCase()) {
-        handleFieldChange("storeName", newName);
-        handleFieldChange("store_image", newLogo || "");
-        setDetectedMerchantLogo(newLogo || null);
-      }
+      // Select the edited merchant for this receipt (same as payment method edit)
+      handleFieldChange("storeName", newName);
+      handleFieldChange("store_image", newLogo || "");
+      setDetectedMerchantLogo(newLogo || null);
       setShowEditMerchantModal(false);
       setEditingMerchant(null);
+      setShowMerchantDropdown(false);
       await Promise.all([fetchApiMerchants(), silentRefreshData(0)]);
       setToast({ isVisible: true, message: "Merchant Updated", type: "success" });
     } catch (err) {
@@ -7349,31 +7348,53 @@ const handleSelectLogo = (index) => {
         </motion.div>
       )}
 
-      {/* Merchant Edit Confirmation Popup */}
-      {showMerchantEditConfirm && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
-            className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center border border-slate-200">
-            <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
-              When editing a Merchant<br />
-              all receipts associated with that<br />
-              Merchant will also be updated.
-            </p>
-            <div className="flex gap-3">
-              <button type="button"
-                onClick={() => setShowMerchantEditConfirm(false)}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
-                Cancel
-              </button>
-              <button type="button" onClick={doConfirmMerchantEdit} disabled={isSavingEditMerchant}
-                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 rounded-xl text-white font-semibold text-sm transition-colors">
-                Okay
-              </button>
-            </div>
+      {/* Merchant Edit Confirmation Dialog (same pattern as Payment Method) */}
+      <AnimatePresence>
+        {showMerchantEditConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => { if (!isSavingEditMerchant) setShowMerchantEditConfirm(false); }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-6 text-center">
+                <p className="text-sm font-medium text-slate-700 leading-relaxed mb-6">
+                  When editing a Merchant all<br />
+                  receipts associated with that Merchant<br />
+                  will also be updated.
+                </p>
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => { if (!isSavingEditMerchant) setShowMerchantEditConfirm(false); }}
+                    disabled={isSavingEditMerchant}
+                    className="px-6 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={doConfirmMerchantEdit}
+                    disabled={isSavingEditMerchant}
+                    className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                  >
+                    {isSavingEditMerchant ? "Saving…" : "Okay"}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
           </motion.div>
-        </motion.div>
-      )}
+        )}
+      </AnimatePresence>
 
       {/* Merchant Delete Confirmation Popup */}
       {showMerchantDeleteConfirm && (

@@ -315,6 +315,7 @@ const ReceiptDetail = ({
   const [isFetchingEditLogos, setIsFetchingEditLogos] = useState(false);
   const [isSavingEditMerchant, setIsSavingEditMerchant] = useState(false);
   const [editMerchantError, setEditMerchantError] = useState(null);
+  const [showMerchantEditConfirm, setShowMerchantEditConfirm] = useState(false);
 
   // Edit/Delete Expense Category state
   const [showEditCategoryModal, setShowEditCategoryModal] = useState(false);
@@ -2377,12 +2378,22 @@ useEffect(() => {
     setEditMerchantLogo(editLogoOptions[index]?.storeUrl || "");
   };
 
-  /** Rename + update logo for ALL receipts using this merchant, then refresh. */
-  const handleSaveEditMerchant = async () => {
+  // Validate only — shows confirmation popup; actual save is in doConfirmMerchantEdit
+  const handleSaveEditMerchant = () => {
     if (!editMerchantName.trim()) {
       setEditMerchantError("Merchant name is required.");
       return;
     }
+    if (merchantExists(editMerchantName, editingMerchant?.name || "")) {
+      setEditMerchantError("Merchant already exists");
+      return;
+    }
+    setShowMerchantEditConfirm(true);
+  };
+
+  /** Rename + update logo for ALL receipts using this merchant, then refresh. */
+  const doConfirmMerchantEdit = async () => {
+    setShowMerchantEditConfirm(false);
     setIsSavingEditMerchant(true);
     setEditMerchantError(null);
     const oldName = editingMerchant.name;
@@ -2437,13 +2448,12 @@ useEffect(() => {
         hideMerchant(oldName);
       }
       if (newLogo) saveMerchLogo(newName, newLogo);
-      // Update the currently viewed receipt's store fields if affected
-      if ((editedReceipt.storeName || "").toLowerCase() === oldName.toLowerCase()) {
-        handleFieldChange("storeName", newName);
-        handleFieldChange("store_image", newLogo);
-      }
+      // Select the edited merchant for this receipt (same as payment method edit)
+      handleFieldChange("storeName", newName);
+      handleFieldChange("store_image", newLogo);
       setShowEditMerchantModal(false);
       setEditingMerchant(null);
+      setShowMerchantDropdown(false);
       await Promise.all([fetchApiMerchants(), silentRefreshData(0)]);
       setToast({ isVisible: true, message: "Merchant updated successfully!", type: "success" });
     } catch (err) {
@@ -6554,6 +6564,54 @@ Thank you for using our receipt management system.
                     className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
                   >
                     {isPayMethodSaving ? "Saving…" : "OK"}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Merchant Edit Confirmation Dialog (same pattern as Payment Method) */}
+      <AnimatePresence>
+        {showMerchantEditConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => { if (!isSavingEditMerchant) setShowMerchantEditConfirm(false); }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-6 text-center">
+                <p className="text-sm font-medium text-slate-700 leading-relaxed mb-6">
+                  When editing a Merchant all<br />
+                  receipts associated with that Merchant<br />
+                  will also be updated.
+                </p>
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => { if (!isSavingEditMerchant) setShowMerchantEditConfirm(false); }}
+                    disabled={isSavingEditMerchant}
+                    className="px-6 py-2 text-gray-700 font-medium hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={doConfirmMerchantEdit}
+                    disabled={isSavingEditMerchant}
+                    className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                  >
+                    {isSavingEditMerchant ? "Saving…" : "Okay"}
                   </button>
                 </div>
               </div>
