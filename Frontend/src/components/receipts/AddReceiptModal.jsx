@@ -2024,6 +2024,7 @@ const handleFieldChange = (field, value) => {
     setEditingCategory(category);
     setEditCategoryName(category);
     setEditCategoryError(null);
+    setShowCategoryEditConfirm(false);
     setShowEditCategoryModal(true);
     setShowCategoryDropdown(false);
   };
@@ -2067,9 +2068,8 @@ const handleFieldChange = (field, value) => {
       if (normalizeMatchKey(oldName) !== normalizeMatchKey(newName)) {
         editCustomCategory(oldName, newName);
       }
-      if ((formData.expense_type || "").toLowerCase() === oldName.toLowerCase()) {
-        handleFieldChange("expense_type", newName);
-      }
+      // User edited this category from the receipt form — select it for this receipt.
+      handleFieldChange("expense_type", newName);
       setShowEditCategoryModal(false);
       setEditingCategory(null);
       await Promise.all([fetchApiExpenseCategories(), silentRefreshData(0)]);
