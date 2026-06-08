@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Toast from "../components/Toast";
+import SimpleAlertModal from "../components/SimpleAlertModal";
 import AuthPageLayout from "../components/auth/AuthPageLayout";
 import {
   AuthFormCard,
@@ -44,12 +45,35 @@ const getBrowserCountry = async () => {
   return "";
 };
 
+const USERNAME_PATTERN = /^[a-zA-Z0-9.]*$/;
+
+const isValidEmailAddress = (email) => {
+  if (!email || typeof email !== "string") return false;
+
+  const trimmed = email.trim();
+  const match = trimmed.match(/^([a-zA-Z0-9._%+-]+)@(.+)$/);
+  if (!match) return false;
+
+  const domain = match[2];
+  const parts = domain.split(".");
+  if (parts.length < 2) return false;
+  if (parts.some((part) => !part.length)) return false;
+
+  const tld = parts[parts.length - 1];
+  if (!/^[a-zA-Z]{2,}$/.test(tld)) return false;
+
+  return parts.slice(0, -1).every((part) =>
+    /^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$/.test(part)
+  );
+};
+
 const Signup = () => {
   const [toastConfig, setToastConfig] = useState({
     isVisible: false,
     message: "",
     type: "error",
   });
+  const [alertMsg, setAlertMsg] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
   const { setLoading } = useLoader();
@@ -61,13 +85,24 @@ const Signup = () => {
       password: "",
     },
     validationSchema: Yup.object({
-      userName: Yup.string().required("Username is required"),
+      userName: Yup.string()
+        .required("Please enter a username")
+        .matches(
+          USERNAME_PATTERN,
+          "Username can only contain letters, numbers, and periods. No spaces allowed."
+        )
+        .min(4, "Username must be between 4 and 30 characters")
+        .max(30, "Username must be between 4 and 30 characters"),
       emailAddress: Yup.string()
-        .email("Invalid email")
-        .required("Email is required"),
+        .required("Please enter your email address")
+        .test(
+          "valid-email",
+          "Please enter a valid email address",
+          (value) => !value || isValidEmailAddress(value)
+        ),
       password: Yup.string()
-        .min(8, "Password must be at least 8 characters")
-        .required("Password is required"),
+        .required("Please enter a password")
+        .min(8, "Password must be more than 8 characters"),
     }),
     onSubmit: async (values) => {
       setLoading(true);
@@ -164,10 +199,39 @@ const Signup = () => {
     },
   });
 
+  const handleUsernameChange = (e) => {
+    const { value } = e.target;
+    if (!USERNAME_PATTERN.test(value)) {
+      setAlertMsg(
+        "Username can only contain letters, numbers, and periods. No spaces allowed."
+      );
+      formik.setFieldValue("userName", value.replace(/[^a-zA-Z0-9.]/g, ""));
+      return;
+    }
+    formik.handleChange(e);
+  };
+
+  const handleFormSubmit = async (e) => {
+    e.preventDefault();
+    const errors = await formik.validateForm();
+    formik.setTouched({
+      userName: true,
+      emailAddress: true,
+      password: true,
+    });
+    if (Object.keys(errors).length > 0) {
+      setAlertMsg(
+        errors.userName || errors.emailAddress || errors.password
+      );
+      return;
+    }
+    formik.submitForm();
+  };
+
   return (
     <AuthPageLayout>
       <form
-        onSubmit={formik.handleSubmit}
+        onSubmit={handleFormSubmit}
         className="w-full flex justify-center"
       >
         <AuthFormCard title="Sign Up">
@@ -178,8 +242,9 @@ const Signup = () => {
               placeholder="Username"
               autoComplete="username"
               value={formik.values.userName}
-              onChange={formik.handleChange}
+              onChange={handleUsernameChange}
               onBlur={formik.handleBlur}
+              maxLength={30}
               className={authInputClass}
             />
             {formik.touched.userName && formik.errors.userName && (
@@ -246,6 +311,13 @@ const Signup = () => {
           setToastConfig((prev) => ({ ...prev, isVisible: false }))
         }
       />
+
+      {alertMsg && (
+        <SimpleAlertModal
+          message={alertMsg}
+          onClose={() => setAlertMsg(null)}
+        />
+      )}
     </AuthPageLayout>
   );
 };
