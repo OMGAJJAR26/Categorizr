@@ -53,6 +53,7 @@ import {
   inferCardTypeFromPayment,
   mergePaymentMethodLabels,
   isCustomCardIssuer,
+  normalizePaymentMatchKey,
   parsePaymentDisplay,
   readPayCardTypeMap,
   storedCardIssuerName,
@@ -293,6 +294,8 @@ const ReceiptDetail = ({
   const [pendingPayMethodFn, setPendingPayMethodFn] = useState(null);
   const [payMethodConfirmMessage, setPayMethodConfirmMessage] = useState("");
   const [isPayMethodSaving, setIsPayMethodSaving] = useState(false);
+  const [showPayDeleteConfirm, setShowPayDeleteConfirm] = useState(false);
+  const [pendingPayDeleteMethod, setPendingPayDeleteMethod] = useState(null);
 
   // Add Merchant modal state
   const [showAddMerchantModal, setShowAddMerchantModal] = useState(false);
@@ -316,6 +319,8 @@ const ReceiptDetail = ({
   const [isSavingEditMerchant, setIsSavingEditMerchant] = useState(false);
   const [editMerchantError, setEditMerchantError] = useState(null);
   const [showMerchantEditConfirm, setShowMerchantEditConfirm] = useState(false);
+  const [showMerchantDeleteConfirm, setShowMerchantDeleteConfirm] = useState(false);
+  const [pendingMerchantDeleteData, setPendingMerchantDeleteData] = useState(null);
 
   // Edit/Delete Expense Category state
   const [showEditCategoryModal, setShowEditCategoryModal] = useState(false);
@@ -1524,37 +1529,85 @@ useEffect(() => {
 
   const getPaymentDisplayForReceipt = (r) => getPaymentDisplayFromReceipt(r);
 
-  const handleDeletePaymentInDropdown = async (method) => {
+  const getReceiptsMatchingPaymentMethod = (methodName) => {
+    const { issuer: oldIssuer, last4: oldLast4 } = parsePaymentDisplay(methodName || "");
+    const targetKey = normalizePaymentMatchKey(methodName);
+    const exactByDisplay = (receipts || []).filter(
+      (r) => normalizePaymentMatchKey(getPaymentDisplayForReceipt(r)) === targetKey
+    );
+    const exactIds = new Set(exactByDisplay.map((r) => r.id));
+    const additionalByFields = oldLast4
+      ? (receipts || []).filter((r) => {
+          if (exactIds.has(r.id)) return false;
+          const rLast4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
+          if (rLast4 !== oldLast4) return false;
+          const rIssuer = (r.card_issuer_name || r.cardIssuerName || "").toString().trim().toLowerCase();
+          const rTypeLower = (r.paymentType || r.payment_type || "")
+            .toString()
+            .replace(/\s*\*\d{3,4}$/, "")
+            .trim()
+            .toLowerCase();
+          const oldIssuerLower = (oldIssuer || "").toLowerCase();
+          return (
+            (oldIssuerLower && rIssuer === oldIssuerLower) ||
+            (oldIssuerLower && rTypeLower === oldIssuerLower)
+          );
+        })
+      : [];
+    return [...exactByDisplay, ...additionalByFields];
+  };
+
+  const handleDeletePaymentInDropdown = (method) => {
     if (isCashPaymentMethod(method)) return; // safety
-    // Step 1 — replace this payment with Cash in all matching receipts
-    const matchingReceipts = (receipts || []).filter(
-      (r) => getPaymentDisplayForReceipt(r).toLowerCase() === (method || "").toLowerCase()
-    );
-    if (matchingReceipts.length > 0) {
-      await Promise.all(matchingReceipts.map(r =>
-        updateReceipt(r.id, { paymentType: "Cash", card_issuer_name: "", last_4_digit_card: "" })
-      ));
-    }
-    // Step 2 — find API ID via direct name match (most reliable)
-    const apiMatch = (apiPaymentMethods || []).find(
-      (p) => apiPaymentMethodMatchesLabel(p, method)
-    );
-    const targetApiId = apiMatch
-      ? (apiMatch.id ?? apiMatch.payment_method_id ?? apiMatch.fk_payment_method_id ?? null)
-      : null;
-    // Step 3 — delete from API (non-fatal if it fails)
-    if (targetApiId != null) {
-      try {
-        await deleteApiPaymentMethod(targetApiId);
-      } catch (e) {
-        console.warn("[handleDeletePaymentInDropdown] API delete failed:", e);
+    setPendingPayDeleteMethod(method);
+    setShowPayDeleteConfirm(true);
+  };
+
+  const doConfirmPayDeleteInDropdown = async () => {
+    setShowPayDeleteConfirm(false);
+    const method = pendingPayDeleteMethod;
+    setPendingPayDeleteMethod(null);
+    if (!method) return;
+    setIsPayMethodSaving(true);
+    try {
+      const matchingReceipts = getReceiptsMatchingPaymentMethod(method);
+      if (matchingReceipts.length > 0) {
+        await Promise.all(
+          matchingReceipts.map((r) =>
+            updateReceipt(r.id, {
+              paymentType: "Cash",
+              card_issuer_name: "",
+              last_4_digit_card: "",
+            })
+          )
+        );
       }
+      const apiMatch = (apiPaymentMethods || []).find(
+        (p) => apiPaymentMethodMatchesLabel(p, method)
+      );
+      const targetApiId = apiMatch
+        ? (apiMatch.id ?? apiMatch.payment_method_id ?? apiMatch.fk_payment_method_id ?? null)
+        : null;
+      await deleteApiPaymentMethod(targetApiId, method);
+      hidePaymentMethod(method);
+      deleteCustomPaymentMethod(method);
+      await Promise.all([fetchApiPaymentMethods(), silentRefreshData(0)]);
+      const targetKey = normalizePaymentMatchKey(method);
+      if (normalizePaymentMatchKey(getPaymentDisplayForReceipt(editedReceipt)) === targetKey) {
+        handleFieldChange("paymentType", "Cash");
+        handleFieldChange("card_issuer_name", "");
+        handleFieldChange("last_4_digit_card", "");
+      }
+      setToast({ isVisible: true, message: "Payment Method Deleted", type: "success" });
+    } catch (err) {
+      setToast({
+        isVisible: true,
+        message: err.message || "Failed to delete payment method.",
+        type: "error",
+      });
+    } finally {
+      setIsPayMethodSaving(false);
     }
-    // Step 4 — hide & remove from local state
-    hidePaymentMethod(method);
-    deleteCustomPaymentMethod(method);
-    await fetchApiPaymentMethods();
-    setToast({ isVisible: true, message: "Payment Method Deleted", type: "success" });
   };
 
   const handleEditPaymentInDropdown = (method) => {
@@ -2465,9 +2518,18 @@ useEffect(() => {
   };
 
   /** Move all receipts of this merchant to "Miscellaneous". */
-  const handleDeleteMerchant = async (merchant) => {
+  const handleDeleteMerchant = (merchant) => {
     if (merchant.name.toLowerCase() === "miscellaneous") return;
-    if (!window.confirm(`Delete "${merchant.name}"?\n\nAll receipts with this merchant will be changed to "Miscellaneous".`)) return;
+    setPendingMerchantDeleteData(merchant);
+    setShowMerchantDeleteConfirm(true);
+  };
+
+  /** Called when user confirms merchant deletion. */
+  const doConfirmMerchantDelete = async () => {
+    setShowMerchantDeleteConfirm(false);
+    if (!pendingMerchantDeleteData) return;
+    const merchant = pendingMerchantDeleteData;
+    setPendingMerchantDeleteData(null);
     setIsSavingEditMerchant(true);
     try {
       const affected = (receipts || []).filter(
@@ -6580,6 +6642,53 @@ Thank you for using our receipt management system.
         )}
       </AnimatePresence>
 
+      {/* Payment Method Delete Confirmation Popup */}
+      <AnimatePresence>
+        {showPayDeleteConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 12 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 12 }}
+              className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center border border-slate-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-[40px] leading-none text-slate-900 font-black mb-4 tracking-tight">Confirmation</h3>
+              <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
+                Are you sure you want to delete this<br />
+                Payment Method? When deleting a<br />
+                Payment Method all receipts<br />
+                associated with that Payment Method<br />
+                will have that Payment Method<br />
+                removed.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setShowPayDeleteConfirm(false); setPendingPayDeleteMethod(null); }}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={doConfirmPayDeleteInDropdown}
+                  disabled={isPayMethodSaving}
+                  className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-60 rounded-xl text-white font-semibold text-sm transition-colors"
+                >
+                  {isPayMethodSaving ? "Deleting…" : "Delete"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Merchant Edit Confirmation Dialog (same pattern as Payment Method) */}
       <AnimatePresence>
         {showMerchantEditConfirm && (
@@ -6622,6 +6731,52 @@ Thank you for using our receipt management system.
                     {isSavingEditMerchant ? "Saving…" : "Okay"}
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Merchant Delete Confirmation Popup */}
+      <AnimatePresence>
+        {showMerchantDeleteConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 12 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 12 }}
+              className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center border border-slate-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-[40px] leading-none text-slate-900 font-black mb-4 tracking-tight">Confirmation</h3>
+              <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
+                Are you sure you want to delete this<br />
+                Merchant? If so, then all Receipts<br />
+                associated with this Merchant will<br />
+                now be associated with the<br />
+                &quot;Miscellaneous&quot; Merchant.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setShowMerchantDeleteConfirm(false); setPendingMerchantDeleteData(null); }}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={doConfirmMerchantDelete}
+                  disabled={isSavingEditMerchant}
+                  className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-60 rounded-xl text-white font-semibold text-sm transition-colors"
+                >
+                  Delete
+                </button>
               </div>
             </motion.div>
           </motion.div>

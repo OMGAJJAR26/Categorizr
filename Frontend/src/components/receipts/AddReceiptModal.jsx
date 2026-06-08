@@ -22,6 +22,7 @@ import {
   inferCardTypeFromPayment,
   mergePaymentMethodLabels,
   isCustomCardIssuer,
+  normalizePaymentMatchKey,
   parsePaymentDisplay,
   readPayCardTypeMap,
   storedCardIssuerName,
@@ -3672,6 +3673,34 @@ const handleSelectLogo = (index) => {
   const isCashPaymentMethod = (name) =>
     (name || "").toString().replace(/\s*\*\s*\d{3,4}\s*$/, "").trim().toLowerCase() === "cash";
 
+  const getReceiptsMatchingPaymentMethod = (methodName) => {
+    const { issuer: oldIssuer, last4: oldLast4 } = parsePaymentDisplay(methodName || "");
+    const targetKey = normalizePaymentMatchKey(methodName);
+    const exactByDisplay = (receipts || []).filter(
+      (r) => normalizePaymentMatchKey(getPaymentDisplayFromReceipt(r)) === targetKey
+    );
+    const exactIds = new Set(exactByDisplay.map((r) => r.id));
+    const additionalByFields = oldLast4
+      ? (receipts || []).filter((r) => {
+          if (exactIds.has(r.id)) return false;
+          const rLast4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
+          if (rLast4 !== oldLast4) return false;
+          const rIssuer = (r.card_issuer_name || r.cardIssuerName || "").toString().trim().toLowerCase();
+          const rTypeLower = (r.paymentType || r.payment_type || "")
+            .toString()
+            .replace(/\s*\*\d{3,4}$/, "")
+            .trim()
+            .toLowerCase();
+          const oldIssuerLower = (oldIssuer || "").toLowerCase();
+          return (
+            (oldIssuerLower && rIssuer === oldIssuerLower) ||
+            (oldIssuerLower && rTypeLower === oldIssuerLower)
+          );
+        })
+      : [];
+    return [...exactByDisplay, ...additionalByFields];
+  };
+
   const handleEditPaymentInDropdown = (method) => {
     if (isCashPaymentMethod(method)) return;
     const { issuer, last4 } = parsePaymentDisplay(method);
@@ -3707,24 +3736,44 @@ const handleSelectLogo = (index) => {
     const method = pendingPayDeleteMethod;
     setPendingPayDeleteMethod(null);
     if (!method) return;
-    // Set payment method to Cash on all matching receipts
-    const matching = (receipts || []).filter(
-      (r) => getPaymentDisplayFromReceipt(r).toLowerCase() === (method || "").toLowerCase()
-    );
-    if (matching.length > 0) {
-      await Promise.all(matching.map(r =>
-        updateReceipt(r.id, { paymentType: "Cash", card_issuer_name: "", last_4_digit_card: "" })
-      ));
+    setIsPayMethodSaving(true);
+    try {
+      const matching = getReceiptsMatchingPaymentMethod(method);
+      if (matching.length > 0) {
+        await Promise.all(
+          matching.map((r) =>
+            updateReceipt(r.id, {
+              paymentType: "Cash",
+              card_issuer_name: "",
+              last_4_digit_card: "",
+            })
+          )
+        );
+      }
+      const apiMatch = (apiPaymentMethods || []).find((p) =>
+        apiPaymentMethodMatchesLabel(p, method)
+      );
+      const targetApiId = apiMatch ? (apiMatch.id ?? apiMatch.payment_method_id ?? null) : null;
+      await deleteApiPaymentMethod(targetApiId, method);
+      hidePaymentMethod(method);
+      deleteCustomPaymentMethod(method);
+      await Promise.all([fetchApiPaymentMethods(), silentRefreshData(0)]);
+      const targetKey = normalizePaymentMatchKey(method);
+      if (normalizePaymentMatchKey(getPaymentDisplayFromReceipt(formData)) === targetKey) {
+        handleFieldChange("paymentType", "Cash");
+        handleFieldChange("card_issuer_name", "");
+        handleFieldChange("last_4_digit_card", "");
+      }
+      setToast({ isVisible: true, message: "Payment Method Deleted", type: "success" });
+    } catch (err) {
+      setToast({
+        isVisible: true,
+        message: err.message || "Failed to delete payment method.",
+        type: "error",
+      });
+    } finally {
+      setIsPayMethodSaving(false);
     }
-    const apiMatch = (apiPaymentMethods || []).find((p) =>
-      apiPaymentMethodMatchesLabel(p, method)
-    );
-    const targetApiId = apiMatch ? (apiMatch.id ?? apiMatch.payment_method_id ?? null) : null;
-    await deleteApiPaymentMethod(targetApiId, method);
-    hidePaymentMethod(method);
-    deleteCustomPaymentMethod(method);
-    await fetchApiPaymentMethods();
-    setToast({ isVisible: true, message: "Payment Method Deleted", type: "success" });
   };
 
   // Handle adding new payment method
@@ -6972,6 +7021,7 @@ const handleSelectLogo = (index) => {
               className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center border border-slate-200"
               onClick={(e) => e.stopPropagation()}
             >
+              <h3 className="text-[40px] leading-none text-slate-900 font-black mb-4 tracking-tight">Confirmation</h3>
               <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
                 Are you sure you want to delete this<br />
                 Payment Method? When deleting a<br />
@@ -6986,9 +7036,9 @@ const handleSelectLogo = (index) => {
                   className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
                   Cancel
                 </button>
-                <button type="button" onClick={doConfirmPayDeleteInDropdown}
-                  className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 rounded-xl text-white font-semibold text-sm transition-colors">
-                  Delete
+                <button type="button" onClick={doConfirmPayDeleteInDropdown} disabled={isPayMethodSaving}
+                  className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-60 rounded-xl text-white font-semibold text-sm transition-colors">
+                  {isPayMethodSaving ? "Deleting…" : "Delete"}
                 </button>
               </div>
             </motion.div>
@@ -7402,6 +7452,7 @@ const handleSelectLogo = (index) => {
           className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
             className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center border border-slate-200">
+            <h3 className="text-[40px] leading-none text-slate-900 font-black mb-4 tracking-tight">Confirmation</h3>
             <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
               Are you sure you want to delete this<br />
               Merchant? If so, then all Receipts<br />
