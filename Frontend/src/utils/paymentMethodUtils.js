@@ -1,5 +1,19 @@
 /** Shared helpers for payment method display, edit prefill, and storage. */
 
+/**
+ * When true, dropdowns/filters/settings show only GET /userpaymentmethod records.
+ * Toggle to false to merge receipt-derived and custom payment methods again.
+ */
+export const PAYMENT_METHODS_API_ONLY = true;
+
+export const isPaymentApiRecord = (m) => {
+  if (!m || typeof m !== "object") return false;
+  if (String(m.card_type || "").toLowerCase() === "merchant") return false;
+  const hasCard = (m.card_number || "").toString().trim();
+  const hasIssuer = (m.card_issuer_name || "").toString().trim();
+  return !!(hasCard || hasIssuer || m.id);
+};
+
 export const normalizePaymentMatchKey = (value) =>
   String(value || "")
     .trim()
@@ -292,6 +306,7 @@ export const mergePaymentMethodLabels = ({
   apiPaymentMethods = [],
   isHidden = () => false,
   skipMerchantCardType = true,
+  apiOnly = PAYMENT_METHODS_API_ONLY,
 } = {}) => {
   const seen = new Map();
 
@@ -305,7 +320,9 @@ export const mergePaymentMethodLabels = ({
     seen.set(key, label);
   };
 
-  (baseLabels || []).forEach(addLabel);
+  if (!apiOnly) {
+    (baseLabels || []).forEach(addLabel);
+  }
   (apiPaymentMethods || []).forEach((m) => {
     if (skipMerchantCardType && String(m?.card_type || "").toLowerCase() === "merchant") {
       return;

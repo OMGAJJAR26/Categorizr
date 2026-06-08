@@ -75,10 +75,12 @@ import {
   getApiPaymentMethodDisplayName,
   getLast4FromPaymentApiRecord,
   isCashPaymentVariant,
+  isPaymentApiRecord,
   mergePaymentMethodLabels,
   parsePaymentDisplay,
   paymentCategoryFromApiEnum,
   cardTypeIntToBrand,
+  PAYMENT_METHODS_API_ONLY,
 } from "../utils/paymentMethodUtils";
 import { getExpenseCategoryRecordName } from "../utils/expenseCategories";
 
@@ -512,6 +514,7 @@ const ManageModal = ({ type, onClose }) => {
     if (type === "merchants")  return receiptMerchWImgRaw.filter(m => !isMerchantHidden(m.name)).map(m => ({ key: m.name, name: m.name, logo: m.image || null }));
     if (type === "categories") return receiptCategoriesRaw.filter(c => !hiddenCategories.has(c)).map(c => ({ key: c, name: c, logo: null }));
     if (type === "payments") {
+      if (PAYMENT_METHODS_API_ONLY) return [];
       return receiptPaymentsRaw.filter(p => !hiddenPaymentMethods.has(p)).map(p => {
         // Try to resolve logo via the API payment methods list (authoritative card_type)
         const apiRec = (apiPaymentMethods || []).find(ap => {
@@ -550,6 +553,22 @@ const ManageModal = ({ type, onClose }) => {
     }
     if (type === "categories") return customCategories.filter(c => !hiddenCategories.has(c)).map(c => ({ key: c, name: c, logo: null }));
     if (type === "payments") {
+      if (PAYMENT_METHODS_API_ONLY) {
+        return (apiPaymentMethods || [])
+          .filter(isPaymentApiRecord)
+          .map((p, index) => {
+            const apiId = getApiPaymentId(p);
+            const cardName = getApiPaymentMethodDisplayName(p);
+            if (!cardName || hiddenPaymentMethods.has(cardName)) return null;
+            return {
+              key: apiId != null ? `api_${apiId}` : `api_idx_${index}`,
+              name: cardName,
+              logo: getApiPaymentMethodLogo(p),
+              apiId,
+            };
+          })
+          .filter(Boolean);
+      }
       const customItems = customPaymentMethods
         .filter(p => !hiddenPaymentMethods.has(p))
         .map(p => ({ key: p, name: p, logo: getPaymentLogo(p) }));
@@ -2803,6 +2822,25 @@ const isBlockedTaxRateInput = (val) => {
         }
         return getPayLogoResolved(displayName);
       };
+
+      if (PAYMENT_METHODS_API_ONLY) {
+        return (apiPaymentMethods || [])
+          .filter(isPaymentApiRecord)
+          .map((m, index) => {
+            const apiId = getApiEntityId(m);
+            const name = getApiPaymentMethodDisplayName(m);
+            if (!name || isPaymentMethodHidden(name)) return null;
+            return {
+              key: apiId != null ? `api_${apiId}` : `api_idx_${index}`,
+              name,
+              logo: resolvePaymentLogoFromApi(m, name),
+              isReceiptItem: false,
+              isApiItem: true,
+              apiId,
+            };
+          })
+          .filter(Boolean);
+      }
 
       const buildPaymentItemFromLabel = (label) => {
         if (!label || isCashPaymentVariant(label)) return null;

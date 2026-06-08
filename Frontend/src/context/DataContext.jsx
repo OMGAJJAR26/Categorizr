@@ -21,6 +21,7 @@ import {
   getApiPaymentMethodCacheKey,
   getApiPaymentMethodDisplayName,
   getLast4FromPaymentApiRecord,
+  isPaymentApiRecord,
   mergePaymentMethodLabels,
   normalizeApiPaymentMethodInput,
   paymentMethodPayloadToQuery,
@@ -82,13 +83,6 @@ const getEntityId = (item) =>
   item?.fk_expense_category_id ??
   null;
 
-const isPaymentApiRecord = (m) => {
-  if (!m || typeof m !== "object") return false;
-  if (String(m.card_type || "").toLowerCase() === "merchant") return false;
-  const hasCard = (m.card_number || "").toString().trim();
-  const hasIssuer = (m.card_issuer_name || "").toString().trim();
-  return !!(hasCard || hasIssuer || m.id);
-};
 const isDeleteResponseSuccessful = (data) => {
   if (data === null || data === undefined) return false;
   if (typeof data !== "object") {
