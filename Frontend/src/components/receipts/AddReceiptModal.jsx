@@ -41,6 +41,7 @@ import {
   buildReceiptTipTaxEntry,
   filterNonTipReceiptTaxValues,
   findTipLineInReceiptTaxValues,
+  getReceiptsUsingTax,
 } from "../../utils/taxTypeUtils";
 import {
   splitMediaField,
@@ -305,6 +306,9 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const [taxRateFocused, setTaxRateFocused] = useState(false);
   const [showTaxRateChangeWarning, setShowTaxRateChangeWarning] = useState(false);
   const [pendingTaxUpdate, setPendingTaxUpdate] = useState(null);
+  const [showTaxDeleteBlockedMsg, setShowTaxDeleteBlockedMsg] = useState(false);
+  const [showTaxDeleteConfirm, setShowTaxDeleteConfirm] = useState(false);
+  const [pendingTaxDeleteId, setPendingTaxDeleteId] = useState(null);
 
   // ── Tax field validation banners ─────────────────────────────────────────
   const TAX_NAME_MAX   = 15;
@@ -1722,21 +1726,34 @@ const handleFieldChange = (field, value) => {
   };
 
   // Handle deleting tax
-  const handleDeleteTax = async (taxId) => {
-    if (!window.confirm("Are you sure you want to delete this tax type?")) {
+  const handleDeleteTax = (taxId) => {
+    const targetTax =
+      (taxData || []).find((t) => t.id === taxId) ||
+      allTaxTypes.find((t) => t.id === taxId);
+    const matching = getReceiptsUsingTax(receipts, taxId, targetTax?.tax_name);
+    if (matching.length > 0) {
+      setShowTaxDeleteBlockedMsg(true);
       return;
     }
+    setPendingTaxDeleteId(taxId);
+    setShowTaxDeleteConfirm(true);
+  };
+
+  const handleConfirmDeleteTax = async () => {
+    if (!pendingTaxDeleteId) return;
 
     setIsDeletingTax(true);
     setError(null);
 
     try {
-      await deleteTax(taxId);
+      await deleteTax(pendingTaxDeleteId);
       setError(null);
     } catch (err) {
       setError(err.message || "Failed to delete tax type. Please try again.");
     } finally {
       setIsDeletingTax(false);
+      setShowTaxDeleteConfirm(false);
+      setPendingTaxDeleteId(null);
     }
   };
 
@@ -6942,6 +6959,62 @@ const handleSelectLogo = (index) => {
         onAddNewTaxType={handleAddNewTaxTypeFromRateWarning}
         onUpdateCurrentRate={confirmTaxRateChange}
       />
+
+      {/* Tax Delete Blocked Message Popup */}
+      <AnimatePresence>
+        {showTaxDeleteBlockedMsg && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
+              className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl text-center border border-slate-200">
+              <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
+                Before you can delete this Tax Type you must<br />
+                remove that Tax Type from any associated<br />
+                receipts. You can do this by using the Search<br />
+                Filters on the Main Receipt screen and<br />
+                tapping the &quot;Tax Type &amp; Tip&quot; filter and<br />
+                selecting this Tax Type. From here you can<br />
+                edit each receipt by either removing this Tax<br />
+                Type or replacing it with another Tax Type.
+              </p>
+              <button type="button"
+                onClick={() => setShowTaxDeleteBlockedMsg(false)}
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
+                Ok
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Tax Delete Confirmation Popup */}
+      <AnimatePresence>
+        {showTaxDeleteConfirm && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
+              className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl text-center border border-slate-200">
+              <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
+                Are you sure you want to delete this<br />
+                Tax Type?
+              </p>
+              <div className="flex gap-3">
+                <button type="button"
+                  onClick={() => { setShowTaxDeleteConfirm(false); setPendingTaxDeleteId(null); }}
+                  disabled={isDeletingTax}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors disabled:opacity-50">
+                  Cancel
+                </button>
+                <button type="button" onClick={handleConfirmDeleteTax}
+                  disabled={isDeletingTax}
+                  className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 rounded-xl text-white font-semibold text-sm transition-colors disabled:opacity-50">
+                  {isDeletingTax ? "Deleting..." : "Delete"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Payment Method Edit Confirmation Dialog */}
       <AnimatePresence>

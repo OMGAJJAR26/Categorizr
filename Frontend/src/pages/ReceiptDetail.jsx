@@ -75,6 +75,7 @@ import {
   buildReceiptTipTaxEntry,
   filterNonTipReceiptTaxValues,
   findTipLineInReceiptTaxValues,
+  getReceiptsUsingTax,
 } from "../utils/taxTypeUtils";
 import { buildExpenseCategoryOptions } from "../utils/expenseCategories";
 import { findRenamedApiMerchant } from "../utils/merchantListUtils";
@@ -349,6 +350,7 @@ const ReceiptDetail = ({
   const [showTaxRateChangeWarning, setShowTaxRateChangeWarning] = useState(false);
   const [pendingTaxUpdate, setPendingTaxUpdate] = useState(null);
   const [showDeleteTaxConfirm, setShowDeleteTaxConfirm] = useState(false);
+  const [showTaxDeleteBlockedMsg, setShowTaxDeleteBlockedMsg] = useState(false);
   const [deletingTaxId, setDeletingTaxId] = useState(null);
   const [tipVisible, setTipVisible] = useState(false); // TIP field visibility (toggled by SELECT pill)
   const [currencyInputs, setCurrencyInputs] = useState({}); // Raw text while user is typing in currency fields
@@ -2185,7 +2187,15 @@ useEffect(() => {
     }
   };
 
-  const handleDeleteTaxType = async (taxId) => {
+  const handleDeleteTaxType = (taxId) => {
+    const targetTax =
+      (taxData || []).find((t) => t.id === taxId) ||
+      allTaxTypes.find((t) => t.id === taxId);
+    const matching = getReceiptsUsingTax(receipts, taxId, targetTax?.tax_name);
+    if (matching.length > 0) {
+      setShowTaxDeleteBlockedMsg(true);
+      return;
+    }
     setDeletingTaxId(taxId);
     setShowDeleteTaxConfirm(true);
   };
@@ -7360,6 +7370,33 @@ Thank you for using our receipt management system.
         onAddNewTaxType={handleAddNewTaxTypeFromRateWarning}
         onUpdateCurrentRate={confirmTaxRateChange}
       />
+
+      {/* Tax Delete Blocked Message Popup */}
+      <AnimatePresence>
+        {showTaxDeleteBlockedMsg && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <motion.div initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 12 }}
+              className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl text-center border border-slate-200">
+              <p className="text-sm font-medium text-slate-800 leading-relaxed mb-5">
+                Before you can delete this Tax Type you must<br />
+                remove that Tax Type from any associated<br />
+                receipts. You can do this by using the Search<br />
+                Filters on the Main Receipt screen and<br />
+                tapping the &quot;Tax Type &amp; Tip&quot; filter and<br />
+                selecting this Tax Type. From here you can<br />
+                edit each receipt by either removing this Tax<br />
+                Type or replacing it with another Tax Type.
+              </p>
+              <button type="button"
+                onClick={() => setShowTaxDeleteBlockedMsg(false)}
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 font-semibold text-sm transition-colors">
+                Ok
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Delete Tax Confirmation */}
       <AnimatePresence>
