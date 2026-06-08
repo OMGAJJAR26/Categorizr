@@ -82,7 +82,10 @@ import {
   cardTypeIntToBrand,
   PAYMENT_METHODS_API_ONLY,
 } from "../utils/paymentMethodUtils";
-import { getExpenseCategoryRecordName } from "../utils/expenseCategories";
+import {
+  getExpenseCategoryRecordName,
+  getExpenseCategoryRecordId,
+} from "../utils/expenseCategories";
 
 /* ─── Helpers ─────────────────────────────────────────── */
 
@@ -1390,7 +1393,12 @@ const ReceiptInfoInline = ({ type }) => {
   useEffect(() => { if (type === "taxes") fetchTaxes(); }, [type, fetchTaxes]);
   useEffect(() => { if (type === "merchants") fetchApiMerchants(); }, [type]);
   useEffect(() => { if (type === "payments") fetchApiPaymentMethods(); }, [type]);
-  useEffect(() => { if (type === "categories") fetchApiExpenseCategories(); }, [type]);
+  useEffect(() => {
+    if (type === "categories") {
+      fetchApiExpenseCategories();
+      silentRefreshData?.(0);
+    }
+  }, [type, fetchApiExpenseCategories, silentRefreshData]);
   useEffect(() => { 
     setShowAddForm(false); 
     resetAddFormState();
@@ -2777,21 +2785,12 @@ const isBlockedTaxRateInput = (val) => {
       return [...allWithApi, ...defaultItems];
     }
     if (type === "categories") {
-      // Filter out any receipt-derived names the user has renamed/hidden
-      const rItems = receiptCategoriesRaw
-        .filter(c => !hiddenCategories.has(c))
-        .map(c => ({ key: c, name: c, logo: null, isReceiptItem: true, isApiItem: false }));
-      const rKeys  = new Set(rItems.map(c => c.name.toLowerCase()));
-      const cItems = customCategories
-        .filter(c => !rKeys.has(c.toLowerCase()) && !hiddenCategories.has(c))
-        .map(c => ({ key: c, name: c, logo: null, isReceiptItem: false, isApiItem: false }));
-      // API expense categories not already present from receipts or custom, and not hidden
-      const allExistingCatKeys = new Set([...rItems.map(c => c.name.toLowerCase()), ...cItems.map(c => c.name.toLowerCase())]);
+      // API expense categories are the source of truth (GET /userexpensecategory/getExpenseCategoryv1)
       const apiItems = (apiExpenseCategories || [])
         .map((c) => {
           const categoryName = getExpenseCategoryRecordName(c);
-          if (!categoryName) return null;
-          const apiId = c?.id ?? c?.expense_category_id ?? c?.fk_expense_category_id ?? null;
+          if (!categoryName || isCategoryHidden(categoryName)) return null;
+          const apiId = getExpenseCategoryRecordId(c);
           return {
             key: apiId != null ? `api_${apiId}` : `api_name_${categoryName.toLowerCase()}`,
             name: categoryName,
@@ -2801,13 +2800,26 @@ const isBlockedTaxRateInput = (val) => {
             apiId,
           };
         })
-        .filter(Boolean)
+        .filter(Boolean);
+      const apiNameKeys = new Set(apiItems.map((item) => (item.name || "").toLowerCase()));
+      const rItems = receiptCategoriesRaw
         .filter(
-          (item) =>
-            !allExistingCatKeys.has((item.name || "").toLowerCase()) &&
-            !hiddenCategories.has(item.name)
-        );
-      return [...rItems, ...cItems, ...apiItems];
+          (c) =>
+            c &&
+            !apiNameKeys.has((c || "").toLowerCase()) &&
+            !isCategoryHidden(c)
+        )
+        .map((c) => ({ key: c, name: c, logo: null, isReceiptItem: true, isApiItem: false }));
+      const rKeys = new Set(rItems.map((c) => c.name.toLowerCase()));
+      const cItems = customCategories
+        .filter(
+          (c) =>
+            !apiNameKeys.has((c || "").toLowerCase()) &&
+            !rKeys.has((c || "").toLowerCase()) &&
+            !isCategoryHidden(c)
+        )
+        .map((c) => ({ key: c, name: c, logo: null, isReceiptItem: false, isApiItem: false }));
+      return [...apiItems, ...rItems, ...cItems];
     }
     if (type === "payments") {
       const resolvePaymentLogoFromApi = (m, displayName) => {

@@ -4,6 +4,7 @@ import { getPaymentDisplayFromReceipt } from "../hooks/usePaymentDisplay";
 import {
   parseExpenseCategoryApiResponse,
   getExpenseCategoryNamesFromApi,
+  getExpenseCategoryRecordName,
   buildExpenseCategoryOptions,
   normalizeExpenseCategoryApiItem,
   normalizeExpenseCategoryApiList,
@@ -873,6 +874,36 @@ export const DataProvider = ({ children }) => {
         console.log("%c[ExpenseCategories] fetchApiExpenseCategories response (full):", "color:#a855f7;font-weight:bold", data);
         console.log("%c[ExpenseCategories] filtered categories:", "color:#a855f7;font-weight:bold", cats);
         setApiExpenseCategories(cats);
+        if (cats.length > 0) {
+          const apiNameKeys = new Set(
+            cats
+              .map((c) => (c.expense_category_name || "").toString().trim().toLowerCase())
+              .filter(Boolean)
+          );
+          // Categories returned by GET are active on the server — clear stale hidden flags
+          // (e.g. after re-adding "Gold" from iOS following a prior web delete).
+          setHiddenCategories((prev) => {
+            const next = new Set(
+              [...prev].filter(
+                (hidden) => !apiNameKeys.has(String(hidden || "").trim().toLowerCase())
+              )
+            );
+            if (next.size !== prev.size) {
+              localStorage.setItem("cat_hidden_categories", JSON.stringify([...next]));
+            }
+            return next;
+          });
+          setExpenseCategories((prev) => {
+            const merged = new Set(
+              (prev || []).map((c) => (c || "").toString().trim()).filter(Boolean)
+            );
+            cats.forEach((c) => {
+              const name = (c.expense_category_name || "").toString().trim();
+              if (name) merged.add(name);
+            });
+            return [...merged];
+          });
+        }
       }
     } catch (e) { console.error("fetchApiExpenseCategories error", e); }
   }, []);
@@ -1601,6 +1632,24 @@ setMerchantsWithImages(
             parseExpenseCategoryApiResponse(apiCatJson)
           );
           setApiExpenseCategories(apiExpenseCategoriesData);
+          if (apiExpenseCategoriesData.length > 0) {
+            const apiNameKeys = new Set(
+              apiExpenseCategoriesData
+                .map((c) => (c.expense_category_name || "").toString().trim().toLowerCase())
+                .filter(Boolean)
+            );
+            setHiddenCategories((prev) => {
+              const next = new Set(
+                [...prev].filter(
+                  (hidden) => !apiNameKeys.has(String(hidden || "").trim().toLowerCase())
+                )
+              );
+              if (next.size !== prev.size) {
+                localStorage.setItem("cat_hidden_categories", JSON.stringify([...next]));
+              }
+              return next;
+            });
+          }
         }
       } catch (apiCatErr) {
         console.error("fetchApiExpenseCategories in fetchData error", apiCatErr);
@@ -2576,9 +2625,10 @@ setMerchantsWithImages(
   const visibleCustomCategories = customCategories.filter(
     (c) => c && !isCategoryHidden(c)
   );
-  const visibleApiExpenseCategories = apiExpenseCategories.filter(
-    (c) => c?.expense_category_name && !isCategoryHidden(c.expense_category_name)
-  );
+  const visibleApiExpenseCategories = apiExpenseCategories.filter((c) => {
+    const name = getExpenseCategoryRecordName(c);
+    return name && !isCategoryHidden(name);
+  });
   const visibleAdminDefaults = adminDefaultExpenseCategories.filter(
     (c) => {
       const n = (c || "").toString().trim();

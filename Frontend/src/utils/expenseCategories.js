@@ -23,14 +23,106 @@ export const DEFAULT_EXPENSE_CATEGORIES = [
   "Other",
 ];
 
+const EXPENSE_CATEGORY_NAME_FIELDS = [
+  "expense_category_name",
+  "Expense_Category_Name",
+  "expenseCategoryName",
+  "category_name",
+  "CategoryName",
+  "name",
+  "Name",
+  "title",
+  "label",
+];
+
+const EXPENSE_CATEGORY_ID_FIELDS = [
+  "id",
+  "ID",
+  "expense_category_id",
+  "Expense_Category_Id",
+  "fk_expense_category_id",
+  "Fk_Expense_Category_Id",
+];
+
+function isExpenseCategoryLikeRecord(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const hasName = EXPENSE_CATEGORY_NAME_FIELDS.some((field) => {
+    const trimmed = (value[field] ?? "").toString().trim();
+    return trimmed.length > 0;
+  });
+  const hasId = EXPENSE_CATEGORY_ID_FIELDS.some(
+    (field) => value[field] != null && String(value[field]).trim() !== ""
+  );
+  return hasName || hasId;
+}
+
+/** Coerce PHP-style object maps ({ "0": {...}, "1": {...} }) or a single record into an array. */
+function coerceExpenseCategoryRecordList(value) {
+  if (value == null) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "object") return [];
+
+  if (isExpenseCategoryLikeRecord(value)) return [value];
+
+  const values = Object.values(value).filter(
+    (entry) => entry != null && typeof entry === "object"
+  );
+  if (values.length === 0) return [];
+
+  if (values.every(isExpenseCategoryLikeRecord)) return values;
+
+  // Wrapped payload, e.g. { data: { "0": {...}, "1": {...} } }
+  if (values.length === 1) {
+    const nested = coerceExpenseCategoryRecordList(values[0]);
+    if (nested.length > 0) return nested;
+  }
+
+  return values;
+}
+
+/** Flatten nested category wrappers returned by some mobile/API payloads. */
+function unwrapExpenseCategoryRecord(item) {
+  if (item == null) return null;
+  if (typeof item !== "object") return item;
+
+  const nested =
+    item.expense_category ??
+    item.ExpenseCategory ??
+    item.expenseCategory ??
+    item.category ??
+    item.Category ??
+    null;
+
+  if (nested && typeof nested === "object" && nested !== item) {
+    return { ...item, ...nested };
+  }
+  return item;
+}
+
 /** Normalize GET /userexpensecategory/getExpenseCategoryv1 payloads to an array. */
 export function parseExpenseCategoryApiResponse(data) {
   if (!data) return [];
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.data)) return data.data;
-  if (Array.isArray(data?.expense_categories)) return data.expense_categories;
-  if (Array.isArray(data?.categories)) return data.categories;
-  if (Array.isArray(data?.result)) return data.result;
+
+  const candidates = [
+    data?.data,
+    data?.expense_categories,
+    data?.expense_category,
+    data?.Expense_Categories,
+    data?.categories,
+    data?.category,
+    data?.result,
+    data?.records,
+    data?.list,
+    data,
+  ];
+
+  for (const candidate of candidates) {
+    const list = coerceExpenseCategoryRecordList(candidate)
+      .map(unwrapExpenseCategoryRecord)
+      .filter((item) => item != null);
+    if (list.length > 0) return list;
+  }
+
   return [];
 }
 
@@ -45,12 +137,21 @@ export function isValidExpenseCategory(category) {
 export function getExpenseCategoryRecordName(item) {
   if (!item) return "";
   if (typeof item === "string") return item.toString().trim();
-  return (
-    item.expense_category_name ??
-    item.name ??
-    item.category_name ??
-    ""
-  ).toString().trim();
+  for (const field of EXPENSE_CATEGORY_NAME_FIELDS) {
+    const trimmed = (item[field] ?? "").toString().trim();
+    if (trimmed) return trimmed;
+  }
+  return "";
+}
+
+export function getExpenseCategoryRecordId(item) {
+  if (!item || typeof item !== "object") return null;
+  for (const field of EXPENSE_CATEGORY_ID_FIELDS) {
+    const raw = item[field];
+    if (raw == null || String(raw).trim() === "") continue;
+    return raw;
+  }
+  return null;
 }
 
 /** Normalize add/get expense category API records to a stable shape for Settings lists. */
@@ -58,11 +159,7 @@ export function normalizeExpenseCategoryApiItem(item, fallbackName = "") {
   const expense_category_name =
     getExpenseCategoryRecordName(item) || (fallbackName || "").toString().trim();
   if (!expense_category_name || !isValidExpenseCategory(expense_category_name)) return null;
-  const id =
-    item?.id ??
-    item?.expense_category_id ??
-    item?.fk_expense_category_id ??
-    null;
+  const id = getExpenseCategoryRecordId(item);
   return typeof item === "object" && item !== null
     ? { ...item, id, expense_category_name }
     : { id, expense_category_name };
