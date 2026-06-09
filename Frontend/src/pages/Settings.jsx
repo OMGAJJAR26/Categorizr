@@ -67,6 +67,8 @@ import LogoutConfirmationDialog from "../components/LogoutConfirmationDialog";
 import ForgotPasswordModal from "./ForgotPasswordModel";
 import MerchantAvatar from "../components/MerchantAvatar";
 import SimpleAlertModal from "../components/SimpleAlertModal";
+import MyNetworkPanel from "../components/network/MyNetworkPanel";
+import { getPendingRequestCount } from "../api/networkApi";
 import { useNavigate } from "react-router-dom";
 import { useData } from "../context/DataContext";
 import { getPaymentDisplayFromReceipt } from "../hooks/usePaymentDisplay";
@@ -1037,44 +1039,6 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
   );
 };
 
-/* My Network panel */
-const MyNetworkPanel = () => {
-  const [search, setSearch] = useState("");
-  const networkList = []; // UI only
-  const filtered = networkList.filter(u => u?.username?.toLowerCase().includes(search.toLowerCase()));
-  return (
-    <div className="max-w-md flex flex-col gap-4">
-      <div className="relative">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-        <input className="w-full bg-white border border-slate-200 text-sm text-slate-900 rounded-xl pl-8 pr-8 py-2.5 placeholder-slate-400 focus:outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-500/10 transition-all shadow-sm"
-          placeholder="Search network…" value={search} onChange={e => setSearch(e.target.value)} />
-        {search && <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X size={13}/></button>}
-      </div>
-      {filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-3 py-14 text-center bg-slate-50 border border-slate-200 rounded-2xl">
-          <div className="w-14 h-14 rounded-full bg-white border border-slate-200 flex items-center justify-center shadow-sm">
-            <Network size={24} className="text-slate-300" />
-          </div>
-          <p className="text-sm font-medium text-slate-600">{search ? "No users found." : "You don't have a network"}</p>
-          {!search && <p className="text-xs text-slate-400">Please search for network</p>}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {filtered.map(u => (
-            <div key={u.id} className="flex items-center gap-3 bg-white border border-slate-200/80 rounded-xl px-3 py-2.5 shadow-sm">
-              <div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">{(u.username || "?")[0].toUpperCase()}</div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-slate-900 truncate">{u.username}</p>
-                <p className="text-xs text-slate-400 truncate">{u.status || "Connected"}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
 /* Receipt Info panel — wraps a manage section inline */
 const ReceiptInfoPanel = ({ type, merchants, expenseCategories, paymentMethods, taxData, onOpen }) => {
   const items = [
@@ -1201,6 +1165,13 @@ const Settings = () => {
   const [active, setActive]               = useState("myaccount");
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [sidebarOpen, setSidebarOpen]     = useState(false); // mobile toggle
+  const [pendingNetworkCount, setPendingNetworkCount] = useState(0);
+
+  useEffect(() => {
+    getPendingRequestCount().then((res) => {
+      if (res.ok) setPendingNetworkCount(res.data);
+    });
+  }, []);
 
   const handleLogout = () => {
     clearAllData();
@@ -1245,6 +1216,11 @@ const Settings = () => {
                   >
                     <Icon size={15} className={isActive && !soon ? "text-blue-600" : ""} />
                     <span className="flex-1">{label}</span>
+                    {id === "mynetwork" && pendingNetworkCount > 0 && (
+                      <span className="min-w-[18px] h-[18px] flex items-center justify-center text-[10px] font-bold px-1 rounded-full bg-red-500 text-white">
+                        {pendingNetworkCount > 9 ? "9+" : pendingNetworkCount}
+                      </span>
+                    )}
                     {soon && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-yellow-100 text-yellow-600 border border-yellow-200">Soon</span>}
                   </button>
                 );
@@ -1322,7 +1298,12 @@ const Settings = () => {
                 {active === "myaccount" && (
                   <MyAccountPanel user={user} onLogoutRequest={() => setShowLogoutConfirm(true)} />
                 )}
-                {active === "mynetwork" && <MyNetworkPanel />}
+                {active === "mynetwork" && (
+                  <MyNetworkPanel
+                    user={user}
+                    onPendingCountChange={setPendingNetworkCount}
+                  />
+                )}
                 {MANAGE_TYPES.includes(active) && (
                   <ReceiptInfoInline type={active} />
                 )}
