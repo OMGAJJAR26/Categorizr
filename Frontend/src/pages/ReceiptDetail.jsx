@@ -25,6 +25,8 @@ import {
   dedupeEmailAttachmentPdfUrls,
 } from "../utils/mediaUrlUtils";
 import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationDialog";
+import ForwardReceiptModal from "../components/receipts/ForwardReceiptModal";
+import { isNetworkReceivedReceipt } from "../utils/networkReceiptUtils";
 import "../App.css";
 const Visa              = "/payment-logos/Visa.png";
 const MasterCard        = "/payment-logos/MasterCard.png";
@@ -363,6 +365,7 @@ const ReceiptDetail = ({
   const [splitErrors, setSplitErrors] = useState({});
   const [splitError, setSplitError] = useState(null);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
+  const [showForwardModal, setShowForwardModal] = useState(false);
   const [alertMsg, setAlertMsg] = useState(null);
   const [showMaxDefaultTaxModal, setShowMaxDefaultTaxModal] = useState(false);
 
@@ -2887,6 +2890,15 @@ useEffect(() => {
     setShowOptionsMenu(false);
   };
 
+  const handleForwardSuccess = async () => {
+    if (selectedReceipt?.id) {
+      await updateReceipt(selectedReceipt.id, { receipt_forwarded: "1" });
+    }
+    setToast({ isVisible: true, message: "Receipt forwarded successfully.", type: "success" });
+    await refreshData?.();
+    onSaved?.();
+  };
+
   /** Update a field on a specific split, auto-calculating tax/total like the main form */
   const updateSplitField = (idx, field, value) => {
     if (field === "subtotal" || field === "purchasePrice") {
@@ -5024,6 +5036,18 @@ Thank you for using our receipt management system.
                     </button>
                     {showOptionsMenu && (
                       <div className="absolute top-full right-0 mt-2 bg-white shadow-xl border border-gray-200 rounded-xl z-[100] min-w-[140px] overflow-hidden">
+                        {!isNetworkReceivedReceipt(selectedReceipt) && (
+                          <button
+                            type="button"
+                            className="w-full text-left px-4 py-3 text-sm font-medium text-gray-800 hover:bg-gray-50 transition-colors border-b border-gray-100"
+                            onClick={() => {
+                              setShowOptionsMenu(false);
+                              setShowForwardModal(true);
+                            }}
+                          >
+                            Forward
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="w-full text-left px-4 py-3 text-sm font-medium text-gray-800 hover:bg-gray-50 transition-colors"
@@ -6513,6 +6537,19 @@ Thank you for using our receipt management system.
         <ViewReport
           receipt={selectedReceipt}
           onClose={() => setShowViewReport(false)}
+        />
+      )}
+
+      {showForwardModal && selectedReceipt && (
+        <ForwardReceiptModal
+          receipt={{
+            ...selectedReceipt,
+            ...editedReceipt,
+            receipt_tax_values:
+              editedReceipt.receipt_tax_values ?? selectedReceipt.receipt_tax_values,
+          }}
+          onClose={() => setShowForwardModal(false)}
+          onSuccess={handleForwardSuccess}
         />
       )}
 

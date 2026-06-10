@@ -16,6 +16,12 @@ import {
   receiptMediaStorageKey,
 } from "../utils/mediaUrlUtils";
 import { isMerchantSupersededByApi } from "../utils/merchantListUtils";
+import { isNetworkReceivedReceipt } from "../utils/networkReceiptUtils";
+import {
+  buildHomepageFilterMerchantsWithImages,
+  buildHomepageFilterExpenseCategories,
+  buildHomepageFilterPaymentMethods,
+} from "../utils/homepageFilterUtils";
 import {
   buildApiPaymentMethodPayload,
   cardTypeIntToBrand,
@@ -173,8 +179,9 @@ function formatPaymentDisplayFromReceipt(r) {
 
 // Helper function to determine badge status
 const getReceiptBadgeStatus = (receipt) => {
-  const isForwarded = receipt.receipt_forwarded === "1" || receipt.receipt_forwarded === 1;
-  const isReceived = receipt.fk_forward_from_receipt_id > 0 || receipt.fkForwardFromReceiptId > 0;
+  const isForwarded =
+    receipt.receipt_forwarded === "1" || receipt.receipt_forwarded === 1;
+  const isReceived = isNetworkReceivedReceipt(receipt);
 
   if (isForwarded && isReceived) {
     return "both";
@@ -1287,9 +1294,16 @@ export const DataProvider = ({ children }) => {
                 is_verify: String(r.is_verify ?? "0"),
                 fk_incoming_email_id: r.fk_incoming_email_id ?? null,
                 fk_original_receipt_id: r.fk_original_receipt_id ?? null,
+                fk_forward_from_receipt_id: String(
+                  r.fk_forward_from_receipt_id ??
+                    r.fkForwardFromReceiptId ??
+                    "0"
+                ),
+                receipt_forwarded: String(r.receipt_forwarded ?? "0"),
+                originalUsername: r.originalUsername ?? r.original_username ?? null,
               };
               const paymentDisplay = formatPaymentDisplayFromReceipt(normalized);
-              const badgeStatus = getReceiptBadgeStatus(r);
+              const badgeStatus = getReceiptBadgeStatus(normalized);
               // Add status field: default to "0" (unread) if not present
               const status = r.status !== undefined ? r.status : "0";
               return {
@@ -1375,7 +1389,10 @@ export const DataProvider = ({ children }) => {
         Array.from(
           new Set([
             "Miscellaneous", // always present — cannot be removed
-            ...receiptsWithIntegrations.map((r) => r.storeName).filter(Boolean),
+            ...receiptsWithIntegrations
+              .filter((r) => !isNetworkReceivedReceipt(r))
+              .map((r) => r.storeName)
+              .filter(Boolean),
             ...apiMerchantsData.map((m) => m.store_name).filter(Boolean),
           ])
         ).sort((a, b) =>
@@ -1415,8 +1432,10 @@ export const DataProvider = ({ children }) => {
         merchantsWithImagesMap.set(key, { name: m.store_name, image: cleanImg });
       });
 
-      // Step 2: fill gaps from receipt data (skip merchants already seeded from API)
+      // Step 2: fill gaps from receipt data (skip merchants already seeded from API).
+      // Network-received receipts are excluded here — they appear in homepage filters only.
       receiptsWithIntegrations.forEach((r) => {
+        if (isNetworkReceivedReceipt(r)) return;
         const name = r.storeName?.toString().trim();
         const rawImage = r.store_image?.toString().trim();
         if (!name || name === "0") return;
@@ -1612,7 +1631,11 @@ setMerchantsWithImages(
         formattedReceiptsDeduped,
         token
       );
-      setPaymentMethods(buildPaymentMethods(receiptsWithIntegrations));
+      setPaymentMethods(
+        buildPaymentMethods(
+          receiptsWithIntegrations.filter((r) => !isNetworkReceivedReceipt(r))
+        )
+      );
 
       setExpenseType([
         ...new Set(
@@ -1658,6 +1681,7 @@ setMerchantsWithImages(
       const receiptDerivedCategories = [
         ...new Set(
           receiptsWithIntegrations
+            .filter((r) => !isNetworkReceivedReceipt(r))
             .map((r) => (r.expense_type ?? "").toString().trim())
             .filter(Boolean)
         ),
@@ -2667,6 +2691,23 @@ setMerchantsWithImages(
     .filter(Boolean)
     .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 
+  const homepageFilterMerchantsWithImages = buildHomepageFilterMerchantsWithImages(
+    mergedMerchantsWithImages,
+    receipts,
+    apiMerchants
+  );
+  const homepageFilterExpenseCategories = buildHomepageFilterExpenseCategories(
+    mergedExpenseCategories,
+    receipts,
+    apiExpenseCategories
+  );
+  const homepageFilterPaymentMethods = buildHomepageFilterPaymentMethods(
+    normalizedPaymentMethods,
+    receipts,
+    apiPaymentMethods,
+    isPaymentMethodHidden
+  );
+
   return (
     <DataContext.Provider
       value={{
@@ -2677,6 +2718,10 @@ setMerchantsWithImages(
         expenseCategories: mergedExpenseCategories,
         paymentMethods: normalizedPaymentMethods,
         merchantsWithImages: mergedMerchantsWithImages,
+        // Homepage filter-only extras from network-received receipts
+        homepageFilterMerchantsWithImages,
+        homepageFilterExpenseCategories,
+        homepageFilterPaymentMethods,
         // Raw receipt-derived arrays (for the management modal — includes hidden items)
         receiptMerchantsRaw,
         receiptMerchWImgRaw,

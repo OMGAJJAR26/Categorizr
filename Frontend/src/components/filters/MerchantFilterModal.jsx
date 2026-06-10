@@ -5,7 +5,8 @@ import MerchantAvatar from "../MerchantAvatar";
 const STORAGE_KEY = "selectedMerchants";
 
 const MerchantFilterModal = ({ onClose, onApply, initialSelected = [] }) => {
-  const { merchantsWithImages } = useData();
+  const { homepageFilterMerchantsWithImages, merchantsWithImages } = useData();
+  const filterMerchants = homepageFilterMerchantsWithImages ?? merchantsWithImages;
 
   const [selectedMerchants, setSelectedMerchants] = useState(() => {
     try {
@@ -29,7 +30,7 @@ const MerchantFilterModal = ({ onClose, onApply, initialSelected = [] }) => {
   const merchantGroups = useMemo(() => {
     const groups = new Map();
 
-    (merchantsWithImages || []).forEach((merchant) => {
+    (filterMerchants || []).forEach((merchant) => {
       const name = merchant.name;
       const normalized = normalize(name);
       if (!groups.has(normalized)) {
@@ -39,7 +40,7 @@ const MerchantFilterModal = ({ onClose, onApply, initialSelected = [] }) => {
     });
 
     return groups;
-  }, [merchantsWithImages]);
+  }, [filterMerchants]);
 
   const uniqueMerchants = useMemo(() => {
     return Array.from(merchantGroups.values())
@@ -96,7 +97,7 @@ const MerchantFilterModal = ({ onClose, onApply, initialSelected = [] }) => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(selectedMerchants));
     
     // Get full merchant data for selected merchants
-    const selectedMerchantsData = (merchantsWithImages || [])
+    const selectedMerchantsData = (filterMerchants || [])
       .filter(merchant => selectedMerchants.includes(merchant.name));
     
     onApply(selectedMerchants, selectedMerchantsData); // Pass both names and data

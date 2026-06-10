@@ -37,9 +37,11 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
     receipts,
     apiPaymentMethods,
     paymentMethods,
+    homepageFilterPaymentMethods,
     fetchApiPaymentMethods,
     isPaymentMethodHidden,
   } = useData();
+  const filterPaymentMethods = homepageFilterPaymentMethods ?? paymentMethods;
   const [selectedPaymentMethods, setSelectedPaymentMethods] =
     useState(initialSelected);
 
@@ -305,11 +307,13 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
   const uniqueMethods = useMemo(
     () =>
       mergePaymentMethodLabels({
-        baseLabels: paymentMethods || [],
+        baseLabels: filterPaymentMethods || [],
         apiPaymentMethods: apiPaymentMethods || [],
         isHidden: isPaymentMethodHidden,
+        // Homepage filter list includes network-received extras in baseLabels.
+        apiOnly: false,
       }),
-    [apiPaymentMethods, paymentMethods, isPaymentMethodHidden]
+    [apiPaymentMethods, filterPaymentMethods, isPaymentMethodHidden]
   );
 
   // ✅ Select all

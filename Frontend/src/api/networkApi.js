@@ -364,8 +364,38 @@ export const buildInvitePayload = (currentUser, searchItem) => {
   };
 };
 
-export const getUserDisplayName = (user) =>
-  user?.fullName || user?.userName || user?.firstName || user?.emailAddress || "User";
+export const getNetworkMemberUser = (member) =>
+  member?.userinfo ||
+  member?.fk_user_id_2_user ||
+  member?.fk_user_id_1_user ||
+  member;
 
-export const getUserEmail = (user) =>
-  user?.emailAddress || user?.redirectionEmail || user?.recoveryEmail || "";
+/** Resolve the connected user's id from a getMyNetwork row or flat user object. */
+export const getNetworkMemberUserId = (member, currentUserId) => {
+  if (!member) return null;
+  const current = currentUserId != null ? String(currentUserId) : "";
+
+  const nested = getNetworkMemberUser(member);
+  if (nested?.id != null && String(nested.id) !== current) {
+    return String(nested.id);
+  }
+
+  const id1 = member.fk_user_id_1 ?? member.fk_user_id_1_user?.id;
+  const id2 = member.fk_user_id_2 ?? member.fk_user_id_2_user?.id;
+  if (id1 != null && String(id1) !== current) return String(id1);
+  if (id2 != null && String(id2) !== current) return String(id2);
+
+  if (member.id != null) return String(member.id);
+  if (member.user_id != null) return String(member.user_id);
+  return null;
+};
+
+export const getUserDisplayName = (user) => {
+  const u = getNetworkMemberUser(user);
+  return u?.fullName || u?.userName || u?.firstName || u?.emailAddress || "User";
+};
+
+export const getUserEmail = (user) => {
+  const u = getNetworkMemberUser(user);
+  return u?.emailAddress || u?.redirectionEmail || u?.recoveryEmail || "";
+};

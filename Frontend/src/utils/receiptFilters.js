@@ -1,6 +1,11 @@
+import { getPaymentDisplayFromReceipt } from "../hooks/usePaymentDisplay";
 import { parseReceiptTags, toTaxLabel } from "./receiptFormatters";
 import { TAG_STATUS_GROUPS } from "./tagStatusGroups";
 import { formatReceiptDate } from "./receiptDate";
+import {
+  normalizePaymentListLabel,
+  normalizePaymentMatchKey,
+} from "./paymentMethodUtils";
 
 // Helper function for search aliases
 const getSearchAliases = (issuer) => {
@@ -105,11 +110,20 @@ const matchesReceiptCategory = (receipt, categories) => {
   return categories.includes(receiptCat);
 };
 
-const matchesPaymentMethod = (receipt, paymentMethods, getPaymentDisplay) => {
+const matchesPaymentMethod = (receipt, paymentMethods) => {
   if (!paymentMethods || !paymentMethods.length) return true;
 
-  const displayTitleForFilter = getPaymentDisplay(receipt);
-  return paymentMethods.includes(displayTitleForFilter);
+  const receiptKey = normalizePaymentMatchKey(
+    normalizePaymentListLabel(getPaymentDisplayFromReceipt(receipt))
+  );
+  if (!receiptKey || receiptKey === "-") return false;
+
+  return paymentMethods.some((method) => {
+    const selectedKey = normalizePaymentMatchKey(
+      normalizePaymentListLabel(method)
+    );
+    return selectedKey && selectedKey === receiptKey;
+  });
 };
 
 const matchesTaxTypes = (receipt, taxTypes) => {
@@ -198,19 +212,6 @@ const matchesGroupedTags = (receipt, selectedTags) => {
 // Main filter function
 export const filterReceipts = (receipts, filters, searchTerm) => {
   return receipts.filter((receipt) => {
-    // We need getPaymentDisplay function here - will be provided by caller
-    // This is a simplified version
-    const getPaymentDisplay = (r) => {
-      const issuer = r?.card_issuer_name?.toString?.().trim?.() || null;
-      const type = r?.paymentType?.toString?.().trim?.() || null;
-      if (!issuer && !type) return "-";
-      if (type?.toLowerCase().includes("cash")) return "Cash";
-      const last4 = type?.includes("*") ? type.split("*").pop() : "";
-      if (issuer) return `${issuer}${last4 ? ` *${last4}` : ""}`;
-      if (type) return last4 ? `*${last4}` : type;
-      return "-";
-    };
-
     return (
       matchesSearch(receipt, searchTerm) &&
       matchesPrice(receipt, filters.price) &&
@@ -218,7 +219,7 @@ export const filterReceipts = (receipts, filters, searchTerm) => {
       matchesMerchants(receipt, filters.merchant) &&
       matchesCategory(receipt, filters.expenseCategory) &&
       matchesReceiptCategory(receipt, filters.receiptCategory) &&
-      matchesPaymentMethod(receipt, filters.paymentMethod, getPaymentDisplay) &&
+      matchesPaymentMethod(receipt, filters.paymentMethod) &&
       matchesTaxTypes(receipt, filters.taxTypes) &&
       matchesGroupedTags(receipt, filters.tags)
     );

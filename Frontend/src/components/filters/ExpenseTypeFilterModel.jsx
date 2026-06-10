@@ -3,7 +3,13 @@ import { useData } from "../../context/DataContext";
 import { buildExpenseCategoryOptions } from "../../utils/expenseCategories";
 
 const ExpenseTypeFilterModel = ({ onClose, onApply, initialSelected = [] }) => {
-  const { expenseCategories, apiExpenseCategories, fetchApiExpenseCategories } = useData();
+  const {
+    expenseCategories,
+    homepageFilterExpenseCategories,
+    apiExpenseCategories,
+    fetchApiExpenseCategories,
+  } = useData();
+  const filterCategories = homepageFilterExpenseCategories ?? expenseCategories;
   const [selectedExpenseCategory, setSelectedExpenseCategory] =
     useState(initialSelected);
 
@@ -15,10 +21,10 @@ const ExpenseTypeFilterModel = ({ onClose, onApply, initialSelected = [] }) => {
     () =>
       buildExpenseCategoryOptions({
         apiExpenseCategories,
-        receiptCategories: expenseCategories,
+        receiptCategories: filterCategories,
         includeDefaultsWhenEmpty: true,
       }),
-    [apiExpenseCategories, expenseCategories]
+    [apiExpenseCategories, filterCategories]
   );
 
   const toggleExpenseCategory = (expenseCategory) => {
