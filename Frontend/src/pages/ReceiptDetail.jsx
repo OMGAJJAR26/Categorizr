@@ -1731,7 +1731,9 @@ useEffect(() => {
     }
 
     // ── ADD MODE ─────────────────────────────────────────────────────────────
-    setPendingPayMethodFn(() => async () => {
+    // No confirmation needed for add — save directly
+    setIsPayMethodSaving(true);
+    try {
       handleFieldChange("paymentType", selectedCardTypeForLogo);
       handleFieldChange("paymentBrand", "");
       handleFieldChange("card_issuer_name", storedIssuer);
@@ -1759,11 +1761,11 @@ useEffect(() => {
       await fetchApiPaymentMethods();
       handleCloseAddPaymentModal();
       setToast({ isVisible: true, message: "Payment Method Added", type: "success" });
-    });
-    setPayMethodConfirmMessage(
-      "This will add the payment method to your account so you can use it on your receipts."
-    );
-    setShowPayMethodConfirm(true);
+    } catch (e) {
+      setToast({ isVisible: true, message: e?.message || "Save failed", type: "error" });
+    } finally {
+      setIsPayMethodSaving(false);
+    }
   };
 
   // ============ Tax Management Functions ============
