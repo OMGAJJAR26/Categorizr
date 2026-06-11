@@ -92,6 +92,7 @@ const MerchantAvatar = ({ name, explicitUrl, className = "w-6 h-6" }) => {
   // Raw API-fetched URL (no proxy prefix)
   const [rawApiUrl, setRawApiUrl] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [imgLoaded, setImgLoaded] = useState(false);
   // Track which display URLs have failed so we can walk down the fallback chain
   const [failedUrls, setFailedUrls] = useState(new Set());
 
@@ -127,6 +128,10 @@ const MerchantAvatar = ({ name, explicitUrl, className = "w-6 h-6" }) => {
     (clearbitDisplay && !failedUrls.has(clearbitDisplay) ? clearbitDisplay : null);
 
   const finalDisplay = displaySrc;
+
+  useEffect(() => {
+    setImgLoaded(false);
+  }, [finalDisplay]);
 
   // ── Fetch from API when no explicit URL and no valid cache ──────────────
   useEffect(() => {
@@ -241,35 +246,47 @@ const MerchantAvatar = ({ name, explicitUrl, className = "w-6 h-6" }) => {
   }
 
   return (
-    <img
-      key={finalDisplay}        // force remount when URL changes → clears browser error state
-      src={finalDisplay}
-      alt={`${name} logo`}
-      className={`${className} rounded object-contain`}
-      loading="lazy"
-      onError={() => {
-        setIsLoading(false);
-        // Add this URL to the failed set so the component falls to the next candidate
-        setFailedUrls((prev) => new Set([...prev, finalDisplay]));
+    <span className={`relative inline-flex ${className}`}>
+      {!imgLoaded && (
+        <span
+          className={`${className} absolute inset-0 rounded bg-gray-100 flex items-center justify-center`}
+          aria-hidden="true"
+        >
+          <Loader2 className="w-3 h-3 animate-spin text-gray-400" />
+        </span>
+      )}
+      <img
+        key={finalDisplay}        // force remount when URL changes → clears browser error state
+        src={finalDisplay}
+        alt={`${name} logo`}
+        className={`${className} rounded object-contain ${imgLoaded ? "" : "opacity-0"}`}
+        loading="lazy"
+        onError={() => {
+          setIsLoading(false);
+          setImgLoaded(false);
+          // Add this URL to the failed set so the component falls to the next candidate
+          setFailedUrls((prev) => new Set([...prev, finalDisplay]));
 
-        if (finalDisplay === proxiedSrc) {
-          // Proxied primary failed — clear cache so we don't cache a bad URL
-          if (rawCached) clearCached(name);
-          if (rawApiUrl) setRawApiUrl(null);
-        } else if (finalDisplay === clearbitDisplay) {
-          // Clearbit also failed — mark permanently failed
-          try { localStorage.setItem(merchantKey(name), "failed"); } catch {}
-        }
-        // directSrc or intermediate failures just flow to the next candidate via failedUrls
-      }}
-      onLoad={() => {
-        setIsLoading(false);
-        // Persist the raw URL that worked so future renders skip the proxy/fallback dance
-        if (rawSrc && rawSrc !== clearbitRaw) {
-          setRawCached(name, rawSrc);
-        }
-      }}
-    />
+          if (finalDisplay === proxiedSrc) {
+            // Proxied primary failed — clear cache so we don't cache a bad URL
+            if (rawCached) clearCached(name);
+            if (rawApiUrl) setRawApiUrl(null);
+          } else if (finalDisplay === clearbitDisplay) {
+            // Clearbit also failed — mark permanently failed
+            try { localStorage.setItem(merchantKey(name), "failed"); } catch {}
+          }
+          // directSrc or intermediate failures just flow to the next candidate via failedUrls
+        }}
+        onLoad={() => {
+          setIsLoading(false);
+          setImgLoaded(true);
+          // Persist the raw URL that worked so future renders skip the proxy/fallback dance
+          if (rawSrc && rawSrc !== clearbitRaw) {
+            setRawCached(name, rawSrc);
+          }
+        }}
+      />
+    </span>
   );
 };
 

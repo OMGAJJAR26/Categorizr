@@ -66,6 +66,7 @@ import Header from "../components/Header";
 import LogoutConfirmationDialog from "../components/LogoutConfirmationDialog";
 import ForgotPasswordModal from "./ForgotPasswordModel";
 import MerchantAvatar from "../components/MerchantAvatar";
+import LoadingImage from "../components/LoadingImage";
 import SimpleAlertModal from "../components/SimpleAlertModal";
 import MyNetworkPanel from "../components/network/MyNetworkPanel";
 import { getPendingRequestCount } from "../api/networkApi";
@@ -183,11 +184,27 @@ const ItemLogo = ({ logo, name }) => {
   const [err, setErr] = useState(false);
   
   if (name?.toString().trim().toLowerCase() === "miscellaneous") {
-    return <img src="/miscellaneous-logo.png" alt="Miscellaneous logo" className="w-9 h-9 rounded-lg object-contain flex-shrink-0" />;
+    return (
+      <LoadingImage
+        src="/miscellaneous-logo.png"
+        alt="Miscellaneous logo"
+        className="w-9 h-9 rounded-lg object-contain flex-shrink-0"
+        wrapperClassName="w-9 h-9 flex-shrink-0"
+      />
+    );
   }
 
-  if (logo && !err)
-    return <img src={logo} alt={name} onError={() => setErr(true)} className="w-9 h-9 rounded-lg object-contain bg-gray-100 p-1 flex-shrink-0" />;
+  if (logo && !err) {
+    return (
+      <LoadingImage
+        src={logo}
+        alt={name}
+        onError={() => setErr(true)}
+        className="w-9 h-9 rounded-lg object-contain bg-gray-100 p-1 flex-shrink-0"
+        wrapperClassName="w-9 h-9 flex-shrink-0"
+      />
+    );
+  }
     
   return (
     <div className="w-9 h-9 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-xs font-bold text-blue-600 flex-shrink-0">
@@ -1343,7 +1360,7 @@ const LogoGrid = ({ options, selectedIndex, onSelect }) => {
               onClick={() => onSelect(i === selectedIndex ? null : i)}
               className={`relative rounded-xl border-2 overflow-hidden bg-gray-50 flex items-center justify-center transition-all ${selectedIndex === i ? "border-blue-500 ring-2 ring-blue-200" : "border-gray-200 hover:border-blue-300"}`}
             >
-              <img src={url} alt="" style={{ width: "80%", height: "80%", objectFit: "contain" }} onError={e => { e.target.style.visibility = "hidden"; }} />
+              <LoadingImage src={url} alt="" style={{ width: "80%", height: "80%", objectFit: "contain" }} wrapperClassName="w-full h-full" />
               {selectedIndex === i && (
                 <div className="absolute bottom-0.5 right-0.5"><CheckCircle size={14} className="text-blue-600 bg-white rounded-full" /></div>
               )}
@@ -3014,7 +3031,7 @@ const isBlockedTaxRateInput = (val) => {
                   style={{ margin: 0, padding: 0 }}
                   onClick={() => setNewCardType(prev => prev === ct.name ? "" : ct.name)}
                   className={`flex flex-col items-center gap-1 py-2 px-1 rounded-xl border-2 transition-all cursor-pointer ${newCardType === ct.name ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200" : "border-slate-200 bg-white hover:border-blue-300"}`}>
-                  <img src={ct.logo} alt={ct.name} style={{ height: 30, width: 52, objectFit: "contain", display: "block", margin: 0, padding: 0 }} />
+                  <LoadingImage src={ct.logo} alt={ct.name} style={{ height: 30, width: 52, objectFit: "contain", display: "block", margin: 0, padding: 0 }} wrapperClassName="h-[30px] w-[52px]" />
                   <span className="text-[10px] font-medium text-slate-600 text-center leading-tight block">{ct.name}</span>
                 </button>
               ))}

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Trash2, Link2, Loader2 } from "lucide-react";
 import MerchantAvatar from "../MerchantAvatar";
+import LoadingImage from "../LoadingImage";
 import ReceiptBadges from "../ReceiptBadges";
 import SimpleAlertModal from "../SimpleAlertModal";
 import { formatReceiptDate } from "../../utils/receiptDate";
@@ -94,11 +95,10 @@ const ReceiptsTable = ({
             return (
               <>
                 {logo && (
-                  <img
+                  <LoadingImage
                     src={logo}
                     alt="Payment logo"
                     className="w-5 h-5 xl:w-6 xl:h-6 object-contain flex-shrink-0"
-                    onError={(e) => { e.target.style.display = 'none'; }}
                   />
                 )}
                 <span className="text-sm xl:text-base truncate">{paymentDisplay}</span>
@@ -269,11 +269,10 @@ const ReceiptsTable = ({
                 <span className="text-gray-500 text-xs uppercase">Payment</span>
                 <div className="flex items-center gap-1 font-medium">
                   {logo && (
-                    <img
+                    <LoadingImage
                       src={logo}
                       alt="Payment logo"
                       className="w-4 h-4 object-contain"
-                      onError={(e) => { e.target.style.display = 'none'; }}
                     />
                   )}
                   <span className="truncate">{paymentDisplay}</span>

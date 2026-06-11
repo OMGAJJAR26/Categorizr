@@ -1,6 +1,7 @@
 import { useCurrency } from "../context/CurrencyContext";
 import { X } from "lucide-react";
 import MerchantAvatar from "./MerchantAvatar";
+import LoadingImage from "./LoadingImage";
 const Visa              = "/payment-logos/Visa.png";
 const MasterCard        = "/payment-logos/MasterCard.png";
 const PayPal            = "/payment-logos/PayPal.png";
@@ -232,7 +233,7 @@ const ActiveFiltersBar = ({
             return (
               <span key={`payment-${method}-${idx}`} className="inline-flex items-center gap-2 mr-3">
                 {logoSrc && (
-                  <img src={logoSrc} alt={displayLabel} className="w-5 h-5 object-contain" />
+                  <LoadingImage src={logoSrc} alt={displayLabel} className="w-5 h-5 object-contain" />
                 )}
                 <span>{displayLabel}</span>
               </span>

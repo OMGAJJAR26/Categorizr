@@ -9,6 +9,7 @@
 
 import React from "react";
 import { X, AlertCircle } from "lucide-react";
+import LoadingImage from "../LoadingImage";
 import { motion, AnimatePresence } from "framer-motion";
 
 // Payment logo paths (served from /public)
@@ -166,12 +167,12 @@ export default function EditPaymentMethodModal({
                       onClick={() => onCardTypeChange(ct.name)}
                     >
                       <div className="flex-shrink-0 mb-2 flex items-center justify-center w-full h-12">
-                        <img
+                        <LoadingImage
                           src={ct.logo}
                           alt={ct.name}
                           className="max-w-full max-h-12 w-auto h-auto object-contain"
                           style={{ imageRendering: "auto" }}
-                          onError={(e) => { e.target.style.display = "none"; }}
+                          wrapperClassName="w-full h-12"
                         />
                       </div>
                       <span className="text-xs font-medium text-center">{ct.name}</span>

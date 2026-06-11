@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Trash2, Link2, Loader2 } from "lucide-react";
 import MerchantAvatar from "../MerchantAvatar";
+import LoadingImage from "../LoadingImage";
 import SimpleAlertModal from "../SimpleAlertModal";
 import { formatReceiptDate } from "../../utils/receiptDate";
 
@@ -121,11 +122,10 @@ const ReceiptsMobileView = ({
           return (
             <div className="col-span-2 flex items-center gap-2">
               {logo && (
-                <img
+                <LoadingImage
                   src={logo}
                   alt="Payment logo"
                   className="w-5 h-5 object-contain"
-                  onError={(e) => { e.target.style.display = 'none'; }}
                 />
               )}
               <div className={`text-gray-900 font-medium ${isUnread ? 'text-gray-400' : ''}`}>

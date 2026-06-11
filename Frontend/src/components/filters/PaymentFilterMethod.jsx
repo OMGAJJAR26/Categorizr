@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { useData } from "../../context/DataContext";
+import LoadingImage from "../LoadingImage";
 import { getPaymentDisplayFromReceipt } from "../../hooks/usePaymentDisplay";
 import {
   getApiPaymentMethodDisplayName,
@@ -362,7 +363,7 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
                   style={{ width: "auto" }}
                 />
                 {logo && (
-                  <img
+                  <LoadingImage
                     src={logo}
                     alt={displayText}
                     className="w-6 h-6 object-contain bg-transparent"

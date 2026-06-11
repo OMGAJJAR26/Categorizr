@@ -45,6 +45,7 @@ import Toast from "../components/Toast";
 import { useData } from "../context/DataContext";
 import { useCurrency } from "../context/CurrencyContext";
 import MerchantAvatar from "../components/MerchantAvatar";
+import LoadingImage from "../components/LoadingImage";
 import { getPaymentDisplayFromReceipt, usePaymentDisplay } from "../hooks/usePaymentDisplay";
 import {
   apiPaymentMethodMatchesLabel,
@@ -5186,7 +5187,7 @@ Thank you for using our receipt management system.
                           {/* ── Existing Receipt row ── */}
                           <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 flex items-center gap-3">
                             {payLogo && (
-                              <img src={payLogo} alt="payment" className="w-8 h-5 object-contain flex-shrink-0" />
+                              <LoadingImage src={payLogo} alt="payment" className="w-8 h-5 object-contain flex-shrink-0" />
                             )}
                             <div className="flex-1 min-w-0">
                               <p className="text-xs text-gray-500 font-medium">Existing (will update)</p>
@@ -5226,7 +5227,7 @@ Thank you for using our receipt management system.
                                     onClick={() => setActiveSplitIndex(idx)}
                                   >
                                     {payLogo && (
-                                      <img src={payLogo} alt="payment" className="w-8 h-5 object-contain flex-shrink-0" />
+                                      <LoadingImage src={payLogo} alt="payment" className="w-8 h-5 object-contain flex-shrink-0" />
                                     )}
                                     <div className="flex-1 min-w-0">
                                       <p className="font-semibold text-gray-800 text-sm">Split {idx + 1}</p>
@@ -5539,15 +5540,18 @@ Thank you for using our receipt management system.
                               const receiptForLogo = { ...r, ...editedReceipt };
                               const logo = getPaymentLogo(receiptForLogo);
                               return logo ? (
-                                <img
-                                  src={logo}
-                                  alt={
-                                    receiptForLogo.paymentType ||
-                                    receiptForLogo.card_issuer_name ||
-                                    ""
-                                  }
-                                  className="absolute left-2 top-1/2 transform -translate-y-1/2 w-5 h-5 rounded z-10 mt-1"
-                                />
+                                <div className="absolute left-2 top-1/2 transform -translate-y-1/2 z-10 mt-1">
+                                  <LoadingImage
+                                    src={logo}
+                                    alt={
+                                      receiptForLogo.paymentType ||
+                                      receiptForLogo.card_issuer_name ||
+                                      ""
+                                    }
+                                    className="w-5 h-5 rounded object-contain"
+                                    wrapperClassName="w-5 h-5"
+                                  />
+                                </div>
                               ) : null;
                             })()}
                             <input
@@ -5862,7 +5866,7 @@ Thank you for using our receipt management system.
                                       }}
                                     >
                                       {logo && (
-                                        <img
+                                        <LoadingImage
                                           src={logo}
                                           alt={method}
                                           className="w-5 h-5 rounded"
@@ -6910,7 +6914,7 @@ Thank you for using our receipt management system.
                     <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center gap-3">
                       <p className="text-sm font-medium text-gray-700 flex-shrink-0">Current:</p>
                       <div className="p-2 border border-gray-300 rounded bg-white flex items-center justify-center min-w-[64px] min-h-[64px]">
-                        <img src={editMerchantLogo} alt="Current logo" className="max-w-full max-h-16 w-auto h-auto object-contain" onError={(e) => { e.target.style.display = "none"; }} />
+                        <LoadingImage src={editMerchantLogo} alt="Current logo" className="max-w-full max-h-16 w-auto h-auto object-contain" wrapperClassName="min-w-[48px] min-h-[48px]" />
                       </div>
                     </div>
                   )}
@@ -6931,18 +6935,13 @@ Thank you for using our receipt management system.
                             }`}
                             onClick={() => handleSelectEditLogo(index)}
                           >
-                            <img
+                            <LoadingImage
                               src={logo.displayUrl}
                               alt={`Logo ${index + 1}`}
                               className="max-w-full max-h-16 w-auto h-auto object-contain"
-                              onError={(e) => {
-                                if (e.target.src !== logo.storeUrl) {
-                                  e.target.src = logo.storeUrl;
-                                } else {
-                                  e.target.style.display = "none";
-                                  e.target.parentElement.innerHTML = '<div class="w-full min-h-[80px] flex items-center justify-center text-xs text-gray-400">Failed to load</div>';
-                                }
-                              }}
+                              fallbackSrc={logo.storeUrl}
+                              showErrorPlaceholder
+                              wrapperClassName="w-full min-h-[64px]"
                             />
                             {editSelectedLogoIndex === index && (
                               <div className="absolute top-1 right-1 bg-blue-600 rounded-full p-1 z-10">
@@ -6962,7 +6961,7 @@ Thank you for using our receipt management system.
                     <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center gap-3">
                       <p className="text-sm font-medium text-gray-700 flex-shrink-0">Selected:</p>
                       <div className="p-2 border border-gray-300 rounded bg-white flex items-center justify-center min-w-[64px] min-h-[64px]">
-                        <img src={editMerchantLogo} alt="Selected logo" className="max-w-full max-h-16 w-auto h-auto object-contain" onError={(e) => { e.target.style.display = "none"; }} />
+                        <LoadingImage src={editMerchantLogo} alt="Selected logo" className="max-w-full max-h-16 w-auto h-auto object-contain" wrapperClassName="min-w-[48px] min-h-[48px]" />
                       </div>
                     </div>
                   )}
@@ -7082,17 +7081,13 @@ Thank you for using our receipt management system.
                             }`}
                             onClick={() => handleSelectMerchantLogo(index)}
                           >
-                            <img
+                            <LoadingImage
                               src={logo.displayUrl}
                               alt={`Logo ${index + 1}`}
                               className="max-w-full max-h-12 w-auto h-auto object-contain"
-                              onError={(e) => {
-                                if (e.target.src !== logo.storeUrl) {
-                                  e.target.src = logo.storeUrl;
-                                } else {
-                                  e.target.style.display = "none";
-                                }
-                              }}
+                              fallbackSrc={logo.storeUrl}
+                              showErrorPlaceholder
+                              wrapperClassName="w-full min-h-[48px]"
                             />
                             {selectedLogoIndex === index && (
                               <div className="absolute top-1 right-1 bg-blue-600 rounded-full p-0.5 z-10">
@@ -7115,11 +7110,11 @@ Thank you for using our receipt management system.
                     <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center gap-3">
                       <p className="text-sm font-medium text-gray-700 flex-shrink-0">Selected:</p>
                       <div className="p-1 border border-gray-200 rounded bg-white flex items-center justify-center min-w-[48px] min-h-[48px]">
-                        <img
+                        <LoadingImage
                           src={newMerchantLogo}
                           alt="Selected logo"
                           className="w-12 h-12 object-contain"
-                          onError={(e) => { e.target.style.display = "none"; }}
+                          wrapperClassName="w-12 h-12"
                         />
                       </div>
                     </div>

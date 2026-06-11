@@ -28,6 +28,7 @@ import {
   storedCardIssuerName,
 } from "../../utils/paymentMethodUtils";
 import MerchantAvatar from "../MerchantAvatar";
+import LoadingImage from "../LoadingImage";
 import { parseReceipt, pdfToImage, canvasToBlob } from "../../utils/receiptParser";
 import { parseTaxRateInput, createTaxRateKeyDownHandler } from "../../utils/taxRateInput";
 import { useTaxRateLimitAlert } from "../../hooks/useTaxRateLimitAlert";
@@ -5168,15 +5169,18 @@ const handleSelectLogo = (index) => {
         };
         const logo = getPaymentLogo(receiptForLogo);
         return logo ? (
-          <img
-            src={logo}
-            alt={
-              formData.card_issuer_name ||
-              formData.paymentType ||
-              ""
-            }
-            className="absolute left-2 top-1/2 transform -translate-y-1/2 w-5 h-5 rounded z-10 mt-1"
-          />
+          <div className="absolute left-2 top-1/2 transform -translate-y-1/2 z-10 mt-1">
+            <LoadingImage
+              src={logo}
+              alt={
+                formData.card_issuer_name ||
+                formData.paymentType ||
+                ""
+              }
+              className="w-5 h-5 rounded object-contain"
+              wrapperClassName="w-5 h-5"
+            />
+          </div>
         ) : null;
       })()}
       <input
@@ -5546,7 +5550,7 @@ const handleSelectLogo = (index) => {
                       }
                     }
                     return logo ? (
-                      <img
+                      <LoadingImage
                         src={logo}
                         alt={displayText}
                         className="w-5 h-5 rounded object-contain mt-2"
@@ -6388,12 +6392,12 @@ const handleSelectLogo = (index) => {
                     <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center gap-3">
                       <p className="text-sm font-medium text-gray-700 flex-shrink-0">Current:</p>
                       <div className="p-2 border border-gray-300 rounded bg-white flex items-center justify-center min-w-[64px] min-h-[64px]">
-                        <img
+                        <LoadingImage
                           src={editMerchantLogo}
                           alt="Current merchant logo"
                           className="max-w-full max-h-16 w-auto h-auto object-contain"
                           style={{ imageRendering: "auto" }}
-                          onError={(e) => { e.target.style.display = "none"; }}
+                          wrapperClassName="min-w-[48px] min-h-[48px]"
                         />
                       </div>
                     </div>
@@ -6420,20 +6424,14 @@ const handleSelectLogo = (index) => {
                             }`}
                             onClick={() => handleSelectEditLogo(index)}
                           >
-                            <img
+                            <LoadingImage
                               src={logo.displayUrl}
                               alt={`Logo option ${index + 1}`}
                               className="max-w-full max-h-16 w-auto h-auto object-contain"
                               style={{ imageRendering: "auto" }}
-                              onError={(e) => {
-                                if (e.target.src !== logo.storeUrl) {
-                                  e.target.src = logo.storeUrl;
-                                } else {
-                                  e.target.style.display = "none";
-                                  e.target.parentElement.innerHTML =
-                                    '<div class="w-full min-h-[80px] flex items-center justify-center text-xs text-gray-400">Failed to load</div>';
-                                }
-                              }}
+                              fallbackSrc={logo.storeUrl}
+                              showErrorPlaceholder
+                              wrapperClassName="w-full min-h-[64px]"
                             />
                             {editSelectedLogoIndex === index && (
                               <div className="absolute top-1 right-1 bg-blue-600 rounded-full p-1 z-10">
@@ -6453,12 +6451,12 @@ const handleSelectLogo = (index) => {
                     <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center gap-3">
                       <p className="text-sm font-medium text-gray-700 flex-shrink-0">Selected:</p>
                       <div className="p-2 border border-gray-300 rounded bg-white flex items-center justify-center min-w-[64px] min-h-[64px]">
-                        <img
+                        <LoadingImage
                           src={editMerchantLogo}
                           alt="Selected merchant logo"
                           className="max-w-full max-h-16 w-auto h-auto object-contain"
                           style={{ imageRendering: "auto" }}
-                          onError={(e) => { e.target.style.display = "none"; }}
+                          wrapperClassName="min-w-[48px] min-h-[48px]"
                         />
                       </div>
                     </div>
@@ -6588,21 +6586,14 @@ const handleSelectLogo = (index) => {
                             }`}
                             onClick={() => handleSelectLogo(index)}
                           >
-                            <img
+                            <LoadingImage
                               src={logo.displayUrl}
                               alt={`Logo option ${index + 1}`}
                               className="max-w-full max-h-16 w-auto h-auto object-contain"
                               style={{ imageRendering: "auto" }}
-                              onError={(e) => {
-                                // fallback: try storeUrl if displayUrl failed
-                                if (e.target.src !== logo.storeUrl) {
-                                  e.target.src = logo.storeUrl;
-                                } else {
-                                  e.target.style.display = "none";
-                                  e.target.parentElement.innerHTML =
-                                    '<div class="w-full min-h-[80px] flex items-center justify-center text-xs text-gray-400">Failed to load</div>';
-                                }
-                              }}
+                              fallbackSrc={logo.storeUrl}
+                              showErrorPlaceholder
+                              wrapperClassName="w-full min-h-[64px]"
                             />
                             {selectedLogoIndex === index && (
                               <div className="absolute top-1 right-1 bg-blue-600 rounded-full p-1 z-10">
@@ -6640,12 +6631,12 @@ const handleSelectLogo = (index) => {
                     <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center gap-3">
                       <p className="text-sm font-medium text-gray-700 flex-shrink-0">Selected:</p>
                       <div className="p-2 border border-gray-300 rounded bg-white flex items-center justify-center min-w-[64px] min-h-[64px]">
-                        <img
+                        <LoadingImage
                           src={newMerchantLogo}
                           alt="Selected merchant logo"
                           className="max-w-full max-h-16 w-auto h-auto object-contain"
                           style={{ imageRendering: "auto" }}
-                          onError={(e) => { e.target.style.display = "none"; }}
+                          wrapperClassName="min-w-[48px] min-h-[48px]"
                         />
                       </div>
                     </div>
