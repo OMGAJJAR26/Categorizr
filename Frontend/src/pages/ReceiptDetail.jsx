@@ -2892,12 +2892,21 @@ useEffect(() => {
   };
 
   const handleForwardSuccess = async () => {
-    if (selectedReceipt?.id) {
-      await updateReceipt(selectedReceipt.id, { receipt_forwarded: "1" });
-    }
+    if (!selectedReceipt?.id) return;
+
+    const isReceived = isNetworkReceivedReceipt(selectedReceipt);
+    const forwardedPatch = {
+      receipt_forwarded: "1",
+      badgeStatus: isReceived ? "both" : "forwarded",
+    };
+
+    setSelectedReceipt((prev) => (prev ? { ...prev, ...forwardedPatch } : prev));
+    setEditedReceipt((prev) => ({ ...prev, receipt_forwarded: "1" }));
+
+    await updateReceipt(selectedReceipt.id, forwardedPatch);
+
     setToast({ isVisible: true, message: "Receipt forwarded successfully.", type: "success" });
-    await refreshData?.();
-    onSaved?.();
+    silentRefreshData?.(1500);
   };
 
   /** Update a field on a specific split, auto-calculating tax/total like the main form */

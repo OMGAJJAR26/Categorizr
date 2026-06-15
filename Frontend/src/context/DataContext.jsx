@@ -2320,6 +2320,9 @@ setMerchantsWithImages(
             merged.payment_logo_url = "";
             merged.paymentLogoUrl = "";
           }
+          if (updates.receipt_forwarded !== undefined) {
+            merged.badgeStatus = getReceiptBadgeStatus(merged);
+          }
           return merged;
         });
 

@@ -62,12 +62,16 @@ const ForwardReceiptModal = ({ receipt, onClose, onSuccess }) => {
         (result.data && typeof result.data === "object" && result.data.message) ||
         `Receipt forwarded to ${getUserDisplayName(member)}.`;
       setMessage(successText);
-      onSuccess?.(member, result.data);
-      setTimeout(() => onClose(), 1200);
-    } else {
-      setError(result.error || "Failed to forward receipt.");
+      try {
+        await onSuccess?.(member, result.data);
+      } finally {
+        setForwardingId(null);
+        setTimeout(() => onClose(), 800);
+      }
+      return;
     }
 
+    setError(result.error || "Failed to forward receipt.");
     setForwardingId(null);
   };
 
