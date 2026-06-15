@@ -51,7 +51,9 @@ import {
   buildPaymentMethodStorageString,
   cardTypeIntToBrand,
   getApiPaymentMethodDisplayName,
+  getApiPaymentMethodSignature,
   getLast4FromPaymentApiRecord,
+  getPaymentSignature,
   inferCardTypeFromPayment,
   mergePaymentMethodLabels,
   isCustomCardIssuer,
@@ -1016,58 +1018,51 @@ useEffect(() => {
     });
   };
 
-  const normalizePaymentMethodKey = (value) =>
-    String(value || "")
-      .trim()
-      .replace(/\s+/g, " ")
-      .replace(/\s*\*\s*/, " *")
-      .toLowerCase();
-
-  const localPaymentMethodStrings = React.useMemo(
-    () =>
-      (localPaymentMethods || []).map((pm) => {
-        const issuerName = pm.cardIssuerName || "";
-        const last4 = pm.last4DigitCard || "";
-        const brand = pm.selectedCardType || inferCardTypeFromPayment(pm.paymentType || "");
-        if (issuerName && last4) {
-          return isCustomCardIssuer(issuerName, brand)
-            ? `${issuerName} *${last4}`
-            : `${brand} *${last4}`;
-        }
-        if (issuerName) return issuerName;
-        if (brand && last4) return `${brand} *${last4}`;
-        return pm.paymentType || "";
-      }),
-    [localPaymentMethods]
-  );
-
-  const paymentMethodNameExists = (name, excludeName = "") => {
-    const target = normalizePaymentMethodKey(name);
-    const excluded = normalizePaymentMethodKey(excludeName);
-    if (!target) return false;
-    const allCandidates = [
-      ...localPaymentMethodStrings,
-      ...(apiPaymentMethods || []).map((p) => getApiPaymentMethodDisplayName(p)),
-    ];
-    return allCandidates.some((item) => {
-      const normalizedItem = normalizePaymentMethodKey(item);
-      return normalizedItem === target && normalizedItem !== excluded;
-    });
-  };
-
-  const paymentMethodDraftName = (() => {
+  const paymentDuplicateError = (() => {
     const cardType = (newPaymentCardType || "").trim();
-    const issuer = (newCardIssuerName || "").trim();
     const last4 = (newLast4Digits || "").replace(/\D/g, "").slice(0, 4);
-    if (!cardType || last4.length < 4) return "";
-    return buildPaymentMethodStorageString(issuer, cardType, last4);
-  })();
+    if (!cardType || last4.length !== 4) return "";
 
-  const paymentDuplicateError =
-    paymentMethodDraftName &&
-    paymentMethodNameExists(paymentMethodDraftName, payModalEditMode?.name || "")
-      ? "Payment Method already exists"
+    const payCardMap = readPayCardTypeMap();
+    const draftSig = getPaymentSignature(
+      buildPaymentMethodStorageString(newCardIssuerName.trim(), cardType, last4),
+      cardType,
+      payCardMap
+    );
+    if (!draftSig) return "";
+
+    const excludeApiId = payModalEditMode?.apiId;
+    const excludeSig = payModalEditMode?.name
+      ? getPaymentSignature(
+          payModalEditMode.name,
+          inferCardTypeFromPayment(payModalEditMode.name),
+          payCardMap
+        )
       : "";
+
+    const duplicateInApi = (apiPaymentMethods || []).some((p) => {
+      const pid = p.id ?? p.payment_method_id;
+      if (excludeApiId != null && String(pid) === String(excludeApiId)) return false;
+      const sig = getApiPaymentMethodSignature(p);
+      return sig && sig === draftSig;
+    });
+    if (duplicateInApi) return "Payment Method already exists";
+
+    const duplicateInLocal = (localPaymentMethods || []).some((pm) => {
+      const brand = (pm.selectedCardType || inferCardTypeFromPayment(pm.paymentType || ""))
+        .toString()
+        .trim()
+        .toLowerCase();
+      const pmLast4 = (pm.last4DigitCard || "").toString().replace(/\D/g, "").slice(0, 4);
+      if (!brand || pmLast4.length !== 4) return false;
+      const sig = `${brand}|${pmLast4}`;
+      if (excludeSig && sig === excludeSig) return false;
+      return sig === draftSig;
+    });
+    if (duplicateInLocal) return "Payment Method already exists";
+
+    return "";
+  })();
 
   const addCategoryDuplicateError =
     newCategoryName.trim() && expenseCategoryExists(newCategoryName.trim())

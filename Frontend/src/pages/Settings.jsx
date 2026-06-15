@@ -2891,6 +2891,36 @@ const isBlockedTaxRateInput = (val) => {
         )
     : [];
 
+  const addInlinePaymentDuplicateMsg =
+    type === "payments" && newCardType.trim() && newLast4.replace(/\D/g, "").length === 4
+      ? (() => {
+          const ct = newCardType.trim();
+          const issuer = newIssuerName.trim();
+          const last4 = newLast4.replace(/\D/g, "").slice(0, 4);
+          const payStr = issuer ? `${issuer} *${last4}` : `${ct} *${last4}`;
+          const nextSignature = getPaymentSignature(payStr, ct);
+          if (!nextSignature) return "";
+          const excludeKey = payEditMode?.item?.key;
+          const editedLast4 = payEditMode
+            ? (parsePaymentDisplay(payEditMode.item.name).last4 || "").trim()
+            : "";
+          const dupExists = buildAllItems().some((item) => {
+            if (excludeKey && item.key === excludeKey) return false;
+            if (item.isReceiptItem) {
+              if (payEditMode) {
+                const iLast4 = (parsePaymentDisplay(item.name).last4 || "").trim();
+                if (editedLast4 && iLast4 && editedLast4 === iLast4) return false;
+              } else {
+                return false;
+              }
+            }
+            const sig = getPaymentSignature(item.name);
+            return sig && sig === nextSignature;
+          });
+          return dupExists ? "Payment Method already exists" : "";
+        })()
+      : "";
+
   const mInput = "flex-1 min-w-0 bg-white border border-gray-200 text-gray-900 text-sm rounded-xl px-3 py-2 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all";
   const taxRateInput = "w-full bg-white border border-gray-200 text-gray-900 text-sm rounded-xl px-3 py-2 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all";
   const showAddTaxRateSuffix = addTaxVal.tax_rate.toString().trim() !== "" && !addTaxRateFocused;
@@ -3024,6 +3054,12 @@ const isBlockedTaxRateInput = (val) => {
               <input className={`${mInput} max-w-[110px]`} placeholder="Last 4 digits" value={newLast4} maxLength={4}
                 onChange={e => setNewLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} />
             </div>
+            {!!addInlinePaymentDuplicateMsg && (
+              <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+                <AlertCircle size={14} />
+                {addInlinePaymentDuplicateMsg}
+              </div>
+            )}
             <div>
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Payment Category Type</p>
               <select
@@ -3036,7 +3072,7 @@ const isBlockedTaxRateInput = (val) => {
                 <option value="Business">Business</option>
               </select>
             </div>
-            <button type="button" onClick={handleAdd}  className={`px-4 py-2 rounded-xl text-white text-sm font-semibold self-start ${colors.btn}`}>{payEditMode ? "Save" : "Add"}</button>
+            <button type="button" onClick={handleAdd} disabled={!!addInlinePaymentDuplicateMsg} className={`px-4 py-2 rounded-xl text-white text-sm font-semibold self-start ${colors.btn} disabled:opacity-50 disabled:cursor-not-allowed`}>{payEditMode ? "Save" : "Add"}</button>
           </>
         )}
 

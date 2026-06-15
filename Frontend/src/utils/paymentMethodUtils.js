@@ -334,6 +334,42 @@ export const mergePaymentMethodLabels = ({
   return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
 };
 
+/** brand|last4 signature for duplicate detection (matches iOS / Settings). */
+export const getPaymentSignature = (paymentName, fallbackCardType = "", payCardMap = {}) => {
+  const { last4 } = parsePaymentDisplay(paymentName);
+  const key = (paymentName || "").toString().trim();
+  let brand = (fallbackCardType || "").trim();
+  if (!brand && key) {
+    const fromLocal = payCardMap[key] || payCardMap[normalizePaymentMatchKey(key)];
+    if (fromLocal) brand = fromLocal;
+  }
+  if (!brand && key) {
+    const inferred = inferCardTypeFromPayment(key);
+    if (inferred !== "Other") brand = inferred;
+  }
+  if (!brand && key) {
+    const { issuer: issuerOnly } = parsePaymentDisplay(key);
+    if (issuerOnly) {
+      const fromIssuer =
+        payCardMap[issuerOnly] || payCardMap[normalizePaymentMatchKey(issuerOnly)];
+      if (fromIssuer) brand = fromIssuer;
+    }
+  }
+  const normalizedBrand = (brand || "").toString().trim().toLowerCase();
+  const normalizedLast4 = (last4 || "").toString().replace(/\D/g, "").slice(0, 4);
+  if (!normalizedBrand || normalizedLast4.length !== 4) return "";
+  return `${normalizedBrand}|${normalizedLast4}`;
+};
+
+export const getApiPaymentMethodSignature = (m) => {
+  const brand = getBrandFromPaymentApiRecord(m);
+  const last4 = getLast4FromPaymentApiRecord(m);
+  const normalizedBrand = (brand || "").toString().trim().toLowerCase();
+  const normalizedLast4 = (last4 || "").toString().replace(/\D/g, "").slice(0, 4);
+  if (!normalizedBrand || normalizedLast4.length !== 4) return "";
+  return `${normalizedBrand}|${normalizedLast4}`;
+};
+
 export const getApiPaymentMethodCacheKey = (m) => {
   if (!m || typeof m !== "object") return String(m || "").trim().toLowerCase();
   const id = m.id ?? m.payment_method_id ?? m.fk_payment_method_id;
