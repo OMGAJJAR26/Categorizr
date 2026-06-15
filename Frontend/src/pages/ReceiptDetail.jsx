@@ -2873,6 +2873,7 @@ useEffect(() => {
 
   /** Open the split screen — validates required fields first */
   const handleOpenSplit = () => {
+    if (editedTags.locked) return;
     const total = parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0;
     const storeName = editedReceipt.storeName || selectedReceipt?.storeName || "";
     const missing = [];
@@ -5031,7 +5032,6 @@ Thank you for using our receipt management system.
                       onClick={() => setShowOptionsMenu(prev => !prev)}
                       className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 bg-blue-600 hover:bg-blue-700 rounded-full transition-colors"
                       title="More options"
-                      disabled={editedTags.locked}
                     >
                       <MoreHorizontal size={16} className="text-white" />
                     </button>
@@ -5051,8 +5051,17 @@ Thank you for using our receipt management system.
                         )}
                         <button
                           type="button"
-                          className="w-full text-left px-4 py-3 text-sm font-medium text-gray-800 hover:bg-gray-50 transition-colors"
-                          onClick={handleOpenSplit}
+                          className={`w-full text-left px-4 py-3 text-sm font-medium transition-colors ${
+                            editedTags.locked
+                              ? "text-gray-400 cursor-not-allowed"
+                              : "text-gray-800 hover:bg-gray-50"
+                          }`}
+                          onClick={() => {
+                            if (editedTags.locked) return;
+                            handleOpenSplit();
+                          }}
+                          disabled={editedTags.locked}
+                          title={editedTags.locked ? "Unlock receipt to split" : undefined}
                         >
                           Split
                         </button>
