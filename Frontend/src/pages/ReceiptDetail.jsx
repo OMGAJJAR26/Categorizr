@@ -4995,7 +4995,9 @@ Thank you for using our receipt management system.
                     </span>
                   </button>
 
-                  {/* Share Button */}
+                  {/* Share + more options hidden until draft is saved */}
+                  {!isDraft && (
+                    <>
                   <div className="relative">
                     <button
                       className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 bg-blue-50 hover:bg-blue-100 rounded-full transition-colors"
@@ -5023,7 +5025,6 @@ Thank you for using our receipt management system.
                       />
                     )}
                   </div>
-                  {/* "..." options menu with Split */}
                   <div className="relative" ref={optionsMenuRef}>
                     <button
                       type="button"
@@ -5058,6 +5059,8 @@ Thank you for using our receipt management system.
                       </div>
                     )}
                   </div>
+                    </>
+                  )}
                     </>
                   )}
                 </div>
