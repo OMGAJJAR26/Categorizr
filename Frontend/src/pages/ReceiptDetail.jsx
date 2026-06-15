@@ -6568,6 +6568,14 @@ Thank you for using our receipt management system.
             ...editedReceipt,
             receipt_tax_values:
               editedReceipt.receipt_tax_values ?? selectedReceipt.receipt_tax_values,
+            _sourceReceiptTaxValues: selectedReceipt.receipt_tax_values,
+            tip:
+              editedReceipt.tip ||
+              findTipLineInReceiptTaxValues(selectedReceipt.receipt_tax_values)
+                ?.tax_amount ||
+              selectedReceipt.tip ||
+              "",
+            subtotal: editedReceipt.subtotal ?? selectedReceipt.subtotal,
           }}
           onClose={() => setShowForwardModal(false)}
           onSuccess={handleForwardSuccess}

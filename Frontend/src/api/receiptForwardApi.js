@@ -1,3 +1,9 @@
+import {
+  buildReceiptTipTaxEntry,
+  filterNonTipReceiptTaxValues,
+  findTipLineInReceiptTaxValues,
+} from "../utils/taxTypeUtils";
+
 const BASE_URL = "/api";
 
 const authHeaders = () => ({
@@ -55,6 +61,69 @@ const inferLast4 = (paymentType, last4) => {
   return matches.length > 0 ? matches[matches.length - 1][1] : "";
 };
 
+const getReceiptTaxValues = (receipt) => {
+  if (Array.isArray(receipt?.receipt_tax_values)) return receipt.receipt_tax_values;
+  if (Array.isArray(receipt?.receiptTaxValues)) return receipt.receiptTaxValues;
+  return [];
+};
+
+/** Tax lines for a newly created receipt on the recipient account. */
+const buildForwardTaxValues = (receipt, recipientUserId) => {
+  const recipientId = toPositiveInt(recipientUserId);
+  const allTaxValues = getReceiptTaxValues(receipt);
+  const existingTipLine =
+    findTipLineInReceiptTaxValues(allTaxValues) ||
+    findTipLineInReceiptTaxValues(receipt._sourceReceiptTaxValues);
+  const tipAmount =
+    parseFloat(receipt.tip) ||
+    (existingTipLine ? parseFloat(existingTipLine.tax_amount) : 0) ||
+    0;
+  const subtotal =
+    parseFloat(receipt.subtotal) ||
+    (() => {
+      const total =
+        parseFloat(receipt.purchasePrice ?? receipt.purchase_price ?? 0) || 0;
+      const nonTipTaxSum = filterNonTipReceiptTaxValues(allTaxValues).reduce(
+        (sum, t) => sum + (parseFloat(t.tax_amount) || 0),
+        0,
+      );
+      return Math.max(0, total - tipAmount - nonTipTaxSum);
+    })();
+
+  const taxLines = filterNonTipReceiptTaxValues(allTaxValues).map((t) => ({
+    id: 0,
+    fk_user_id: recipientId || toPositiveInt(t.fk_user_id),
+    fk_receipt_id: 0,
+    fk_tax_id: toInt(t.fk_tax_id),
+    tax_name: (t.tax_name || "").toString(),
+    tax_rate: (t.tax_rate ?? "0").toString(),
+    tax_amount: (parseFloat(t.tax_amount) || 0).toString(),
+    created: 0,
+    updated: 0,
+  }));
+
+  const tipLine = buildReceiptTipTaxEntry({
+    tipAmount,
+    subtotal,
+    taxDefinitions: [],
+    existingTipLine,
+    fk_receipt_id: 0,
+    fk_user_id: recipientId,
+  });
+  if (tipLine) {
+    taxLines.push({
+      ...tipLine,
+      id: 0,
+      fk_user_id: recipientId || toPositiveInt(tipLine.fk_user_id),
+      fk_receipt_id: 0,
+      created: 0,
+      updated: 0,
+    });
+  }
+
+  return taxLines;
+};
+
 /** UserReceipt body for POST /user/forwardreceiptv2. Sender from Accesstoken; recipient via forward_to_user_id. */
 export const buildForwardPayload = (receipt, recipientUserId) => {
   const sourceReceiptId = toPositiveInt(receipt.id);
@@ -103,6 +172,7 @@ export const buildForwardPayload = (receipt, recipientUserId) => {
     notes: receipt.notes || "",
     receipt_forwarded: "1",
     create_date: (receipt.create_date || String(Math.floor(Date.now() / 1000))).toString(),
+    receipt_tax_values: buildForwardTaxValues(receipt, recipientId),
   };
 };
 
