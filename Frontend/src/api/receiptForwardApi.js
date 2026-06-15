@@ -144,6 +144,15 @@ export const buildForwardPayload = (receipt, recipientUserId) => {
       ? String(receipt.fk_original_receipt_id)
       : String(sourceReceiptId);
 
+  const mobileProductDate = calendarUnixToMobileUnix(
+    receipt.product_date,
+    receipt.product_date ?? receipt.create_date ?? receipt.createDate,
+    {
+      isDraft: receipt.is_draft === "1" || receipt.is_draft === 1,
+      fk_incoming_email_id: receipt.fk_incoming_email_id,
+    },
+  );
+
   return {
     id: sourceReceiptId,
     forward_to_user_id: recipientId,
@@ -165,21 +174,17 @@ export const buildForwardPayload = (receipt, recipientUserId) => {
     fk_original_receipt_id: originalId,
     fk_forward_from_receipt_id: String(sourceReceiptId),
     receipt_category: toInt(receipt.receipt_category),
-    product_date: calendarUnixToMobileUnix(
-      receipt.product_date,
-      receipt.create_date ?? receipt.createDate,
-      {
-        isDraft: receipt.is_draft === "1" || receipt.is_draft === 1,
-        fk_incoming_email_id: receipt.fk_incoming_email_id,
-      },
-    ),
+    product_date: mobileProductDate,
     expense_type: receipt.expense_type || receipt.expenseType || "",
     receipt_image: (receipt.receipt_image || receipt.receiptImage || "0").toString(),
     store_image: receipt.store_image || receipt.storeImage || "",
     receipt_tag: receipt.receipt_tag || "0,0,0,0,0,0,0",
     notes: receipt.notes || "",
     receipt_forwarded: "1",
-    create_date: (receipt.create_date || String(Math.floor(Date.now() / 1000))).toString(),
+    // Match product_date so mobile date heuristics never shift the forwarded day
+    create_date: String(
+      mobileProductDate || Math.floor(Date.now() / 1000),
+    ),
     receipt_tax_values: buildForwardTaxValues(receipt, recipientId),
   };
 };
