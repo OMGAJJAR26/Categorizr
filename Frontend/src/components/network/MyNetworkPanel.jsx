@@ -50,20 +50,24 @@ const SectionHeader = ({ title, count, badgeVariant = "default" }) => (
   </div>
 );
 
-const NetworkUserRow = ({ user, action, subtitle }) => (
-  <div className="flex items-center gap-3 bg-white border border-slate-200/80 rounded-xl px-3 py-3 hover:bg-slate-50">
-    <UserAvatar name={getUserDisplayName(user)} />
-    <div className="flex-1 min-w-0">
-      <p className="text-sm font-semibold text-slate-900 truncate">
-        {getUserDisplayName(user)}
-      </p>
-      <p className="text-xs text-slate-400 truncate">
-        {subtitle || getUserEmail(user) || getUserDisplayName(user) || "—"}
-      </p>
+const NetworkUserRow = ({ user, action, subtitle, singleLine = false }) => {
+  const displayName = getUserDisplayName(user);
+
+  return (
+    <div className="flex items-center gap-3 bg-white border border-slate-200/80 rounded-xl px-3 py-3 hover:bg-slate-50">
+      <UserAvatar name={displayName} />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-slate-900 truncate">{displayName}</p>
+        {!singleLine && (
+          <p className="text-xs text-slate-400 truncate">
+            {subtitle || getUserEmail(user) || displayName || "—"}
+          </p>
+        )}
+      </div>
+      {action && <div className="flex-shrink-0">{action}</div>}
     </div>
-    {action && <div className="flex-shrink-0">{action}</div>}
-  </div>
-);
+  );
+};
 
 const getSearchItemUser = (item) =>
   item?.userinfo ||
@@ -448,6 +452,7 @@ const MyNetworkPanel = ({ user, onPendingCountChange }) => {
               <NetworkUserRow
                 key={member.id}
                 user={member}
+                singleLine
                 action={
                   <div className="flex items-center gap-1.5">
                     <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">

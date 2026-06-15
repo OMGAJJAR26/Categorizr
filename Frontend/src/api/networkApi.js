@@ -392,7 +392,10 @@ export const getNetworkMemberUserId = (member, currentUserId) => {
 
 export const getUserDisplayName = (user) => {
   const u = getNetworkMemberUser(user);
-  return u?.fullName || u?.userName || u?.firstName || u?.emailAddress || "User";
+  const fullName = (u?.fullName || "").trim();
+  const userName = (u?.userName || "").trim();
+  const firstName = (u?.firstName || "").trim();
+  return fullName || userName || firstName || u?.emailAddress || "User";
 };
 
 export const getUserEmail = (user) => {
