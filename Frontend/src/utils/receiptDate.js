@@ -153,6 +153,30 @@ export function todayLocalCalendarUnix() {
   return localCalendarDateToUnix(new Date());
 }
 
+/**
+ * Encode a calendar date for mobile API writes (iOS/Android interpret unix in local TZ).
+ * Web normalizes reads to UTC midnight; mobile expects local midnight for the same day.
+ */
+export function calendarUnixToMobileUnix(
+  productDateUnix,
+  createDateUnix = 0,
+  hints = {},
+) {
+  const resolved = resolveReceiptCalendarUnix(
+    productDateUnix,
+    createDateUnix,
+    hints,
+  );
+  const ts = parseReceiptUnix(resolved);
+  if (!ts || ts < 1000000) return ts;
+
+  const d = new Date(ts * 1000);
+  return Math.floor(
+    new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()).getTime() /
+      1000,
+  );
+}
+
 const RECEIPT_DATE_FORMAT = {
   timeZone: "UTC",
   month: "short",
