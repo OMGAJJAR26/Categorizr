@@ -24,6 +24,7 @@ import {
   isCustomCardIssuer,
   normalizePaymentMatchKey,
   parsePaymentDisplay,
+  paymentCategoryFromApiEnum,
   readPayCardTypeMap,
   storedCardIssuerName,
 } from "../../utils/paymentMethodUtils";
@@ -3735,7 +3736,9 @@ const handleSelectLogo = (index) => {
     setNewCardIssuerName(isCustomCardIssuer(issuer, cardType) ? issuer : "");
     setNewLast4Digits(last4 || "");
     const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
-    setNewPaymentCategoryType(_pet[method] || "");
+    setNewPaymentCategoryType(
+      _pet[method] || paymentCategoryFromApiEnum(apiMatch?.default_payment_category) || ""
+    );
     setPayModalEditMode({ name: method, apiId });
     setPayModalError(null);
     setShowAddPaymentModal(true);
@@ -3931,7 +3934,7 @@ const handleSelectLogo = (index) => {
         cardIssuerName: storedIssuer,
         selectedCardType: selectedCardTypeForLogo,
         last4DigitCard: last4Final || "",
-        paymentCategoryType: newPaymentCategoryType || "Personal",
+        paymentCategoryType: newPaymentCategoryType || "",
       };
       setLocalPaymentMethods((prev) => [...prev, newPaymentMethod]);
 
@@ -3943,7 +3946,7 @@ const handleSelectLogo = (index) => {
           last4: last4Final,
         },
         logoUrl,
-        newPaymentCategoryType || "Personal"
+        newPaymentCategoryType || ""
       );
       const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
       _pct[paymentMethodString] = selectedCardTypeForLogo;

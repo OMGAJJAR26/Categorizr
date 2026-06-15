@@ -1477,7 +1477,7 @@ const ReceiptInfoInline = ({ type }) => {
   const [newCardType, setNewCardType]         = useState("");
   const [newIssuerName, setNewIssuerName]     = useState("");
   const [newLast4, setNewLast4]               = useState("");
-  const [newExpenseType, setNewExpenseType]   = useState("Personal"); // Personal | Business
+  const [newExpenseType, setNewExpenseType]   = useState(""); // "" | Personal | Business
 
   // localStorage: payment display string → "Personal" or "Business"
   // payEditMode: null = add mode, { item, apiId } = edit an existing payment method via the Add form
@@ -1497,7 +1497,7 @@ const ReceiptInfoInline = ({ type }) => {
     setNewCardType("");
     setNewIssuerName("");
     setNewLast4("");
-    setNewExpenseType("Personal");
+    setNewExpenseType("");
     setPayEditMode(null);
   };
 
@@ -2029,7 +2029,7 @@ const isBlockedTaxRateInput = (val) => {
             }
             // Reset & refresh
             setPayEditMode(null);
-            setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
+            setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("");
             setShowAddForm(false);
             await Promise.all([refreshData(), fetchApiPaymentMethods()]);
             toast("success", "Payment Method Updated");
@@ -3024,18 +3024,17 @@ const isBlockedTaxRateInput = (val) => {
               <input className={`${mInput} max-w-[110px]`} placeholder="Last 4 digits" value={newLast4} maxLength={4}
                 onChange={e => setNewLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} />
             </div>
-            {/* Personal / Business toggle */}
-            <div className="flex items-center gap-2">
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Default Type</p>
-              <div className="flex rounded-xl border border-slate-200 overflow-hidden">
-                {["Personal", "Business"].map(opt => (
-                  <button key={opt} type="button"
-                    onClick={() => setNewExpenseType(opt)}
-                    className={`px-4 py-1.5 text-xs font-semibold transition-all ${newExpenseType === opt ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
-                    {opt}
-                  </button>
-                ))}
-              </div>
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Payment Category Type</p>
+              <select
+                className={`${mInput} w-full`}
+                value={newExpenseType}
+                onChange={(e) => setNewExpenseType(e.target.value)}
+              >
+                <option value="">Select Category Type</option>
+                <option value="Personal">Personal</option>
+                <option value="Business">Business</option>
+              </select>
             </div>
             <button type="button" onClick={handleAdd}  className={`px-4 py-2 rounded-xl text-white text-sm font-semibold self-start ${colors.btn}`}>{payEditMode ? "Save" : "Add"}</button>
           </>
@@ -3283,8 +3282,10 @@ const isBlockedTaxRateInput = (val) => {
                                 setNewLast4(pLast4 || "");
                                 setNewExpenseType(
                                   payExpenseTypeMap[item.name] ||
-                                    paymentCategoryFromApiEnum(pApiMatches[0]?.default_payment_category) ||
-                                    "Personal"
+                                    paymentCategoryFromApiEnum(
+                                      pApiRecord?.default_payment_category ?? pApiMatches[0]?.default_payment_category
+                                    ) ||
+                                    ""
                                 );
                                 setPayEditMode({ item, apiId: pApiId });
                                 setShowAddForm(true);

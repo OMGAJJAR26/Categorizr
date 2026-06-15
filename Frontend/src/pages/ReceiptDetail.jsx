@@ -57,6 +57,7 @@ import {
   isCustomCardIssuer,
   normalizePaymentMatchKey,
   parsePaymentDisplay,
+  paymentCategoryFromApiEnum,
   readPayCardTypeMap,
   storedCardIssuerName,
 } from "../utils/paymentMethodUtils";
@@ -1633,7 +1634,9 @@ useEffect(() => {
     setNewCardIssuerName(isCustomCardIssuer(issuer, cardType) ? issuer : "");
     setNewLast4Digits(last4 || "");
     const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
-    setNewPaymentCategoryType(_pet[method] || "");
+    setNewPaymentCategoryType(
+      _pet[method] || paymentCategoryFromApiEnum(apiMatch?.default_payment_category) || ""
+    );
     setPayModalEditMode({ name: method, apiId });
     setPayModalError(null);
     setShowAddPaymentModal(true);
@@ -1691,7 +1694,8 @@ useEffect(() => {
               cardTypeBrand: selectedCardTypeForLogo,
               last4,
             },
-            logoUrl
+            logoUrl,
+            newPaymentCategoryType || ""
           );
         }
         const matchingReceipts = (receipts || []).filter(
@@ -1751,7 +1755,8 @@ useEffect(() => {
           cardTypeBrand: selectedCardTypeForLogo,
           last4,
         },
-        logoUrl
+        logoUrl,
+        newPaymentCategoryType || ""
       );
       const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
       _pct[newPayStr] = selectedCardTypeForLogo;
