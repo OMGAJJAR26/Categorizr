@@ -4149,6 +4149,21 @@ const handleSelectLogo = (index) => {
     });
     if (duplicateInLocal) return "Payment Method already exists";
 
+    const duplicateInReceipts = (receipts || []).some((r) => {
+      const brand = inferCardTypeFromPayment(r.paymentType || r.payment_type || "")
+        .trim()
+        .toLowerCase();
+      const rLast4 = (r.last_4_digit_card || r.last4DigitCard || "")
+        .toString()
+        .replace(/\D/g, "")
+        .slice(-4);
+      if (!brand || brand === "other" || rLast4.length !== 4) return false;
+      const receiptSig = `${brand}|${rLast4}`;
+      if (excludeSig && receiptSig === excludeSig) return false;
+      return receiptSig === draftSig;
+    });
+    if (duplicateInReceipts) return "Payment Method already exists";
+
     return "";
   })();
 
