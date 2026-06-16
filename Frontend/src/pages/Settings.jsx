@@ -134,8 +134,8 @@ const getApiPaymentMethodLogo = (p) => {
   if (img && (img.startsWith("/payment-logos/") || /^https?:\/\//.test(img) || img.startsWith("data:image"))) {
     return img;
   }
-  // last resort: keyword detection on display name
-  return getPaymentLogo(getApiPaymentMethodDisplayName(p));
+  // keyword detection on display name, then generic icon as final fallback
+  return getPaymentLogo(getApiPaymentMethodDisplayName(p)) || (brand === "Other" ? creditDebitCardIcon : null);
 };
 
 const normalizePaymentDisplayKey = (value) => {
@@ -2811,9 +2811,12 @@ const isBlockedTaxRateInput = (val) => {
         const brandFromApiType = cardTypeIntToBrand(m?.card_type);
         if (brandFromApiType) {
           const ct = PAYMENT_CARD_TYPES.find((c) => c.name === brandFromApiType);
-          return ct ? ct.logo : getPayLogoResolved(displayName);
+          if (ct) return ct.logo;
+          // "Other" card type has no entry in PAYMENT_CARD_TYPES; use generic icon
+          if (brandFromApiType === "Other") return creditDebitCardIcon;
+          return getPayLogoResolved(displayName);
         }
-        return getPayLogoResolved(displayName);
+        return getPayLogoResolved(displayName) || creditDebitCardIcon;
       };
 
       if (PAYMENT_METHODS_API_ONLY) {

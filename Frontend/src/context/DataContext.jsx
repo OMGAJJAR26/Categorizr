@@ -28,6 +28,7 @@ import {
   getApiPaymentMethodCacheKey,
   getApiPaymentMethodDisplayName,
   getLast4FromPaymentApiRecord,
+  inferCardTypeFromPayment,
   isPaymentApiRecord,
   mergePaymentMethodLabels,
   normalizeApiPaymentMethodInput,
@@ -945,8 +946,8 @@ export const DataProvider = ({ children }) => {
           // response whose name field failed isValidExpenseCategory validation, such as
           // returning "0" or a numeric code).  Construct directly from the user's input.
           { id: getEntityId(data) ?? null, fk_user_id, expense_category_name: name.trim() };
+        const catName = (entity?.expense_category_name || "").toString().trim();
         setApiExpenseCategories((prev) => {
-          const catName = (entity?.expense_category_name || "").toString().trim();
           if (!catName) return prev; // nothing to add
           const key = catName.toLowerCase();
           const existingIdx = prev.findIndex(
@@ -958,6 +959,23 @@ export const DataProvider = ({ children }) => {
           next[existingIdx] = { ...next[existingIdx], ...entity };
           return next;
         });
+        if (catName) {
+          // Un-hide in case this category was previously deleted/hidden — ensures it
+          // appears immediately in Settings and AddReceiptModal without waiting for fetchData.
+          setHiddenCategories((prev) => {
+            const key = catName.toLowerCase();
+            const next = new Set([...prev].filter((h) => (h || "").trim().toLowerCase() !== key));
+            if (next.size !== prev.size) {
+              localStorage.setItem("cat_hidden_categories", JSON.stringify([...next]));
+            }
+            return next;
+          });
+          // Surface immediately in expenseCategories so dropdowns show it without waiting for fetchData.
+          setExpenseCategories((prev) => {
+            const key = catName.toLowerCase();
+            return prev.some((c) => (c || "").toLowerCase() === key) ? prev : [...prev, catName];
+          });
+        }
         return { ok: true, data: entity, error: null };
       }
       return { ok: false, data: null, error: `Failed with status ${res.status}` };
@@ -966,65 +984,6 @@ export const DataProvider = ({ children }) => {
       return { ok: false, data: null, error: e.message || "Failed to add category" };
     }
   };
-
-  // When a forwarded receipt arrives, auto-add any merchant, payment method,
-  // expense category, or tax type that doesn't yet exist in the recipient's account.
-  const syncForwardedReceiptData = useCallback(async (receipt) => {
-    if (!receipt) return;
-    const tasks = [];
-
-    // Merchant + logo
-    const storeName = (receipt.storeName || receipt.store_name || "").trim();
-    const storeImage = receipt.store_image || receipt.storeImage || "";
-    if (storeName) {
-      const existingMerchant = (apiMerchants || []).find(
-        (m) => (m.store_name || "").toLowerCase() === storeName.toLowerCase()
-      );
-      if (!existingMerchant) {
-        tasks.push(addApiMerchant(storeName, storeImage));
-        if (storeImage) saveMerchLogo(storeName, storeImage);
-      } else if (storeImage && !existingMerchant.store_image_url) {
-        tasks.push(updateApiMerchant(existingMerchant.id, storeName, storeImage));
-        saveMerchLogo(storeName, storeImage);
-      }
-    }
-
-    // Payment method — only if brand + last4 are valid
-    const normalized = normalizeApiPaymentMethodInput(receipt, "", receipt.expense_type || "");
-    if (normalized.last4 && normalized.cardTypeBrand) {
-      const sig = getApiPaymentMethodCacheKey({ ...normalized, id: 0 });
-      const alreadyHave = sig && (apiPaymentMethods || []).some(
-        (pm) => getApiPaymentMethodCacheKey(pm) === sig
-      );
-      if (!alreadyHave) tasks.push(addApiPaymentMethod(receipt, "", receipt.expense_type || ""));
-    }
-
-    // Expense category
-    const expenseType = (receipt.expense_type || receipt.expenseType || "").trim();
-    if (expenseType) {
-      const catExists = (apiExpenseCategories || []).some(
-        (c) => (c.expense_category_name || "").toLowerCase() === expenseType.toLowerCase()
-      );
-      if (!catExists) tasks.push(addApiExpenseCategory(expenseType));
-    }
-
-    // Tax types (skip Tip lines)
-    for (const tv of (receipt.receipt_tax_values || [])) {
-      const taxName = (tv.tax_name || "").trim();
-      if (!taxName || /^tip$/i.test(taxName)) continue;
-      const taxExists = (taxData || []).some(
-        (t) => (t.tax_name || "").toLowerCase() === taxName.toLowerCase()
-      );
-      if (!taxExists) {
-        const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
-        tasks.push(addTax({ tax_name: taxName, tax_rate: tv.tax_rate || "0", fk_user_id }));
-      }
-    }
-
-    if (tasks.length > 0) await Promise.allSettled(tasks);
-  }, [apiMerchants, apiPaymentMethods, apiExpenseCategories, taxData,
-      addApiMerchant, updateApiMerchant, saveMerchLogo,
-      addApiPaymentMethod, addApiExpenseCategory, addTax]);
 
   const updateApiExpenseCategory = async (id, name) => {
     const token = localStorage.getItem("token");
@@ -1361,6 +1320,7 @@ export const DataProvider = ({ children }) => {
                 ),
                 receipt_forwarded: String(r.receipt_forwarded ?? "0"),
                 originalUsername: r.originalUsername ?? r.original_username ?? null,
+                payment_logo_url: r.payment_logo_url ?? r.paymentLogoUrl ?? "",
               };
               const paymentDisplay = formatPaymentDisplayFromReceipt(normalized);
               const badgeStatus = getReceiptBadgeStatus(normalized);
@@ -2287,6 +2247,7 @@ setMerchantsWithImages(
         fk_forward_from_receipt_id: getValue("fk_forward_from_receipt_id", "0"),
         fk_forward_from_user_id: getValue("fk_forward_from_user_id", "0"),
         originalUsername: getValue("originalUsername") ?? getValue("original_username") ?? existingReceipt?.originalUsername ?? null,
+        payment_logo_url: getValue("payment_logo_url") ?? getValue("paymentLogoUrl") ?? existingReceipt?.payment_logo_url ?? "",
         // Preserve receipt_category - only update if explicitly provided
         receipt_category: (() => {
           const val = getValue("receipt_category");
@@ -2512,6 +2473,99 @@ setMerchantsWithImages(
       localStorage.setItem("cat_merch_logos", JSON.stringify(logos));
     } catch (e) { console.error("saveMerchLogo error", e); }
   }, []);
+
+  // When a forwarded receipt arrives, auto-add any merchant, payment method,
+  // expense category, or tax type that doesn't yet exist in the recipient's account.
+  const syncForwardedReceiptData = useCallback(async (receipt) => {
+    if (!receipt) return;
+    const tasks = [];
+
+    // Merchant + logo
+    const storeName = (receipt.storeName || receipt.store_name || "").trim();
+    const storeImage = receipt.store_image || receipt.storeImage || "";
+    if (storeName) {
+      const existingMerchant = (apiMerchants || []).find(
+        (m) => (m.store_name || "").toLowerCase() === storeName.toLowerCase()
+      );
+      if (!existingMerchant) {
+        tasks.push(addApiMerchant(storeName, storeImage));
+        if (storeImage) saveMerchLogo(storeName, storeImage);
+      } else if (storeImage && !existingMerchant.store_image_url) {
+        tasks.push(updateApiMerchant(existingMerchant.id, storeName, storeImage));
+        saveMerchLogo(storeName, storeImage);
+      }
+    }
+
+    // Payment method — direct comparison so non-standard card types (e.g. "Coffee") work too
+    const pmLast4 = (receipt.last_4_digit_card || "").replace(/\D/g, "").slice(-4);
+    const pmIssuer = (receipt.card_issuer_name || "").trim()
+      || (receipt.paymentType || "").replace(/\s*\*\d+/g, "").trim();
+    if (pmLast4 || pmIssuer) {
+      const pmSig = `${pmIssuer.toLowerCase()}|${pmLast4}`;
+      const alreadyHave = (apiPaymentMethods || []).some((pm) => {
+        const eLast4 = (pm.last_4_digit_card || "").replace(/\D/g, "").slice(-4);
+        const eIssuer = (pm.card_issuer_name || "").trim().toLowerCase();
+        return `${eIssuer}|${eLast4}` === pmSig;
+      });
+      // Prefer explicit logo from the forwarded receipt; fall back to the standard
+      // logo for the detected card type so custom PMs (e.g. "HeadPhoneSONY") at
+      // minimum store the generic credit-card icon instead of an empty string.
+      // When the issuer is a custom name (e.g. "Nokia"), infer brand from paymentType
+      // ("Discover") so card_type and logo are set correctly on Account B.
+      const PM_LOGO_MAP = {
+        Visa: "/payment-logos/Visa.png",
+        MasterCard: "/payment-logos/MasterCard.png",
+        PayPal: "/payment-logos/PayPal.png",
+        "American Express": "/payment-logos/AmericanExpress.webp",
+        Discover: "/payment-logos/discover.png",
+        "Diners Club": "/payment-logos/DinersClub.png",
+        Cash: "/payment-logos/Cash.jpg",
+        "Debit Card": "/payment-logos/DebitCard.webp",
+        Other: "/payment-logos/Creditdebitcardicon.jpg",
+      };
+      const issuerStr = (receipt.card_issuer_name || "").replace(/\s*\*\d+/g, "").trim();
+      const payTypeStr = (receipt.paymentType || "").replace(/\s*\*\d+/g, "").trim();
+      const brandFromIssuer = inferCardTypeFromPayment(issuerStr);
+      // If issuer name is custom (brand=Other), check paymentType for the real card brand
+      const resolvedBrand = brandFromIssuer !== "Other"
+        ? brandFromIssuer
+        : (inferCardTypeFromPayment(payTypeStr) || "Other");
+      const pmLogoUrl = receipt.payment_logo_url || receipt.paymentDisplay?.logoUrl
+        || PM_LOGO_MAP[resolvedBrand] || PM_LOGO_MAP.Other;
+      // Inject resolved brand as cardTypeBrand so normalizeApiPaymentMethodInput sets
+      // the correct card_type integer (e.g. Discover=4) instead of defaulting to Other=8.
+      const pmInput = resolvedBrand !== "Other"
+        ? { ...receipt, cardTypeBrand: resolvedBrand }
+        : receipt;
+      if (!alreadyHave) tasks.push(addApiPaymentMethod(pmInput, pmLogoUrl, receipt.expense_type || ""));
+    }
+
+    // Expense category
+    const expenseType = (receipt.expense_type || receipt.expenseType || "").trim();
+    if (expenseType) {
+      const catExists = (apiExpenseCategories || []).some(
+        (c) => (c.expense_category_name || "").toLowerCase() === expenseType.toLowerCase()
+      );
+      if (!catExists) tasks.push(addApiExpenseCategory(expenseType));
+    }
+
+    // Tax types (skip Tip lines)
+    for (const tv of (receipt.receipt_tax_values || [])) {
+      const taxName = (tv.tax_name || "").trim();
+      if (!taxName || /^tip$/i.test(taxName)) continue;
+      const taxExists = (taxData || []).some(
+        (t) => (t.tax_name || "").toLowerCase() === taxName.toLowerCase()
+      );
+      if (!taxExists) {
+        const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
+        tasks.push(addTax({ tax_name: taxName, tax_rate: tv.tax_rate || "0", fk_user_id }));
+      }
+    }
+
+    if (tasks.length > 0) await Promise.allSettled(tasks);
+  }, [apiMerchants, apiPaymentMethods, apiExpenseCategories, taxData,
+      addApiMerchant, updateApiMerchant, saveMerchLogo,
+      addApiPaymentMethod, addApiExpenseCategory, addTax]);
 
   // ── Custom Category CRUD ──
   const addCustomCategory = useCallback((name) => {

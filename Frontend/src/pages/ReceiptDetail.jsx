@@ -6568,20 +6568,34 @@ Thank you for using our receipt management system.
 
       {showForwardModal && selectedReceipt && (
         <ForwardReceiptModal
-          receipt={{
-            ...selectedReceipt,
-            ...editedReceipt,
-            receipt_tax_values:
-              editedReceipt.receipt_tax_values ?? selectedReceipt.receipt_tax_values,
-            _sourceReceiptTaxValues: selectedReceipt.receipt_tax_values,
-            tip:
-              editedReceipt.tip ||
-              findTipLineInReceiptTaxValues(selectedReceipt.receipt_tax_values)
-                ?.tax_amount ||
-              selectedReceipt.tip ||
-              "",
-            subtotal: editedReceipt.subtotal ?? selectedReceipt.subtotal,
-          }}
+          receipt={(() => {
+            const base = {
+              ...selectedReceipt,
+              ...editedReceipt,
+              receipt_tax_values:
+                editedReceipt.receipt_tax_values ?? selectedReceipt.receipt_tax_values,
+              _sourceReceiptTaxValues: selectedReceipt.receipt_tax_values,
+              tip:
+                editedReceipt.tip ||
+                findTipLineInReceiptTaxValues(selectedReceipt.receipt_tax_values)
+                  ?.tax_amount ||
+                selectedReceipt.tip ||
+                "",
+              subtotal: editedReceipt.subtotal ?? selectedReceipt.subtotal,
+            };
+            // Attach the sender's payment method icon so the recipient's sync can carry it over
+            if (!base.payment_logo_url) {
+              const last4 = (base.last_4_digit_card || "").replace(/\D/g, "").slice(-4);
+              const issuer = (base.card_issuer_name || "").trim().toLowerCase();
+              const pmMatch = (apiPaymentMethods || []).find((pm) => {
+                const pmLast4 = (pm.last_4_digit_card || "").replace(/\D/g, "").slice(-4);
+                const pmIssuer = (pm.card_issuer_name || "").trim().toLowerCase();
+                return pmLast4 === last4 && pmIssuer === issuer;
+              });
+              if (pmMatch?.icon_image) base.payment_logo_url = pmMatch.icon_image;
+            }
+            return base;
+          })()}
           onClose={() => setShowForwardModal(false)}
           onSuccess={handleForwardSuccess}
         />

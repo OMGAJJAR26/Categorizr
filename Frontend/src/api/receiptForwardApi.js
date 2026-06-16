@@ -171,6 +171,7 @@ export const buildForwardPayload = (receipt, recipientUserId) => {
     paymentType: basePaymentType || paymentType,
     last_4_digit_card: last4,
     card_issuer_name: receipt.card_issuer_name || receipt.cardIssuerName || "",
+    payment_logo_url: receipt.paymentDisplay?.logoUrl || receipt.payment_logo_url || receipt.paymentLogoUrl || "",
     fk_original_receipt_id: originalId,
     fk_forward_from_receipt_id: String(sourceReceiptId),
     receipt_category: toInt(receipt.receipt_category),

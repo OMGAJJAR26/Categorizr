@@ -396,56 +396,66 @@ const HomePage = () => {
     };
   }, [user?.id, silentRefreshData]);
 
-  // Detect newly-arrived forwarded receipts and show a blue Toast notification.
+  // Detect newly-arrived forwarded receipts: show notification + sync missing data.
   useEffect(() => {
     if (!receipts || !user?.id) return;
 
-    const storageKey = `cat_seen_forwards_${user.id}`;
+    // ── Notification tracking (seen = already notified) ──
+    const notifKey = `cat_seen_forwards_${user.id}`;
     let seen;
     try {
-      seen = new Set(JSON.parse(localStorage.getItem(storageKey) || "[]"));
+      seen = new Set(JSON.parse(localStorage.getItem(notifKey) || "[]"));
     } catch {
       seen = new Set();
     }
 
-    const newForwards = receipts.filter((r) => {
+    // ── Sync tracking (separate key — existing receipts may not have been synced yet) ──
+    const syncKey = `cat_synced_forwards_${user.id}`;
+    let synced;
+    try {
+      synced = new Set(JSON.parse(localStorage.getItem(syncKey) || "[]"));
+    } catch {
+      synced = new Set();
+    }
+
+    const allForwards = receipts.filter((r) => {
       const fwdId = r.fk_forward_from_receipt_id;
-      const isForwarded = fwdId && fwdId !== "0" && fwdId !== 0;
-      return isForwarded && !seen.has(String(r.id));
+      return fwdId && fwdId !== "0" && fwdId !== 0;
     });
 
-    if (newForwards.length === 0) return;
+    // Receipts that haven't shown a notification yet
+    const newForwards = allForwards.filter((r) => !seen.has(String(r.id)));
+    // Receipts that haven't been data-synced yet (may include older forwards)
+    const toSync = allForwards.filter((r) => !synced.has(String(r.id)));
 
-    newForwards.forEach((r) => seen.add(String(r.id)));
-    try {
-      localStorage.setItem(storageKey, JSON.stringify([...seen]));
-    } catch {
-      // localStorage quota — non-fatal
+    // Show notification for newly arrived ones
+    if (newForwards.length > 0) {
+      newForwards.forEach((r) => seen.add(String(r.id)));
+      try { localStorage.setItem(notifKey, JSON.stringify([...seen])); } catch { /* quota */ }
+
+      const latest = newForwards[newForwards.length - 1];
+      const senderName = latest.originalUsername || null;
+      const count = newForwards.length;
+      let message;
+      if (count === 1) {
+        message = senderName
+          ? `New eReceipt forwarded from ${senderName}`
+          : "New eReceipt forwarded to you";
+      } else {
+        const names = [...new Set(newForwards.map((r) => r.originalUsername).filter(Boolean))];
+        message = names.length > 0
+          ? `${count} new eReceipts forwarded from ${names.join(", ")}`
+          : `${count} new eReceipts forwarded to you`;
+      }
+      setToast({ isVisible: true, message, type: "info", actionUrl: null, actionLabel: null });
     }
 
-    // Use originalUsername that the backend sends back on forwarded receipts
-    const latest = newForwards[newForwards.length - 1];
-    const senderName = latest.originalUsername || null;
-    const count = newForwards.length;
-
-    let message;
-    if (count === 1) {
-      message = senderName
-        ? `New eReceipt forwarded from ${senderName}`
-        : "New eReceipt forwarded to you";
-    } else {
-      const names = [...new Set(newForwards.map((r) => r.originalUsername).filter(Boolean))];
-      message = names.length > 0
-        ? `${count} new eReceipts forwarded from ${names.join(", ")}`
-        : `${count} new eReceipts forwarded to you`;
-    }
-
-    setToast({ isVisible: true, message, type: "info", actionUrl: null, actionLabel: null });
-
-    // Auto-add any missing payment methods, merchants, expense categories, and
-    // tax types from each new forwarded receipt into the recipient's account.
-    if (syncForwardedReceiptData) {
-      newForwards.forEach((r) => syncForwardedReceiptData(r).catch(() => {}));
+    // Auto-add missing merchant / payment method / expense category / tax types
+    // for ALL unsynced forwarded receipts (including ones that arrived before this feature)
+    if (syncForwardedReceiptData && toSync.length > 0) {
+      toSync.forEach((r) => synced.add(String(r.id)));
+      try { localStorage.setItem(syncKey, JSON.stringify([...synced])); } catch { /* quota */ }
+      toSync.forEach((r) => syncForwardedReceiptData(r).catch(() => {}));
     }
   }, [receipts, user?.id, syncForwardedReceiptData]);
 
