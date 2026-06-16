@@ -6,6 +6,7 @@
  */
 
 const ONE_DAY_MS = 86400000;
+const UTC_NOON_OFFSET_SEC = 43200; // 12:00:00 UTC — safe calendar-day anchor for all TZs
 
 /** Parse API unix seconds (handles ms by mistake). */
 export function parseReceiptUnix(value) {
@@ -22,6 +23,17 @@ export function parseReceiptUnix(value) {
 function isUtcDateOnlyUnix(unixSeconds) {
   const ts = parseReceiptUnix(unixSeconds);
   return ts > 0 && ts % 86400 === 0;
+}
+
+/** True when timestamp is exactly 12:00:00 UTC (timezone-neutral calendar day). */
+function isUtcNoonUnix(unixSeconds) {
+  const ts = parseReceiptUnix(unixSeconds);
+  return ts > 0 && ts % 86400 === UTC_NOON_OFFSET_SEC;
+}
+
+/** UTC noon unix for Y/M/D calendar components (API writes). */
+function utcNoonUnixFromParts(year, monthIndex, day) {
+  return Math.floor(Date.UTC(year, monthIndex, day, 12, 0, 0) / 1000);
 }
 
 function utcCalendarDayMs(unixSeconds) {
@@ -62,6 +74,11 @@ export function resolveReceiptCalendarUnix(
   const createTs = parseReceiptUnix(createDateUnix);
   const utcDay = utcCalendarDayMs(ts);
   const localDay = localCalendarDayMs(ts);
+
+  // UTC noon = sender's calendar day, stable on iOS/Android/Web in any timezone
+  if (isUtcNoonUnix(ts)) {
+    return Math.floor(utcDay / 1000);
+  }
 
   // --- Timestamps with a time component (e.g. mobile Date.now()) ---
   if (!isUtcDateOnlyUnix(ts)) {
@@ -133,10 +150,12 @@ function hintsFromReceipt(receipt) {
   };
 }
 
-/** Local calendar today → UTC midnight unix (for saves). */
+/** Local calendar today → UTC noon unix (for saves). */
 export function localCalendarDateToUnix(date = new Date()) {
-  return Math.floor(
-    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 1000,
+  return utcNoonUnixFromParts(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
   );
 }
 
@@ -144,13 +163,40 @@ export function parseDateInputToUnix(dateString) {
   if (!dateString || typeof dateString !== "string") return 0;
   const [yr, mo, dy] = dateString.split("-").map(Number);
   if (!yr || !mo || !dy) return 0;
-  const d = new Date(Date.UTC(yr, mo - 1, dy));
-  if (isNaN(d.getTime())) return 0;
-  return Math.floor(d.getTime() / 1000);
+  return utcNoonUnixFromParts(yr, mo - 1, dy);
 }
 
 export function todayLocalCalendarUnix() {
   return localCalendarDateToUnix(new Date());
+}
+
+/**
+ * Encode the sender's calendar day for API writes (forward, mobile sync).
+ * Uses UTC noon so iOS/Android show the same date regardless of device timezone.
+ */
+export function productDateUnixToApiUnix(productDateUnix) {
+  const ts = parseReceiptUnix(productDateUnix);
+  if (!ts || ts < 1000000) return ts;
+  const d = new Date(ts * 1000);
+  return utcNoonUnixFromParts(
+    d.getUTCFullYear(),
+    d.getUTCMonth(),
+    d.getUTCDate(),
+  );
+}
+
+export function calendarUnixToMobileUnix(
+  productDateUnix,
+  createDateUnix = 0,
+  hints = {},
+) {
+  // Use product_date as create_date so stale create_date never shifts the day
+  const resolved = resolveReceiptCalendarUnix(
+    productDateUnix,
+    productDateUnix || createDateUnix,
+    hints,
+  );
+  return productDateUnixToApiUnix(resolved);
 }
 
 const RECEIPT_DATE_FORMAT = {

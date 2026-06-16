@@ -36,6 +36,7 @@ import {
 import {
   parseReceiptUnix,
   resolveReceiptCalendarUnix,
+  calendarUnixToMobileUnix,
 } from "../utils/receiptDate";
 
 const DataContext = createContext();
@@ -2234,9 +2235,45 @@ setMerchantsWithImages(
         })(),
         product_date: (() => {
           const val = getValue("product_date");
-          if (val === null || val === undefined) return existingReceipt?.product_date ?? 0;
-          const parsed = parseInt(val);
-          return isNaN(parsed) ? (existingReceipt?.product_date ?? 0) : parsed;
+          if (val === null || val === undefined) {
+            return calendarUnixToMobileUnix(
+              existingReceipt?.product_date ?? 0,
+              existingReceipt?.create_date,
+              {
+                isDraft:
+                  existingReceipt?.is_draft === "1" ||
+                  existingReceipt?.is_draft === 1,
+                fk_incoming_email_id: existingReceipt?.fk_incoming_email_id,
+              },
+            );
+          }
+          const parsed = parseInt(val, 10);
+          if (isNaN(parsed)) {
+            return calendarUnixToMobileUnix(
+              existingReceipt?.product_date ?? 0,
+              existingReceipt?.create_date,
+              {
+                isDraft:
+                  existingReceipt?.is_draft === "1" ||
+                  existingReceipt?.is_draft === 1,
+                fk_incoming_email_id: existingReceipt?.fk_incoming_email_id,
+              },
+            );
+          }
+          return calendarUnixToMobileUnix(
+            parsed,
+            existingReceipt?.create_date ?? getValue("create_date"),
+            {
+              isDraft:
+                getValue("is_draft") === "1" ||
+                getValue("is_draft") === 1 ||
+                existingReceipt?.is_draft === "1" ||
+                existingReceipt?.is_draft === 1,
+              fk_incoming_email_id:
+                getValue("fk_incoming_email_id") ??
+                existingReceipt?.fk_incoming_email_id,
+            },
+          );
         })(),
         expense_type: (() => {
           const val = getValue("expense_type");
@@ -2319,6 +2356,9 @@ setMerchantsWithImages(
           if (paymentFieldsChanged) {
             merged.payment_logo_url = "";
             merged.paymentLogoUrl = "";
+          }
+          if (updates.receipt_forwarded !== undefined) {
+            merged.badgeStatus = getReceiptBadgeStatus(merged);
           }
           return merged;
         });

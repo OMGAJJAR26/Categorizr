@@ -52,12 +52,15 @@ import {
   buildPaymentMethodStorageString,
   cardTypeIntToBrand,
   getApiPaymentMethodDisplayName,
+  getApiPaymentMethodSignature,
   getLast4FromPaymentApiRecord,
+  getPaymentSignature,
   inferCardTypeFromPayment,
   mergePaymentMethodLabels,
   isCustomCardIssuer,
   normalizePaymentMatchKey,
   parsePaymentDisplay,
+  paymentCategoryFromApiEnum,
   readPayCardTypeMap,
   storedCardIssuerName,
 } from "../utils/paymentMethodUtils";
@@ -1016,58 +1019,51 @@ useEffect(() => {
     });
   };
 
-  const normalizePaymentMethodKey = (value) =>
-    String(value || "")
-      .trim()
-      .replace(/\s+/g, " ")
-      .replace(/\s*\*\s*/, " *")
-      .toLowerCase();
-
-  const localPaymentMethodStrings = React.useMemo(
-    () =>
-      (localPaymentMethods || []).map((pm) => {
-        const issuerName = pm.cardIssuerName || "";
-        const last4 = pm.last4DigitCard || "";
-        const brand = pm.selectedCardType || inferCardTypeFromPayment(pm.paymentType || "");
-        if (issuerName && last4) {
-          return isCustomCardIssuer(issuerName, brand)
-            ? `${issuerName} *${last4}`
-            : `${brand} *${last4}`;
-        }
-        if (issuerName) return issuerName;
-        if (brand && last4) return `${brand} *${last4}`;
-        return pm.paymentType || "";
-      }),
-    [localPaymentMethods]
-  );
-
-  const paymentMethodNameExists = (name, excludeName = "") => {
-    const target = normalizePaymentMethodKey(name);
-    const excluded = normalizePaymentMethodKey(excludeName);
-    if (!target) return false;
-    const allCandidates = [
-      ...localPaymentMethodStrings,
-      ...(apiPaymentMethods || []).map((p) => getApiPaymentMethodDisplayName(p)),
-    ];
-    return allCandidates.some((item) => {
-      const normalizedItem = normalizePaymentMethodKey(item);
-      return normalizedItem === target && normalizedItem !== excluded;
-    });
-  };
-
-  const paymentMethodDraftName = (() => {
+  const paymentDuplicateError = (() => {
     const cardType = (newPaymentCardType || "").trim();
-    const issuer = (newCardIssuerName || "").trim();
     const last4 = (newLast4Digits || "").replace(/\D/g, "").slice(0, 4);
-    if (!cardType || last4.length < 4) return "";
-    return buildPaymentMethodStorageString(issuer, cardType, last4);
-  })();
+    if (!cardType || last4.length !== 4) return "";
 
-  const paymentDuplicateError =
-    paymentMethodDraftName &&
-    paymentMethodNameExists(paymentMethodDraftName, payModalEditMode?.name || "")
-      ? "Payment Method already exists"
+    const payCardMap = readPayCardTypeMap();
+    const draftSig = getPaymentSignature(
+      buildPaymentMethodStorageString(newCardIssuerName.trim(), cardType, last4),
+      cardType,
+      payCardMap
+    );
+    if (!draftSig) return "";
+
+    const excludeApiId = payModalEditMode?.apiId;
+    const excludeSig = payModalEditMode?.name
+      ? getPaymentSignature(
+          payModalEditMode.name,
+          inferCardTypeFromPayment(payModalEditMode.name),
+          payCardMap
+        )
       : "";
+
+    const duplicateInApi = (apiPaymentMethods || []).some((p) => {
+      const pid = p.id ?? p.payment_method_id;
+      if (excludeApiId != null && String(pid) === String(excludeApiId)) return false;
+      const sig = getApiPaymentMethodSignature(p);
+      return sig && sig === draftSig;
+    });
+    if (duplicateInApi) return "Payment Method already exists";
+
+    const duplicateInLocal = (localPaymentMethods || []).some((pm) => {
+      const brand = (pm.selectedCardType || inferCardTypeFromPayment(pm.paymentType || ""))
+        .toString()
+        .trim()
+        .toLowerCase();
+      const pmLast4 = (pm.last4DigitCard || "").toString().replace(/\D/g, "").slice(0, 4);
+      if (!brand || pmLast4.length !== 4) return false;
+      const sig = `${brand}|${pmLast4}`;
+      if (excludeSig && sig === excludeSig) return false;
+      return sig === draftSig;
+    });
+    if (duplicateInLocal) return "Payment Method already exists";
+
+    return "";
+  })();
 
   const addCategoryDuplicateError =
     newCategoryName.trim() && expenseCategoryExists(newCategoryName.trim())
@@ -1634,7 +1630,9 @@ useEffect(() => {
     setNewCardIssuerName(isCustomCardIssuer(issuer, cardType) ? issuer : "");
     setNewLast4Digits(last4 || "");
     const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
-    setNewPaymentCategoryType(_pet[method] || "");
+    setNewPaymentCategoryType(
+      _pet[method] || paymentCategoryFromApiEnum(apiMatch?.default_payment_category) || ""
+    );
     setPayModalEditMode({ name: method, apiId });
     setPayModalError(null);
     setShowAddPaymentModal(true);
@@ -1692,7 +1690,8 @@ useEffect(() => {
               cardTypeBrand: selectedCardTypeForLogo,
               last4,
             },
-            logoUrl
+            logoUrl,
+            newPaymentCategoryType || ""
           );
         }
         const matchingReceipts = (receipts || []).filter(
@@ -1752,7 +1751,8 @@ useEffect(() => {
           cardTypeBrand: selectedCardTypeForLogo,
           last4,
         },
-        logoUrl
+        logoUrl,
+        newPaymentCategoryType || ""
       );
       const _pct = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_card_types") || "{}"); } catch { return {}; } })();
       _pct[newPayStr] = selectedCardTypeForLogo;
@@ -2874,6 +2874,7 @@ useEffect(() => {
 
   /** Open the split screen — validates required fields first */
   const handleOpenSplit = () => {
+    if (editedTags.locked) return;
     const total = parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0;
     const storeName = editedReceipt.storeName || selectedReceipt?.storeName || "";
     const missing = [];
@@ -2892,12 +2893,21 @@ useEffect(() => {
   };
 
   const handleForwardSuccess = async () => {
-    if (selectedReceipt?.id) {
-      await updateReceipt(selectedReceipt.id, { receipt_forwarded: "1" });
-    }
+    if (!selectedReceipt?.id) return;
+
+    const isReceived = isNetworkReceivedReceipt(selectedReceipt);
+    const forwardedPatch = {
+      receipt_forwarded: "1",
+      badgeStatus: isReceived ? "both" : "forwarded",
+    };
+
+    setSelectedReceipt((prev) => (prev ? { ...prev, ...forwardedPatch } : prev));
+    setEditedReceipt((prev) => ({ ...prev, receipt_forwarded: "1" }));
+
+    await updateReceipt(selectedReceipt.id, forwardedPatch);
+
     setToast({ isVisible: true, message: "Receipt forwarded successfully.", type: "success" });
-    await refreshData?.();
-    onSaved?.();
+    silentRefreshData?.(1500);
   };
 
   /** Update a field on a specific split, auto-calculating tax/total like the main form */
@@ -4996,7 +5006,9 @@ Thank you for using our receipt management system.
                     </span>
                   </button>
 
-                  {/* Share Button */}
+                  {/* Share + more options hidden until draft is saved */}
+                  {!isDraft && (
+                    <>
                   <div className="relative">
                     <button
                       className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 bg-blue-50 hover:bg-blue-100 rounded-full transition-colors"
@@ -5024,14 +5036,12 @@ Thank you for using our receipt management system.
                       />
                     )}
                   </div>
-                  {/* "..." options menu with Split */}
                   <div className="relative" ref={optionsMenuRef}>
                     <button
                       type="button"
                       onClick={() => setShowOptionsMenu(prev => !prev)}
                       className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 bg-blue-600 hover:bg-blue-700 rounded-full transition-colors"
                       title="More options"
-                      disabled={editedTags.locked}
                     >
                       <MoreHorizontal size={16} className="text-white" />
                     </button>
@@ -5051,14 +5061,25 @@ Thank you for using our receipt management system.
                         )}
                         <button
                           type="button"
-                          className="w-full text-left px-4 py-3 text-sm font-medium text-gray-800 hover:bg-gray-50 transition-colors"
-                          onClick={handleOpenSplit}
+                          className={`w-full text-left px-4 py-3 text-sm font-medium transition-colors ${
+                            editedTags.locked
+                              ? "text-gray-400 cursor-not-allowed"
+                              : "text-gray-800 hover:bg-gray-50"
+                          }`}
+                          onClick={() => {
+                            if (editedTags.locked) return;
+                            handleOpenSplit();
+                          }}
+                          disabled={editedTags.locked}
+                          title={editedTags.locked ? "Unlock receipt to split" : undefined}
                         >
                           Split
                         </button>
                       </div>
                     )}
                   </div>
+                    </>
+                  )}
                     </>
                   )}
                 </div>
@@ -6551,6 +6572,14 @@ Thank you for using our receipt management system.
             ...editedReceipt,
             receipt_tax_values:
               editedReceipt.receipt_tax_values ?? selectedReceipt.receipt_tax_values,
+            _sourceReceiptTaxValues: selectedReceipt.receipt_tax_values,
+            tip:
+              editedReceipt.tip ||
+              findTipLineInReceiptTaxValues(selectedReceipt.receipt_tax_values)
+                ?.tax_amount ||
+              selectedReceipt.tip ||
+              "",
+            subtotal: editedReceipt.subtotal ?? selectedReceipt.subtotal,
           }}
           onClose={() => setShowForwardModal(false)}
           onSuccess={handleForwardSuccess}

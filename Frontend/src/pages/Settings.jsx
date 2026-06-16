@@ -1494,7 +1494,7 @@ const ReceiptInfoInline = ({ type }) => {
   const [newCardType, setNewCardType]         = useState("");
   const [newIssuerName, setNewIssuerName]     = useState("");
   const [newLast4, setNewLast4]               = useState("");
-  const [newExpenseType, setNewExpenseType]   = useState("Personal"); // Personal | Business
+  const [newExpenseType, setNewExpenseType]   = useState(""); // "" | Personal | Business
 
   // localStorage: payment display string → "Personal" or "Business"
   // payEditMode: null = add mode, { item, apiId } = edit an existing payment method via the Add form
@@ -1514,7 +1514,7 @@ const ReceiptInfoInline = ({ type }) => {
     setNewCardType("");
     setNewIssuerName("");
     setNewLast4("");
-    setNewExpenseType("Personal");
+    setNewExpenseType("");
     setPayEditMode(null);
   };
 
@@ -2046,7 +2046,7 @@ const isBlockedTaxRateInput = (val) => {
             }
             // Reset & refresh
             setPayEditMode(null);
-            setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
+            setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("");
             setShowAddForm(false);
             await Promise.all([refreshData(), fetchApiPaymentMethods()]);
             toast("success", "Payment Method Updated");
@@ -2908,6 +2908,36 @@ const isBlockedTaxRateInput = (val) => {
         )
     : [];
 
+  const addInlinePaymentDuplicateMsg =
+    type === "payments" && newCardType.trim() && newLast4.replace(/\D/g, "").length === 4
+      ? (() => {
+          const ct = newCardType.trim();
+          const issuer = newIssuerName.trim();
+          const last4 = newLast4.replace(/\D/g, "").slice(0, 4);
+          const payStr = issuer ? `${issuer} *${last4}` : `${ct} *${last4}`;
+          const nextSignature = getPaymentSignature(payStr, ct);
+          if (!nextSignature) return "";
+          const excludeKey = payEditMode?.item?.key;
+          const editedLast4 = payEditMode
+            ? (parsePaymentDisplay(payEditMode.item.name).last4 || "").trim()
+            : "";
+          const dupExists = buildAllItems().some((item) => {
+            if (excludeKey && item.key === excludeKey) return false;
+            if (item.isReceiptItem) {
+              if (payEditMode) {
+                const iLast4 = (parsePaymentDisplay(item.name).last4 || "").trim();
+                if (editedLast4 && iLast4 && editedLast4 === iLast4) return false;
+              } else {
+                return false;
+              }
+            }
+            const sig = getPaymentSignature(item.name);
+            return sig && sig === nextSignature;
+          });
+          return dupExists ? "Payment Method already exists" : "";
+        })()
+      : "";
+
   const mInput = "flex-1 min-w-0 bg-white border border-gray-200 text-gray-900 text-sm rounded-xl px-3 py-2 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all";
   const taxRateInput = "w-full bg-white border border-gray-200 text-gray-900 text-sm rounded-xl px-3 py-2 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all";
   const showAddTaxRateSuffix = addTaxVal.tax_rate.toString().trim() !== "" && !addTaxRateFocused;
@@ -3041,20 +3071,25 @@ const isBlockedTaxRateInput = (val) => {
               <input className={`${mInput} max-w-[110px]`} placeholder="Last 4 digits" value={newLast4} maxLength={4}
                 onChange={e => setNewLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} />
             </div>
-            {/* Personal / Business toggle */}
-            <div className="flex items-center gap-2">
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Default Type</p>
-              <div className="flex rounded-xl border border-slate-200 overflow-hidden">
-                {["Personal", "Business"].map(opt => (
-                  <button key={opt} type="button"
-                    onClick={() => setNewExpenseType(opt)}
-                    className={`px-4 py-1.5 text-xs font-semibold transition-all ${newExpenseType === opt ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
-                    {opt}
-                  </button>
-                ))}
+            {!!addInlinePaymentDuplicateMsg && (
+              <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+                <AlertCircle size={14} />
+                {addInlinePaymentDuplicateMsg}
               </div>
+            )}
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Payment Category Type</p>
+              <select
+                className={`${mInput} w-full`}
+                value={newExpenseType}
+                onChange={(e) => setNewExpenseType(e.target.value)}
+              >
+                <option value="">Select Category Type</option>
+                <option value="Personal">Personal</option>
+                <option value="Business">Business</option>
+              </select>
             </div>
-            <button type="button" onClick={handleAdd}  className={`px-4 py-2 rounded-xl text-white text-sm font-semibold self-start ${colors.btn}`}>{payEditMode ? "Save" : "Add"}</button>
+            <button type="button" onClick={handleAdd} disabled={!!addInlinePaymentDuplicateMsg} className={`px-4 py-2 rounded-xl text-white text-sm font-semibold self-start ${colors.btn} disabled:opacity-50 disabled:cursor-not-allowed`}>{payEditMode ? "Save" : "Add"}</button>
           </>
         )}
 
@@ -3300,8 +3335,10 @@ const isBlockedTaxRateInput = (val) => {
                                 setNewLast4(pLast4 || "");
                                 setNewExpenseType(
                                   payExpenseTypeMap[item.name] ||
-                                    paymentCategoryFromApiEnum(pApiMatches[0]?.default_payment_category) ||
-                                    "Personal"
+                                    paymentCategoryFromApiEnum(
+                                      pApiRecord?.default_payment_category ?? pApiMatches[0]?.default_payment_category
+                                    ) ||
+                                    ""
                                 );
                                 setPayEditMode({ item, apiId: pApiId });
                                 setShowAddForm(true);
