@@ -2888,7 +2888,6 @@ useEffect(() => {
 
   /** Open the split screen — validates required fields first */
   const handleOpenSplit = () => {
-    if (editedTags.locked) return;
     const total = parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0;
     const storeName = editedReceipt.storeName || selectedReceipt?.storeName || "";
     const missing = [];
@@ -5061,8 +5060,7 @@ Thank you for using our receipt management system.
                     </button>
                     {showOptionsMenu && (
                       <div className="absolute top-full right-0 mt-2 bg-white shadow-xl border border-gray-200 rounded-xl z-[100] min-w-[140px] overflow-hidden">
-                        {!isNetworkReceivedReceipt(selectedReceipt) && (
-                          <button
+                        <button
                             type="button"
                             className="w-full text-left px-4 py-3 text-sm font-medium text-gray-800 hover:bg-gray-50 transition-colors border-b border-gray-100"
                             onClick={() => {
@@ -5072,20 +5070,12 @@ Thank you for using our receipt management system.
                           >
                             Forward
                           </button>
-                        )}
                         <button
                           type="button"
-                          className={`w-full text-left px-4 py-3 text-sm font-medium transition-colors ${
-                            editedTags.locked
-                              ? "text-gray-400 cursor-not-allowed"
-                              : "text-gray-800 hover:bg-gray-50"
-                          }`}
+                          className="w-full text-left px-4 py-3 text-sm font-medium transition-colors text-gray-800 hover:bg-gray-50"
                           onClick={() => {
-                            if (editedTags.locked) return;
                             handleOpenSplit();
                           }}
-                          disabled={editedTags.locked}
-                          title={editedTags.locked ? "Unlock receipt to split" : undefined}
                         >
                           Split
                         </button>

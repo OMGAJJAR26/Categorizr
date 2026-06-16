@@ -24,6 +24,7 @@ import Toast from "../components/Toast";
 import IntegrationsModal from "../components/IntegrationsModal";
 import { useReceiptFilters } from "../hooks/useReceiptFilters";
 import { splitMediaField } from "../utils/mediaUrlUtils";
+import { getMyNetwork, getNetworkMemberUser, getUserDisplayName } from "../api/networkApi";
 import { useReceiptSorting } from "../hooks/useReceiptSorting";
 import { useReceiptGrouping } from "../hooks/useReceiptGrouping";
 import { useReportGeneration } from "../hooks/useReportGeneration";
@@ -105,6 +106,8 @@ const HomePage = () => {
   const [linkingReceiptId, setLinkingReceiptId] = useState(null);
   const [linkingSageReceiptId, setLinkingSageReceiptId] = useState(null);
   const [xeroConnected, setXeroConnected] = useState(false);
+
+  const [forwardNotification, setForwardNotification] = useState(null); // { messages: string[] }
 
   // ── Recovery-email verification popup ──
   const [showRecoveryEmailFlow, setShowRecoveryEmailFlow] = useState(false);
@@ -395,6 +398,76 @@ const HomePage = () => {
       document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
     };
   }, [user?.id, silentRefreshData]);
+
+  // Detect newly-arrived forwarded receipts and show a blue notification banner.
+  useEffect(() => {
+    if (!receipts || !user?.id) return;
+
+    const storageKey = `cat_seen_forwards_${user.id}`;
+    let seen;
+    try {
+      seen = new Set(JSON.parse(localStorage.getItem(storageKey) || "[]"));
+    } catch {
+      seen = new Set();
+    }
+
+    const newForwards = receipts.filter((r) => {
+      const fwdId = r.fk_forward_from_receipt_id;
+      const isForwarded = fwdId && fwdId !== "0" && fwdId !== 0;
+      return isForwarded && !seen.has(String(r.id));
+    });
+
+    if (newForwards.length === 0) return;
+
+    newForwards.forEach((r) => seen.add(String(r.id)));
+    try {
+      localStorage.setItem(storageKey, JSON.stringify([...seen]));
+    } catch {
+      // localStorage quota issues — non-fatal
+    }
+
+    // Collect unique sender IDs (best-effort; backend may not return fk_forward_from_user_id)
+    const senderIds = [
+      ...new Set(
+        newForwards
+          .map((r) => r.fk_forward_from_user_id)
+          .filter((id) => id && id !== "0")
+      ),
+    ];
+
+    const buildMessages = (networkData) => {
+      const idToName = new Map();
+      if (Array.isArray(networkData)) {
+        networkData.forEach((member) => {
+          const u = getNetworkMemberUser(member);
+          if (u?.id) idToName.set(String(u.id), getUserDisplayName(u));
+        });
+      }
+
+      // Build one message per unique sender, or one generic if no sender IDs known
+      if (senderIds.length === 0) {
+        return [`New eReceipt${newForwards.length > 1 ? "s" : ""} forwarded to you`];
+      }
+      return senderIds.map((id) => {
+        const name = idToName.get(String(id));
+        return name
+          ? `New eReceipt forwarded from ${name}`
+          : `New eReceipt forwarded to you`;
+      });
+    };
+
+    if (senderIds.length > 0) {
+      getMyNetwork()
+        .then((result) => {
+          setForwardNotification({ messages: buildMessages(result.ok ? result.data : []) });
+        })
+        .catch(() => {
+          setForwardNotification({ messages: buildMessages([]) });
+        });
+    } else {
+      setForwardNotification({ messages: buildMessages([]) });
+    }
+  }, [receipts, user?.id]);
 
   const handleReceiptClick = async (receipt, index) => {
     if (receipt.status === "0") {
@@ -847,6 +920,24 @@ const HomePage = () => {
   return (
     <div className="home-page">
       <Header />
+
+      {forwardNotification && (
+        <div className="bg-blue-600 text-white px-4 py-3 flex items-start justify-between gap-3 shadow-md">
+          <div className="flex flex-col gap-1 text-sm font-medium leading-snug">
+            {forwardNotification.messages.map((msg, i) => (
+              <span key={i}>{msg}</span>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="flex-shrink-0 text-white/80 hover:text-white text-lg leading-none mt-0.5"
+            onClick={() => setForwardNotification(null)}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="home-loader-wrap">

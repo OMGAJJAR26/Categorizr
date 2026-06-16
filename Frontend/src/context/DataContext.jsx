@@ -2226,6 +2226,7 @@ setMerchantsWithImages(
         card_issuer_name: rawIssuerName,
         fk_original_receipt_id: getValue("fk_original_receipt_id", "0"),
         fk_forward_from_receipt_id: getValue("fk_forward_from_receipt_id", "0"),
+        fk_forward_from_user_id: getValue("fk_forward_from_user_id", "0"),
         // Preserve receipt_category - only update if explicitly provided
         receipt_category: (() => {
           const val = getValue("receipt_category");
