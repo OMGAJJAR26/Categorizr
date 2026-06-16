@@ -37,7 +37,7 @@ import "./HomePage.css";
 
 const HomePage = () => {
   const navigate = useNavigate();
-  const { refreshData, silentRefreshData, receipts, loading, updateReceiptStatus, deleteReceipt, updateReceipt, user } = useData();
+  const { refreshData, silentRefreshData, receipts, loading, updateReceiptStatus, deleteReceipt, updateReceipt, user, syncForwardedReceiptData } = useData();
   const { formatCurrency } = useCurrency();
 
   // Custom hooks for complex logic
@@ -441,7 +441,13 @@ const HomePage = () => {
     }
 
     setToast({ isVisible: true, message, type: "info", actionUrl: null, actionLabel: null });
-  }, [receipts, user?.id]);
+
+    // Auto-add any missing payment methods, merchants, expense categories, and
+    // tax types from each new forwarded receipt into the recipient's account.
+    if (syncForwardedReceiptData) {
+      newForwards.forEach((r) => syncForwardedReceiptData(r).catch(() => {}));
+    }
+  }, [receipts, user?.id, syncForwardedReceiptData]);
 
   const handleReceiptClick = async (receipt, index) => {
     if (receipt.status === "0") {

@@ -2664,6 +2664,23 @@ const handleFieldChange = (field, value) => {
         addExpenseCategory(formData.expense_type.trim());
       }
 
+      // Persist merchant logo to localStorage and the backend merchant record so
+      // the logo survives logout/login (not just the in-memory session).
+      if (storeImageToSave && formData.storeName?.trim()) {
+        const mName = formData.storeName.trim();
+        saveMerchLogo(mName, storeImageToSave);
+        const existingMerchant = (apiMerchants || []).find(
+          (m) => (m.store_name || "").toLowerCase() === mName.toLowerCase()
+        );
+        if (existingMerchant) {
+          if (!existingMerchant.store_image_url) {
+            updateApiMerchant(existingMerchant.id, existingMerchant.store_name, storeImageToSave).catch(() => {});
+          }
+        } else {
+          addApiMerchant(mName, storeImageToSave).catch(() => {});
+        }
+      }
+
       // Refresh data from backend to get the newly created/updated receipt with all fields
       // This ensures payment method logos and all other data are correctly loaded
       // The onReceiptAdded callback will trigger refreshData() in HomePage

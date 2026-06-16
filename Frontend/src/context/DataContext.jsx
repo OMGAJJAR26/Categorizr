@@ -967,6 +967,65 @@ export const DataProvider = ({ children }) => {
     }
   };
 
+  // When a forwarded receipt arrives, auto-add any merchant, payment method,
+  // expense category, or tax type that doesn't yet exist in the recipient's account.
+  const syncForwardedReceiptData = useCallback(async (receipt) => {
+    if (!receipt) return;
+    const tasks = [];
+
+    // Merchant + logo
+    const storeName = (receipt.storeName || receipt.store_name || "").trim();
+    const storeImage = receipt.store_image || receipt.storeImage || "";
+    if (storeName) {
+      const existingMerchant = (apiMerchants || []).find(
+        (m) => (m.store_name || "").toLowerCase() === storeName.toLowerCase()
+      );
+      if (!existingMerchant) {
+        tasks.push(addApiMerchant(storeName, storeImage));
+        if (storeImage) saveMerchLogo(storeName, storeImage);
+      } else if (storeImage && !existingMerchant.store_image_url) {
+        tasks.push(updateApiMerchant(existingMerchant.id, storeName, storeImage));
+        saveMerchLogo(storeName, storeImage);
+      }
+    }
+
+    // Payment method — only if brand + last4 are valid
+    const normalized = normalizeApiPaymentMethodInput(receipt, "", receipt.expense_type || "");
+    if (normalized.last4 && normalized.cardTypeBrand) {
+      const sig = getApiPaymentMethodCacheKey({ ...normalized, id: 0 });
+      const alreadyHave = sig && (apiPaymentMethods || []).some(
+        (pm) => getApiPaymentMethodCacheKey(pm) === sig
+      );
+      if (!alreadyHave) tasks.push(addApiPaymentMethod(receipt, "", receipt.expense_type || ""));
+    }
+
+    // Expense category
+    const expenseType = (receipt.expense_type || receipt.expenseType || "").trim();
+    if (expenseType) {
+      const catExists = (apiExpenseCategories || []).some(
+        (c) => (c.expense_category_name || "").toLowerCase() === expenseType.toLowerCase()
+      );
+      if (!catExists) tasks.push(addApiExpenseCategory(expenseType));
+    }
+
+    // Tax types (skip Tip lines)
+    for (const tv of (receipt.receipt_tax_values || [])) {
+      const taxName = (tv.tax_name || "").trim();
+      if (!taxName || /^tip$/i.test(taxName)) continue;
+      const taxExists = (taxData || []).some(
+        (t) => (t.tax_name || "").toLowerCase() === taxName.toLowerCase()
+      );
+      if (!taxExists) {
+        const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
+        tasks.push(addTax({ tax_name: taxName, tax_rate: tv.tax_rate || "0", fk_user_id }));
+      }
+    }
+
+    if (tasks.length > 0) await Promise.allSettled(tasks);
+  }, [apiMerchants, apiPaymentMethods, apiExpenseCategories, taxData,
+      addApiMerchant, updateApiMerchant, saveMerchLogo,
+      addApiPaymentMethod, addApiExpenseCategory, addTax]);
+
   const updateApiExpenseCategory = async (id, name) => {
     const token = localStorage.getItem("token");
     if (!token) return { ok: false, data: null, error: "Missing token" };
@@ -2792,6 +2851,7 @@ setMerchantsWithImages(
         deleteReceipt,
         updateReceipt,
         repairReceiptMediaOnServer,
+        syncForwardedReceiptData,
         addExpenseCategory,
         // Tax management functions
         fetchTaxes,
