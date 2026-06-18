@@ -453,9 +453,16 @@ const HomePage = () => {
     // Auto-add missing merchant / payment method / expense category / tax types
     // for ALL unsynced forwarded receipts (including ones that arrived before this feature)
     if (syncForwardedReceiptData && toSync.length > 0) {
+      // Mark upfront to prevent concurrent duplicate syncs on rapid re-renders.
+      // On failure, unmark so the next receipts refresh can retry.
       toSync.forEach((r) => synced.add(String(r.id)));
       try { localStorage.setItem(syncKey, JSON.stringify([...synced])); } catch { /* quota */ }
-      toSync.forEach((r) => syncForwardedReceiptData(r).catch(() => {}));
+      toSync.forEach((r) => {
+        syncForwardedReceiptData(r).catch(() => {
+          synced.delete(String(r.id));
+          try { localStorage.setItem(syncKey, JSON.stringify([...synced])); } catch { /* quota */ }
+        });
+      });
     }
   }, [receipts, user?.id, syncForwardedReceiptData]);
 

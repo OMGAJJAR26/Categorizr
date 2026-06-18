@@ -6572,6 +6572,10 @@ Thank you for using our receipt management system.
             const base = {
               ...selectedReceipt,
               ...editedReceipt,
+              // Always use the actual receipt's store name for the forward popup —
+              // editedReceipt can carry stale data from a previously viewed receipt.
+              storeName: selectedReceipt.storeName || editedReceipt.storeName || "",
+              store_image: selectedReceipt.store_image || editedReceipt.store_image || "",
               receipt_tax_values:
                 editedReceipt.receipt_tax_values ?? selectedReceipt.receipt_tax_values,
               _sourceReceiptTaxValues: selectedReceipt.receipt_tax_values,

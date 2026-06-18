@@ -2493,6 +2493,30 @@ setMerchantsWithImages(
       } else if (storeImage && !existingMerchant.store_image_url) {
         tasks.push(updateApiMerchant(existingMerchant.id, storeName, storeImage));
         saveMerchLogo(storeName, storeImage);
+      } else if (existingMerchant.store_image_url) {
+        // WebApp already has a canonical logo for this merchant.
+        // Patch the forwarded receipt to use it so the receipt card shows
+        // the WebApp logo instead of the sender's logo.
+        const canonicalLogo = existingMerchant.store_image_url;
+        saveMerchLogo(storeName, canonicalLogo);
+        if (receipt.id && storeImage && storeImage !== canonicalLogo) {
+          tasks.push(
+            (async () => {
+              const token = localStorage.getItem("token");
+              if (!token) return;
+              for (const ep of ["/api/receipt/updateReceiptv1", "/api/receipt/editReceiptv1"]) {
+                try {
+                  const res = await fetch(ep, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", Accesstoken: token },
+                    body: JSON.stringify({ id: receipt.id, store_image: canonicalLogo }),
+                  });
+                  if (res.ok) break;
+                } catch { /* ignore */ }
+              }
+            })()
+          );
+        }
       }
     }
 

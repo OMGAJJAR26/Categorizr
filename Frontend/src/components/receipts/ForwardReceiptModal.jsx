@@ -21,7 +21,6 @@ const ForwardReceiptModal = ({ receipt, onClose, onSuccess }) => {
   const [loading, setLoading] = useState(true);
   const [forwardingId, setForwardingId] = useState(null);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -53,20 +52,17 @@ const ForwardReceiptModal = ({ receipt, onClose, onSuccess }) => {
 
     setForwardingId(memberId);
     setError("");
-    setMessage("");
 
     const result = await forwardReceiptToUser(receipt, memberId, user);
 
     if (result.ok) {
-      const successText =
-        (result.data && typeof result.data === "object" && result.data.message) ||
-        `Receipt forwarded to ${getUserDisplayName(member)}.`;
-      setMessage(successText);
+      // Close the modal first; the parent (ReceiptDetail) shows the success toast
+      // so we don't show a duplicate green banner here.
       try {
         await onSuccess?.(member, result.data);
       } finally {
         setForwardingId(null);
-        setTimeout(() => onClose(), 800);
+        onClose();
       }
       return;
     }
@@ -76,8 +72,14 @@ const ForwardReceiptModal = ({ receipt, onClose, onSuccess }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col overflow-hidden">
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
           <div>
             <h2 className="text-lg font-bold text-slate-900">Forward Receipt</h2>
@@ -103,11 +105,6 @@ const ForwardReceiptModal = ({ receipt, onClose, onSuccess }) => {
           </p>
         </div>
 
-        {message && (
-          <div className="mx-5 mt-4 text-sm px-4 py-2.5 rounded-xl border bg-emerald-50 text-emerald-800 border-emerald-200">
-            {message}
-          </div>
-        )}
         {error && (
           <div className="mx-5 mt-4 text-sm px-4 py-2.5 rounded-xl border bg-red-50 text-red-800 border-red-200">
             {error}
