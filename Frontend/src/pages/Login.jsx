@@ -61,6 +61,14 @@ const Login = () => {
         localStorage.setItem("token", data.authenticationToken);
         localStorage.setItem("id", data.id);
         localStorage.setItem("fk_user_id", data.id);
+        // Register device once per login — fire and forget, non-blocking
+        const deviceParams = new URLSearchParams({
+          deviceId: "0", deviceType: "2", deviceToken: "0", version: "-",
+        }).toString();
+        fetch(`/api/user/updatedevicetoken?${deviceParams}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accesstoken: data.authenticationToken },
+        }).catch(() => {});
         navigate("/homepage", { replace: true });
       } else {
         setAlertMsg(data.message || "Login failed");

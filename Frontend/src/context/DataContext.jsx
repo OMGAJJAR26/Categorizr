@@ -216,6 +216,7 @@ export const DataProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   // Ref used by fetchData to skip the loading spinner for background (silent) refreshes.
   const silentRefreshRef = useRef(false);
+  const userFetchedRef = useRef(false);
   const mediaHealInFlightRef = useRef(false);
   // Map of signature → { lastAttemptTs: number, failCount: number }
   // We allow re-healing the same contamination pattern after 60 s so new uploads
@@ -1081,51 +1082,56 @@ export const DataProvider = ({ children }) => {
       if (!silentRefreshRef.current) setLoading(true);
       setError(null);
 
-      // Fetch user
-      const userRes = await fetch(`${BASE_URL}/user/getuserdetails`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accesstoken: token,
-        },
-      });
-      if (!userRes.ok) throw new Error("Failed to fetch user data");
-      const userData = await userRes.json();
-      setUser(userData);
-      const fk_user_id = userData?.id;
-      // Persist user ID so tax payloads and other API calls can use it
-      if (fk_user_id) localStorage.setItem("fk_user_id", fk_user_id);
-
-      // Fetch receipts
-      const receiptRes = await fetch(
-        `${BASE_URL}/user/getreceiptfromdatev1?fk_user_id=${fk_user_id}&date_time_stamp=${date_time_stamp}`,
-        {
-          method: "GET",
+      // Fetch user only on first load — user data doesn't change during a session.
+      // userFetchedRef persists across renders so it works correctly inside the
+      // memoized fetchData callback (avoids stale closure on the user state).
+      let fk_user_id = localStorage.getItem("fk_user_id");
+      if (!userFetchedRef.current) {
+        const userRes = await fetch(`${BASE_URL}/user/getuserdetails`, {
+          method: "POST",
           headers: {
             "Content-Type": "application/json",
             Accesstoken: token,
           },
-        }
-      );
+        });
+        if (!userRes.ok) throw new Error("Failed to fetch user data");
+        const userData = await userRes.json();
+        setUser(userData);
+        fk_user_id = userData?.id;
+        if (fk_user_id) localStorage.setItem("fk_user_id", fk_user_id);
+        userFetchedRef.current = true;
+      }
+
+      // Fire all independent requests in parallel so the receipt list appears as
+      // fast as the slowest single response, not the sum of all responses.
+      const [receiptRes, taxResRaw, apiStoreResRaw, apiPayResRaw, apiCatResRaw] = await Promise.all([
+        fetch(
+          `${BASE_URL}/user/getreceiptfromdatev1?fk_user_id=${fk_user_id}&date_time_stamp=${date_time_stamp}`,
+          { method: "GET", headers: { "Content-Type": "application/json", Accesstoken: token } }
+        ),
+        fetch(`${BASE_URL}/tax/getTax?date_time_stamp=${Date.now()}`, {
+          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
+        }).catch(() => null),
+        fetch(`${BASE_URL}/userstore/getStorev1`, {
+          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
+        }).catch(() => null),
+        fetch(`${BASE_URL}/userpaymentmethod/getPaymentMethodv1`, {
+          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
+        }).catch(() => null),
+        fetch(`${BASE_URL}/userexpensecategory/getExpenseCategoryv1`, {
+          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
+        }).catch(() => null),
+      ]);
+
       if (!receiptRes.ok) throw new Error("Failed to fetch receipts");
       const receiptData = await receiptRes.json();
       console.log("%c[Receipts] getreceiptfromdatev1 response (all receipts):", "color:#06b6d4;font-weight:bold", receiptData);
-      
-      // Fetch taxes from API (needed to enrich receipt_tax_values)
-      // Do this in parallel with receipt processing to avoid blocking
+
+      // Parse tax response
       let taxDataArray = [];
       try {
-        const dateTimeStamp = Date.now();
-        const taxRes = await fetch(`${BASE_URL}/tax/getTax?date_time_stamp=${dateTimeStamp}`, {
-          headers: {
-            // Use both header styles so the API works regardless of how the
-            // backend authenticates (Accesstoken for PHP, Bearer for Node.js)
-            Accesstoken: token,
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        if (taxRes.ok) {
-          const taxes = await taxRes.json();
+        if (taxResRaw?.ok) {
+          const taxes = await taxResRaw.json();
           taxDataArray = Array.isArray(taxes) ? taxes : [];
           // Merge with existing taxData to avoid losing recently-added taxes that the API
           // might not yet return (e.g. due to server-side caching or propagation delay).
@@ -1138,8 +1144,70 @@ export const DataProvider = ({ children }) => {
         }
       } catch (taxErr) {
         console.error("Error fetching taxes:", taxErr);
-        // Continue without tax data - receipts will still work
         taxDataArray = [];
+      }
+
+      // Parse merchants response
+      let apiMerchantsData = [];
+      try {
+        console.log("%c[fetchData] GET /userstore/getStorev1", "color:#6366f1;font-weight:bold");
+        if (apiStoreResRaw?.ok) {
+          const apiStoreJson = await apiStoreResRaw.json();
+          apiMerchantsData = Array.isArray(apiStoreJson) ? apiStoreJson.filter(m => m.store_name) : [];
+          console.log("%c[fetchData] Merchants from API:", "color:#6366f1;font-weight:bold", apiMerchantsData);
+          setApiMerchants(apiMerchantsData);
+          purgeCustomMerchantsMatchingApi(apiMerchantsData);
+        }
+      } catch (apiStoreErr) {
+        console.error("[fetchData] fetchApiMerchants error", apiStoreErr);
+      }
+
+      // Parse payment methods response
+      let apiPaymentMethodsData = [];
+      try {
+        console.log("%c[fetchData] GET /userpaymentmethod/getPaymentMethodv1", "color:#8b5cf6;font-weight:bold");
+        if (apiPayResRaw?.ok) {
+          const apiPayJson = await apiPayResRaw.json();
+          const allPayItems = Array.isArray(apiPayJson) ? apiPayJson : [];
+          apiPaymentMethodsData = allPayItems.filter(isPaymentApiRecord);
+          console.log("%c[fetchData] Payment methods from API (raw all):", "color:#8b5cf6;font-weight:bold", allPayItems);
+          console.log("%c[fetchData] Payment methods filtered (non-merchant):", "color:#8b5cf6;font-weight:bold", apiPaymentMethodsData);
+          setApiPaymentMethods(apiPaymentMethodsData);
+        }
+      } catch (apiPayErr) {
+        console.error("[fetchData] fetchApiPaymentMethods error", apiPayErr);
+      }
+
+      // Parse expense categories response
+      let apiExpenseCategoriesData = [];
+      try {
+        if (apiCatResRaw?.ok) {
+          const apiCatJson = await apiCatResRaw.json();
+          apiExpenseCategoriesData = normalizeExpenseCategoryApiList(
+            parseExpenseCategoryApiResponse(apiCatJson)
+          );
+          setApiExpenseCategories(apiExpenseCategoriesData);
+          if (apiExpenseCategoriesData.length > 0) {
+            const apiNameKeys = new Set(
+              apiExpenseCategoriesData
+                .map((c) => (c.expense_category_name || "").toString().trim().toLowerCase())
+                .filter(Boolean)
+            );
+            setHiddenCategories((prev) => {
+              const next = new Set(
+                [...prev].filter(
+                  (hidden) => !apiNameKeys.has(String(hidden || "").trim().toLowerCase())
+                )
+              );
+              if (next.size !== prev.size) {
+                localStorage.setItem("cat_hidden_categories", JSON.stringify([...next]));
+              }
+              return next;
+            });
+          }
+        }
+      } catch (apiCatErr) {
+        console.error("fetchApiExpenseCategories in fetchData error", apiCatErr);
       }
 
       // Build formatted receipts with subtotal, paymentDisplay, badgeStatus, read status,
@@ -1367,43 +1435,6 @@ export const DataProvider = ({ children }) => {
         receiptsWithIntegrations = formattedReceiptsDeduped;
       }
 
-
-      // Fetch API merchants from /userstore/getStorev1
-      let apiMerchantsData = [];
-      try {
-        console.log("%c[fetchData] GET /userstore/getStorev1", "color:#6366f1;font-weight:bold");
-        const apiStoreRes = await fetch(`${BASE_URL}/userstore/getStorev1`, {
-          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
-        });
-        if (apiStoreRes.ok) {
-          const apiStoreJson = await apiStoreRes.json();
-          apiMerchantsData = Array.isArray(apiStoreJson) ? apiStoreJson.filter(m => m.store_name) : [];
-          console.log("%c[fetchData] Merchants from API:", "color:#6366f1;font-weight:bold", apiMerchantsData);
-          setApiMerchants(apiMerchantsData);
-          purgeCustomMerchantsMatchingApi(apiMerchantsData);
-        }
-      } catch (apiStoreErr) {
-        console.error("[fetchData] fetchApiMerchants error", apiStoreErr);
-      }
-
-      // Fetch API payment methods from /userpaymentmethod/getPaymentMethodv1
-      let apiPaymentMethodsData = [];
-      try {
-        console.log("%c[fetchData] GET /userpaymentmethod/getPaymentMethodv1", "color:#8b5cf6;font-weight:bold");
-        const apiPayRes = await fetch(`${BASE_URL}/userpaymentmethod/getPaymentMethodv1`, {
-          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
-        });
-        if (apiPayRes.ok) {
-          const apiPayJson = await apiPayRes.json();
-          const allPayItems = Array.isArray(apiPayJson) ? apiPayJson : [];
-          apiPaymentMethodsData = allPayItems.filter(isPaymentApiRecord);
-          console.log("%c[fetchData] Payment methods from API (raw all):", "color:#8b5cf6;font-weight:bold", allPayItems);
-          console.log("%c[fetchData] Payment methods filtered (non-merchant):", "color:#8b5cf6;font-weight:bold", apiPaymentMethodsData);
-          setApiPaymentMethods(apiPaymentMethodsData);
-        }
-      } catch (apiPayErr) {
-        console.error("[fetchData] fetchApiPaymentMethods error", apiPayErr);
-      }
 
       setMerchants(
         Array.from(
@@ -1694,41 +1725,6 @@ setMerchantsWithImages(
         ),
       ]);
 
-      // Fetch API expense categories and merge with receipt-derived categories
-      let apiExpenseCategoriesData = [];
-      try {
-        const apiCatRes = await fetch(`${BASE_URL}/userexpensecategory/getExpenseCategoryv1`, {
-          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
-        });
-        if (apiCatRes.ok) {
-          const apiCatJson = await apiCatRes.json();
-          apiExpenseCategoriesData = normalizeExpenseCategoryApiList(
-            parseExpenseCategoryApiResponse(apiCatJson)
-          );
-          setApiExpenseCategories(apiExpenseCategoriesData);
-          if (apiExpenseCategoriesData.length > 0) {
-            const apiNameKeys = new Set(
-              apiExpenseCategoriesData
-                .map((c) => (c.expense_category_name || "").toString().trim().toLowerCase())
-                .filter(Boolean)
-            );
-            setHiddenCategories((prev) => {
-              const next = new Set(
-                [...prev].filter(
-                  (hidden) => !apiNameKeys.has(String(hidden || "").trim().toLowerCase())
-                )
-              );
-              if (next.size !== prev.size) {
-                localStorage.setItem("cat_hidden_categories", JSON.stringify([...next]));
-              }
-              return next;
-            });
-          }
-        }
-      } catch (apiCatErr) {
-        console.error("fetchApiExpenseCategories in fetchData error", apiCatErr);
-      }
-
       const receiptDerivedCategories = [
         ...new Set(
           receiptsWithIntegrations
@@ -1764,15 +1760,16 @@ setMerchantsWithImages(
   useEffect(() => {
     const token = localStorage.getItem("token");
     // Only fetch data if token exists
+    // fetchData now fetches all APIs in parallel (receipts, taxes, merchants, PMs, categories)
     if (token) {
-      fetchData(); // fetchData already calls fetchTaxes internally
-      fetchApiExpenseCategories();
+      fetchData();
     } else {
       setLoading(false);
     }
-  }, [fetchData, fetchApiExpenseCategories]);
+  }, [fetchData]);
 
   const clearAllData = () => {
+    userFetchedRef.current = false;
     setUser(null);
     setReceipts([]);
     setMerchants(["Miscellaneous"]);

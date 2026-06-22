@@ -129,7 +129,6 @@ const HomePage = () => {
   } = useChatAssistant();
 
   const customizedReportRef = useRef(null);
-  const calledRef = useRef(false);
   const autoRefreshInFlightRef = useRef(false);
   const mobileSearchInputRef = useRef(null);
   const receiptsScrollRef = useRef(null);
@@ -352,13 +351,6 @@ const HomePage = () => {
   };
 
   const closeMobileSearch = () => setShowMobileSearch(false);
-
-  useEffect(() => {
-    if (!calledRef.current) {
-      calledRef.current = true;
-      refreshData();
-    }
-  }, [refreshData]);
 
   // Auto-refresh receipts so incoming eReceipts appear without manual refresh/login cycle.
   // Uses silent refresh to avoid full-page loading flicker.
