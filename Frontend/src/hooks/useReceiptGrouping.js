@@ -47,6 +47,10 @@ export const useReceiptGrouping = (receipts, filters, sortConfig, searchTerm) =>
     return { draftReceipts: draft, regularReceipts: regular };
   }, [receipts]);
 
+  const filteredDraftReceipts = useMemo(() => {
+    return filterReceipts(draftReceipts, filters, searchTerm);
+  }, [draftReceipts, filters, searchTerm]);
+
   const filteredReceipts = useMemo(() => {
     return filterReceipts(regularReceipts, filters, searchTerm);
   }, [regularReceipts, filters, searchTerm]);
@@ -90,7 +94,7 @@ export const useReceiptGrouping = (receipts, filters, sortConfig, searchTerm) =>
   }, [sortedReceipts, sortConfig]);
 
   return {
-    draftReceipts,
+    draftReceipts: filteredDraftReceipts,
     groupedReceipts,
     yearTotals,
     sortedYears,
