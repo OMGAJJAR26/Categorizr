@@ -1642,7 +1642,38 @@ setMerchantsWithImages(
       // Update receipts with enriched data (payment fields + logos + tax) and
       // build the payment methods list from the NOW-enriched receipts so renamed
       // payment methods show the updated name, not the stale one.
-      setReceipts(receiptsWithIntegrations);
+      // Merge: preserve receipt_forwarded="1" from in-memory state (same-session flicker)
+      // and from localStorage (survives refresh and logout/login, like iOS Core Data).
+      // Once the backend starts returning "1" for a receipt, the localStorage entry is
+      // cleaned up automatically.
+      setReceipts(prevReceipts => {
+        const prevMap = new Map(prevReceipts.map(r => [String(r.id), r]));
+        let locallyForwarded;
+        try {
+          locallyForwarded = new Set(JSON.parse(localStorage.getItem("cat_locally_forwarded") || "[]"));
+        } catch {
+          locallyForwarded = new Set();
+        }
+        const needsLocalWrite = locallyForwarded.size > 0;
+        const result = receiptsWithIntegrations.map(r => {
+          const rId = String(r.id);
+          const prev = prevMap.get(rId);
+          const shouldBeForwarded =
+            (prev?.receipt_forwarded === "1") || locallyForwarded.has(rId);
+          if (shouldBeForwarded && r.receipt_forwarded !== "1") {
+            const merged = { ...r, receipt_forwarded: "1" };
+            return { ...merged, badgeStatus: getReceiptBadgeStatus(merged) };
+          }
+          if (r.receipt_forwarded === "1" && locallyForwarded.has(rId)) {
+            locallyForwarded.delete(rId);
+          }
+          return r;
+        });
+        if (needsLocalWrite) {
+          try { localStorage.setItem("cat_locally_forwarded", JSON.stringify([...locallyForwarded])); } catch {}
+        }
+        return result;
+      });
       // Heal runs on EVERY fetchData call (including silentRefreshData) so that
       // each new upload that re-contaminates older receipts is fixed promptly.
       // The function itself rate-limits per-signature (60 s cooldown, 5 retries).
@@ -1974,6 +2005,30 @@ setMerchantsWithImages(
         ? receipt.receipt_tax_values
         : [],
     };
+  };
+
+  const markReceiptAsForwarded = async (receiptId) => {
+    const token = localStorage.getItem("token");
+    if (!token || !receiptId) return;
+    const existingReceipt = receipts.find(r => String(r.id) === String(receiptId));
+    if (!existingReceipt) return;
+    const payload = buildReceiptUpdatePayloadFromRow({
+      ...existingReceipt,
+      receipt_forwarded: "1",
+    });
+    await postReceiptUpdatePayload(payload, token);
+    // Persist locally so badge survives refresh and logout/login
+    // (equivalent to iOS Core Data — backend doesn't update the source receipt)
+    try {
+      const set = new Set(JSON.parse(localStorage.getItem("cat_locally_forwarded") || "[]"));
+      set.add(String(receiptId));
+      localStorage.setItem("cat_locally_forwarded", JSON.stringify([...set]));
+    } catch { /* quota */ }
+    setReceipts(prev => prev.map(r => {
+      if (String(r.id) !== String(receiptId)) return r;
+      const updated = { ...r, receipt_forwarded: "1" };
+      return { ...updated, badgeStatus: getReceiptBadgeStatus(updated) };
+    }));
   };
 
   /**
@@ -2488,8 +2543,54 @@ setMerchantsWithImages(
         (m) => (m.store_name || "").toLowerCase() === storeName.toLowerCase()
       );
       if (!existingMerchant) {
-        tasks.push(addApiMerchant(storeName, storeImage));
-        if (storeImage) saveMerchLogo(storeName, storeImage);
+        let logoToUse = storeImage;
+        if (!logoToUse) {
+          // Sender used a local app asset (no URL) — try prefix-match against known merchants.
+          // e.g. "Target - iOS" starts with "Target" → use Target's logo.
+          const storeNameLower = storeName.toLowerCase();
+          const partialApi = (apiMerchants || []).find(
+            (m) => m.store_image_url && storeNameLower.startsWith((m.store_name || "").toLowerCase())
+          );
+          if (partialApi) {
+            logoToUse = partialApi.store_image_url;
+          } else {
+            const partialDef = DEFAULT_MERCHANTS_WITH_LOGOS.find(
+              (d) => d.image && storeNameLower.startsWith((d.name || "").toLowerCase())
+            );
+            if (partialDef) logoToUse = partialDef.image;
+          }
+        }
+        tasks.push(addApiMerchant(storeName, logoToUse));
+        if (logoToUse) {
+          saveMerchLogo(storeName, logoToUse);
+          // Patch store_image on the in-memory receipt so the card re-renders immediately
+          // with the resolved logo instead of waiting for the next full data fetch.
+          if (receipt.id) {
+            setReceipts((prev) =>
+              prev.map((r) =>
+                String(r.id) === String(receipt.id) && !r.store_image
+                  ? { ...r, store_image: logoToUse }
+                  : r
+              )
+            );
+            tasks.push(
+              (async () => {
+                const token = localStorage.getItem("token");
+                if (!token) return;
+                for (const ep of ["/api/receipt/updateReceiptv1", "/api/receipt/editReceiptv1"]) {
+                  try {
+                    const res = await fetch(ep, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json", Accesstoken: token },
+                      body: JSON.stringify({ id: receipt.id, store_image: logoToUse }),
+                    });
+                    if (res.ok) break;
+                  } catch { /* ignore */ }
+                }
+              })()
+            );
+          }
+        }
       } else if (storeImage && !existingMerchant.store_image_url) {
         tasks.push(updateApiMerchant(existingMerchant.id, storeName, storeImage));
         saveMerchLogo(storeName, storeImage);
@@ -2526,16 +2627,35 @@ setMerchantsWithImages(
       || (receipt.paymentType || "").replace(/\s*\*\d+/g, "").trim();
     if (pmLast4 || pmIssuer) {
       const pmSig = `${pmIssuer.toLowerCase()}|${pmLast4}`;
+
+      // Resolve brand early — needed for both the alreadyHave check and logo/type resolution.
+      // When the issuer is a custom name (e.g. "Nokia"), infer brand from paymentType
+      // ("Discover") so card_type and logo are set correctly on Account B.
+      const issuerStr = (receipt.card_issuer_name || "").replace(/\s*\*\d+/g, "").trim();
+      const payTypeStr = (receipt.paymentType || "").replace(/\s*\*\d+/g, "").trim();
+      const brandFromIssuer = inferCardTypeFromPayment(issuerStr);
+      const resolvedBrand = brandFromIssuer !== "Other"
+        ? brandFromIssuer
+        : (inferCardTypeFromPayment(payTypeStr) || "Other");
+
       const alreadyHave = (apiPaymentMethods || []).some((pm) => {
-        const eLast4 = (pm.last_4_digit_card || "").replace(/\D/g, "").slice(-4);
+        // API PM objects use card_number (not last_4_digit_card) for the last4 field
+        const eLast4 = getLast4FromPaymentApiRecord(pm);
         const eIssuer = (pm.card_issuer_name || "").trim().toLowerCase();
-        return `${eIssuer}|${eLast4}` === pmSig;
+        if (`${eIssuer}|${eLast4}` === pmSig) return true;
+        // Brand-only PMs (Cash, Visa, etc.) are stored with card_issuer_name="" because
+        // storedCardIssuerName returns "" when the issuer name equals the brand.
+        // Fall back to card_type integer match so Cash (type 7) never duplicates.
+        if (!eIssuer && eLast4 === pmLast4) {
+          const eBrand = cardTypeIntToBrand(parseInt(pm.card_type ?? "", 10));
+          if (eBrand && eBrand !== "Other" && eBrand.toLowerCase() === resolvedBrand.toLowerCase()) return true;
+        }
+        return false;
       });
+
       // Prefer explicit logo from the forwarded receipt; fall back to the standard
       // logo for the detected card type so custom PMs (e.g. "HeadPhoneSONY") at
       // minimum store the generic credit-card icon instead of an empty string.
-      // When the issuer is a custom name (e.g. "Nokia"), infer brand from paymentType
-      // ("Discover") so card_type and logo are set correctly on Account B.
       const PM_LOGO_MAP = {
         Visa: "/payment-logos/Visa.png",
         MasterCard: "/payment-logos/MasterCard.png",
@@ -2547,13 +2667,6 @@ setMerchantsWithImages(
         "Debit Card": "/payment-logos/DebitCard.webp",
         Other: "/payment-logos/Creditdebitcardicon.jpg",
       };
-      const issuerStr = (receipt.card_issuer_name || "").replace(/\s*\*\d+/g, "").trim();
-      const payTypeStr = (receipt.paymentType || "").replace(/\s*\*\d+/g, "").trim();
-      const brandFromIssuer = inferCardTypeFromPayment(issuerStr);
-      // If issuer name is custom (brand=Other), check paymentType for the real card brand
-      const resolvedBrand = brandFromIssuer !== "Other"
-        ? brandFromIssuer
-        : (inferCardTypeFromPayment(payTypeStr) || "Other");
       const pmLogoUrl = receipt.payment_logo_url || receipt.paymentDisplay?.logoUrl
         || PM_LOGO_MAP[resolvedBrand] || PM_LOGO_MAP.Other;
       // Inject resolved brand as cardTypeBrand so normalizeApiPaymentMethodInput sets
@@ -2928,6 +3041,7 @@ setMerchantsWithImages(
         updateReceiptStatus,
         deleteReceipt,
         updateReceipt,
+        markReceiptAsForwarded,
         repairReceiptMediaOnServer,
         syncForwardedReceiptData,
         addExpenseCategory,

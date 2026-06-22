@@ -13,7 +13,9 @@ const SessionManager = ({ children }) => {
       clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
     
+        const forwarded = localStorage.getItem("cat_locally_forwarded");
         localStorage.clear();
+        if (forwarded) localStorage.setItem("cat_locally_forwarded", forwarded);
         navigate("/login");
       }, TIMEOUT);
     };

@@ -25,8 +25,10 @@ const Header = () => {
     setShowLogoutConfirm(false);
     // Clear all data first
     clearAllData();
-    // Then clear localStorage
+    // Clear localStorage but preserve forwarded-receipt IDs (like iOS Core Data across app restarts)
+    const forwarded = localStorage.getItem("cat_locally_forwarded");
     localStorage.clear();
+    if (forwarded) localStorage.setItem("cat_locally_forwarded", forwarded);
     // Navigate to login
     navigate("/login", { replace: true });
   };

@@ -235,6 +235,7 @@ const ReceiptDetail = ({
     deleteCustomPaymentMethod,
     hidePaymentMethod,
     repairReceiptMediaOnServer,
+    markReceiptAsForwarded,
   } = useData();
 
   const openingReceipt = findContextReceipt(receipts, receipt);
@@ -2917,7 +2918,7 @@ useEffect(() => {
     setSelectedReceipt((prev) => (prev ? { ...prev, ...forwardedPatch } : prev));
     setEditedReceipt((prev) => ({ ...prev, receipt_forwarded: "1" }));
 
-    await updateReceipt(selectedReceipt.id, forwardedPatch);
+    await markReceiptAsForwarded(selectedReceipt.id);
 
     setToast({ isVisible: true, message: "Receipt forwarded successfully.", type: "success" });
     silentRefreshData?.(1500);
