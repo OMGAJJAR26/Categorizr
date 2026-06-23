@@ -97,7 +97,7 @@ export function resolveReceiptCalendarUnix(
 
     if (utcDay !== localDay) {
       if (utcDay - localDay === ONE_DAY_MS) return Math.floor(localDay / 1000);
-      if (localDay - utcDay === ONE_DAY_MS) return Math.floor(utcDay / 1000);
+      if (localDay - utcDay === ONE_DAY_MS) return Math.floor(localDay / 1000);
     }
     return Math.floor(utcDay / 1000);
   }

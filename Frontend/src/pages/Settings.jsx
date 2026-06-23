@@ -121,19 +121,19 @@ const getPaymentLogo = (name) => {
   return null;
 };
 
-/** Resolve logo for an API payment-method record using card_type (authoritative)
- *  then icon_image, then keyword detection on the display name. */
+/** Resolve logo for an API payment-method record using icon_image (explicitly configured)
+ *  then card_type, then keyword detection on the display name. */
 const getApiPaymentMethodLogo = (p) => {
   if (!p) return null;
-  // card_type integer is authoritative (0=AmEx…5=DinersClub…8=Other)
-  const brand = cardTypeIntToBrand(p.card_type);
-  const brandLogo = brand ? getPaymentLogo(brand) : null;
-  if (brandLogo) return brandLogo;
-  // fall back to icon_image if it's a valid logo path / URL
+  // icon_image is the explicitly configured logo — use it when present
   const img = (p.icon_image || "").trim();
   if (img && (img.startsWith("/payment-logos/") || /^https?:\/\//.test(img) || img.startsWith("data:image"))) {
     return img;
   }
+  // fall back to card_type integer brand logo
+  const brand = cardTypeIntToBrand(p.card_type);
+  const brandLogo = brand ? getPaymentLogo(brand) : null;
+  if (brandLogo) return brandLogo;
   // keyword detection on display name, then generic icon as final fallback
   return getPaymentLogo(getApiPaymentMethodDisplayName(p)) || (brand === "Other" ? creditDebitCardIcon : null);
 };

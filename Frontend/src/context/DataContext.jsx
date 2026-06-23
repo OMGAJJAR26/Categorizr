@@ -1345,7 +1345,7 @@ export const DataProvider = ({ children }) => {
                 ? (() => { try { return decodeURIComponent(_rawStoreImage.slice(_siIdx + _storeImageMarker.length)); } catch { return _rawStoreImage; } })()
                 : _rawStoreImage;
               const storeImage = /localhost|127\.0\.0\.1/i.test(_storeImageUnproxied) ? "" : _storeImageUnproxied;
-              const expenseType = r.expense_type ?? r.expenseType ?? "";
+              const expenseType = r.expense_type || r.expenseType || r.expense_category || r.expenseCategory || "";
               const productName = r.product_name ?? r.productName ?? "";
               // iOS sends purchase_price (snake_case); web sends purchasePrice (camelCase)
               const purchasePrice = r.purchasePrice ?? r.purchase_price ?? "";
@@ -2635,7 +2635,7 @@ setMerchantsWithImages(
         ? brandFromIssuer
         : (inferCardTypeFromPayment(payTypeStr) || "Other");
 
-      const alreadyHave = (apiPaymentMethods || []).some((pm) => {
+      const existingPm = (apiPaymentMethods || []).find((pm) => {
         // API PM objects use card_number (not last_4_digit_card) for the last4 field
         const eLast4 = getLast4FromPaymentApiRecord(pm);
         const eIssuer = (pm.card_issuer_name || "").trim().toLowerCase();
@@ -2649,6 +2649,7 @@ setMerchantsWithImages(
         }
         return false;
       });
+      const alreadyHave = !!existingPm;
 
       // Prefer explicit logo from the forwarded receipt; fall back to the standard
       // logo for the detected card type so custom PMs (e.g. "HeadPhoneSONY") at
@@ -2664,23 +2665,47 @@ setMerchantsWithImages(
         "Debit Card": "/payment-logos/DebitCard.webp",
         Other: "/payment-logos/Creditdebitcardicon.jpg",
       };
-      const pmLogoUrl = receipt.payment_logo_url || receipt.paymentDisplay?.logoUrl
-        || PM_LOGO_MAP[resolvedBrand] || PM_LOGO_MAP.Other;
+      // If the receipt carries an explicit logo URL that matches a known brand,
+      // use that brand — it is more authoritative than text inference for custom-named
+      // cards (e.g. "Yashphone *2222" with a Discover logo → brand = Discover, not "Other")
+      const pmRawLogoUrl = receipt.payment_logo_url || receipt.paymentDisplay?.logoUrl || "";
+      const brandFromLogo = pmRawLogoUrl
+        ? (Object.entries(PM_LOGO_MAP).find(
+            ([, v]) => v.toLowerCase() === pmRawLogoUrl.toLowerCase()
+          )?.[0] || null)
+        : null;
+      const finalBrand = brandFromLogo || resolvedBrand;
+      const pmLogoUrl = pmRawLogoUrl || PM_LOGO_MAP[finalBrand] || PM_LOGO_MAP.Other;
       // Inject resolved brand as cardTypeBrand so normalizeApiPaymentMethodInput sets
       // the correct card_type integer (e.g. Discover=4) instead of defaulting to Other=8.
-      const pmInput = resolvedBrand !== "Other"
-        ? { ...receipt, cardTypeBrand: resolvedBrand }
+      const pmInput = finalBrand !== "Other"
+        ? { ...receipt, cardTypeBrand: finalBrand }
         : receipt;
-      if (!alreadyHave) tasks.push(addApiPaymentMethod(pmInput, pmLogoUrl, receipt.expense_type || ""));
+      if (!alreadyHave) {
+        tasks.push(addApiPaymentMethod(pmInput, pmLogoUrl, receipt.expense_type || ""));
+      } else if (existingPm?.id && brandFromLogo && existingPm.icon_image !== pmLogoUrl) {
+        // The receipt carries an authoritative logo URL that differs from what is stored —
+        // update the existing PM so Settings/Filter show the correct logo going forward.
+        tasks.push(updateApiPaymentMethod(existingPm.id, pmInput, pmLogoUrl, receipt.expense_type || ""));
+      }
     }
 
     // Expense category
-    const expenseType = (receipt.expense_type || receipt.expenseType || "").trim();
+    const expenseType = (receipt.expense_type || receipt.expenseType || receipt.expense_category || receipt.expenseCategory || "").trim();
     if (expenseType) {
       const catExists = (apiExpenseCategories || []).some(
         (c) => (c.expense_category_name || "").toLowerCase() === expenseType.toLowerCase()
       );
       if (!catExists) tasks.push(addApiExpenseCategory(expenseType));
+      // Patch the in-memory receipt so the detail view shows expense_type immediately
+      // without waiting for the next full data refresh (mirrors how store_image is patched above)
+      if (receipt.id && !receipt.expense_type) {
+        setReceipts((prev) =>
+          prev.map((r) =>
+            String(r.id) === String(receipt.id) ? { ...r, expense_type: expenseType } : r
+          )
+        );
+      }
     }
 
     // Tax types (skip Tip lines)
