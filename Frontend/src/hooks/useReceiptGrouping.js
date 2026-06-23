@@ -44,12 +44,10 @@ export const useReceiptGrouping = (receipts, filters, sortConfig, searchTerm) =>
     });
     // Sort draft receipts newest first
     draft.sort((a, b) => Number(b.product_date || 0) - Number(a.product_date || 0));
-    return { draftReceipts: draft, regularReceipts: regular };
-  }, [receipts]);
-
-  const filteredDraftReceipts = useMemo(() => {
-    return filterReceipts(draftReceipts, filters, searchTerm);
-  }, [draftReceipts, filters, searchTerm]);
+    // Apply the same filters to drafts so they respect active filter selections
+    const filteredDraft = filterReceipts(draft, filters, searchTerm);
+    return { draftReceipts: filteredDraft, regularReceipts: regular };
+  }, [receipts, filters, searchTerm]);
 
   const filteredReceipts = useMemo(() => {
     return filterReceipts(regularReceipts, filters, searchTerm);
@@ -94,7 +92,7 @@ export const useReceiptGrouping = (receipts, filters, sortConfig, searchTerm) =>
   }, [sortedReceipts, sortConfig]);
 
   return {
-    draftReceipts: filteredDraftReceipts,
+    draftReceipts,
     groupedReceipts,
     yearTotals,
     sortedYears,
