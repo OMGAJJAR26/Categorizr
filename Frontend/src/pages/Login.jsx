@@ -16,6 +16,7 @@ import {
 import { Formik, Form, Field, ErrorMessage } from "formik";
 import * as Yup from "yup";
 import { useLoader } from "../context/LoaderContext";
+import { useData } from "../context/DataContext";
 import ForgotPasswordModal from "./ForgotPasswordModel";
 import ForgotUsernameModal from "./ForgotUsernameModel";
 
@@ -26,6 +27,7 @@ const Login = () => {
   const [showUsernameModel, setShowUsernameModel] = useState(false);
   const navigate = useNavigate();
   const { setLoading } = useLoader();
+  const { refreshData } = useData();
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -69,6 +71,8 @@ const Login = () => {
           method: "POST",
           headers: { "Content-Type": "application/json", Accesstoken: data.authenticationToken },
         }).catch(() => {});
+        // Kick off data fetch immediately so receipts are ready when homepage renders
+        refreshData();
         navigate("/homepage", { replace: true });
       } else {
         setAlertMsg(data.message || "Login failed");
