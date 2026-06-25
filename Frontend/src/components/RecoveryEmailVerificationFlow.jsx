@@ -14,6 +14,14 @@ import { X, ShieldCheck, Loader2, RefreshCw } from "lucide-react";
 const BASE_URL = "/api";
 const OTP_LENGTH = 4;
 
+// React StrictMode remounts the modal in dev — track auto-send per user/day so OTP is only sent once.
+const autoSendInitiatedForUser = new Set();
+
+const getAutoSendKey = () => {
+  const userId = localStorage.getItem("fk_user_id") || "0";
+  return `${userId}-${new Date().toDateString()}`;
+};
+
 /** Returns true if a stored ms-timestamp is from today's calendar day */
 export const isTimestampFromToday = (ts) => {
   if (!ts) return false;
@@ -36,9 +44,16 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
   const [cooldown, setCooldown]   = useState(0);
   const inputRefs                 = useRef([]);
   const timerRef                  = useRef(null);
+  const sendInFlightRef           = useRef(false);
 
-  // Auto-send OTP as soon as the modal opens
+  // Auto-send OTP once when the modal opens (guarded against StrictMode double-mount).
   useEffect(() => {
+    const autoSendKey = getAutoSendKey();
+    if (autoSendInitiatedForUser.has(autoSendKey)) {
+      setSent(true);
+      return () => clearInterval(timerRef.current);
+    }
+    autoSendInitiatedForUser.add(autoSendKey);
     handleSendOtp();
     return () => clearInterval(timerRef.current);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -55,6 +70,8 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
   };
 
   const handleSendOtp = async () => {
+    if (sendInFlightRef.current) return;
+    sendInFlightRef.current = true;
     setSending(true);
     setError("");
     try {
@@ -72,6 +89,7 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
     } catch (err) {
       setError(err.message || "Could not send OTP. Please try again.");
     } finally {
+      sendInFlightRef.current = false;
       setSending(false);
     }
   };

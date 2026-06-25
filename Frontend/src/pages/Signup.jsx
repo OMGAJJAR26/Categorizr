@@ -16,6 +16,7 @@ import {
 import { useFormik } from "formik";
 import * as Yup from "yup";
 import { useLoader } from "../context/LoaderContext";
+import { useData } from "../context/DataContext";
 
 const getBrowserCountry = async () => {
   try {
@@ -77,6 +78,7 @@ const Signup = () => {
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
   const { setLoading } = useLoader();
+  const { refreshDataAfterAuth } = useData();
 
   const formik = useFormik({
     initialValues: {
@@ -178,6 +180,7 @@ const Signup = () => {
             message: data.message || "Signup successful",
             type: "success",
           });
+          await refreshDataAfterAuth();
           navigate("/homepage", { replace: true });
         } else {
           setToastConfig({

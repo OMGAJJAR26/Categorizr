@@ -16,6 +16,7 @@ const SessionManager = ({ children }) => {
         const forwarded = localStorage.getItem("cat_locally_forwarded");
         localStorage.clear();
         if (forwarded) localStorage.setItem("cat_locally_forwarded", forwarded);
+        window.dispatchEvent(new CustomEvent("cat:session-expired"));
         navigate("/login");
       }, TIMEOUT);
     };

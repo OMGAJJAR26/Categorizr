@@ -33,11 +33,12 @@ import ChatButton from "../components/chat/ChatButton";
 import ChatPanel from "../components/chat/ChatPanel";
 import RecoveryEmailVerificationFlow from "../components/RecoveryEmailVerificationFlow";
 import { isTimestampFromToday } from "../components/RecoveryEmailVerificationFlow";
+import { isRecoveryEmailVerified } from "../utils/userUtils";
 import "./HomePage.css";
 
 const HomePage = () => {
   const navigate = useNavigate();
-  const { refreshData, silentRefreshData, receipts, loading, updateReceiptStatus, deleteReceipt, updateReceipt, user, syncForwardedReceiptData } = useData();
+  const { refreshData, silentRefreshData, receipts, loading, updateReceiptStatus, deleteReceipt, updateReceipt, user, syncForwardedReceiptData, markRecoveryEmailVerified } = useData();
   const { formatCurrency } = useCurrency();
 
   // Custom hooks for complex logic
@@ -172,12 +173,7 @@ const HomePage = () => {
   useEffect(() => {
     if (!user) return;
 
-    const isVerified =
-      user.isRecoveryEmailVerified ??
-      user.is_recovery_email_verified ??
-      false;
-
-    if (isVerified) return;
+    if (isRecoveryEmailVerified(user)) return;
 
     const ts = localStorage.getItem("cat_confirmEmailPopupTs");
     if (isTimestampFromToday(ts)) return; // already shown today
@@ -1335,6 +1331,7 @@ const HomePage = () => {
           onDone={(verified) => {
             setShowRecoveryEmailFlow(false);
             if (verified) {
+              markRecoveryEmailVerified();
               setToast({
                 isVisible: true,
                 message: "Email verified successfully!",

@@ -39,6 +39,7 @@ import {
   resolveReceiptCalendarUnix,
   calendarUnixToMobileUnix,
 } from "../utils/receiptDate";
+import { normalizeUserResponse } from "../utils/userUtils";
 
 const DataContext = createContext();
 const BASE_URL = "/api";
@@ -1095,7 +1096,9 @@ export const DataProvider = ({ children }) => {
           },
         });
         if (!userRes.ok) throw new Error("Failed to fetch user data");
-        const userData = await userRes.json();
+        const userJson = await userRes.json();
+        const userData = normalizeUserResponse(userJson);
+        if (!userData) throw new Error("Invalid user data response");
         setUser(userData);
         fk_user_id = userData?.id;
         if (fk_user_id) localStorage.setItem("fk_user_id", fk_user_id);
@@ -1757,16 +1760,20 @@ setMerchantsWithImages(
     await fetchData();
   }, [fetchData]);
 
-  useEffect(() => {
-    const token = localStorage.getItem("token");
-    // Only fetch data if token exists
-    // fetchData now fetches all APIs in parallel (receipts, taxes, merchants, PMs, categories)
-    if (token) {
-      fetchData();
-    } else {
-      setLoading(false);
-    }
+  // After login/signup: always re-fetch user profile (userFetchedRef may be stale).
+  const refreshDataAfterAuth = useCallback(async () => {
+    userFetchedRef.current = false;
+    setUser(null);
+    await fetchData();
   }, [fetchData]);
+
+  const markRecoveryEmailVerified = useCallback(() => {
+    setUser((prev) =>
+      prev
+        ? { ...prev, is_recovery_email_verified: 1, isRecoveryEmailVerified: true }
+        : prev
+    );
+  }, []);
 
   const clearAllData = () => {
     userFetchedRef.current = false;
@@ -1799,6 +1806,23 @@ setMerchantsWithImages(
     setHiddenPaymentMethods(new Set());
     // Note: Don't clear taxes here - they should persist
   };
+
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    // Only fetch data if token exists
+    // fetchData now fetches all APIs in parallel (receipts, taxes, merchants, PMs, categories)
+    if (token) {
+      fetchData();
+    } else {
+      setLoading(false);
+    }
+  }, [fetchData]);
+
+  useEffect(() => {
+    const onSessionExpired = () => clearAllData();
+    window.addEventListener("cat:session-expired", onSessionExpired);
+    return () => window.removeEventListener("cat:session-expired", onSessionExpired);
+  }, []);
 
   // Add updateReceiptStatus function
   const updateReceiptStatus = async (receiptId, newStatus) => {
@@ -3054,7 +3078,9 @@ setMerchantsWithImages(
         loading,
         error,
         refreshData: fetchData,
+        refreshDataAfterAuth,
         silentRefreshData,
+        markRecoveryEmailVerified,
         calculateSubtotal,
         setDataContent,
         clearDataContent,

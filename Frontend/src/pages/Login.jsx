@@ -27,7 +27,7 @@ const Login = () => {
   const [showUsernameModel, setShowUsernameModel] = useState(false);
   const navigate = useNavigate();
   const { setLoading } = useLoader();
-  const { refreshData } = useData();
+  const { refreshDataAfterAuth } = useData();
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -71,8 +71,8 @@ const Login = () => {
           method: "POST",
           headers: { "Content-Type": "application/json", Accesstoken: data.authenticationToken },
         }).catch(() => {});
-        // Kick off data fetch immediately so receipts are ready when homepage renders
-        refreshData();
+        // Load user + receipts before navigating so header/receipts render immediately
+        await refreshDataAfterAuth();
         navigate("/homepage", { replace: true });
       } else {
         setAlertMsg(data.message || "Login failed");
