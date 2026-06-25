@@ -34,11 +34,12 @@ import ChatPanel from "../components/chat/ChatPanel";
 import RecoveryEmailVerificationFlow from "../components/RecoveryEmailVerificationFlow";
 import { isTimestampFromToday } from "../components/RecoveryEmailVerificationFlow";
 import { isRecoveryEmailVerified } from "../utils/userUtils";
+import { getReceiptExpenseType } from "../utils/expenseCategories";
 import "./HomePage.css";
 
 const HomePage = () => {
   const navigate = useNavigate();
-  const { refreshData, silentRefreshData, receipts, loading, updateReceiptStatus, deleteReceipt, updateReceipt, user, syncForwardedReceiptData, markRecoveryEmailVerified } = useData();
+  const { refreshData, silentRefreshData, receipts, loading, updateReceiptStatus, deleteReceipt, updateReceipt, user, syncForwardedReceiptData, markRecoveryEmailVerified, apiExpenseCategories } = useData();
   const { formatCurrency } = useCurrency();
 
   // Custom hooks for complex logic
@@ -414,7 +415,16 @@ const HomePage = () => {
     // Receipts that haven't shown a notification yet
     const newForwards = allForwards.filter((r) => !seen.has(String(r.id)));
     // Receipts that haven't been data-synced yet (may include older forwards)
-    const toSync = allForwards.filter((r) => !synced.has(String(r.id)));
+    const toSync = allForwards.filter((r) => {
+      const resolvedType = getReceiptExpenseType(r, apiExpenseCategories).trim();
+      const rowType = (r.expense_type || "").trim();
+      if (!synced.has(String(r.id))) return true;
+      // Re-sync when category is present on the payload but not yet on the row
+      return (
+        resolvedType &&
+        rowType.toLowerCase() !== resolvedType.toLowerCase()
+      );
+    });
 
     // Show notification for newly arrived ones
     if (newForwards.length > 0) {
@@ -452,7 +462,7 @@ const HomePage = () => {
         });
       });
     }
-  }, [receipts, user?.id, syncForwardedReceiptData]);
+  }, [receipts, user?.id, syncForwardedReceiptData, apiExpenseCategories]);
 
   const handleReceiptClick = async (receipt, index) => {
     if (receipt.status === "0") {

@@ -5,6 +5,7 @@ import {
   parseExpenseCategoryApiResponse,
   getExpenseCategoryNamesFromApi,
   getExpenseCategoryRecordName,
+  getReceiptExpenseType,
   buildExpenseCategoryOptions,
   normalizeExpenseCategoryApiItem,
   normalizeExpenseCategoryApiList,
@@ -1348,7 +1349,7 @@ export const DataProvider = ({ children }) => {
                 ? (() => { try { return decodeURIComponent(_rawStoreImage.slice(_siIdx + _storeImageMarker.length)); } catch { return _rawStoreImage; } })()
                 : _rawStoreImage;
               const storeImage = /localhost|127\.0\.0\.1/i.test(_storeImageUnproxied) ? "" : _storeImageUnproxied;
-              const expenseType = r.expense_type || r.expenseType || r.expense_category || r.expenseCategory || "";
+              const expenseType = getReceiptExpenseType(r, apiExpenseCategoriesData);
               const productName = r.product_name ?? r.productName ?? "";
               // iOS sends purchase_price (snake_case); web sends purchasePrice (camelCase)
               const purchasePrice = r.purchasePrice ?? r.purchase_price ?? "";
@@ -1731,8 +1732,7 @@ setMerchantsWithImages(
       const receiptDerivedCategories = [
         ...new Set(
           receiptsWithIntegrations
-            .filter((r) => !isNetworkReceivedReceipt(r))
-            .map((r) => (r.expense_type ?? "").toString().trim())
+            .map((r) => getReceiptExpenseType(r, apiExpenseCategoriesData).trim())
             .filter(Boolean)
         ),
       ];
@@ -2715,19 +2715,30 @@ setMerchantsWithImages(
     }
 
     // Expense category
-    const expenseType = (receipt.expense_type || receipt.expenseType || receipt.expense_category || receipt.expenseCategory || "").trim();
+    const expenseType = getReceiptExpenseType(receipt, apiExpenseCategories).trim();
     if (expenseType) {
       const catExists = (apiExpenseCategories || []).some(
         (c) => (c.expense_category_name || "").toLowerCase() === expenseType.toLowerCase()
       );
       if (!catExists) tasks.push(addApiExpenseCategory(expenseType));
-      // Patch the in-memory receipt so the detail view shows expense_type immediately
-      // without waiting for the next full data refresh (mirrors how store_image is patched above)
-      if (receipt.id && !receipt.expense_type) {
+      // Patch in-memory receipt when API row is missing expense_type (common on forwards)
+      const currentType = (receipt.expense_type || "").trim();
+      if (receipt.id && currentType.toLowerCase() !== expenseType.toLowerCase()) {
         setReceipts((prev) =>
           prev.map((r) =>
             String(r.id) === String(receipt.id) ? { ...r, expense_type: expenseType } : r
           )
+        );
+        tasks.push(
+          (async () => {
+            const token = localStorage.getItem("token");
+            if (!token) return;
+            const payload = buildReceiptUpdatePayloadFromRow({
+              ...receipt,
+              expense_type: expenseType,
+            });
+            await postReceiptUpdatePayload(payload, token);
+          })()
         );
       }
     }

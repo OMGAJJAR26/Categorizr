@@ -1,5 +1,5 @@
 import { getPaymentDisplayFromReceipt } from "../hooks/usePaymentDisplay";
-import { getExpenseCategoryRecordName } from "./expenseCategories";
+import { getExpenseCategoryRecordName, getReceiptExpenseType } from "./expenseCategories";
 import {
   getApiPaymentMethodDisplayName,
   normalizePaymentListLabel,
@@ -52,7 +52,7 @@ export const buildHomepageFilterExpenseCategories = (
 
   const extras = [];
   (receipts || []).filter(isNetworkReceivedReceipt).forEach((r) => {
-    const cat = (r.expense_type || "").trim();
+    const cat = getReceiptExpenseType(r, apiExpenseCategories).trim();
     if (!cat) return;
     const key = cat.toLowerCase();
     if (existing.has(key)) return;

@@ -99,9 +99,16 @@ const matchesMerchants = (receipt, merchants) => {
   return selectedNorms.includes(rNorm);
 };
 
+const normalizeCategoryKey = (value) =>
+  (value ?? "").toString().trim().toLowerCase();
+
 const matchesCategory = (receipt, categories) => {
   if (!categories || !categories.length) return true;
-  return categories.includes(receipt.expense_type);
+  const receiptCat = normalizeCategoryKey(receipt.expense_type);
+  if (!receiptCat) return false;
+  return categories.some(
+    (cat) => normalizeCategoryKey(cat) === receiptCat
+  );
 };
 
 const matchesReceiptCategory = (receipt, categories) => {
