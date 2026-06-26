@@ -71,10 +71,11 @@ import MyNetworkPanel from "../components/network/MyNetworkPanel";
 import { getPendingRequestCount } from "../api/networkApi";
 import { useNavigate } from "react-router-dom";
 import { useData } from "../context/DataContext";
-import { getPaymentDisplayFromReceipt } from "../hooks/usePaymentDisplay";
+import { getReceiptsMatchingPaymentMethod } from "../hooks/usePaymentDisplay";
 import {
   apiPaymentMethodMatchesLabel,
   getApiPaymentMethodDisplayName,
+  getClearPaymentMethodUpdates,
   getLast4FromPaymentApiRecord,
   isCashPaymentVariant,
   isPaymentApiRecord,
@@ -1733,8 +1734,6 @@ const ReceiptInfoInline = ({ type }) => {
     return base === "cash";
   };
 
-  const paymentDisplayForReceipt = (r) => getPaymentDisplayFromReceipt(r);
-
   const getReceiptsByMerchant = (name) =>
     (receipts || []).filter(
       (r) =>
@@ -1750,9 +1749,7 @@ const ReceiptInfoInline = ({ type }) => {
     );
 
   const getReceiptsByPaymentDisplay = (name) =>
-    (receipts || []).filter(
-      (r) => paymentDisplayForReceipt(r).toLowerCase() === (name || "").toLowerCase()
-    );
+    getReceiptsMatchingPaymentMethod(receipts || [], name || "");
 
   const toast = (t, text) => { setMsg({ type: t, text }); setTimeout(() => setMsg(null), 3000); };
   const TAX_NAME_MAX = 15;
@@ -2378,13 +2375,12 @@ const isBlockedTaxRateInput = (val) => {
       toast("error", "Cash payment method cannot be deleted");
       return;
     }
-    // Step 1 — set payment method to Cash on every matching receipt
+    // Step 1 — clear payment method on every matching receipt
+    const clearPayment = getClearPaymentMethodUpdates();
     const matching = getReceiptsByPaymentDisplay(item.name || "");
     if (matching.length > 0) {
       await Promise.all(
-        matching.map(r =>
-          updateReceipt(r.id, { paymentType: "Cash", card_issuer_name: "", last_4_digit_card: "" })
-        )
+        matching.map(r => updateReceipt(r.id, clearPayment))
       );
     }
     console.log("jdhhj step22")
@@ -2412,7 +2408,7 @@ const isBlockedTaxRateInput = (val) => {
     // ("api_28"), because customPaymentMethods is a plain string array keyed by name.
     hidePaymentMethod(item.name);
     deleteCustomPaymentMethod(item.name);
-    // Step 5 — refresh
+    // Step 5 — refresh from server (payment clear now persists via API "0" sentinels)
     setIsDeleteSyncing(true);
     await Promise.all([refreshData(), fetchApiPaymentMethods()]);
     toast("success", "Payment Method Deleted");

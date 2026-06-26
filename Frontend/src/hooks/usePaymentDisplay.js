@@ -2,6 +2,8 @@ import { useCallback } from "react";
 import {
   inferCardTypeFromPayment,
   isCustomCardIssuer,
+  normalizePaymentField,
+  normalizePaymentMatchKey,
   parsePaymentDisplay,
 } from "../utils/paymentMethodUtils";
 const Visa              = "/payment-logos/Visa.png";
@@ -56,23 +58,15 @@ const detectCardNetwork = (str) => {
 // Match PaymentFilterMethod.jsx logic for consistency
 // Display format: cardIssuerName *last4 (ALWAYS prioritize cardIssuerName over paymentType)
 export function getPaymentDisplayFromReceipt(receipt) {
-  const issuer = (
-    receipt?.card_issuer_name ||
-    receipt?.cardIssuerName ||
-    ""
-  )
-    ?.toString?.()
-    .trim?.() || "";
-  const type = (receipt?.paymentType || receipt?.payment_type || "")
-    ?.toString?.()
-    .trim?.() || "";
-  const selectedType = (
-    receipt?.selected_card_type ||
-    receipt?.selectedCardType ||
-    ""
-  )
-    ?.toString?.()
-    .trim?.() || "";
+  const issuer = normalizePaymentField(
+    receipt?.card_issuer_name || receipt?.cardIssuerName
+  );
+  const type = normalizePaymentField(
+    receipt?.paymentType || receipt?.payment_type
+  );
+  const selectedType = normalizePaymentField(
+    receipt?.selected_card_type || receipt?.selectedCardType
+  );
 
   if (!issuer && !type && !selectedType) return "-";
 
@@ -80,14 +74,10 @@ export function getPaymentDisplayFromReceipt(receipt) {
   if (cashHint.includes("cash")) return "Cash";
 
   let last4 = "";
-  const last4Raw = (
-    receipt?.last_4_digit_card ||
-    receipt?.last4DigitCard ||
-    ""
-  )
-    ?.toString?.()
-    .trim?.() || "";
-  if (last4Raw && last4Raw !== "0" && /^\d{3,4}$/.test(last4Raw)) {
+  const last4Raw = normalizePaymentField(
+    receipt?.last_4_digit_card || receipt?.last4DigitCard
+  );
+  if (last4Raw && /^\d{3,4}$/.test(last4Raw)) {
     last4 = last4Raw;
   } else if (type.includes("*")) {
     last4 = parsePaymentDisplay(type).last4;
@@ -113,6 +103,64 @@ export function getPaymentDisplayFromReceipt(receipt) {
 
   if (last4) return `*${last4}`;
   return "-";
+}
+
+/** Generic logo for empty payment-method inputs (add/edit receipt). */
+export const GENERIC_PAYMENT_LOGO = Creditdebitcardicon;
+
+export function isReceiptPaymentEmpty(receipt) {
+  const issuer = normalizePaymentField(receipt?.card_issuer_name || receipt?.cardIssuerName);
+  const type = normalizePaymentField(receipt?.paymentType || receipt?.payment_type);
+  const selected = normalizePaymentField(receipt?.selected_card_type || receipt?.selectedCardType);
+  const last4 = normalizePaymentField(receipt?.last_4_digit_card || receipt?.last4DigitCard);
+  return !issuer && !type && !selected && !last4;
+}
+
+/** Logo for payment input fields — generic "other" icon when nothing is selected. */
+export function getPaymentInputLogo(fields, getPaymentLogoFn) {
+  if (isReceiptPaymentEmpty(fields)) {
+    return GENERIC_PAYMENT_LOGO;
+  }
+  return getPaymentLogoFn({
+    paymentType: fields?.paymentType || fields?.payment_type || "",
+    card_issuer_name: fields?.card_issuer_name || fields?.cardIssuerName || "",
+    last_4_digit_card: fields?.last_4_digit_card || fields?.last4DigitCard || "",
+    payment_logo_url: fields?.payment_logo_url || fields?.paymentLogoUrl || "",
+  });
+}
+
+/** Find receipts that use a payment method label (display match + issuer/last4 fallback). */
+export function getReceiptsMatchingPaymentMethod(receipts, methodName) {
+  const { issuer: oldIssuer, last4: oldLast4 } = parsePaymentDisplay(methodName || "");
+  const targetKey = normalizePaymentMatchKey(methodName);
+  const exactByDisplay = (receipts || []).filter(
+    (r) => normalizePaymentMatchKey(getPaymentDisplayFromReceipt(r)) === targetKey
+  );
+  const exactIds = new Set(exactByDisplay.map((r) => r.id));
+  const oldIssuerLower = (oldIssuer || "").toLowerCase();
+  const oldBrandLower = normalizePaymentMatchKey(inferCardTypeFromPayment(oldIssuer || methodName || ""));
+
+  const additionalByFields = oldLast4
+    ? (receipts || []).filter((r) => {
+        if (exactIds.has(r.id)) return false;
+        const rLast4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
+        if (rLast4 !== oldLast4) return false;
+        const rIssuer = (r.card_issuer_name || r.cardIssuerName || "").toString().trim().toLowerCase();
+        const rTypeLower = (r.paymentType || r.payment_type || "")
+          .toString()
+          .replace(/\s*\*\d{3,4}$/, "")
+          .trim()
+          .toLowerCase();
+        return (
+          (oldIssuerLower && rIssuer === oldIssuerLower) ||
+          (oldIssuerLower && rTypeLower === oldIssuerLower) ||
+          (oldBrandLower &&
+            (normalizePaymentMatchKey(rTypeLower) === oldBrandLower ||
+              normalizePaymentMatchKey(rIssuer) === oldBrandLower))
+        );
+      })
+    : [];
+  return [...exactByDisplay, ...additionalByFields];
 }
 
 /** Card type is "Other" — always use the generic credit-card icon until user picks another type. */

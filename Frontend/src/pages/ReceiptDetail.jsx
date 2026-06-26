@@ -45,13 +45,14 @@ import Toast from "../components/Toast";
 import { useData } from "../context/DataContext";
 import { useCurrency } from "../context/CurrencyContext";
 import MerchantAvatar from "../components/MerchantAvatar";
-import { getPaymentDisplayFromReceipt, usePaymentDisplay } from "../hooks/usePaymentDisplay";
+import { getPaymentDisplayFromReceipt, getPaymentInputLogo, getReceiptsMatchingPaymentMethod, usePaymentDisplay } from "../hooks/usePaymentDisplay";
 import {
   apiPaymentMethodMatchesLabel,
   buildPaymentMethodStorageString,
   cardTypeIntToBrand,
   getApiPaymentMethodDisplayName,
   getApiPaymentMethodSignature,
+  getClearPaymentMethodUpdates,
   getLast4FromPaymentApiRecord,
   getPaymentSignature,
   inferCardTypeFromPayment,
@@ -1546,34 +1547,6 @@ useEffect(() => {
 
   const getPaymentDisplayForReceipt = (r) => getPaymentDisplayFromReceipt(r);
 
-  const getReceiptsMatchingPaymentMethod = (methodName) => {
-    const { issuer: oldIssuer, last4: oldLast4 } = parsePaymentDisplay(methodName || "");
-    const targetKey = normalizePaymentMatchKey(methodName);
-    const exactByDisplay = (receipts || []).filter(
-      (r) => normalizePaymentMatchKey(getPaymentDisplayForReceipt(r)) === targetKey
-    );
-    const exactIds = new Set(exactByDisplay.map((r) => r.id));
-    const additionalByFields = oldLast4
-      ? (receipts || []).filter((r) => {
-          if (exactIds.has(r.id)) return false;
-          const rLast4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
-          if (rLast4 !== oldLast4) return false;
-          const rIssuer = (r.card_issuer_name || r.cardIssuerName || "").toString().trim().toLowerCase();
-          const rTypeLower = (r.paymentType || r.payment_type || "")
-            .toString()
-            .replace(/\s*\*\d{3,4}$/, "")
-            .trim()
-            .toLowerCase();
-          const oldIssuerLower = (oldIssuer || "").toLowerCase();
-          return (
-            (oldIssuerLower && rIssuer === oldIssuerLower) ||
-            (oldIssuerLower && rTypeLower === oldIssuerLower)
-          );
-        })
-      : [];
-    return [...exactByDisplay, ...additionalByFields];
-  };
-
   const handleDeletePaymentInDropdown = (method) => {
     if (isCashPaymentMethod(method)) return; // safety
     setPendingPayDeleteMethod(method);
@@ -1587,16 +1560,11 @@ useEffect(() => {
     if (!method) return;
     setIsPayMethodSaving(true);
     try {
-      const matchingReceipts = getReceiptsMatchingPaymentMethod(method);
+      const clearPayment = getClearPaymentMethodUpdates();
+      const matchingReceipts = getReceiptsMatchingPaymentMethod(receipts || [], method);
       if (matchingReceipts.length > 0) {
         await Promise.all(
-          matchingReceipts.map((r) =>
-            updateReceipt(r.id, {
-              paymentType: "Cash",
-              card_issuer_name: "",
-              last_4_digit_card: "",
-            })
-          )
+          matchingReceipts.map((r) => updateReceipt(r.id, clearPayment))
         );
       }
       const apiMatch = (apiPaymentMethods || []).find(
@@ -1609,11 +1577,9 @@ useEffect(() => {
       hidePaymentMethod(method);
       deleteCustomPaymentMethod(method);
       await Promise.all([fetchApiPaymentMethods(), silentRefreshData(0)]);
-      const targetKey = normalizePaymentMatchKey(method);
-      if (normalizePaymentMatchKey(getPaymentDisplayForReceipt(editedReceipt)) === targetKey) {
-        handleFieldChange("paymentType", "Cash");
-        handleFieldChange("card_issuer_name", "");
-        handleFieldChange("last_4_digit_card", "");
+      const currentPaymentFields = { ...selectedReceipt, ...editedReceipt };
+      if (getReceiptsMatchingPaymentMethod([currentPaymentFields], method).length > 0) {
+        setEditedReceipt((prev) => ({ ...prev, ...getClearPaymentMethodUpdates() }));
       }
       setToast({ isVisible: true, message: "Payment Method Deleted", type: "success" });
     } catch (err) {
@@ -5562,15 +5528,19 @@ Thank you for using our receipt management system.
                           <label className="font-bold">Payment Method</label>
                           <div className="relative w-full">
                             {(() => {
-                              // Merge editedReceipt with original receipt to ensure card_issuer_name is available
-                              const receiptForLogo = { ...r, ...editedReceipt };
-                              const logo = getPaymentLogo(receiptForLogo);
+                              const paymentFields = {
+                                paymentType: editedReceipt.paymentType ?? "",
+                                card_issuer_name: editedReceipt.card_issuer_name ?? "",
+                                last_4_digit_card: editedReceipt.last_4_digit_card ?? "",
+                                payment_logo_url: editedReceipt.payment_logo_url ?? "",
+                              };
+                              const logo = getPaymentInputLogo(paymentFields, getPaymentLogo);
                               return logo ? (
                                 <img
                                   src={logo}
                                   alt={
-                                    receiptForLogo.paymentType ||
-                                    receiptForLogo.card_issuer_name ||
+                                    paymentFields.paymentType ||
+                                    paymentFields.card_issuer_name ||
                                     ""
                                   }
                                   className="absolute left-2 top-1/2 transform -translate-y-1/2 w-5 h-5 rounded z-10 mt-1"
@@ -5578,26 +5548,14 @@ Thank you for using our receipt management system.
                               ) : null;
                             })()}
                             <input
-                              className={`${inputClass} ${
-                                (() => {
-                                  const receiptForLogo = {
-                                    ...r,
-                                    ...editedReceipt,
-                                  };
-                                  return getPaymentLogo(receiptForLogo);
-                                })()
-                                  ? "pl-8"
-                                  : ""
-                              }`}
+                              className={`${inputClass} pl-8`}
                               value={(() => {
-                                // Use getPaymentDisplayName to show card issuer name + last4 (like homepage)
                                 const receiptForDisplay = {
                                   ...r,
                                   ...editedReceipt,
                                 };
-                                return (
-                                  getPaymentDisplayName(receiptForDisplay) || ""
-                                );
+                                const display = getPaymentDisplayName(receiptForDisplay) || "";
+                                return display === "-" ? "" : display;
                               })()}
                               onChange={(e) => {
                                 // When user types, extract card issuer name and last4 from input

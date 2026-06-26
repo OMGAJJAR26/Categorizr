@@ -162,6 +162,16 @@ export const isPlaceholderCardNumber = (cn) => {
   return !v || v === "-" || v === "0";
 };
 
+/** Normalize payment field from API/local — treats 0, -, and empty as no value. */
+export const normalizePaymentField = (value) => {
+  const s = (value ?? "").toString().trim();
+  if (!s || s === "0" || s === "-" || s === "0*0" || /^0\*\d*$/.test(s)) return "";
+  return s;
+};
+
+/** API sentinel for clearing payment on updateReceiptv1 (empty string is ignored by server). */
+export const CLEAR_PAYMENT_API_VALUE = "0";
+
 export const getLast4FromPaymentApiRecord = (m) => {
   const cn = (m?.card_number || "").toString().trim();
   if (isPlaceholderCardNumber(cn)) return "";
@@ -385,4 +395,42 @@ export const getApiPaymentMethodCacheKey = (m) => {
   const cn = (m.card_number || "").toString().trim();
   if (!isPlaceholderCardNumber(cn)) return cn.toLowerCase();
   return `type:${cardType || "unknown"}`;
+};
+
+/** Field updates that fully clear payment method on a receipt (all API/local aliases). */
+export const getClearPaymentMethodUpdates = () => ({
+  paymentType: "",
+  payment_type: "",
+  card_issuer_name: "",
+  cardIssuerName: "",
+  last_4_digit_card: "",
+  last4DigitCard: "",
+  paymentBrand: "",
+  payment_method_name: "",
+  payment_logo_url: "",
+  paymentLogoUrl: "",
+});
+
+/** Values the receipt API expects when clearing payment on update (not add). */
+export const getClearPaymentMethodApiPayload = () => ({
+  paymentType: CLEAR_PAYMENT_API_VALUE,
+  card_issuer_name: CLEAR_PAYMENT_API_VALUE,
+  last_4_digit_card: CLEAR_PAYMENT_API_VALUE,
+});
+
+/** Keep snake_case and camelCase payment fields in sync after reads/updates. */
+export const syncReceiptPaymentFieldAliases = (receipt) => {
+  if (!receipt || typeof receipt !== "object") return receipt;
+  const paymentType = normalizePaymentField(receipt.paymentType ?? receipt.payment_type);
+  const cardIssuerName = normalizePaymentField(receipt.card_issuer_name ?? receipt.cardIssuerName);
+  const last4 = normalizePaymentField(receipt.last_4_digit_card ?? receipt.last4DigitCard);
+  return {
+    ...receipt,
+    paymentType,
+    payment_type: paymentType,
+    card_issuer_name: cardIssuerName,
+    cardIssuerName,
+    last_4_digit_card: last4,
+    last4DigitCard: last4,
+  };
 };

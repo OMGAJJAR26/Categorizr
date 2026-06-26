@@ -11,13 +11,14 @@ import ReceiptAnnotator from "./ReceiptAnnotator";
 import { motion, AnimatePresence } from "framer-motion";
 import { useData } from "../../context/DataContext";
 import Toast from "../Toast";
-import { getPaymentDisplayFromReceipt, usePaymentDisplay } from "../../hooks/usePaymentDisplay";
+import { getPaymentDisplayFromReceipt, getPaymentInputLogo, getReceiptsMatchingPaymentMethod, usePaymentDisplay } from "../../hooks/usePaymentDisplay";
 import {
   apiPaymentMethodMatchesLabel,
   buildPaymentMethodStorageString,
   cardTypeIntToBrand,
   getApiPaymentMethodDisplayName,
   getApiPaymentMethodSignature,
+  getClearPaymentMethodUpdates,
   getLast4FromPaymentApiRecord,
   getPaymentMethodListLabel,
   getPaymentSignature,
@@ -3710,34 +3711,6 @@ const handleSelectLogo = (index) => {
   const isCashPaymentMethod = (name) =>
     (name || "").toString().replace(/\s*\*\s*\d{3,4}\s*$/, "").trim().toLowerCase() === "cash";
 
-  const getReceiptsMatchingPaymentMethod = (methodName) => {
-    const { issuer: oldIssuer, last4: oldLast4 } = parsePaymentDisplay(methodName || "");
-    const targetKey = normalizePaymentMatchKey(methodName);
-    const exactByDisplay = (receipts || []).filter(
-      (r) => normalizePaymentMatchKey(getPaymentDisplayFromReceipt(r)) === targetKey
-    );
-    const exactIds = new Set(exactByDisplay.map((r) => r.id));
-    const additionalByFields = oldLast4
-      ? (receipts || []).filter((r) => {
-          if (exactIds.has(r.id)) return false;
-          const rLast4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
-          if (rLast4 !== oldLast4) return false;
-          const rIssuer = (r.card_issuer_name || r.cardIssuerName || "").toString().trim().toLowerCase();
-          const rTypeLower = (r.paymentType || r.payment_type || "")
-            .toString()
-            .replace(/\s*\*\d{3,4}$/, "")
-            .trim()
-            .toLowerCase();
-          const oldIssuerLower = (oldIssuer || "").toLowerCase();
-          return (
-            (oldIssuerLower && rIssuer === oldIssuerLower) ||
-            (oldIssuerLower && rTypeLower === oldIssuerLower)
-          );
-        })
-      : [];
-    return [...exactByDisplay, ...additionalByFields];
-  };
-
   const handleEditPaymentInDropdown = (method) => {
     if (isCashPaymentMethod(method)) return;
     const { issuer, last4 } = parsePaymentDisplay(method);
@@ -3777,16 +3750,11 @@ const handleSelectLogo = (index) => {
     if (!method) return;
     setIsPayMethodSaving(true);
     try {
-      const matching = getReceiptsMatchingPaymentMethod(method);
+      const clearPayment = getClearPaymentMethodUpdates();
+      const matching = getReceiptsMatchingPaymentMethod(receipts || [], method);
       if (matching.length > 0) {
         await Promise.all(
-          matching.map((r) =>
-            updateReceipt(r.id, {
-              paymentType: "Cash",
-              card_issuer_name: "",
-              last_4_digit_card: "",
-            })
-          )
+          matching.map((r) => updateReceipt(r.id, clearPayment))
         );
       }
       const apiMatch = (apiPaymentMethods || []).find((p) =>
@@ -3797,11 +3765,8 @@ const handleSelectLogo = (index) => {
       hidePaymentMethod(method);
       deleteCustomPaymentMethod(method);
       await Promise.all([fetchApiPaymentMethods(), silentRefreshData(0)]);
-      const targetKey = normalizePaymentMatchKey(method);
-      if (normalizePaymentMatchKey(getPaymentDisplayFromReceipt(formData)) === targetKey) {
-        handleFieldChange("paymentType", "Cash");
-        handleFieldChange("card_issuer_name", "");
-        handleFieldChange("last_4_digit_card", "");
+      if (getReceiptsMatchingPaymentMethod([formData], method).length > 0) {
+        setFormData((prev) => ({ ...prev, ...getClearPaymentMethodUpdates() }));
       }
       setToast({ isVisible: true, message: "Payment Method Deleted", type: "success" });
     } catch (err) {
@@ -5209,15 +5174,12 @@ const handleSelectLogo = (index) => {
     <label className="font-bold">Payment Method</label>
     <div className="relative w-full">
       {(() => {
-        // Use receipt object for logo detection
-        // IMPORTANT: paymentType should be the card type (e.g., "PayPal") for logo detection
-        // card_issuer_name is for display only (e.g., "Hello")
-        const receiptForLogo = {
-          paymentType: formData.paymentType, // Card type for logo (e.g., "PayPal", "Diners Club")
-          card_issuer_name: formData.card_issuer_name, // Custom name for display (e.g., "Hello")
+        const paymentFields = {
+          paymentType: formData.paymentType,
+          card_issuer_name: formData.card_issuer_name,
           last_4_digit_card: formData.last_4_digit_card,
         };
-        const logo = getPaymentLogo(receiptForLogo);
+        const logo = getPaymentInputLogo(paymentFields, getPaymentLogo);
         return logo ? (
           <img
             src={logo}
@@ -5231,19 +5193,7 @@ const handleSelectLogo = (index) => {
         ) : null;
       })()}
       <input
-        className={`${inputClass} ${
-          (() => {
-            const receiptForLogo = {
-              paymentType: formData.paymentType,
-              card_issuer_name: formData.card_issuer_name,
-              last_4_digit_card:
-                formData.last_4_digit_card,
-            };
-            return getPaymentLogo(receiptForLogo);
-          })()
-            ? "pl-8"
-            : ""
-        }`}
+        className={`${inputClass} pl-8`}
         value={(() => {
           const display = getPaymentDisplay({
             paymentType: formData.paymentType,

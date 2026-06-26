@@ -89,7 +89,9 @@ const ReceiptsTable = ({
           {(() => {
             const paymentDisplay = getPaymentDisplay(receipt);
             const hasPayment = paymentDisplay && paymentDisplay !== "-" && paymentDisplay !== "—";
-            if (!hasPayment) return null;
+            if (!hasPayment) {
+              return <span className="text-sm xl:text-base text-gray-500">-</span>;
+            }
             const logo = getPaymentLogo(receipt);
             return (
               <>
@@ -262,7 +264,14 @@ const ReceiptsTable = ({
           {(() => {
             const paymentDisplay = getPaymentDisplay(receipt);
             const hasPayment = paymentDisplay && paymentDisplay !== "-" && paymentDisplay !== "—";
-            if (!hasPayment) return null;
+            if (!hasPayment) {
+              return (
+                <div>
+                  <span className="text-gray-500 text-xs uppercase">Payment</span>
+                  <div className="font-medium text-gray-500">-</div>
+                </div>
+              );
+            }
             const logo = getPaymentLogo(receipt);
             return (
               <div>

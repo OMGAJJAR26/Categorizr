@@ -33,7 +33,10 @@ import {
   isPaymentApiRecord,
   mergePaymentMethodLabels,
   normalizeApiPaymentMethodInput,
+  normalizePaymentField,
   paymentMethodPayloadToQuery,
+  syncReceiptPaymentFieldAliases,
+  CLEAR_PAYMENT_API_VALUE,
 } from "../utils/paymentMethodUtils";
 import {
   parseReceiptUnix,
@@ -1335,9 +1338,9 @@ export const DataProvider = ({ children }) => {
             .map((r) => {
               // Normalize ALL fields from API (support both snake_case and camelCase
               // so Android-created accounts sync correctly to the web Desktop version)
-              let paymentType = r.paymentType ?? r.payment_type ?? "";
-              const cardIssuerName = r.card_issuer_name ?? r.cardIssuerName ?? "";
-              const last4DigitCard = r.last_4_digit_card ?? r.last4DigitCard ?? "";
+              let paymentType = normalizePaymentField(r.paymentType ?? r.payment_type);
+              const cardIssuerName = normalizePaymentField(r.card_issuer_name ?? r.cardIssuerName);
+              const last4DigitCard = normalizePaymentField(r.last_4_digit_card ?? r.last4DigitCard);
               // Normalize merchant / category / tax fields – Android/iOS may use snake_case or camelCase
               const storeName = r.storeName ?? r.store_name ?? "";
               // Strip any localhost proxy URL saved during local dev so receipt cards
@@ -1365,7 +1368,7 @@ export const DataProvider = ({ children }) => {
               // The getPaymentLogo function will extract the card type from paymentType for logo detection
               // Don't modify paymentType here - it needs to contain the card type for logos to work
 
-              const normalized = {
+              const normalized = syncReceiptPaymentFieldAliases({
                 ...r,
                 // Overwrite with normalised values so downstream code can use
                 // a single field name regardless of API variant (web vs Android/iOS)
@@ -1393,7 +1396,7 @@ export const DataProvider = ({ children }) => {
                 receipt_forwarded: String(r.receipt_forwarded ?? "0"),
                 originalUsername: r.originalUsername ?? r.original_username ?? null,
                 payment_logo_url: r.payment_logo_url ?? r.paymentLogoUrl ?? "",
-              };
+              });
               const paymentDisplay = formatPaymentDisplayFromReceipt(normalized);
               const badgeStatus = getReceiptBadgeStatus(normalized);
               // Add status field: default to "0" (unread) if not present
@@ -1654,7 +1657,7 @@ setMerchantsWithImages(
             enriched.payment_logo_url = matchedRec.icon_image;
           }
 
-          return enriched;
+          return syncReceiptPaymentFieldAliases(enriched);
         }
 
         // No API record found — fall back to logo-only enrichment via display key
@@ -1667,11 +1670,14 @@ setMerchantsWithImages(
               return pKey === rKey || (p.card_number || "").trim().toLowerCase() === last4;
             });
           if (logoByIssuerLast4) {
-            return { ...r, payment_logo_url: logoByIssuerLast4.icon_image };
+            return syncReceiptPaymentFieldAliases({
+              ...r,
+              payment_logo_url: logoByIssuerLast4.icon_image,
+            });
           }
         }
 
-        return r;
+        return syncReceiptPaymentFieldAliases(r);
       });
 
       // Update receipts with enriched data (payment fields + logos + tax) and
@@ -1988,14 +1994,16 @@ setMerchantsWithImages(
   };
 
   const buildReceiptUpdatePayloadFromRow = (receipt) => {
-    const rawPaymentType = (receipt.paymentType ?? "").toString().trim();
+    const rawPaymentType = normalizePaymentField(receipt.paymentType ?? receipt.payment_type);
     const normalizedPaymentType = rawPaymentType.replace(/\s*\*\d{3,4}/g, "").trim();
-    const rawLast4 = (receipt.last_4_digit_card ?? "").toString().trim();
+    const rawIssuerName = normalizePaymentField(receipt.card_issuer_name ?? receipt.cardIssuerName);
+    const rawLast4 = normalizePaymentField(receipt.last_4_digit_card ?? receipt.last4DigitCard);
     const inferredLast4 = (() => {
       if (!rawPaymentType.includes("*")) return "";
       const matches = [...rawPaymentType.matchAll(/\*(\d{3,4})/g)];
       return matches.length > 0 ? matches[matches.length - 1][1] : "";
     })();
+    const hasPayment = !!(normalizedPaymentType || rawIssuerName || rawLast4 || inferredLast4);
 
     return {
       id: parseInt(receipt.id),
@@ -2006,9 +2014,9 @@ setMerchantsWithImages(
       total_amount: (receipt.total_amount ?? receipt.purchasePrice ?? "0").toString(),
       payment_category_type: parseInt(receipt.payment_category_type ?? 0) || 0,
       status: parseInt(receipt.status ?? 0) || 0,
-      paymentType: normalizedPaymentType,
-      last_4_digit_card: rawLast4 || inferredLast4 || "",
-      card_issuer_name: receipt.card_issuer_name ?? "",
+      paymentType: hasPayment ? normalizedPaymentType : CLEAR_PAYMENT_API_VALUE,
+      last_4_digit_card: hasPayment ? (rawLast4 || inferredLast4 || "") : CLEAR_PAYMENT_API_VALUE,
+      card_issuer_name: hasPayment ? rawIssuerName : CLEAR_PAYMENT_API_VALUE,
       fk_original_receipt_id: receipt.fk_original_receipt_id ?? "0",
       fk_forward_from_receipt_id: receipt.fk_forward_from_receipt_id ?? "0",
       receipt_category: parseInt(receipt.receipt_category ?? 0) || 0,
@@ -2253,7 +2261,7 @@ setMerchantsWithImages(
           if (value === null || value === undefined || value === "") {
             // For empty strings, check if we should preserve existing value
             // Some fields like notes can be empty, so we need to be careful
-            if (field === "notes" || field === "expense_type" || field === "product_name" || field === "storeName" || field === "card_issuer_name") {
+            if (field === "notes" || field === "expense_type" || field === "product_name" || field === "storeName" || field === "card_issuer_name" || field === "paymentType" || field === "last_4_digit_card") {
               // These fields can legitimately be empty, so use empty string if provided
               return value === "" ? "" : (existingReceipt?.[field] ?? defaultValue);
             }
@@ -2277,6 +2285,15 @@ setMerchantsWithImages(
         return matches.length > 0 ? matches[matches.length - 1][1] : "";
       })();
 
+      // Server ignores empty strings on update — must send "0" to clear payment fields.
+      const clearingPayment =
+        apiUpdates.hasOwnProperty("paymentType") &&
+        apiUpdates.paymentType === "" &&
+        apiUpdates.hasOwnProperty("card_issuer_name") &&
+        apiUpdates.card_issuer_name === "" &&
+        apiUpdates.hasOwnProperty("last_4_digit_card") &&
+        apiUpdates.last_4_digit_card === "";
+
       // Never persist uploadmediaV1 cross-receipt contamination: each receipt may
       // only store media URLs it owns after global dedupe (newest receipt wins).
       const receiptsForMediaResolve = receipts.map((r) =>
@@ -2290,7 +2307,19 @@ setMerchantsWithImages(
 
       // Build the update payload matching API model
       // Only update fields that are provided, preserve existing values for others
-      const updatePayload = {
+      const updatePayload = clearingPayment
+        ? buildReceiptUpdatePayloadFromRow({
+            ...existingReceipt,
+            ...apiUpdates,
+            paymentType: "",
+            payment_type: "",
+            card_issuer_name: "",
+            last_4_digit_card: "",
+            payment_logo_url: "",
+            emailAttachment: apiMediaFields.emailAttachment,
+            receipt_image: apiMediaFields.receipt_image,
+          })
+        : {
         id: parseInt(receiptId),
         storeName: getValue("storeName", ""),
         product_name: getValue("product_name", ""),
@@ -2450,10 +2479,18 @@ setMerchantsWithImages(
           updates.last_4_digit_card !== undefined;
         const updatedReceipts = prevReceipts.map(receipt => {
           if (!receiptMatchesId(receipt)) return receipt;
-          const merged = { ...receipt, ...updates };
+          const merged = syncReceiptPaymentFieldAliases({ ...receipt, ...updates });
           if (paymentFieldsChanged) {
+            const cleared =
+              (updates.paymentType === "" || merged.paymentType === "") &&
+              !(merged.card_issuer_name || "").toString().trim() &&
+              !(merged.last_4_digit_card || "").toString().trim();
             merged.payment_logo_url = "";
             merged.paymentLogoUrl = "";
+            if (cleared) {
+              merged.paymentBrand = "";
+              merged.payment_method_name = "";
+            }
           }
           if (updates.receipt_forwarded !== undefined) {
             merged.badgeStatus = getReceiptBadgeStatus(merged);
@@ -2462,7 +2499,7 @@ setMerchantsWithImages(
         });
 
         // Also update payment methods list if paymentType changed
-        if (updates.paymentType) {
+        if (updates.paymentType !== undefined) {
           setTimeout(() => {
             setPaymentMethods(buildPaymentMethods(updatedReceipts));
           }, 0);

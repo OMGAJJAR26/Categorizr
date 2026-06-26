@@ -116,7 +116,11 @@ const ReceiptsMobileView = ({
         {(() => {
           const paymentDisplay = getPaymentDisplay(receipt);
           const hasPayment = paymentDisplay && paymentDisplay !== "-" && paymentDisplay !== "—";
-          if (!hasPayment) return null;
+          if (!hasPayment) {
+            return (
+              <div className="col-span-2 text-gray-500 font-medium">-</div>
+            );
+          }
           const logo = getPaymentLogo(receipt);
           return (
             <div className="col-span-2 flex items-center gap-2">
