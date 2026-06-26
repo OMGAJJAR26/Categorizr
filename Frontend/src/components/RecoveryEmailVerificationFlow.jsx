@@ -119,6 +119,8 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
     inputRefs.current[Math.min(pasted.length, OTP_LENGTH - 1)]?.focus();
   };
 
+  const handleDismiss = () => onDone(false);
+
   const handleVerify = async () => {
     const code = otp.join("");
     if (code.length < OTP_LENGTH) { setError(`Please enter all ${OTP_LENGTH} digits.`); return; }
@@ -166,7 +168,7 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
         {/* Header */}
         <div className="relative bg-gradient-to-br from-blue-600 to-blue-700 px-6 pt-8 pb-6 text-white text-center">
           <button
-            onClick={onDone}
+            onClick={handleDismiss}
             className="absolute top-3 right-3 p-1.5 rounded-full hover:bg-white/20 transition-colors"
             aria-label="Skip"
           >
@@ -256,7 +258,7 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
             </div>
 
             <button
-              onClick={onDone}
+              onClick={handleDismiss}
               className="w-full text-xs text-slate-400 hover:text-slate-600 py-1 transition-colors"
             >
               Skip for now
