@@ -6432,7 +6432,7 @@ Thank you for using our receipt management system.
 
                           const allUrls = [
                             ...new Set(
-                              [...urls, ...additionalPhotoUrls]
+                              [...urls.slice().reverse(), ...additionalPhotoUrls]
                                 .map((u) => normalizeMediaUrl(u))
                                 .filter(Boolean)
                             ),
