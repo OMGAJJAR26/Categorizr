@@ -177,6 +177,7 @@ export const buildForwardPayload = (receipt, recipientUserId) => {
     receipt_category: toInt(receipt.receipt_category),
     product_date: mobileProductDate,
     expense_type: receipt.expense_type || receipt.expenseType || "",
+    expenseType: receipt.expense_type || receipt.expenseType || "",  // camelCase alias — some API versions use this field name
     receipt_image: (receipt.receipt_image || receipt.receiptImage || "0").toString(),
     store_image: receipt.store_image || receipt.storeImage || "",
     receipt_tag: receipt.receipt_tag || "0,0,0,0,0,0,0",

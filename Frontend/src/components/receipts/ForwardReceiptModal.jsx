@@ -59,7 +59,8 @@ const ForwardReceiptModal = ({ receipt, onClose, onSuccess }) => {
       // Close the modal first; the parent (ReceiptDetail) shows the success toast
       // so we don't show a duplicate green banner here.
       try {
-        await onSuccess?.(member, result.data);
+        // Pass memberId (resolved recipient user ID) so the parent can look up the new receipt
+        await onSuccess?.(memberId, result.data);
       } finally {
         setForwardingId(null);
         onClose();

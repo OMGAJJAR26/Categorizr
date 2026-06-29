@@ -47,6 +47,9 @@ import { normalizeUserResponse } from "../utils/userUtils";
 
 const DataContext = createContext();
 const BASE_URL = "/api";
+// Deduplication cache for cross-account sender-receipt fetches (keyed by sender user ID).
+// Module-level so parallel syncForwardedReceiptData calls share in-flight promises.
+const _senderReceiptFetchCache = new Map();
 const onlyDigits = (s) => (s ?? "").toString().replace(/\D/g, "");
 // DEFAULT_PAYMENT_METHODS removed — payment methods now come exclusively
 // from the getPaymentMethodv1 API (apiPaymentMethods) and from receipts.
@@ -1602,6 +1605,13 @@ setMerchantsWithImages(
       });
 
       receiptsWithIntegrations = receiptsWithIntegrations.map(r => {
+        // Received forwarded receipts carry the SENDER's payment method — do not
+        // overwrite it with the recipient's own card that happens to share the same last4.
+        const forwardFromId = String(r.fk_forward_from_receipt_id ?? r.fkForwardFromReceiptId ?? "0").trim();
+        if (forwardFromId && forwardFromId !== "0") {
+          return syncReceiptPaymentFieldAliases(r);
+        }
+
         const issuer  = (r.card_issuer_name  || r.cardIssuerName  || "").toString().trim();
         const last4   = (r.last_4_digit_card  || r.last4DigitCard  || "").toString().trim();
         const type    = (r.paymentType        || r.payment_type    || "").toString().trim();
@@ -2775,6 +2785,105 @@ setMerchantsWithImages(
               expense_type: expenseType,
             });
             await postReceiptUpdatePayload(payload, token);
+          })()
+        );
+      }
+    }
+
+    // For network-forwarded receipts: fetch sender's original to fix missing expense_type
+    // and/or payment method (backend overwrites payment with recipient's own card by last4).
+    // Runs for ALL received forwards (not just ones missing expense_type) so that old receipts
+    // with backend-corrupted payment data are also corrected.
+    // fk_forward_from_receipt_id = sender's user ID; fk_original_receipt_id = source receipt ID.
+    if (receipt.id) {
+      const senderUserId = String(
+        receipt.fk_forward_from_receipt_id ?? receipt.fkForwardFromReceiptId ?? "0"
+      );
+      const originalReceiptId = String(
+        receipt.fk_original_receipt_id ?? receipt.fkOriginalReceiptId ?? "0"
+      );
+      if (senderUserId !== "0" && originalReceiptId !== "0") {
+        tasks.push(
+          (async () => {
+            try {
+              const token = localStorage.getItem("token");
+              if (!token) return;
+              // Reuse any in-flight fetch for the same sender (deduplicate parallel calls)
+              let fetchPromise = _senderReceiptFetchCache.get(senderUserId);
+              if (!fetchPromise) {
+                fetchPromise = fetch(
+                  `${BASE_URL}/user/getreceiptfromdatev1?fk_user_id=${senderUserId}&date_time_stamp=0`,
+                  { headers: { "Content-Type": "application/json", Accesstoken: token } }
+                )
+                  .then((r) => (r.ok ? r.json() : []))
+                  .then((d) => (Array.isArray(d) ? d : []))
+                  .catch(() => []);
+                _senderReceiptFetchCache.set(senderUserId, fetchPromise);
+                // Evict after 30 s so stale data doesn't linger across multiple syncs
+                setTimeout(() => _senderReceiptFetchCache.delete(senderUserId), 30000);
+              }
+              const senderReceipts = await fetchPromise;
+              const orig = senderReceipts.find(
+                (r) => String(r.id) === originalReceiptId
+              );
+              if (!orig) return;
+
+              const fetchedType = (orig.expense_type || "").trim();
+              const currentExpenseType = (receipt.expense_type || "").trim();
+              const needsExpensePatch =
+                fetchedType && fetchedType.toLowerCase() !== currentExpenseType.toLowerCase();
+
+              // The backend overwrites the forwarded receipt's payment method with
+              // the recipient's own card matched by last4. Detect and correct this.
+              const origPayBase = (orig.paymentType || "")
+                .replace(/\s*\*\d+/g, "").trim();
+              const curPayBase = (receipt.paymentType || "")
+                .replace(/\s*\*\d+/g, "").trim();
+              const paymentMismatch =
+                origPayBase &&
+                curPayBase &&
+                origPayBase.toLowerCase() !== curPayBase.toLowerCase();
+
+              if (!needsExpensePatch && !paymentMismatch) return;
+
+              const statePatch = {};
+              const serverPatch = { ...receipt };
+              if (needsExpensePatch) {
+                statePatch.expense_type = fetchedType;
+                serverPatch.expense_type = fetchedType;
+              }
+              if (paymentMismatch) {
+                statePatch.paymentType = orig.paymentType || origPayBase;
+                statePatch.card_issuer_name = (orig.card_issuer_name || "").trim();
+                statePatch.last_4_digit_card = (orig.last_4_digit_card || "").trim();
+                serverPatch.paymentType = orig.paymentType || origPayBase;
+                serverPatch.card_issuer_name = (orig.card_issuer_name || "").trim();
+                serverPatch.last_4_digit_card = (orig.last_4_digit_card || "").trim();
+              }
+
+              // Update in-memory receipt
+              setReceipts((prev) =>
+                prev.map((r) =>
+                  String(r.id) === String(receipt.id)
+                    ? { ...r, ...statePatch }
+                    : r
+                )
+              );
+
+              // Add expense category to user's list if new
+              if (needsExpensePatch) {
+                const catExists2 = (apiExpenseCategories || []).some(
+                  (c) =>
+                    (c.expense_category_name || "").toLowerCase() ===
+                    fetchedType.toLowerCase()
+                );
+                if (!catExists2) addApiExpenseCategory(fetchedType);
+              }
+
+              // Persist all patches to server in one call
+              const payload = buildReceiptUpdatePayloadFromRow(serverPatch);
+              await postReceiptUpdatePayload(payload, token);
+            } catch { /* ignore */ }
           })()
         );
       }

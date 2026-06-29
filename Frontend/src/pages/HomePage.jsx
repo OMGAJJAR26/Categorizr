@@ -419,6 +419,8 @@ const HomePage = () => {
       const resolvedType = getReceiptExpenseType(r, apiExpenseCategories).trim();
       const rowType = (r.expense_type || "").trim();
       if (!synced.has(String(r.id))) return true;
+      // Keep retrying while expense_type is still blank — server may not have saved it yet
+      if (!rowType) return true;
       // Re-sync when category is present on the payload but not yet on the row
       return (
         resolvedType &&
@@ -467,6 +469,18 @@ const HomePage = () => {
   const handleReceiptClick = async (receipt, index) => {
     if (receipt.status === "0") {
       await updateReceiptStatus(receipt.id, "1");
+    }
+    // Clear the "New" highlight for forwarded receipts (email or network) on first open
+    if (receipt.is_verify === "0") {
+      const hasEmailId =
+        receipt.fk_incoming_email_id != null &&
+        String(receipt.fk_incoming_email_id) !== "0";
+      const isNetworkReceived =
+        receipt.fk_forward_from_receipt_id != null &&
+        String(receipt.fk_forward_from_receipt_id) !== "0";
+      if (hasEmailId || isNetworkReceived) {
+        updateReceipt(receipt.id, { is_verify: "1" });
+      }
     }
     const fresh =
       receipts.find((r) => String(r.id) === String(receipt.id)) || receipt;
@@ -1129,7 +1143,6 @@ const HomePage = () => {
                           isLinkingXero={linkingXeroReceiptId === receipt.id}
                           formatCurrency={formatCurrency}
                           isToBeVerified={true}
-                          disableDelete={true}
                         />
                         <ReceiptsMobileView
                           receipt={receipt}
@@ -1146,7 +1159,6 @@ const HomePage = () => {
                           isLinkingXero={linkingXeroReceiptId === receipt.id}
                           formatCurrency={formatCurrency}
                           isToBeVerified={true}
-                          disableDelete={true}
                         />
                         {selectedReceipt?.id === receipt.id && (
                           <ReceiptDetail

@@ -4,6 +4,7 @@ import MerchantAvatar from "../MerchantAvatar";
 import ReceiptBadges from "../ReceiptBadges";
 import SimpleAlertModal from "../SimpleAlertModal";
 import { formatReceiptDate } from "../../utils/receiptDate";
+import { isNewForwardedReceipt } from "../../hooks/useReceiptGrouping";
 
 const ReceiptsTable = ({
   receipt,
@@ -38,6 +39,8 @@ const ReceiptsTable = ({
     return () => document.removeEventListener("mousedown", handler);
   }, [showIntegrateMenu]);
 
+  const isNewForwarded = isNewForwardedReceipt(receipt);
+
   const getFormattedDate = () => formatReceiptDate(receipt);
 
   const getReceiptType = () => {
@@ -55,9 +58,9 @@ const ReceiptsTable = ({
   return (
     <>
       {/* Desktop View - Large screens (lg+) */}
-      <div className={`hidden lg:grid grid-cols-8 gap-4 items-center border rounded-xl shadow-sm hover:shadow-md hover:bg-gray-50 transition p-3 ${isToBeVerified ? "border-amber-400 border-2 bg-amber-50/30" : ""}`}>
+      <div className={`hidden lg:grid grid-cols-8 gap-4 items-center border rounded-xl shadow-sm hover:shadow-md hover:bg-gray-50 transition p-3 ${isToBeVerified ? "border-amber-400 border-2 bg-amber-50/30" : isNewForwarded ? "border-blue-500 border-2 bg-blue-50/30" : ""}`}>
         <div className="col-span-8 -mt-1 -mb-1">
-          <ReceiptBadges receipt={receipt} isToBeVerified={isToBeVerified} />
+          <ReceiptBadges receipt={receipt} isToBeVerified={isToBeVerified} isNewForwarded={isNewForwarded} />
         </div>
 
         <div className="text-gray-800 font-medium text-sm xl:text-base">
@@ -230,9 +233,9 @@ const ReceiptsTable = ({
       </div>
 
       {/* Tablet View - Medium screens (md to lg) */}
-      <div className={`hidden md:flex lg:hidden flex-col border rounded-xl shadow-sm hover:shadow-md hover:bg-gray-50 transition p-3 ${isToBeVerified ? "border-amber-400 border-2 bg-amber-50/30" : ""}`}>
+      <div className={`hidden md:flex lg:hidden flex-col border rounded-xl shadow-sm hover:shadow-md hover:bg-gray-50 transition p-3 ${isToBeVerified ? "border-amber-400 border-2 bg-amber-50/30" : isNewForwarded ? "border-blue-500 border-2 bg-blue-50/30" : ""}`}>
         <div className="mb-2">
-          <ReceiptBadges receipt={receipt} isToBeVerified={isToBeVerified} />
+          <ReceiptBadges receipt={receipt} isToBeVerified={isToBeVerified} isNewForwarded={isNewForwarded} />
         </div>
 
         <div className="flex justify-between items-start mb-2">

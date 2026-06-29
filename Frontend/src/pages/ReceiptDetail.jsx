@@ -2872,7 +2872,7 @@ useEffect(() => {
     setShowOptionsMenu(false);
   };
 
-  const handleForwardSuccess = async () => {
+  const handleForwardSuccess = async (recipientUserId, responseData) => {
     if (!selectedReceipt?.id) return;
 
     const isReceived = isNetworkReceivedReceipt(selectedReceipt);
@@ -2885,6 +2885,62 @@ useEffect(() => {
     setEditedReceipt((prev) => ({ ...prev, receipt_forwarded: "1" }));
 
     await markReceiptAsForwarded(selectedReceipt.id);
+
+    // The server does not copy expense_type when creating the recipient's receipt.
+    // forwardreceiptv2 returns no receipt ID, so we fetch the recipient's list, find
+    // the new receipt by fk_original_receipt_id, and patch it from the sender's side.
+    const expenseToForward = (selectedReceipt.expense_type || "").trim();
+    if (expenseToForward && recipientUserId) {
+      const sourceReceiptId = String(selectedReceipt.id);
+      const token = localStorage.getItem("token");
+      if (token) {
+        (async () => {
+          try {
+            const res = await fetch(
+              `/api/user/getreceiptfromdatev1?fk_user_id=${recipientUserId}&date_time_stamp=0`,
+              { headers: { "Content-Type": "application/json", Accesstoken: token } }
+            );
+            if (!res.ok) return;
+            const data = await res.json();
+            if (!Array.isArray(data)) return;
+            // Find receipt(s) where this source was the original — newest first
+            const matching = data
+              .filter((r) => String(r.fk_original_receipt_id) === sourceReceiptId)
+              .sort((a, b) => Number(b.create_date || 0) - Number(a.create_date || 0));
+            if (matching.length === 0) return;
+            // The backend matches last_4_digit_card against the RECIPIENT's own cards,
+            // overwriting the sender's card brand/issuer. Compare and patch what differs.
+            const senderPayBase = (selectedReceipt.paymentType || "")
+              .replace(/\s*\*\d+/g, "").trim();
+            for (const newReceipt of matching) {
+              const needsExpense =
+                expenseToForward && !(newReceipt.expense_type || "").trim();
+              const recipientPayBase = (newReceipt.paymentType || "")
+                .replace(/\s*\*\d+/g, "").trim();
+              const needsPayment =
+                senderPayBase &&
+                recipientPayBase &&
+                senderPayBase.toLowerCase() !== recipientPayBase.toLowerCase();
+
+              if (!needsExpense && !needsPayment) continue;
+
+              const patch = { id: String(newReceipt.id) };
+              if (needsExpense) patch.expense_type = expenseToForward;
+              if (needsPayment) {
+                patch.paymentType = senderPayBase;
+                patch.card_issuer_name = (selectedReceipt.card_issuer_name || "").trim();
+                patch.last_4_digit_card = (selectedReceipt.last_4_digit_card || "").trim();
+              }
+              fetch("/api/receipt/updateReceiptv1", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Accesstoken: token },
+                body: JSON.stringify(patch),
+              }).catch(() => {});
+            }
+          } catch { /* ignore */ }
+        })();
+      }
+    }
 
     setToast({ isVisible: true, message: "Receipt forwarded successfully.", type: "success" });
     silentRefreshData?.(1500);
@@ -6403,7 +6459,7 @@ Thank you for using our receipt management system.
                                     src={proxyImageUrl(u)}
                                     alt="Receipt"
                                     className="w-24 h-auto rounded cursor-pointer border border-gray-200"
-                                    onClick={() => window.open(u, "_blank")}
+                                    onClick={() => window.open(proxyImageUrl(u), "_blank")}
                                     onError={(e) =>
                                       (e.target.style.display = "none")
                                     }

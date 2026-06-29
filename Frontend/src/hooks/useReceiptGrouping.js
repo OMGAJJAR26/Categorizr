@@ -2,33 +2,27 @@ import { useMemo } from "react";
 import { filterReceipts } from "../utils/receiptFilters";
 import { sortReceipts, sortYears } from "../utils/receiptSorting";
 
+// Only iOS/Android-drafted receipts go in the amber Draft section.
+const isToBeVerified = (r) => r.is_draft === "1";
+
 /**
- * A receipt is "to be verified" (Draft / eReceipt) when it was forwarded via
- * email to the app (fk_incoming_email_id is set) and has not yet been verified.
- *
- * "Received" receipts forwarded within the Categorizr Network have
- * fk_forward_from_receipt_id > 0 — those are NOT drafts; they go in the
- * regular list with a blue "Received" badge.
- *
- * Rules:
- *  - is_draft === "1"  → always a draft
- *  - fk_incoming_email_id non-null/non-zero AND is_verify === "0" → eReceipt to verify
+ * Any forwarded receipt (email-forwarded OR network-forwarded from another user)
+ * that hasn't been opened yet. Goes in the REGULAR section with a blue "New" highlight.
+ * The highlight clears when the user taps to view (is_verify flips to "1").
  */
-const isToBeVerified = (r) => {
-  if (r.is_draft === "1") return true;
+export const isNewForwardedReceipt = (r) => {
+  if (!r || r.is_draft === "1" || r.is_verify !== "0") return false;
   const hasEmailId =
-    r.fk_incoming_email_id &&
-    r.fk_incoming_email_id !== "0" &&
-    r.fk_incoming_email_id !== 0 &&
-    r.fk_incoming_email_id !== null;
-  // Explicitly exclude "Received" network receipts (fk_forward_from_receipt_id set)
+    r.fk_incoming_email_id != null &&
+    String(r.fk_incoming_email_id) !== "0";
   const isNetworkReceived =
-    r.fk_forward_from_receipt_id &&
-    r.fk_forward_from_receipt_id !== "0" &&
-    r.fk_forward_from_receipt_id !== 0;
-  if (isNetworkReceived) return false;
-  return hasEmailId && r.is_verify === "0";
+    r.fk_forward_from_receipt_id != null &&
+    String(r.fk_forward_from_receipt_id) !== "0";
+  return hasEmailId || isNetworkReceived;
 };
+
+/** @deprecated Use isNewForwardedReceipt instead */
+export const isNewForwardedEmailReceipt = isNewForwardedReceipt;
 
 export const useReceiptGrouping = (receipts, filters, sortConfig, searchTerm) => {
   // Split ALL receipts into draft vs regular BEFORE applying user filters.
