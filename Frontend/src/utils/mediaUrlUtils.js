@@ -290,6 +290,8 @@ export function dedupeReceiptMediaAcrossReceipts(receipts) {
   if (!Array.isArray(receipts) || receipts.length <= 1) return receipts;
 
   const urlOwner = new Map();
+  // url → all receipt indices and create_dates that have it
+  const urlAllIndices = new Map();
 
   receipts.forEach((receipt, index) => {
     const rank = receiptMediaRank(receipt);
@@ -300,15 +302,26 @@ export function dedupeReceiptMediaAcrossReceipts(receipts) {
         rank > prev.rank ||
         (rank === prev.rank && index > prev.index)
       ) {
-        urlOwner.set(url, { rank, index });
+        urlOwner.set(url, { rank, index, createDate: parseInt(receipt?.create_date, 10) || 0 });
       }
+      if (!urlAllIndices.has(url)) urlAllIndices.set(url, []);
+      urlAllIndices.get(url).push({ index, createDate: parseInt(receipt?.create_date, 10) || 0 });
     });
   });
 
   return receipts.map((receipt, index) => {
+    const receiptCreateDate = parseInt(receipt?.create_date, 10) || 0;
     const owned = collectReceiptMediaUrls(receipt).filter((url) => {
       const owner = urlOwner.get(url);
-      return owner && owner.index === index;
+      if (!owner) return false;
+      if (owner.index === index) return true;
+      // Receipts created within 60 seconds of each other are likely intentional splits
+      // sharing the same image — allow them to all keep the URL.
+      if (receiptCreateDate > 0 && owner.createDate > 0 &&
+          Math.abs(receiptCreateDate - owner.createDate) <= 60) {
+        return true;
+      }
+      return false;
     });
 
     const hadReceiptImageUrl =

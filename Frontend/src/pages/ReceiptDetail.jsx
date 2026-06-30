@@ -3063,7 +3063,13 @@ useEffect(() => {
       }
       const receiptTag = ["0","0","0","0","0","0","0"].join(",");
 
-      // Create a new receipt for each split
+      // Gather all image URLs from both editable fields + any photos added this session,
+      // so split receipts inherit the full image set of the original receipt.
+      const splitMediaUrls = collectReceiptMediaUrlsForSave();
+      const splitCombinedImages = buildCombinedMediaField(splitMediaUrls);
+
+      // Create a new receipt for each split; capture IDs for the image patch below.
+      const newSplitIds = [];
       for (const split of splits) {
         const splitSubtotal = parseFloat(split.subtotal) || 0;
         const taxValues = (split.receipt_tax_values || []).map(t => ({
@@ -3075,11 +3081,11 @@ useEffect(() => {
         }));
         const splitTotal = parseFloat(split.purchasePrice) ||
           parseFloat((splitSubtotal + taxValues.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0)).toFixed(2));
-        await postNewReceiptForSplit({
+        const result = await postNewReceiptForSplit({
           id: 0,
           storeName,
           product_name: split.product_name || "",
-          emailAttachment: selectedReceipt?.emailAttachment || "0",
+          emailAttachment: splitCombinedImages || "0",
           purchasePrice: splitTotal.toString(),
           total_amount: splitTotal.toString(),
           payment_category_type: parseInt(split.receipt_category) || 0,
@@ -3092,7 +3098,7 @@ useEffect(() => {
           receipt_category: parseInt(split.receipt_category) || 0,
           product_date: productDate,
           expense_type: split.expense_type || editedReceipt.expense_type || selectedReceipt?.expense_type || "",
-          receipt_image: selectedReceipt?.receipt_image || "0",
+          receipt_image: "0",
           store_image: storeImage,
           notes: "",
           receipt_forwarded: "0",
@@ -3100,6 +3106,22 @@ useEffect(() => {
           create_date: "",
           receipt_tax_values: taxValues,
         });
+        const newId = result?.id ? String(result.id) : null;
+        if (newId) newSplitIds.push(newId);
+      }
+
+      // The backend de-dups the same image URL across concurrent addReceiptv1 calls,
+      // keeping it on only one split. Re-apply the image to every split via individual
+      // updateReceiptv1 calls (backend does not de-dup on update operations).
+      if (splitCombinedImages && splitCombinedImages !== "0" && newSplitIds.length > 0) {
+        const token = localStorage.getItem("token");
+        for (const splitId of newSplitIds) {
+          fetch("/api/receipt/updateReceiptv1", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accesstoken: token },
+            body: JSON.stringify({ id: splitId, emailAttachment: splitCombinedImages }),
+          }).catch(() => {});
+        }
       }
 
       // Calculate remainder and update the existing receipt
