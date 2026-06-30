@@ -67,6 +67,7 @@ import {
 import EditPaymentMethodModal from "../components/receipts/EditPaymentMethodModal";
 import { parseTaxRateInput, createTaxRateKeyDownHandler } from "../utils/taxRateInput";
 import { useTaxRateLimitAlert } from "../hooks/useTaxRateLimitAlert";
+import { isNewForwardedReceipt } from "../hooks/useReceiptGrouping";
 import TaxRateChangeWarningModal from "../components/TaxRateChangeWarningModal";
 import {
   buildIncrementedTaxName,
@@ -3288,8 +3289,10 @@ useEffect(() => {
         card_issuer_name: cardIssuerName,
         paymentType: finalPaymentTypeForAPI || "", // Send WITHOUT *last4 to API
         last_4_digit_card: last4 || "", // Send separately
-        // Saving a draft receipt marks it as verified so it moves to the regular list
+        // Saving a draft receipt marks it as verified so it moves to the regular list.
+        // Saving a new forwarded receipt (blue "New" highlight) also clears the highlight.
         ...(isDraft ? { is_verify: "1", is_draft: "0" } : {}),
+        ...(isNewForwardedReceipt(selectedReceipt) ? { is_verify: "1" } : {}),
       };
 
       const success = await updateReceipt(selectedReceipt.id, updatedData);
@@ -3546,8 +3549,10 @@ useEffect(() => {
       card_issuer_name: cardIssuerName,
       paymentType: finalPaymentTypeForAPI || "",
       last_4_digit_card: last4 || "",
-      // Keep draft transition behavior consistent with main Save Changes flow
+      // Keep draft transition behavior consistent with main Save Changes flow.
+      // Also clear the "New" highlight when saving a forwarded receipt.
       ...(isDraft ? { is_verify: "1", is_draft: "0" } : {}),
+      ...(isNewForwardedReceipt(selectedReceipt) ? { is_verify: "1" } : {}),
     };
 
     const success = await updateReceipt(selectedReceipt.id, updatedData);
