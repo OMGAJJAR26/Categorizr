@@ -2,23 +2,41 @@ import { useMemo } from "react";
 import { filterReceipts } from "../utils/receiptFilters";
 import { sortReceipts, sortYears } from "../utils/receiptSorting";
 
-// Only iOS/Android-drafted receipts go in the amber Draft section.
-const isToBeVerified = (r) => r.is_draft === "1";
+/**
+ * Receipts that belong in the amber "Draft / To Be Verified" section.
+ * Mirrors the isDraft condition in ReceiptDetail.jsx exactly:
+ *   1. iOS/Android manually-drafted receipts (is_draft === "1")
+ *   2. Email-received eReceipts (fk_incoming_email_id set, NOT a network-forward)
+ *      that haven't been saved yet (is_verify !== "1")
+ */
+const isToBeVerified = (r) => {
+  if (!r) return false;
+  if (r.is_draft === "1") return true;
+  const hasEmailId =
+    r.fk_incoming_email_id != null &&
+    r.fk_incoming_email_id !== "0" &&
+    r.fk_incoming_email_id !== 0 &&
+    r.fk_incoming_email_id !== null;
+  const isNetworkReceived =
+    r.fk_forward_from_receipt_id != null &&
+    r.fk_forward_from_receipt_id !== "0" &&
+    r.fk_forward_from_receipt_id !== 0;
+  return hasEmailId && !isNetworkReceived && String(r?.is_verify ?? "0") !== "1";
+};
 
 /**
- * Any forwarded receipt (email-forwarded OR network-forwarded from another user)
- * that hasn't been opened yet. Goes in the REGULAR section with a blue "New" highlight.
- * The highlight clears when the user taps to view (is_verify flips to "1").
+ * Network-forwarded receipts (sent from another Categorizr user via the app)
+ * that haven't been opened yet. Goes in the REGULAR section with a blue "New" highlight.
+ * Email-received receipts (fk_incoming_email_id) are drafts — they use isToBeVerified instead.
  */
 export const isNewForwardedReceipt = (r) => {
   if (!r || r.is_draft === "1" || r.is_verify !== "0") return false;
-  const hasEmailId =
-    r.fk_incoming_email_id != null &&
-    String(r.fk_incoming_email_id) !== "0";
+  // Only network-forwarded receipts get the blue "New" badge.
+  // Email-received eReceipts belong in Draft Mode, not here.
   const isNetworkReceived =
     r.fk_forward_from_receipt_id != null &&
     String(r.fk_forward_from_receipt_id) !== "0";
-  return hasEmailId || isNetworkReceived;
+  return isNetworkReceived;
 };
 
 /** @deprecated Use isNewForwardedReceipt instead */

@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import FontLogo from "../assets/categorizrFontLogo.png";
-import { UserCircle, Check, Settings } from "lucide-react";
+import { UserCircle, Check, Settings, Sun, Moon } from "lucide-react";
 import { useData } from "../context/DataContext";
 import { useCurrency } from "../context/CurrencyContext";
-// import { useTheme } from "../context/ThemeContext";
+import { useTheme } from "../context/ThemeContext";
 import LogoutConfirmationDialog from "./LogoutConfirmationDialog";
 
 const Header = () => {
@@ -17,19 +17,16 @@ const Header = () => {
   const profileRef = useRef(null);
   const { clearAllData, user } = useData();
   const { language, setLanguage, languages, flags } = useCurrency();
-  // const { isDark, toggle: toggleTheme } = useTheme();
+  const { isDark, toggle: toggleTheme } = useTheme();
   const isOnSettings = location.pathname === "/settings";
 
   const handleLogout = () => {
     setShowProfileMenu(false);
     setShowLogoutConfirm(false);
-    // Clear all data first
     clearAllData();
-    // Clear localStorage but preserve forwarded-receipt IDs (like iOS Core Data across app restarts)
     const forwarded = localStorage.getItem("cat_locally_forwarded");
     localStorage.clear();
     if (forwarded) localStorage.setItem("cat_locally_forwarded", forwarded);
-    // Navigate to login
     navigate("/login", { replace: true });
   };
 
@@ -37,7 +34,6 @@ const Header = () => {
     setShowLogoutConfirm(true);
   };
 
-  // Close menus when clicking outside either menu, or pressing Escape
   useEffect(() => {
     const handleClickOutside = (event) => {
       const inLang = langRef.current?.contains(event.target);
@@ -91,7 +87,7 @@ const Header = () => {
           </button>
 
           {showLangMenu && (
-            <div className="absolute right-0 mt-2 bg-blue-50 text-black rounded-xl shadow-2xl w-48 sm:w-60 z-50 border overflow-hidden animate-fadeIn">
+            <div className="absolute right-0 mt-2 bg-blue-50 text-black rounded-xl shadow-2xl w-48 sm:w-60 z-50 border overflow-hidden animate-fadeIn dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700">
               {languages.map((lang) => (
                 <button
                   key={lang}
@@ -99,7 +95,7 @@ const Header = () => {
                     setLanguage(lang);
                     setShowLangMenu(false);
                   }}
-                  className="flex items-center justify-between gap-2 sm:gap-3 w-full text-left px-3 sm:px-5 py-2.5 sm:py-3 m-0 transition-all hover:bg-gradient-to-r hover:from-blue-400 hover:to-blue-600 hover:text-white"
+                  className="flex items-center justify-between gap-2 sm:gap-3 w-full text-left px-3 sm:px-5 py-2.5 sm:py-3 m-0 transition-all hover:bg-gradient-to-r hover:from-blue-400 hover:to-blue-600 hover:text-white dark:hover:from-blue-600 dark:hover:to-blue-800"
                 >
                   <div className="flex items-center gap-2 sm:gap-3">
                     <span className="text-sm sm:text-base lg:text-xl leading-none relative -top-0.5">
@@ -116,7 +112,7 @@ const Header = () => {
           )}
         </div>
 
-        {/* Theme Toggle
+        {/* Theme Toggle */}
         <button
           onClick={toggleTheme}
           aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
@@ -126,7 +122,7 @@ const Header = () => {
           {isDark
             ? <Sun size={17} className="text-yellow-300" />
             : <Moon size={17} className="text-slate-300" />}
-        </button> */}
+        </button>
 
         {/* Settings Icon */}
         <button
@@ -151,9 +147,6 @@ const Header = () => {
 
         {/* Profile Icon */}
         <div ref={profileRef} className="flex items-center gap-2">
-          {/* Username */}
-
-          {/* Profile Icon */}
           <UserCircle
             size={28}
             className="cursor-pointer hover:text-blue-300 transition-colors sm:w-8 sm:h-8 md:w-9 md:h-9 focus:outline-none"
@@ -166,40 +159,33 @@ const Header = () => {
             {user?.userName || user?.username || user?.email || "User"}
           </span>
           {showProfileMenu && (
-  <div className="absolute top-12 sm:top-14 md:top-16 right-0 mt-1 bg-white text-black rounded-xl sm:rounded-2xl shadow-lg w-44 sm:w-52 z-50 border overflow-hidden animate-fadeIn">
-
-    <button
-      onClick={handleLogoutClick}
-      className="flex items-center w-full text-left px-4 py-3 hover:bg-gray-100 transition-all duration-200 ease-in-out group"
-    >
-      {/* Logout Icon */}
-      <svg
-        className="w-5 h-5 mr-2 text-gray-600 group-hover:text-red-500 transition-colors duration-200"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-        />
-      </svg>
-
-      {/* Username */}
-      <span className="text-sm font-semibold text-gray-800 truncate flex-1">
-        {user?.userName || user?.username || user?.email || "User"}
-      </span>
-
-      {/* Logout Text */}
-      <span className="text-sm font-semibold text-gray-700 group-hover:text-red-600 transition-colors duration-200">
-        Logout
-      </span>
-    </button>
-  </div>
-)}
-
+            <div className="absolute top-12 sm:top-14 md:top-16 right-0 mt-1 bg-white text-black rounded-xl sm:rounded-2xl shadow-lg w-44 sm:w-52 z-50 border overflow-hidden animate-fadeIn dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700">
+              <button
+                onClick={handleLogoutClick}
+                className="flex items-center w-full text-left px-4 py-3 hover:bg-gray-100 transition-all duration-200 ease-in-out group dark:hover:bg-slate-700"
+              >
+                <svg
+                  className="w-5 h-5 mr-2 text-gray-600 group-hover:text-red-500 transition-colors duration-200 dark:text-slate-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                  />
+                </svg>
+                <span className="text-sm font-semibold text-gray-800 truncate flex-1 dark:text-slate-100">
+                  {user?.userName || user?.username || user?.email || "User"}
+                </span>
+                <span className="text-sm font-semibold text-gray-700 group-hover:text-red-600 transition-colors duration-200 dark:text-slate-300 dark:group-hover:text-red-400">
+                  Logout
+                </span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
       <LogoutConfirmationDialog

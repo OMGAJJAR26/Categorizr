@@ -407,15 +407,27 @@ const HomePage = () => {
       synced = new Set();
     }
 
-    const allForwards = receipts.filter((r) => {
+    // Network-forwarded receipts (from another Categorizr user via the app)
+    const networkForwards = receipts.filter((r) => {
       const fwdId = r.fk_forward_from_receipt_id;
       return fwdId && fwdId !== "0" && fwdId !== 0;
     });
 
+    // Email-received eReceipts (fk_incoming_email_id set, NOT also a network-forward)
+    const emailEReceipts = receipts.filter((r) => {
+      const emailId = r.fk_incoming_email_id;
+      const fwdId = r.fk_forward_from_receipt_id;
+      const isNetworkForward = fwdId && fwdId !== "0" && fwdId !== 0;
+      return emailId && emailId !== "0" && emailId !== 0 && !isNetworkForward;
+    });
+
+    // All receipt types that need a notification banner
+    const allForwards = [...networkForwards, ...emailEReceipts];
+
     // Receipts that haven't shown a notification yet
     const newForwards = allForwards.filter((r) => !seen.has(String(r.id)));
-    // Receipts that haven't been data-synced yet (may include older forwards)
-    const toSync = allForwards.filter((r) => {
+    // Data-sync only applies to NETWORK-forwarded receipts (copies data from original receipt)
+    const toSync = networkForwards.filter((r) => {
       const resolvedType = getReceiptExpenseType(r, apiExpenseCategories).trim();
       const rowType = (r.expense_type || "").trim();
       if (!synced.has(String(r.id))) return true;
@@ -433,19 +445,31 @@ const HomePage = () => {
       newForwards.forEach((r) => seen.add(String(r.id)));
       try { localStorage.setItem(notifKey, JSON.stringify([...seen])); } catch { /* quota */ }
 
-      const latest = newForwards[newForwards.length - 1];
-      const senderName = latest.originalUsername || null;
-      const count = newForwards.length;
+      const newNetworkForwards = newForwards.filter((r) => {
+        const fwdId = r.fk_forward_from_receipt_id;
+        return fwdId && fwdId !== "0" && fwdId !== 0;
+      });
+      const newEmailEReceipts = newForwards.filter((r) => !newNetworkForwards.includes(r));
+
       let message;
-      if (count === 1) {
-        message = senderName
-          ? `New eReceipt forwarded from ${senderName}`
-          : "New eReceipt forwarded to you";
+      if (newForwards.length === 1) {
+        if (newEmailEReceipts.length === 1) {
+          message = "New eReceipt added to drafts";
+        } else {
+          const senderName = newNetworkForwards[0]?.originalUsername || null;
+          message = senderName
+            ? `New eReceipt forwarded from ${senderName}`
+            : "New eReceipt forwarded to you";
+        }
       } else {
-        const names = [...new Set(newForwards.map((r) => r.originalUsername).filter(Boolean))];
-        message = names.length > 0
-          ? `${count} new eReceipts forwarded from ${names.join(", ")}`
-          : `${count} new eReceipts forwarded to you`;
+        if (newNetworkForwards.length === 0) {
+          message = `${newForwards.length} new eReceipts added to drafts`;
+        } else {
+          const names = [...new Set(newNetworkForwards.map((r) => r.originalUsername).filter(Boolean))];
+          message = names.length > 0
+            ? `${newForwards.length} new eReceipts forwarded from ${names.join(", ")}`
+            : `${newForwards.length} new eReceipts forwarded to you`;
+        }
       }
       setToast({ isVisible: true, message, type: "info", actionUrl: null, actionLabel: null });
     }
@@ -470,15 +494,14 @@ const HomePage = () => {
     if (receipt.status === "0") {
       await updateReceiptStatus(receipt.id, "1");
     }
-    // Clear the "New" highlight for forwarded receipts (email or network) on first open
+    // Clear the "New" highlight for NETWORK-forwarded receipts on first open.
+    // Email-received eReceipts are drafts — do not set is_verify on open; let the
+    // user explicitly save or discard them from the Draft Mode section.
     if (receipt.is_verify === "0") {
-      const hasEmailId =
-        receipt.fk_incoming_email_id != null &&
-        String(receipt.fk_incoming_email_id) !== "0";
       const isNetworkReceived =
         receipt.fk_forward_from_receipt_id != null &&
         String(receipt.fk_forward_from_receipt_id) !== "0";
-      if (hasEmailId || isNetworkReceived) {
+      if (isNetworkReceived) {
         updateReceipt(receipt.id, { is_verify: "1" });
       }
     }
