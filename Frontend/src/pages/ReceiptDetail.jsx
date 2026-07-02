@@ -3,12 +3,13 @@ import { NODE_API_URL, proxyImageUrl, unproxyImageUrl } from "../api/Axios";
 import {
   encodeReceiptTags,
   formatTaxRate,
+  getSplitReceiptValidationMessage,
   parseReceiptTags,
   taxTypeDedupKey,
   taxTypesMatch,
   taxDefinitionMatchesReceiptLine,
 } from "../utils/receiptFormatters";
-import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine, AlertCircle,} from "lucide-react";
+import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine, AlertCircle, RotateCcw,} from "lucide-react";
 import ReceiptAnnotator from "../components/receipts/ReceiptAnnotator";
 import PdfThumbnail from "../components/receipts/PdfThumbnail";
 import {
@@ -370,10 +371,18 @@ const ReceiptDetail = ({
   const [isSavingSplits, setIsSavingSplits] = useState(false);
   const [splitErrors, setSplitErrors] = useState({});
   const [splitError, setSplitError] = useState(null);
+  const [splitPrereqError, setSplitPrereqError] = useState(null);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [showForwardModal, setShowForwardModal] = useState(false);
   const [alertMsg, setAlertMsg] = useState(null);
   const [showMaxDefaultTaxModal, setShowMaxDefaultTaxModal] = useState(false);
+
+  // Auto-dismiss split prerequisite banner after 3.5 s
+  useEffect(() => {
+    if (!splitPrereqError) return;
+    const t = setTimeout(() => setSplitPrereqError(null), 3500);
+    return () => clearTimeout(t);
+  }, [splitPrereqError]);
 
   // Refs for dropdowns
   const merchantInputRef = useRef(null);
@@ -592,6 +601,8 @@ const ReceiptDetail = ({
   // Keep total fixed: derive subtotal and per-tax amounts from rates.
   const recalculateReceiptTotalsFromFixedTotal = useCallback(
     (total, taxValues, tip) => {
+      // If all non-tip taxes have stored amounts AND none are manually locked,
+      // preserve all amounts and let subtotal absorb any total change.
       const preserved = preserveStoredReceiptTaxTotals(total, taxValues, tip);
       if (preserved) return preserved;
 
@@ -600,6 +611,33 @@ const ReceiptDetail = ({
       const taxes = (taxValues || []).filter(
         (t) => !(t.tax_name || "").toLowerCase().includes("tip"),
       );
+
+      // If any tax line is manually locked, use the manual-override formula.
+      const hasManual = taxes.some((t) => t._isManual);
+      if (hasManual) {
+        const manualSum = taxes.reduce(
+          (sum, t) => (t._isManual ? sum + (parseFloat(t.tax_amount) || 0) : sum),
+          0,
+        );
+        const nonManualRateSum = taxes.reduce((sum, t) => {
+          if (t._isManual) return sum;
+          return sum + resolveTaxRateForReceipt(t) / 100;
+        }, 0);
+        const denominator = 1 + nonManualRateSum;
+        const subtotalNum =
+          denominator > 0 ? (totalNum - tipNum - manualSum) / denominator : 0;
+        const subtotal = subtotalNum > 0 ? parseFloat(subtotalNum.toFixed(2)) : 0;
+        const receipt_tax_values = taxes.map((t) => {
+          if (t._isManual) return { ...t, tax_amount: parseFloat(t.tax_amount) || 0 };
+          const rate = resolveTaxRateForReceipt(t);
+          const tax_amount =
+            subtotal > 0 && rate > 0
+              ? parseFloat(((subtotal * rate) / 100).toFixed(2))
+              : 0;
+          return { ...t, tax_rate: rate > 0 ? formatTaxRate(rate) : t.tax_rate || "0", tax_amount };
+        });
+        return { subtotal, receipt_tax_values };
+      }
 
       const totalRateSum = taxes.reduce(
         (sum, t) => sum + resolveTaxRateForReceipt(t) / 100,
@@ -1470,6 +1508,12 @@ useEffect(() => {
     if (field === "subtotal" || field === "purchasePrice" || field === "tip") {
       value = sanitizeMoneyInput(value);
     }
+    if (
+      ["product_date", "storeName", "expense_type", "purchasePrice"].includes(field) &&
+      splitPrereqError
+    ) {
+      setSplitPrereqError(null);
+    }
     setEditedReceipt((prev) => {
       const newData = { ...prev, [field]: value };
 
@@ -1870,7 +1914,8 @@ useEffect(() => {
     });
   };
 
-  // Tax amount input: keep total fixed; recalc subtotal and all tax rows from rates.
+  // Tax amount input: mark the edited line as manually overridden so the value is
+  // preserved across price/tip changes. Other non-manual lines recalculate from rates.
   const handleTaxAmountChange = (index, rawValue) => {
     const numeric = sanitizeMoneyInput(rawValue);
     const fieldKey = index === 0 ? "tax0" : "tax1";
@@ -1883,7 +1928,9 @@ useEffect(() => {
         ) ||
         [];
       const updatedTaxValues = currentTaxValues.map((t, i) =>
-        i === index ? { ...t, tax_amount: numeric === "" ? 0 : parseFloat(numeric) } : t
+        i === index
+          ? { ...t, tax_amount: numeric === "" ? 0 : parseFloat(numeric), _isManual: true }
+          : t
       );
       const total =
         parseFloat(prev.purchasePrice) ||
@@ -1904,6 +1951,30 @@ useEffect(() => {
         subtotal,
         purchasePrice: prev.purchasePrice,
       };
+    });
+  };
+
+  // Revert a manually overridden tax line back to rate-based auto-calculation.
+  const handleResetTaxAmount = (index) => {
+    setEditedReceipt((prev) => {
+      const currentTaxValues = prev.receipt_tax_values || [];
+      const updatedTaxValues = currentTaxValues.map((t, i) =>
+        i === index ? { ...t, _isManual: false } : t
+      );
+      const total =
+        parseFloat(prev.purchasePrice) ||
+        parseFloat(r.total) ||
+        parseFloat(r.purchasePrice) ||
+        0;
+      const tipAmount =
+        parseFloat(prev.tip) ||
+        (tipTax?.tax_amount ? parseFloat(tipTax.tax_amount) : 0);
+      const { subtotal, receipt_tax_values } = recalculateReceiptTotalsFromFixedTotal(
+        total,
+        updatedTaxValues,
+        tipAmount,
+      );
+      return { ...prev, receipt_tax_values, subtotal, purchasePrice: prev.purchasePrice };
     });
   };
 
@@ -2856,15 +2927,18 @@ useEffect(() => {
 
   /** Open the split screen — validates required fields first */
   const handleOpenSplit = () => {
-    const total = parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0;
-    const storeName = editedReceipt.storeName || selectedReceipt?.storeName || "";
-    const missing = [];
-    if (!storeName.trim()) missing.push("Merchant Name");
-    if (!total) missing.push("Total Amount");
-    if (missing.length) {
-      setSplitError(`Please fill in: ${missing.join(", ")} before splitting.`);
+    const msg = getSplitReceiptValidationMessage({
+      product_date: editedReceipt.product_date ?? selectedReceipt?.product_date,
+      storeName: editedReceipt.storeName || selectedReceipt?.storeName,
+      expense_type: editedReceipt.expense_type || selectedReceipt?.expense_type,
+      purchasePrice: editedReceipt.purchasePrice || selectedReceipt?.purchasePrice,
+    });
+    if (msg) {
+      setSplitPrereqError(msg);
+      setShowOptionsMenu(false);
       return;
     }
+    setSplitPrereqError(null);
     setSplitError(null);
     setSplits([]);
     setSplitErrors({});
@@ -5139,6 +5213,20 @@ Thank you for using our receipt management system.
                 </div>
               </div>
 
+              {/* Split prerequisite error banner */}
+              {splitPrereqError && (
+                <div className="flex items-center gap-2 bg-red-50 border-b border-red-300 px-4 py-2.5">
+                  <span className="text-red-700 text-sm font-medium flex-1">{splitPrereqError}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSplitPrereqError(null)}
+                    className="text-red-400 hover:text-red-600 text-lg leading-none flex-shrink-0"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+
               {/* Scrollable Content */}
               <div className="overflow-y-auto flex-1 min-h-0 relative">
               <div ref={scrollContentRef}>
@@ -6021,6 +6109,17 @@ Thank you for using our receipt management system.
                                     })()}
                                   </label>
                                   <div className="flex items-center gap-1">
+                                    {currentTaxValues[0]?._isManual && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleResetTaxAmount(0)}
+                                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                                        title="Revert to auto-calculated amount"
+                                      >
+                                        <RotateCcw size={11} />
+                                        Auto
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
                                       onClick={() => removeTaxFromReceipt(0)}
@@ -6063,6 +6162,17 @@ Thank you for using our receipt management system.
                                     })()}
                                   </label>
                                   <div className="flex items-center gap-1">
+                                    {currentTaxValues[1]?._isManual && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleResetTaxAmount(1)}
+                                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                                        title="Revert to auto-calculated amount"
+                                      >
+                                        <RotateCcw size={11} />
+                                        Auto
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
                                       onClick={() => removeTaxFromReceipt(1)}

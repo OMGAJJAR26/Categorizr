@@ -454,7 +454,7 @@ const HomePage = () => {
       let message;
       if (newForwards.length === 1) {
         if (newEmailEReceipts.length === 1) {
-          message = "New eReceipt added to drafts";
+          message = "New eReceipt Added";
         } else {
           const senderName = newNetworkForwards[0]?.originalUsername || null;
           message = senderName
@@ -463,7 +463,7 @@ const HomePage = () => {
         }
       } else {
         if (newNetworkForwards.length === 0) {
-          message = `${newForwards.length} new eReceipts added to drafts`;
+          message = `${newForwards.length} New eReceipts Added`;
         } else {
           const names = [...new Set(newNetworkForwards.map((r) => r.originalUsername).filter(Boolean))];
           message = names.length > 0
@@ -542,7 +542,7 @@ const HomePage = () => {
     setDuplicateInitialData(snapshot);      // triggers the duplicate modal to open
     setToast({
       isVisible: true,
-      message: "Your original receipt has been saved successfully. You are now viewing the duplicate receipt.",
+      message: "Your original receipt has been saved. You are now viewing your duplicate receipt.",
       type: "success",
     });
   };

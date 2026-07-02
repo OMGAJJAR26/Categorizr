@@ -93,7 +93,7 @@ const ReceiptsTable = ({
             const paymentDisplay = getPaymentDisplay(receipt);
             const hasPayment = paymentDisplay && paymentDisplay !== "-" && paymentDisplay !== "—";
             if (!hasPayment) {
-              return <span className="text-sm xl:text-base text-gray-500">-</span>;
+              return <span className="text-sm xl:text-base text-gray-500">—</span>;
             }
             const logo = getPaymentLogo(receipt);
             return (

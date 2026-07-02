@@ -1,12 +1,12 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { formatTaxRate, taxTypeDedupKey, taxTypesMatch } from "../../utils/receiptFormatters";
+import { formatTaxRate, taxTypeDedupKey, taxTypesMatch, getSplitReceiptValidationMessage, getDuplicateReceiptValidationMessage } from "../../utils/receiptFormatters";
 import {
   parseDateInputToUnix,
   todayLocalCalendarUnix,
 } from "../../utils/receiptDate";
 import { containsEmoji, stripEmoji } from "../../utils/emojiUtils";
 import SimpleAlertModal from "../SimpleAlertModal";
-import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus, MoreHorizontal, Minus, ChevronLeft, ChevronRight, Pencil, Camera, PenLine, AlertCircle } from "lucide-react";
+import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus, MoreHorizontal, Minus, ChevronLeft, ChevronRight, Pencil, Camera, PenLine, AlertCircle, RotateCcw } from "lucide-react";
 import ReceiptAnnotator from "./ReceiptAnnotator";
 import { motion, AnimatePresence } from "framer-motion";
 import { useData } from "../../context/DataContext";
@@ -86,28 +86,6 @@ import warrantedDeselect from "../../assets/receipttags/warrantied_deselect.png"
 import warrantedSelect from "../../assets/receipttags/warrantied_select.png";
 import lockedImg from "../../assets/receipttags/locked.png";
 import unlockedImg from "../../assets/receipttags/unlocked.png";
-
-/**
- * Duplicate flow: required fields in order (date → merchant → total).
- * Returns the first user-facing error message, or null if valid.
- */
-function getDuplicateReceiptValidationMessage(formData) {
-  if (formData?.product_date == null || String(formData.product_date).trim() === "") {
-    return "Please select date";
-  }
-  if (formData?.storeName == null || String(formData.storeName).trim() === "") {
-    return "Please select merchant";
-  }
-  const rawTotal = formData?.purchasePrice;
-  if (rawTotal == null || String(rawTotal).trim() === "") {
-    return "Please enter total";
-  }
-  const total = parseFloat(String(rawTotal).trim());
-  if (!Number.isFinite(total) || total === 0) {
-    return "Please enter total";
-  }
-  return null;
-}
 
 /** Describe Purchase (`product_name`): default to "Duplicate" when blank, otherwise append " (1)". */
 function withDuplicateDefaultProductName(formData) {
@@ -229,6 +207,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const [splits, setSplits] = useState([]);
   const [isSavingSplits, setIsSavingSplits] = useState(false);
   const [splitErrors, setSplitErrors] = useState({}); // { [split._id]: { amount: "msg", ... } }
+  const [actionPrereqError, setActionPrereqError] = useState(null); // split / duplicate prerequisite banner
 
   // Form fields state
   const [formData, setFormData] = useState({
@@ -477,7 +456,15 @@ const [localMerchants, setLocalMerchants] = useState([]);
       resetReceiptMediaState();
       return;
     }
-    if (initialData.formData)        setFormData(initialData.formData);
+    if (initialData.formData) {
+      // Mark tax lines that already have stored amounts as manually overridden so
+      // they are not wiped when the user later changes price, subtotal, or tip.
+      const taxWithManual = (initialData.formData.receipt_tax_values || []).map((t) => ({
+        ...t,
+        _isManual: parseFloat(t.tax_amount) > 0,
+      }));
+      setFormData({ ...initialData.formData, receipt_tax_values: taxWithManual });
+    }
     if (initialData.tags)            setTags(initialData.tags);
     if (initialData.uploadedMediaUrls) setUploadedMediaUrls(initialData.uploadedMediaUrls);
     if (initialData.uploadedImageUrl)  setUploadedImageUrl(initialData.uploadedImageUrl);
@@ -1095,6 +1082,40 @@ const [localMerchants, setLocalMerchants] = useState([]);
     return subtotal > 0 ? subtotal.toFixed(2) : "0.00";
   };
 
+  // Subtotal when some taxes are manually locked.
+  // Formula: (total - tip - sum(manual amounts)) / (1 + sum(non-manual rates)/100)
+  const calculateSubtotalWithManualOverrides = (total, taxValues, tip) => {
+    const totalNum = parseFloat(total) || 0;
+    const tipNum = parseFloat(tip) || 0;
+    const manualSum = (taxValues || []).reduce(
+      (sum, t) => (t._isManual ? sum + (parseFloat(t.tax_amount) || 0) : sum),
+      0,
+    );
+    const nonManualRateSum = (taxValues || []).reduce((sum, t) => {
+      if (t._isManual) return sum;
+      return sum + (parseFloat(t.tax_rate) || 0) / 100;
+    }, 0);
+    const denominator = 1 + nonManualRateSum;
+    const subtotal = denominator > 0 ? (totalNum - tipNum - manualSum) / denominator : 0;
+    return subtotal > 0 ? subtotal.toFixed(2) : "0.00";
+  };
+
+  // Recalculate only non-manual tax lines; manual lines are returned unchanged.
+  const applyTaxRecalc = (taxValues, subtotal) => {
+    const subtotalNum = parseFloat(subtotal) || 0;
+    const userId = parseInt(localStorage.getItem("fk_user_id")) || 0;
+    return (taxValues || []).map((t) => {
+      const base = { ...t, id: t.id || 0, fk_user_id: t.fk_user_id || userId, fk_tax_id: t.fk_tax_id || 0, created: t.created || 0, updated: t.updated || 0 };
+      if (t._isManual) return base;
+      const rate = parseFloat(t.tax_rate) || 0;
+      const calculatedAmount =
+        subtotalNum > 0 && rate > 0
+          ? ((subtotalNum * rate) / 100).toFixed(2)
+          : "0.00";
+      return { ...base, tax_amount: calculatedAmount };
+    });
+  };
+
   const sanitizeMoneyInput = (raw) => {
     if (raw === null || raw === undefined) return "";
     const cleaned = String(raw).replace(/[^0-9.]/g, "");
@@ -1125,6 +1146,13 @@ const [localMerchants, setLocalMerchants] = useState([]);
     const t = setTimeout(() => setError(null), 3500);
     return () => clearTimeout(t);
   }, [error]);
+
+  // Auto-dismiss split/duplicate prerequisite banner after 3.5 s
+  useEffect(() => {
+    if (!actionPrereqError) return;
+    const t = setTimeout(() => setActionPrereqError(null), 3500);
+    return () => clearTimeout(t);
+  }, [actionPrereqError]);
 
   // ── Merchant-category intelligence ──────────────────────────────────────────
   // Scans existing receipts to find the most-recently-used expense category for
@@ -1165,6 +1193,12 @@ const handleFieldChange = (field, value) => {
   }
   // Clear error banner when user changes the merchant field
   if (field === "storeName" && error) setError(null);
+  if (
+    ["product_date", "storeName", "expense_type", "purchasePrice"].includes(field) &&
+    actionPrereqError
+  ) {
+    setActionPrereqError(null);
+  }
   setFormData((prev) => {
     const newData = { ...prev, [field]: value };
 
@@ -1178,13 +1212,13 @@ const handleFieldChange = (field, value) => {
       newData.paymentLogoUrl = "";
     }
 
-    // When subtotal changes, recalculate tax amounts based on rates and update total
+    // When subtotal changes, recalculate non-manual tax amounts and update total
     if (field === "subtotal") {
       const subtotal = parseFloat(value) || 0;
 
-      // Recalculate tax amounts based on subtotal and tax rates
       if (newData.receipt_tax_values.length > 0) {
         newData.receipt_tax_values = newData.receipt_tax_values.map((t) => {
+          if (t._isManual) return t;
           const rate = parseFloat(t.tax_rate) || 0;
           const calculatedAmount =
             subtotal > 0 && rate > 0
@@ -1202,14 +1236,13 @@ const handleFieldChange = (field, value) => {
       );
     }
 
-    // When total changes, recalculate subtotal and tax amounts
+    // When total changes, recalculate subtotal and non-manual tax amounts
     if (field === "purchasePrice") {
       const totalNum = parseFloat(value) || 0;
       const tipNum = parseFloat(newData.tip) || 0;
 
-      // Calculate subtotal from total using tax rates (not amounts)
-      // This avoids circular dependency since tax amounts aren't set yet
-      const subtotalFromTotal = calculateSubtotalFromRates(
+      // Account for manually locked amounts in the subtotal formula
+      const subtotalFromTotal = calculateSubtotalWithManualOverrides(
         value,
         newData.receipt_tax_values,
         newData.tip,
@@ -1217,31 +1250,14 @@ const handleFieldChange = (field, value) => {
       const subtotalNum = parseFloat(subtotalFromTotal) || 0;
       newData.subtotal = subtotalFromTotal;
 
-      // Recalculate tax amounts based on new subtotal so amounts update immediately
       if (newData.receipt_tax_values.length > 0 && subtotalNum > 0) {
         newData.receipt_tax_values = newData.receipt_tax_values.map((t) => {
+          if (t._isManual) return t;
           const rate = parseFloat(t.tax_rate) || 0;
-          const calculatedAmount =
-            rate > 0 ? ((subtotalNum * rate) / 100).toFixed(2) : "0.00";
-          return { ...t, tax_amount: calculatedAmount };
+          return { ...t, tax_amount: rate > 0 ? ((subtotalNum * rate) / 100).toFixed(2) : "0.00" };
         });
-
-        // Verify: Total should equal Subtotal + Taxes + Tip
-        const recalculatedTotal = calculateTotal(
-          subtotalFromTotal,
-          newData.receipt_tax_values,
-          newData.tip,
-        );
-        console.log("=== Total Changed Calculation ===");
-        console.log("Input Total:", value);
-        console.log("Calculated Subtotal:", subtotalFromTotal);
-        console.log("Tax Values:", newData.receipt_tax_values);
-        console.log("Tip:", newData.tip);
-        console.log("Recalculated Total:", recalculatedTotal);
       } else if (newData.receipt_tax_values.length === 0) {
-        // No taxes, so subtotal = total - tip
-        const subtotalNoTax = (totalNum - tipNum).toFixed(2);
-        newData.subtotal = subtotalNoTax;
+        newData.subtotal = (totalNum - tipNum).toFixed(2);
       }
     }
 
@@ -1249,9 +1265,8 @@ const handleFieldChange = (field, value) => {
     if (field === "tip") {
       const totalNum = parseFloat(newData.purchasePrice) || 0;
       const tipNum = parseFloat(value) || 0;
-      
-      // Calculate subtotal from total using tax rates (including new tip)
-      const subtotalFromTotal = calculateSubtotalFromRates(
+
+      const subtotalFromTotal = calculateSubtotalWithManualOverrides(
         totalNum,
         newData.receipt_tax_values,
         tipNum,
@@ -1259,13 +1274,11 @@ const handleFieldChange = (field, value) => {
       const subtotalNum = parseFloat(subtotalFromTotal) || 0;
       newData.subtotal = subtotalFromTotal;
 
-      // Recalculate tax amounts based on new subtotal
       if (newData.receipt_tax_values.length > 0 && subtotalNum > 0) {
         newData.receipt_tax_values = newData.receipt_tax_values.map((t) => {
+          if (t._isManual) return t;
           const rate = parseFloat(t.tax_rate) || 0;
-          const calculatedAmount =
-            rate > 0 ? ((subtotalNum * rate) / 100).toFixed(2) : "0.00";
-          return { ...t, tax_amount: calculatedAmount };
+          return { ...t, tax_amount: rate > 0 ? ((subtotalNum * rate) / 100).toFixed(2) : "0.00" };
         });
       }
 
@@ -1350,36 +1363,15 @@ const handleFieldChange = (field, value) => {
       const newTaxValues = [...formData.receipt_tax_values, taxToAdd]
         .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""));
 
-      // Recompute subtotal from total using tax rates (not amounts)
-      const subtotalFromTotal = calculateSubtotalFromRates(
+      // Recompute subtotal accounting for any existing manual overrides
+      const subtotalFromTotal = calculateSubtotalWithManualOverrides(
         totalNum,
         newTaxValues,
         tipNum,
       );
-      const subtotalNum = parseFloat(subtotalFromTotal) || 0;
 
-      // Recompute each tax amount based on new subtotal
-      // Ensure all required fields are present for saving
-      const recalculatedTaxes = newTaxValues.map((t) => {
-        const rate = parseFloat(t.tax_rate) || 0;
-        const calculatedAmount =
-          subtotalNum > 0 && rate > 0
-            ? ((subtotalNum * rate) / 100).toFixed(2)
-            : "0.00";
-        return {
-          ...t,
-          tax_amount: calculatedAmount,
-          // Ensure required fields exist (for saving to backend)
-          id: t.id || 0,
-          fk_user_id:
-            t.fk_user_id || parseInt(localStorage.getItem("fk_user_id")) || 0,
-          // IMPORTANT: Preserve fk_tax_id (tax definition ID) - don't override it
-          // t.id is the receipt_tax_value id (0 for new entries), not the tax definition id
-          fk_tax_id: t.fk_tax_id || 0,
-          created: t.created || 0,
-          updated: t.updated || 0,
-        };
-      });
+      // Recalculate only non-manual lines; new tax is not manually overridden
+      const recalculatedTaxes = applyTaxRecalc(newTaxValues, subtotalFromTotal);
 
       console.log("Subtotal from total:", subtotalFromTotal);
       console.log("Recalculated taxes:", recalculatedTaxes);
@@ -1403,45 +1395,16 @@ const handleFieldChange = (field, value) => {
   // Remove tax type and keep total fixed; recalc subtotal and remaining taxes
   const removeTaxType = (index) => {
     setFormData((prev) => {
-      const newTaxValues = prev.receipt_tax_values.filter(
-        (_, i) => i !== index,
-      );
-
+      const newTaxValues = prev.receipt_tax_values.filter((_, i) => i !== index);
       const totalNum = parseFloat(prev.purchasePrice) || 0;
       const tipNum = parseFloat(prev.tip) || 0;
-      const subtotalFromTotal = calculateSubtotalFromRates(
-        totalNum,
-        newTaxValues,
-        tipNum,
-      );
-      const subtotalNum = parseFloat(subtotalFromTotal) || 0;
-
-      const recalculatedTaxes = newTaxValues.map((t) => {
-        const rate = parseFloat(t.tax_rate) || 0;
-        const calculatedAmount =
-          subtotalNum > 0 && rate > 0
-            ? ((subtotalNum * rate) / 100).toFixed(2)
-            : "0.00";
-        return {
-          ...t,
-          tax_amount: calculatedAmount,
-          // Ensure required fields exist (for saving to backend)
-          id: t.id || 0,
-          fk_user_id:
-            t.fk_user_id || parseInt(localStorage.getItem("fk_user_id")) || 0,
-          // IMPORTANT: Preserve fk_tax_id (tax definition ID) - don't override it
-          // t.id is the receipt_tax_value id (0 for new entries), not the tax definition id
-          fk_tax_id: t.fk_tax_id || 0,
-          created: t.created || 0,
-          updated: t.updated || 0,
-        };
-      });
-
+      const subtotalFromTotal = calculateSubtotalWithManualOverrides(totalNum, newTaxValues, tipNum);
+      const recalculatedTaxes = applyTaxRecalc(newTaxValues, subtotalFromTotal);
       return {
         ...prev,
         receipt_tax_values: recalculatedTaxes,
         subtotal: subtotalFromTotal,
-        purchasePrice: prev.purchasePrice, // keep total fixed
+        purchasePrice: prev.purchasePrice,
       };
     });
   };
@@ -1803,45 +1766,43 @@ const handleFieldChange = (field, value) => {
   // Update tax amount and keep total fixed; recalc subtotal and taxes
   const updateTaxAmount = (index, amount) => {
     setFormData((prev) => {
+      // Mark this tax line as manually overridden so future recalculations preserve it.
       const newTaxValues = prev.receipt_tax_values.map((t, i) =>
-        i === index ? { ...t, tax_amount: amount } : t,
+        i === index ? { ...t, tax_amount: amount, _isManual: true } : t,
       );
-
-      const totalNum = parseFloat(prev.purchasePrice) || 0;
-      const tipNum = parseFloat(prev.tip) || 0;
-      const subtotalFromTotal = calculateSubtotalFromRates(
-        totalNum,
+      // Subtotal: absorbs the manual lock; non-manual taxes recalculate from rates.
+      const subtotalFromTotal = calculateSubtotalWithManualOverrides(
+        prev.purchasePrice,
         newTaxValues,
-        tipNum,
+        prev.tip,
       );
-      const subtotalNum = parseFloat(subtotalFromTotal) || 0;
-
-      const recalculatedTaxes = newTaxValues.map((t) => {
-        const rate = parseFloat(t.tax_rate) || 0;
-        const calculatedAmount =
-          subtotalNum > 0 && rate > 0
-            ? ((subtotalNum * rate) / 100).toFixed(2)
-            : "0.00";
-        return {
-          ...t,
-          tax_amount: calculatedAmount,
-          // Ensure required fields exist (for saving to backend)
-          id: t.id || 0,
-          fk_user_id:
-            t.fk_user_id || parseInt(localStorage.getItem("fk_user_id")) || 0,
-          // IMPORTANT: Preserve fk_tax_id (tax definition ID) - don't override it
-          // t.id is the receipt_tax_value id (0 for new entries), not the tax definition id
-          fk_tax_id: t.fk_tax_id || 0,
-          created: t.created || 0,
-          updated: t.updated || 0,
-        };
-      });
-
+      const recalculatedTaxes = applyTaxRecalc(newTaxValues, subtotalFromTotal);
       return {
         ...prev,
         receipt_tax_values: recalculatedTaxes,
         subtotal: subtotalFromTotal,
-        purchasePrice: prev.purchasePrice, // keep total fixed
+        purchasePrice: prev.purchasePrice,
+      };
+    });
+  };
+
+  // Clear the manual override on a tax line and revert to rate-based auto-calculation.
+  const resetTaxAmount = (index) => {
+    setFormData((prev) => {
+      const newTaxValues = prev.receipt_tax_values.map((t, i) =>
+        i === index ? { ...t, _isManual: false } : t,
+      );
+      const subtotalFromTotal = calculateSubtotalWithManualOverrides(
+        prev.purchasePrice,
+        newTaxValues,
+        prev.tip,
+      );
+      const recalculatedTaxes = applyTaxRecalc(newTaxValues, subtotalFromTotal);
+      return {
+        ...prev,
+        receipt_tax_values: recalculatedTaxes,
+        subtotal: subtotalFromTotal,
+        purchasePrice: prev.purchasePrice,
       };
     });
   };
@@ -2809,7 +2770,8 @@ const handleFieldChange = (field, value) => {
   const handleDuplicateConfirm = async () => {
     const validationMsg = getDuplicateReceiptValidationMessage(formData);
     if (validationMsg) {
-      setAlertMsg(validationMsg);
+      setShowDuplicateConfirm(false);
+      setActionPrereqError(validationMsg);
       return;
     }
     setIsDuplicateSaving(true);
@@ -2848,7 +2810,7 @@ const handleFieldChange = (field, value) => {
         setUploadedReceiptData(prev => prev ? { ...prev, id: 0 } : null);
         setToast({
           isVisible: true,
-          message: "Your original receipt has been saved successfully. You are now viewing the duplicate receipt.",
+          message: "Your original receipt has been saved. You are now viewing your duplicate receipt.",
           type: "success",
         });
       }
@@ -2887,15 +2849,12 @@ const handleFieldChange = (field, value) => {
 
   /** Open split screen - validates required fields first, starts empty (no auto-splits) */
   const handleOpenSplit = () => {
-    const missing = [];
-    if (!formData.storeName?.trim()) missing.push("Merchant Name");
-    if (!formData.paymentType?.trim() && !formData.card_issuer_name?.trim()) missing.push("Payment Method");
-    if (!formData.expense_type?.trim()) missing.push("Expense Category");
-    if (!parseFloat(formData.purchasePrice)) missing.push("Total Amount");
-    if (missing.length) {
-      setError(`Please fill in: ${missing.join(", ")} before splitting.`);
+    const msg = getSplitReceiptValidationMessage(formData);
+    if (msg) {
+      setActionPrereqError(msg);
       return;
     }
+    setActionPrereqError(null);
     setError(null);
     setSplits([]);           // user adds splits manually
     setSplitErrors({});
@@ -4392,7 +4351,7 @@ const handleSelectLogo = (index) => {
                                 setShowOptionsMenu(false);
                                 const validationMsg = getDuplicateReceiptValidationMessage(formData);
                                 if (validationMsg) {
-                                  setAlertMsg(validationMsg);
+                                  setActionPrereqError(validationMsg);
                                   return;
                                 }
                                 setShowDuplicateConfirm(true);
@@ -4415,6 +4374,20 @@ const handleSelectLogo = (index) => {
                   )}
                 </div>
               </div>
+
+              {/* Split / duplicate prerequisite error banner */}
+              {actionPrereqError && (
+                <div className="flex items-center gap-2 bg-red-50 border-b border-red-300 px-4 py-2.5">
+                  <span className="text-red-700 text-sm font-medium flex-1">{actionPrereqError}</span>
+                  <button
+                    type="button"
+                    onClick={() => setActionPrereqError(null)}
+                    className="text-red-400 hover:text-red-600 text-lg leading-none flex-shrink-0"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
 
               {/* Top Error Banner */}
               {error && (
@@ -5617,6 +5590,17 @@ const handleSelectLogo = (index) => {
                               {`${formData.receipt_tax_values[0].tax_name} (${formatTaxRate(formData.receipt_tax_values[0].tax_rate)}%)`}
                             </label>
                             <div className="flex items-center gap-2">
+                              {formData.receipt_tax_values[0]?._isManual && (
+                                <button
+                                  type="button"
+                                  onClick={() => resetTaxAmount(0)}
+                                  className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                                  title="Revert to auto-calculated amount"
+                                >
+                                  <RotateCcw size={11} />
+                                  Auto
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => removeTaxType(0)}
@@ -5714,6 +5698,17 @@ const handleSelectLogo = (index) => {
                               {`${formData.receipt_tax_values[1].tax_name} (${formatTaxRate(formData.receipt_tax_values[1].tax_rate)}%)`}
                             </label>
                             <div className="flex items-center gap-2">
+                              {formData.receipt_tax_values[1]?._isManual && (
+                                <button
+                                  type="button"
+                                  onClick={() => resetTaxAmount(1)}
+                                  className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                                  title="Revert to auto-calculated amount"
+                                >
+                                  <RotateCcw size={11} />
+                                  Auto
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => removeTaxType(1)}
