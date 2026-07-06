@@ -3143,8 +3143,10 @@ useEffect(() => {
       const splitMediaUrls = collectReceiptMediaUrlsForSave();
       const splitCombinedImages = buildCombinedMediaField(splitMediaUrls);
 
-      // Create a new receipt for each split; capture IDs for the image patch below.
-      const newSplitIds = [];
+      // Create a new receipt for each split; capture IDs + expense/category for the
+      // post-create patch below (addReceiptv1 does not persist expense_type — see the
+      // updateReceiptv1 patch loop after this).
+      const newSplitPatches = [];
       for (const split of splits) {
         const splitSubtotal = parseFloat(split.subtotal) || 0;
         const taxValues = (split.receipt_tax_values || []).map(t => ({
@@ -3156,47 +3158,81 @@ useEffect(() => {
         }));
         const splitTotal = parseFloat(split.purchasePrice) ||
           parseFloat((splitSubtotal + taxValues.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0)).toFixed(2));
+        const splitExpenseType =
+          split.expense_type || editedReceipt.expense_type || selectedReceipt?.expense_type || "";
+        const splitCategory = parseInt(split.receipt_category) || 0;
+        const splitProductName = split.product_name || "";
+        const splitNotes = split.notes || "";
         const result = await postNewReceiptForSplit({
           id: 0,
           storeName,
-          product_name: split.product_name || "",
+          product_name: splitProductName,
           emailAttachment: splitCombinedImages || "0",
           purchasePrice: splitTotal.toString(),
           total_amount: splitTotal.toString(),
-          payment_category_type: parseInt(split.receipt_category) || 0,
+          payment_category_type: splitCategory,
           status: 0,
           paymentType,
           last_4_digit_card: last4,
           card_issuer_name: cardIssuerName,
           fk_original_receipt_id: "0",
           fk_forward_from_receipt_id: "0",
-          receipt_category: parseInt(split.receipt_category) || 0,
+          receipt_category: splitCategory,
           product_date: productDate,
-          expense_type: split.expense_type || editedReceipt.expense_type || selectedReceipt?.expense_type || "",
+          expense_type: splitExpenseType,
           receipt_image: "0",
           store_image: storeImage,
-          notes: "",
+          notes: splitNotes,
           receipt_forwarded: "0",
           receipt_tag: receiptTag,
           create_date: "",
           receipt_tax_values: taxValues,
         });
         const newId = result?.id ? String(result.id) : null;
-        if (newId) newSplitIds.push(newId);
+        if (newId) {
+          newSplitPatches.push({
+            id: newId,
+            expense_type: splitExpenseType,
+            receipt_category: splitCategory,
+            product_name: splitProductName,
+            notes: splitNotes,
+            tax_values: taxValues,
+          });
+        }
       }
 
-      // The backend de-dups the same image URL across concurrent addReceiptv1 calls,
-      // keeping it on only one split. Re-apply the image to every split via individual
-      // updateReceiptv1 calls (backend does not de-dup on update operations).
-      if (splitCombinedImages && splitCombinedImages !== "0" && newSplitIds.length > 0) {
+      // addReceiptv1 does not reliably persist expense_type / product_name /
+      // receipt_tax_values (and the backend de-dups the same image URL across concurrent
+      // create calls). Re-apply expense_type, category, describe-purchase, notes, taxes,
+      // and image to every split via updateReceiptv1, which does persist them.
+      if (newSplitPatches.length > 0) {
         const token = localStorage.getItem("token");
-        for (const splitId of newSplitIds) {
-          fetch("/api/receipt/updateReceiptv1", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Accesstoken: token },
-            body: JSON.stringify({ id: splitId, emailAttachment: splitCombinedImages }),
-          }).catch(() => {});
-        }
+        // Await the patches so the refreshData() below reflects the corrected data.
+        await Promise.allSettled(
+          newSplitPatches.map((sp) => {
+            const patch = {
+              id: sp.id,
+              expense_type: sp.expense_type,
+              receipt_category: sp.receipt_category,
+              payment_category_type: sp.receipt_category,
+              product_name: sp.product_name,
+              notes: sp.notes,
+              // Re-link the taxes to the newly created split receipt id.
+              receipt_tax_values: (sp.tax_values || []).map((t) => ({
+                ...t,
+                fk_receipt_id: parseInt(sp.id) || 0,
+              })),
+            };
+            if (splitCombinedImages && splitCombinedImages !== "0") {
+              patch.emailAttachment = splitCombinedImages;
+            }
+            return fetch("/api/receipt/updateReceiptv1", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Accesstoken: token },
+              body: JSON.stringify(patch),
+            }).catch(() => {});
+          })
+        );
       }
 
       // Calculate remainder and update the existing receipt
