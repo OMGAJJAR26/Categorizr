@@ -3111,7 +3111,8 @@ const handleFieldChange = (field, value) => {
           taxVals: remTaxValues,
           category: formData.receipt_category || 0,
           expenseType: formData.expense_type || "",
-          productName: "",
+          // Remainder is the leftover of the main receipt — keep its description.
+          productName: formData.product_name || "",
         });
         await postNewReceipt(remPayload);
         if (onReceiptAdded) onReceiptAdded(remPayload);
