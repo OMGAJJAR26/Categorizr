@@ -2040,10 +2040,47 @@ setMerchantsWithImages(
       is_draft: parseInt(receipt.is_draft ?? 0) || 0,
       is_verify: parseInt(receipt.is_verify ?? 0) || 0,
       create_date: receipt.create_date ?? "",
-      receipt_tax_values: Array.isArray(receipt.receipt_tax_values)
-        ? receipt.receipt_tax_values
-        : [],
+      // Preserve real taxes: if this row carries none, restore the freshest fetched
+      // tax lines so a full-row update never deletes iOS-forwarded taxes.
+      receipt_tax_values:
+        Array.isArray(receipt.receipt_tax_values) && receipt.receipt_tax_values.length > 0
+          ? receipt.receipt_tax_values
+          : (resolveFreshestReceiptTaxValues(receipt.id) ||
+             (Array.isArray(receipt.receipt_tax_values) ? receipt.receipt_tax_values : [])),
     };
+  };
+
+  // Resolve the freshest, non-empty tax lines for a receipt from the most recent fetch.
+  // Forwarded-receipt backfill updates hit updateReceiptv1, which replaces the whole row,
+  // so we must always send the real (iOS-forwarded) taxes — never an empty array that
+  // would delete them. Returns null when no non-empty tax lines are known yet.
+  const resolveFreshestReceiptTaxValues = (receiptId) => {
+    const fresh = (lastRawReceiptsRef.current || []).find(
+      (r) => String(r.id) === String(receiptId)
+    );
+    if (Array.isArray(fresh?.receipt_tax_values) && fresh.receipt_tax_values.length > 0) {
+      return fresh.receipt_tax_values;
+    }
+    return null;
+  };
+
+  // Remap a sender's original tax lines onto the recipient's receipt so a backfill update
+  // can restore taxes the recipient copy hasn't received yet (keeps them "as in iOS").
+  const remapTaxValuesToRecipient = (taxLines, recipientReceiptId) => {
+    const recipientUserId = parseInt(localStorage.getItem("fk_user_id")) || 0;
+    return (taxLines || [])
+      .filter((t) => (t?.tax_name || "").trim() && !/^tip$/i.test((t.tax_name || "").trim()))
+      .map((t) => ({
+        id: 0,
+        fk_user_id: recipientUserId,
+        fk_receipt_id: parseInt(recipientReceiptId) || 0,
+        fk_tax_id: parseInt(t.fk_tax_id) || 0,
+        tax_name: t.tax_name || "",
+        tax_rate: (t.tax_rate ?? "0").toString(),
+        tax_amount: (parseFloat(t.tax_amount) || 0).toString(),
+        created: 0,
+        updated: 0,
+      }));
   };
 
   const markReceiptAsForwarded = async (receiptId) => {
@@ -2439,7 +2476,14 @@ setMerchantsWithImages(
           return parseInt(val) || 0;
         })(),
         create_date: getValue("create_date", ""),
-        receipt_tax_values: getValue("receipt_tax_values", []),
+        // Never wipe taxes on a partial update (e.g. only is_verify). If the caller
+        // did not pass tax lines and the in-state copy has none yet (common right
+        // after an iOS forward), fall back to the freshest fetched tax values.
+        receipt_tax_values: (() => {
+          const candidate = getValue("receipt_tax_values", []);
+          if (Array.isArray(candidate) && candidate.length > 0) return candidate;
+          return resolveFreshestReceiptTaxValues(receiptId) || (Array.isArray(candidate) ? candidate : []);
+        })(),
       };
 
       // Try multiple possible endpoints
@@ -2645,16 +2689,13 @@ setMerchantsWithImages(
               (async () => {
                 const token = localStorage.getItem("token");
                 if (!token) return;
-                for (const ep of ["/api/receipt/updateReceiptv1", "/api/receipt/editReceiptv1"]) {
-                  try {
-                    const res = await fetch(ep, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json", Accesstoken: token },
-                      body: JSON.stringify({ id: receipt.id, store_image: logoToUse }),
-                    });
-                    if (res.ok) break;
-                  } catch { /* ignore */ }
-                }
+                // Full-row update: updateReceiptv1 replaces the whole row, so a minimal
+                // {id, store_image} patch would delete taxes and every other field.
+                const payload = buildReceiptUpdatePayloadFromRow({
+                  ...receipt,
+                  store_image: logoToUse,
+                });
+                await postReceiptUpdatePayload(payload, token);
               })()
             );
           }
@@ -2673,16 +2714,12 @@ setMerchantsWithImages(
             (async () => {
               const token = localStorage.getItem("token");
               if (!token) return;
-              for (const ep of ["/api/receipt/updateReceiptv1", "/api/receipt/editReceiptv1"]) {
-                try {
-                  const res = await fetch(ep, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json", Accesstoken: token },
-                    body: JSON.stringify({ id: receipt.id, store_image: canonicalLogo }),
-                  });
-                  if (res.ok) break;
-                } catch { /* ignore */ }
-              }
+              // Full-row update so this logo patch never wipes taxes/other fields.
+              const payload = buildReceiptUpdatePayloadFromRow({
+                ...receipt,
+                store_image: canonicalLogo,
+              });
+              await postReceiptUpdatePayload(payload, token);
             })()
           );
         }
@@ -2780,9 +2817,12 @@ setMerchantsWithImages(
           (async () => {
             const token = localStorage.getItem("token");
             if (!token) return;
+            // Keep the forwarded receipt's real taxes (never wipe them via this update).
+            const freshTax = resolveFreshestReceiptTaxValues(receipt.id);
             const payload = buildReceiptUpdatePayloadFromRow({
               ...receipt,
               expense_type: expenseType,
+              ...(freshTax ? { receipt_tax_values: freshTax } : {}),
             });
             await postReceiptUpdatePayload(payload, token);
           })()
@@ -2878,6 +2918,23 @@ setMerchantsWithImages(
                     fetchedType.toLowerCase()
                 );
                 if (!catExists2) addApiExpenseCategory(fetchedType);
+              }
+
+              // Preserve the receipt's real taxes so this update never wipes them.
+              // Prefer the freshest fetched copy; if the recipient copy hasn't received
+              // its tax lines yet, restore them from the sender's original (iOS source).
+              const freshTax = resolveFreshestReceiptTaxValues(receipt.id);
+              if (freshTax) {
+                serverPatch.receipt_tax_values = freshTax;
+              } else if (
+                Array.isArray(orig?.receipt_tax_values) &&
+                orig.receipt_tax_values.length > 0 &&
+                !(Array.isArray(receipt.receipt_tax_values) && receipt.receipt_tax_values.length > 0)
+              ) {
+                serverPatch.receipt_tax_values = remapTaxValuesToRecipient(
+                  orig.receipt_tax_values,
+                  receipt.id
+                );
               }
 
               // Persist all patches to server in one call
