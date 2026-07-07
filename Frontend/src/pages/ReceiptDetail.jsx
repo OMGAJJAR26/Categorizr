@@ -258,6 +258,9 @@ const ReceiptDetail = ({
   const containerRef = useRef(null);
   const dropdownRef = useRef();
   const scrollContentRef = useRef(null);
+  // Wraps only the editable fields/tags so "locked" can disable editing while leaving
+  // the receipt-image thumbnails interactive (viewing/enlarging stays allowed).
+  const editableContentRef = useRef(null);
   const currentSelectedIdRef = useRef(receipt?.id ?? null);
   const lastReportedIndexRef = useRef(null);
   const swipeGestureActiveRef = useRef(false);
@@ -1209,16 +1212,18 @@ useEffect(() => {
     };
   }, []);
 
-  // iOS/Android-style locked: make scrollable content non-interactive without dark overlay
+  // iOS/Android-style locked: make the editable fields/tags non-interactive without a
+  // dark overlay. Scoped to editableContentRef (not the whole scroll area) so receipt
+  // image/PDF thumbnails stay clickable for viewing/enlarging even when locked.
   useEffect(() => {
-    const el = scrollContentRef.current;
+    const el = editableContentRef.current;
     if (!el) return;
     if (editedTags.locked && !showSplitScreen) {
       el.setAttribute("inert", "");
     } else {
       el.removeAttribute("inert");
     }
-  }, [editedTags.locked, showSplitScreen]);
+  }, [editedTags.locked, showSplitScreen, selectedReceipt?.id]);
 
   // Enrich receipt_tax_values with tax_name and tax_rate from taxData for display
   const enrichedReceiptTaxValues = React.useMemo(() => {
@@ -5481,7 +5486,7 @@ Thank you for using our receipt management system.
                         This receipt is locked. Unlock it in Tags below to edit and save changes.
                       </div>
                     )}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 p-3 sm:p-6 text-sm text-gray-800">
+                    <div ref={editableContentRef} className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 p-3 sm:p-6 text-sm text-gray-800">
                       <div>
                         <h3 className="font-bold mb-4 text-gray-900 text-left">
                           RECEIPT INFORMATION
@@ -6545,7 +6550,8 @@ Thank you for using our receipt management system.
                           RECEIPT IMAGES
                         </h3>
                         <div className="flex items-center gap-2">
-                          {/* Add Photo button */}
+                          {/* Add Photo button — disabled when locked (editing an image) */}
+                          {!editedTags.locked && (
                           <button
                             type="button"
                             onClick={() => addPhotoInputRef.current?.click()}
@@ -6559,6 +6565,7 @@ Thank you for using our receipt management system.
                             )}
                             Add Photo
                           </button>
+                          )}
                           <input
                             ref={addPhotoInputRef}
                             type="file"
@@ -6638,6 +6645,8 @@ Thank you for using our receipt management system.
                                     }
                                   />
                                 )}
+                                {/* Delete file — blocked when locked (viewing only) */}
+                                {!editedTags.locked && (
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -6662,8 +6671,9 @@ Thank you for using our receipt management system.
                                 >
                                   <Trash2 size={11} />
                                 </button>
-                                {/* Annotate button */}
-                                {!isPdfUrl(u) && (
+                                )}
+                                {/* Annotate button — blocked when locked (editing an image) */}
+                                {!isPdfUrl(u) && !editedTags.locked && (
                                   <button
                                     type="button"
                                     onClick={(e) => {
