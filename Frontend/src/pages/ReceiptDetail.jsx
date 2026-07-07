@@ -9,7 +9,7 @@ import {
   taxTypesMatch,
   taxDefinitionMatchesReceiptLine,
 } from "../utils/receiptFormatters";
-import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine, AlertCircle, RotateCcw,} from "lucide-react";
+import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine, AlertCircle, RotateCcw, Check,} from "lucide-react";
 import ReceiptAnnotator from "../components/receipts/ReceiptAnnotator";
 import PdfThumbnail from "../components/receipts/PdfThumbnail";
 import {
@@ -604,6 +604,16 @@ const ReceiptDetail = ({
   // Keep total fixed: derive subtotal and per-tax amounts from rates.
   const recalculateReceiptTotalsFromFixedTotal = useCallback(
     (total, taxValues, tip) => {
+      // Deleting the total (0/empty) zeroes the whole receipt: subtotal and every tax
+      // line go to 0. Do this BEFORE preserveStoredReceiptTaxTotals, which would
+      // otherwise keep the old stored tax amounts even at a 0 total.
+      if ((parseFloat(total) || 0) === 0) {
+        const zeroedTaxes = (taxValues || [])
+          .filter((t) => !(t.tax_name || "").toLowerCase().includes("tip"))
+          .map((t) => ({ ...t, tax_amount: 0 }));
+        return { subtotal: 0, receipt_tax_values: zeroedTaxes };
+      }
+
       // If all non-tip taxes have stored amounts AND none are manually locked,
       // preserve all amounts and let subtotal absorb any total change.
       const preserved = preserveStoredReceiptTaxTotals(total, taxValues, tip);
@@ -932,10 +942,17 @@ useEffect(() => {
     setEditedReceipt((prev) => {
       const taxes = prev.receipt_tax_values || [];
       if (taxes.length === 0) return prev;
-      const total =
-        parseFloat(prev.purchasePrice) ||
-        parseFloat(selectedReceipt.purchasePrice) ||
-        0;
+      // Respect an explicitly cleared total ("" / 0) — do NOT restore it from the
+      // original receipt, otherwise deleting the total would re-populate the taxes.
+      const clearedTotal =
+        prev.purchasePrice === "" ||
+        prev.purchasePrice === "0" ||
+        prev.purchasePrice === 0;
+      const total = clearedTotal
+        ? 0
+        : parseFloat(prev.purchasePrice) ||
+          parseFloat(selectedReceipt.purchasePrice) ||
+          0;
       if (!total) return prev;
 
       const nonTipTaxes = taxes.filter(
@@ -1536,15 +1553,26 @@ useEffect(() => {
       // When total changes, recalculate subtotal and tax amounts from rates
       if (field === "purchasePrice") {
         const total = parseFloat(value) || 0;
-        const tipAmount = parseFloat(newData.tip) || 0;
-        const taxValues = newData.receipt_tax_values || [];
+        // Use the currently-displayed tax lines as the base. When the user hasn't
+        // touched taxes yet, editedReceipt.receipt_tax_values is undefined, so fall
+        // back to the enriched lines — otherwise clearing the total would leave the
+        // displayed (stale) amounts untouched.
+        const baseTaxes =
+          newData.receipt_tax_values && newData.receipt_tax_values.length
+            ? newData.receipt_tax_values
+            : enrichedReceiptTaxValues.filter(
+                (t) => !(t.tax_name || "").toLowerCase().includes("tip"),
+              );
+        const tipAmount = total === 0 ? 0 : parseFloat(newData.tip) || 0;
         const recalculated = recalculateReceiptTotalsFromFixedTotal(
           total,
-          taxValues,
+          baseTaxes,
           tipAmount,
         );
         newData.subtotal = recalculated.subtotal;
         newData.receipt_tax_values = recalculated.receipt_tax_values;
+        // Deleting the total also clears the tip.
+        if (total === 0) newData.tip = "";
       }
 
       // When tip changes, keep total fixed and recalculate subtotal/taxes from rates
@@ -5513,16 +5541,35 @@ Thank you for using our receipt management system.
                         </div>
 
                         <div className="mb-4 text-align-left">
-                          <label className="font-bold">Date</label>
+                          <div className="flex items-center justify-between">
+                            <label className="font-bold">Date</label>
+                            {editedReceipt.product_date !== "" && (
+                              <button
+                                type="button"
+                                onClick={() => handleFieldChange("product_date", "")}
+                                className="text-red-500 hover:text-red-700 text-xs font-medium"
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </div>
                           <input
                             type="date"
                             className={inputClass}
-                            value={productDateToInputValue(
-                              editedReceipt.product_date,
-                              selectedReceipt?.create_date ?? editedReceipt?.create_date,
-                            )}
+                            value={
+                              editedReceipt.product_date === ""
+                                ? ""
+                                : productDateToInputValue(
+                                    editedReceipt.product_date,
+                                    selectedReceipt?.create_date ?? editedReceipt?.create_date,
+                                  )
+                            }
                             onChange={(e) => {
-                              if (!e.target.value) return;
+                              if (!e.target.value) {
+                                // User cleared the date (native clear button or Clear link).
+                                handleFieldChange("product_date", "");
+                                return;
+                              }
                               const unix = parseDateInputToUnix(e.target.value);
                               if (unix) handleFieldChange("product_date", unix);
                             }}
@@ -5536,24 +5583,27 @@ Thank you for using our receipt management system.
                         >
                           <label className="font-bold">Merchant</label>
                           <div className="relative w-full">
-                            {(editedReceipt.storeName || r.storeName || r.merchant) ? (
-                              <div className="absolute left-2 top-1/2 transform -translate-y-1/2 z-10">
-                                <MerchantAvatar
-                                  name={
-                                    editedReceipt.storeName ||
-                                    r.storeName ||
-                                    r.merchant
-                                  }
-                                  explicitUrl={
-                                    getMerchantImage(editedReceipt.storeName) ||
-                                    r.store_image
-                                  }
-                                  className="w-5 h-5 mt-2"
-                                />
-                              </div>
-                            ) : null}
+                            {(() => {
+                              // Respect an explicitly cleared merchant ("" wins over the
+                              // original) so removing the merchant also removes its logo.
+                              const resolvedMerchant =
+                                editedReceipt.storeName ?? r.storeName ?? r.merchant ?? "";
+                              if (!resolvedMerchant) return null;
+                              const resolvedImage =
+                                getMerchantImage(resolvedMerchant) ||
+                                (editedReceipt.store_image ?? r.store_image ?? "");
+                              return (
+                                <div className="absolute left-2 top-1/2 transform -translate-y-1/2 z-10">
+                                  <MerchantAvatar
+                                    name={resolvedMerchant}
+                                    explicitUrl={resolvedImage}
+                                    className="w-5 h-5 mt-2"
+                                  />
+                                </div>
+                              );
+                            })()}
                             <input
-                              className={`${inputClass} ${(editedReceipt.storeName || r.storeName || r.merchant) ? "pl-8" : "pl-3"}`}
+                              className={`${inputClass} ${(editedReceipt.storeName ?? r.storeName ?? r.merchant ?? "") ? "pl-8" : "pl-3"}`}
                               value={
                                 editedReceipt.storeName ?? r.storeName ?? ""
                               }
@@ -5590,6 +5640,8 @@ Thank you for using our receipt management system.
                                   </div>
                                   {filteredMerchants.map((merchant, idx) => {
                                     const isMisc = merchant.name?.toLowerCase().trim() === "miscellaneous";
+                                    const currentMerchant = (editedReceipt.storeName ?? r.storeName ?? "").trim().toLowerCase();
+                                    const isSelected = !!merchant.name && currentMerchant === merchant.name.trim().toLowerCase();
                                     return (
                                     <div
                                       key={idx}
@@ -5598,6 +5650,16 @@ Thank you for using our receipt management system.
                                       <div
                                         className="flex-1 flex items-center gap-2 cursor-pointer"
                                         onClick={() => {
+                                          if (isSelected) {
+                                            // Tapping the checked merchant unchecks it (clears the field).
+                                            setEditedReceipt((prev) => ({
+                                              ...prev,
+                                              storeName: "",
+                                              store_image: "",
+                                            }));
+                                            setShowMerchantDropdown(false);
+                                            return;
+                                          }
                                           // Auto-fill expense category from receipt history if currently empty
                                           const suggestedCategory = getMerchantDefaultCategory(merchant.name);
                                           setEditedReceipt((prev) => ({
@@ -5617,6 +5679,9 @@ Thank you for using our receipt management system.
                                           className="w-5 h-5 mt-2"
                                         />
                                         <span className="truncate">{merchant.name}</span>
+                                        {isSelected && (
+                                          <Check size={15} className="text-blue-600 flex-shrink-0 ml-auto" />
+                                        )}
                                       </div>
                                       {!isMisc && (
                                         <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
@@ -5693,19 +5758,26 @@ Thank you for using our receipt management system.
                                     <Plus size={16} className="text-blue-600" />
                                     <span className="font-medium text-blue-600">Add Expense Category</span>
                                   </div>
-                                  {filteredCategories.map((category, idx) => (
+                                  {filteredCategories.map((category, idx) => {
+                                    const currentCategory = (editedReceipt.expense_type ?? r.expense_type ?? "").trim().toLowerCase();
+                                    const isSelected = !!category && currentCategory === category.trim().toLowerCase();
+                                    return (
                                     <div
                                       key={idx}
                                       className="px-3 py-2 hover:bg-blue-50 text-left flex items-center justify-between group"
                                     >
                                       <span
-                                        className="flex-1 cursor-pointer text-sm"
+                                        className="flex-1 cursor-pointer text-sm flex items-center gap-2"
                                         onClick={() => {
-                                          handleFieldChange("expense_type", category);
+                                          // Tapping the checked category unchecks it (clears the field).
+                                          handleFieldChange("expense_type", isSelected ? "" : category);
                                           setShowCategoryDropdown(false);
                                         }}
                                       >
-                                        {category}
+                                        <span className="truncate">{category}</span>
+                                        {isSelected && (
+                                          <Check size={15} className="text-blue-600 flex-shrink-0" />
+                                        )}
                                       </span>
                                       <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
                                         <button
@@ -5726,7 +5798,8 @@ Thank you for using our receipt management system.
                                         </button>
                                       </div>
                                     </div>
-                                  ))}
+                                    );
+                                  })}
                                 </div>
                               )}
                           </div>
@@ -5885,6 +5958,8 @@ Thank you for using our receipt management system.
                                       : _pct[method]
                                         ? getPaymentLogo({ paymentType: _pct[method] })
                                         : getPaymentLogo(method);
+                                  const currentPaymentDisplay = getPaymentDisplayName({ ...r, ...editedReceipt }) || "";
+                                  const isSelected = currentPaymentDisplay !== "-" && currentPaymentDisplay === method;
                                   return (
                                     <div
                                       key={idx}
@@ -5894,6 +5969,20 @@ Thank you for using our receipt management system.
                                     <div
                                       style={{ cursor: "pointer", flex: 1, display: "flex", alignItems: "center", gap: 8 }}
                                       onClick={() => {
+                                        if (isSelected) {
+                                          // Tapping the checked payment method unchecks it (clears the field).
+                                          setEditedReceipt((prev) => ({
+                                            ...prev,
+                                            paymentType: "",
+                                            card_issuer_name: "",
+                                            last_4_digit_card: "",
+                                            paymentBrand: "",
+                                            payment_logo_url: "",
+                                            paymentLogoUrl: "",
+                                          }));
+                                          setShowPaymentDropdown(false);
+                                          return;
+                                        }
                                         // Extract card issuer name and last4 from selected method
                                         const methodParts = method.split("*");
                                         const baseMethod =
@@ -6067,6 +6156,9 @@ Thank you for using our receipt management system.
                                         />
                                       )}
                                       <span style={{ flex: 1 }}>{method}</span>
+                                      {isSelected && (
+                                        <Check size={15} className="text-blue-600 flex-shrink-0" />
+                                      )}
                                     </div>
                                     {!isCashItem && (
                                       <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
@@ -6108,17 +6200,25 @@ Thank you for using our receipt management system.
                             type="text"
                             readOnly
                             className={`${inputClass} ${(() => {
-                              const sub =
-                                parseFloat(editedReceipt.subtotal) ||
-                                parseFloat(r.subtotal) ||
-                                0;
+                              // Prefer the edited subtotal even when it is exactly 0
+                              // (deleting the total sets it to 0 — don't fall back to old value).
+                              const hasEdited =
+                                editedReceipt.subtotal !== undefined &&
+                                editedReceipt.subtotal !== null &&
+                                editedReceipt.subtotal !== "";
+                              const sub = hasEdited
+                                ? parseFloat(editedReceipt.subtotal) || 0
+                                : parseFloat(r.subtotal) || 0;
                               return sub < 0 ? "text-red-500" : "";
                             })()}`}
                             value={(() => {
-                              const sub =
-                                parseFloat(editedReceipt.subtotal) ||
-                                parseFloat(r.subtotal) ||
-                                0;
+                              const hasEdited =
+                                editedReceipt.subtotal !== undefined &&
+                                editedReceipt.subtotal !== null &&
+                                editedReceipt.subtotal !== "";
+                              const sub = hasEdited
+                                ? parseFloat(editedReceipt.subtotal) || 0
+                                : parseFloat(r.subtotal) || 0;
                               const displaySub = Number.isFinite(sub) ? sub : 0;
                               return `$${displaySub > 0 ? displaySub.toFixed(2) : "0.00"}`;
                             })()}
@@ -6353,9 +6453,23 @@ Thank you for using our receipt management system.
                               const numPart = raw.replace(/^-?\$?/, "");
                               const sanitized = sanitizeMoneyInput(numPart);
                               const display = `${isNeg ? "-" : ""}$${sanitized}`;
-                              setCurrencyInputs((p) => ({ ...p, total: display }));
-                              const parsed = parseFloat(raw.replace(/[^0-9.-]/g, ""));
-                              if (!isNaN(parsed)) handleFieldChange("purchasePrice", parsed);
+                              if (sanitized === "") {
+                                // Total fully deleted → propagate empty so subtotal/taxes/tip
+                                // zero out, and drop any stale per-field currency overrides so
+                                // the tax/tip inputs reflect the recalculated $0.00.
+                                setCurrencyInputs((p) => ({
+                                  ...p,
+                                  total: display,
+                                  tax0: undefined,
+                                  tax1: undefined,
+                                  tip: undefined,
+                                }));
+                                handleFieldChange("purchasePrice", "");
+                              } else {
+                                setCurrencyInputs((p) => ({ ...p, total: display }));
+                                const parsed = parseFloat(raw.replace(/[^0-9.-]/g, ""));
+                                if (!isNaN(parsed)) handleFieldChange("purchasePrice", parsed);
+                              }
                             }}
                             onBlur={() =>
                               setCurrencyInputs((p) => ({ ...p, total: undefined }))

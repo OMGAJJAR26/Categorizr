@@ -6,7 +6,7 @@ import {
 } from "../../utils/receiptDate";
 import { containsEmoji, stripEmoji } from "../../utils/emojiUtils";
 import SimpleAlertModal from "../SimpleAlertModal";
-import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus, MoreHorizontal, Minus, ChevronLeft, ChevronRight, Pencil, Camera, PenLine, AlertCircle, RotateCcw } from "lucide-react";
+import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus, MoreHorizontal, Minus, ChevronLeft, ChevronRight, Pencil, Camera, PenLine, AlertCircle, RotateCcw, Check } from "lucide-react";
 import ReceiptAnnotator from "./ReceiptAnnotator";
 import { motion, AnimatePresence } from "framer-motion";
 import { useData } from "../../context/DataContext";
@@ -1241,23 +1241,34 @@ const handleFieldChange = (field, value) => {
       const totalNum = parseFloat(value) || 0;
       const tipNum = parseFloat(newData.tip) || 0;
 
-      // Account for manually locked amounts in the subtotal formula
-      const subtotalFromTotal = calculateSubtotalWithManualOverrides(
-        value,
-        newData.receipt_tax_values,
-        newData.tip,
-      );
-      const subtotalNum = parseFloat(subtotalFromTotal) || 0;
-      newData.subtotal = subtotalFromTotal;
+      if (totalNum === 0) {
+        // Deleting the total clears the whole receipt amount: subtotal, every tax
+        // line, and the tip all go to 0 (don't leave stale tax amounts behind).
+        newData.subtotal = "0.00";
+        newData.receipt_tax_values = (newData.receipt_tax_values || []).map((t) => ({
+          ...t,
+          tax_amount: "0.00",
+        }));
+        newData.tip = "";
+      } else {
+        // Account for manually locked amounts in the subtotal formula
+        const subtotalFromTotal = calculateSubtotalWithManualOverrides(
+          value,
+          newData.receipt_tax_values,
+          newData.tip,
+        );
+        const subtotalNum = parseFloat(subtotalFromTotal) || 0;
+        newData.subtotal = subtotalFromTotal;
 
-      if (newData.receipt_tax_values.length > 0 && subtotalNum > 0) {
-        newData.receipt_tax_values = newData.receipt_tax_values.map((t) => {
-          if (t._isManual) return t;
-          const rate = parseFloat(t.tax_rate) || 0;
-          return { ...t, tax_amount: rate > 0 ? ((subtotalNum * rate) / 100).toFixed(2) : "0.00" };
-        });
-      } else if (newData.receipt_tax_values.length === 0) {
-        newData.subtotal = (totalNum - tipNum).toFixed(2);
+        if (newData.receipt_tax_values.length > 0 && subtotalNum > 0) {
+          newData.receipt_tax_values = newData.receipt_tax_values.map((t) => {
+            if (t._isManual) return t;
+            const rate = parseFloat(t.tax_rate) || 0;
+            return { ...t, tax_amount: rate > 0 ? ((subtotalNum * rate) / 100).toFixed(2) : "0.00" };
+          });
+        } else if (newData.receipt_tax_values.length === 0) {
+          newData.subtotal = (totalNum - tipNum).toFixed(2);
+        }
       }
     }
 
@@ -4995,6 +5006,9 @@ const handleSelectLogo = (index) => {
               {filteredMerchants.length > 0 ? (
                 filteredMerchants.map((merchant, idx) => {
                   const isMisc = merchant.name.toLowerCase().trim() === "miscellaneous";
+                  const isSelected =
+                    !!merchant.name &&
+                    (formData.storeName || "").trim().toLowerCase() === merchant.name.trim().toLowerCase();
                   return (
                     <div
                       key={idx}
@@ -5004,6 +5018,14 @@ const handleSelectLogo = (index) => {
                       <div
                         className="flex-1 flex items-center gap-2 cursor-pointer min-w-0"
                         onClick={() => {
+                          if (isSelected) {
+                            // Tapping the checked merchant unchecks it (clears the field).
+                            setDetectedMerchantLogo(null);
+                            setFormData((prev) => ({ ...prev, storeName: "" }));
+                            setIsMerchantTyping(false);
+                            setShowMerchantDropdown(false);
+                            return;
+                          }
                           if (merchant.name !== uploadedReceiptData?.storeName) {
                             setDetectedMerchantLogo(null);
                           }
@@ -5027,6 +5049,9 @@ const handleSelectLogo = (index) => {
                           className="w-5 h-5 mt-2 flex-shrink-0"
                         />
                         <span className="truncate">{merchant.name}</span>
+                        {isSelected && (
+                          <Check size={15} className="text-blue-600 flex-shrink-0 ml-auto" />
+                        )}
                       </div>
                       {/* Edit / Delete — hidden for Miscellaneous, visible on hover */}
                       {!isMisc && (
@@ -5104,19 +5129,27 @@ const handleSelectLogo = (index) => {
               <Plus size={16} className="text-blue-600" />
               <span className="font-medium text-blue-600">Add Expense Category</span>
             </div>
-            {filteredCategories.map((category, idx) => (
+            {filteredCategories.map((category, idx) => {
+              const isSelected =
+                !!category &&
+                (formData.expense_type || "").trim().toLowerCase() === category.trim().toLowerCase();
+              return (
               <div
                 key={idx}
                 className="px-3 py-2 hover:bg-blue-50 text-left flex items-center justify-between group"
               >
                 <span
-                  className="flex-1 cursor-pointer text-sm"
+                  className="flex-1 cursor-pointer text-sm flex items-center gap-2"
                   onClick={() => {
-                    handleFieldChange("expense_type", category);
+                    // Tapping the checked category unchecks it (clears the field).
+                    handleFieldChange("expense_type", isSelected ? "" : category);
                     setShowCategoryDropdown(false);
                   }}
                 >
-                  {category}
+                  <span className="truncate">{category}</span>
+                  {isSelected && (
+                    <Check size={15} className="text-blue-600 flex-shrink-0" />
+                  )}
                 </span>
                 <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
                   <button
@@ -5137,7 +5170,8 @@ const handleSelectLogo = (index) => {
                   </button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
     </div>
@@ -5355,6 +5389,14 @@ const handleSelectLogo = (index) => {
               );
 
               const isCashItem = isCashPaymentMethod(methodString);
+              const curLast4 = (formData.last_4_digit_card ?? "").toString().replace(/\D/g, "").slice(-4);
+              const curIssuer = (formData.card_issuer_name ?? "").toString().trim().toLowerCase();
+              const curType = (formData.paymentType ?? "").toString().replace(/\s*\*\d+/g, "").trim().toLowerCase();
+              const rowIssuer = (issuerName || "").trim().toLowerCase();
+              const isSelected =
+                (!!curType || !!curLast4) &&
+                (last4 ? curLast4 === last4 : true) &&
+                (rowIssuer ? curIssuer === rowIssuer || curType === rowIssuer : true);
               return (
                 <div
                   key={`payment-${methodString}-${idx}`}
@@ -5362,6 +5404,16 @@ const handleSelectLogo = (index) => {
                   style={{ cursor: "default" }}
                 >
                 <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }} onClick={() => {
+                    if (isSelected) {
+                      // Tapping the checked payment method unchecks it (clears the field).
+                      handleFieldChange("paymentType", "");
+                      handleFieldChange("card_issuer_name", "");
+                      handleFieldChange("last_4_digit_card", "");
+                      handleFieldChange("paymentBrand", "");
+                      setIsPaymentTyping(false);
+                      setShowPaymentDropdown(false);
+                      return;
+                    }
                     // Use the already extracted issuerName and last4 (they handle both localPaymentMethods and method strings correctly)
                     const cardIssuerName = issuerName;
                     const finalLast4 = last4;
@@ -5529,6 +5581,9 @@ const handleSelectLogo = (index) => {
                     ) : null;
                   })()}
                   <span style={{ flex: 1 }}>{displayText}</span>
+                  {isSelected && (
+                    <Check size={15} className="text-blue-600 flex-shrink-0" />
+                  )}
                 </div>
                 {/* Edit / Delete icons — not shown for Cash */}
                 {!isCashItem && (
@@ -5877,8 +5932,21 @@ const handleSelectLogo = (index) => {
                             onKeyDown={preventInvalidMoneyKey}
                             onChange={(e) => {
                               const normalized = normalizeCurrencyInput(e.target.value);
-                              setCurrencyInput("total", normalized);
-                              handleFieldChange("purchasePrice", parseCurrencyToNumber(normalized));
+                              const num = parseCurrencyToNumber(normalized);
+                              // When the total is deleted, drop stale tax/tip overrides so those
+                              // inputs reflect the recalculated $0.00 instead of old amounts.
+                              if (num === "" || parseFloat(num) === 0) {
+                                setCurrencyInputs((prev) => ({
+                                  ...prev,
+                                  total: normalized,
+                                  tax0: "",
+                                  tax1: "",
+                                  tip: "",
+                                }));
+                              } else {
+                                setCurrencyInput("total", normalized);
+                              }
+                              handleFieldChange("purchasePrice", num);
                             }}
                             onBlur={() => {
                               const num = parseFloat(formData.purchasePrice);
