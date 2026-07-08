@@ -838,8 +838,10 @@ const ManageModal = ({ type, onClose }) => {
 
 /* My Account panel — menu → sub-view */
 const MyAccountPanel = ({ user, onLogoutRequest }) => {
+  const { updateUserProfile } = useData();
   const [view, setView] = useState("menu"); // menu | editProfile | changePassword | deleteConfirm
   const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
 
   const [profile, setProfile] = useState({
     firstName: user?.firstName || "", lastName: user?.lastName || "",
@@ -864,9 +866,35 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
   const [showConfirm, setShowConfirm] = useState(false);
   const [passwordMsg, setPasswordMsg] = useState(null);
 
-  const handleProfileUpdate = (e) => {
+  const handleProfileUpdate = async (e) => {
     e.preventDefault();
-    setProfileMsg({ type: "success", text: "Profile updated successfully!" });
+    if (savingProfile) return;
+    const isEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((v || "").trim());
+    const recovery = (profile.recoveryEmail || "").trim();
+    const duplicate = (profile.sameAsRecovery ? profile.recoveryEmail : profile.receiptEmail || "").trim();
+    if (recovery && !isEmail(recovery)) {
+      setProfileMsg({ type: "error", text: "Please enter a valid recovery email." });
+      setTimeout(() => setProfileMsg(null), 3000);
+      return;
+    }
+    if (duplicate && !isEmail(duplicate)) {
+      setProfileMsg({ type: "error", text: "Please enter a valid duplicate eReceipt email." });
+      setTimeout(() => setProfileMsg(null), 3000);
+      return;
+    }
+    setSavingProfile(true);
+    const res = await updateUserProfile({
+      firstName: profile.firstName,
+      lastName: profile.lastName,
+      recoveryEmail: recovery,
+      duplicate_eReciept_email: duplicate,
+    });
+    setSavingProfile(false);
+    if (res?.ok) {
+      setProfileMsg({ type: "success", text: "Profile updated successfully!" });
+    } else {
+      setProfileMsg({ type: "error", text: res?.error || "Failed to update profile. Please try again." });
+    }
     setTimeout(() => setProfileMsg(null), 3000);
   };
 
@@ -963,7 +991,7 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
               </motion.div>
             )}
           </AnimatePresence>
-          <button type="submit" className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl transition-all shadow-sm hover:shadow">Update</button>
+          <button type="submit" disabled={savingProfile} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold text-sm rounded-xl transition-all shadow-sm hover:shadow">{savingProfile ? "Updating…" : "Update"}</button>
         </form>
       )}
 

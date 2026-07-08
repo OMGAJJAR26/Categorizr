@@ -604,14 +604,40 @@ const ReceiptDetail = ({
   // Keep total fixed: derive subtotal and per-tax amounts from rates.
   const recalculateReceiptTotalsFromFixedTotal = useCallback(
     (total, taxValues, tip) => {
-      // Deleting the total (0/empty) zeroes the whole receipt: subtotal and every tax
-      // line go to 0. Do this BEFORE preserveStoredReceiptTaxTotals, which would
-      // otherwise keep the old stored tax amounts even at a 0 total.
+      const nonTipTaxes = (taxValues || []).filter(
+        (t) => !(t.tax_name || "").toLowerCase().includes("tip"),
+      );
+
+      // Total is 0/empty:
       if ((parseFloat(total) || 0) === 0) {
-        const zeroedTaxes = (taxValues || [])
-          .filter((t) => !(t.tax_name || "").toLowerCase().includes("tip"))
-          .map((t) => ({ ...t, tax_amount: 0 }));
-        return { subtotal: 0, receipt_tax_values: zeroedTaxes };
+        if ((parseFloat(tip) || 0) === 0) {
+          // No tip → zero the whole receipt (avoids leaving stale tax amounts).
+          return {
+            subtotal: 0,
+            receipt_tax_values: nonTipTaxes.map((t) => ({ ...t, tax_amount: 0 })),
+          };
+        }
+        // A tip is present → subtotal & taxes go negative (red), recomputed from rates,
+        // and the tip is preserved (treated like the tax lines).
+        const tipN = parseFloat(tip) || 0;
+        const rateSum = nonTipTaxes.reduce(
+          (s, t) => s + resolveTaxRateForReceipt(t) / 100,
+          0,
+        );
+        const subN =
+          nonTipTaxes.length > 0 && rateSum > 0 ? -tipN / (1 + rateSum) : -tipN;
+        const subtotal = parseFloat(subN.toFixed(2));
+        const receipt_tax_values = nonTipTaxes.map((t) => {
+          const rate = resolveTaxRateForReceipt(t);
+          const tax_amount =
+            rate > 0 ? parseFloat(((subtotal * rate) / 100).toFixed(2)) : 0;
+          return {
+            ...t,
+            tax_rate: rate > 0 ? formatTaxRate(rate) : t.tax_rate || "0",
+            tax_amount,
+          };
+        });
+        return { subtotal, receipt_tax_values };
       }
 
       // If all non-tip taxes have stored amounts AND none are manually locked,
@@ -1563,7 +1589,9 @@ useEffect(() => {
             : enrichedReceiptTaxValues.filter(
                 (t) => !(t.tax_name || "").toLowerCase().includes("tip"),
               );
-        const tipAmount = total === 0 ? 0 : parseFloat(newData.tip) || 0;
+        // The tip is preserved (treated like the tax lines); when it exceeds the total
+        // the subtotal/taxes recompute negative (red) instead of being zeroed/capped.
+        const tipAmount = parseFloat(newData.tip) || 0;
         const recalculated = recalculateReceiptTotalsFromFixedTotal(
           total,
           baseTaxes,
@@ -1571,8 +1599,6 @@ useEffect(() => {
         );
         newData.subtotal = recalculated.subtotal;
         newData.receipt_tax_values = recalculated.receipt_tax_values;
-        // Deleting the total also clears the tip.
-        if (total === 0) newData.tip = "";
       }
 
       // When tip changes, keep total fixed and recalculate subtotal/taxes from rates
@@ -6220,6 +6246,8 @@ Thank you for using our receipt management system.
                                 ? parseFloat(editedReceipt.subtotal) || 0
                                 : parseFloat(r.subtotal) || 0;
                               const displaySub = Number.isFinite(sub) ? sub : 0;
+                              // Show negative subtotals (e.g. tip exceeds total) as -$X.XX in red.
+                              if (displaySub < 0) return `-$${Math.abs(displaySub).toFixed(2)}`;
                               return `$${displaySub > 0 ? displaySub.toFixed(2) : "0.00"}`;
                             })()}
                           />
@@ -6276,7 +6304,10 @@ Thank you for using our receipt management system.
                                   value={
                                     currencyInputs.tax0 !== undefined
                                       ? currencyInputs.tax0
-                                      : `$${parseFloat(currentTaxValues[0].tax_amount || 0).toFixed(2)}`
+                                      : (() => {
+                                          const n = parseFloat(currentTaxValues[0].tax_amount || 0);
+                                          return n < 0 ? `-$${Math.abs(n).toFixed(2)}` : `$${n.toFixed(2)}`;
+                                        })()
                                   }
                                   onFocus={() => {
                                     const num = parseFloat(currentTaxValues[0].tax_amount);
@@ -6329,7 +6360,10 @@ Thank you for using our receipt management system.
                                   value={
                                     currencyInputs.tax1 !== undefined
                                       ? currencyInputs.tax1
-                                      : `$${parseFloat(currentTaxValues[1].tax_amount || 0).toFixed(2)}`
+                                      : (() => {
+                                          const n = parseFloat(currentTaxValues[1].tax_amount || 0);
+                                          return n < 0 ? `-$${Math.abs(n).toFixed(2)}` : `$${n.toFixed(2)}`;
+                                        })()
                                   }
                                   onFocus={() => {
                                     const num = parseFloat(currentTaxValues[1].tax_amount);
@@ -6400,9 +6434,17 @@ Thank you for using our receipt management system.
                                         const raw = e.target.value;
                                         const numPart = raw.replace(/^\$?/, "");
                                         const sanitized = sanitizeMoneyInput(numPart);
-                                        const display = `$${sanitized}`;
-                                        setCurrencyInputs((p) => ({ ...p, tip: display }));
-                                        const parsed = parseFloat(raw.replace(/[^0-9.-]/g, ""));
+                                        const total =
+                                          parseFloat(editedReceipt.purchasePrice ?? r.purchasePrice ?? r.total ?? 0) || 0;
+                                        let parsed = parseFloat(raw.replace(/[^0-9.-]/g, ""));
+                                        // A tip can never exceed the total; cap it and warn.
+                                        if (!isNaN(parsed) && parsed > total) {
+                                          parsed = total;
+                                          setCurrencyInputs((p) => ({ ...p, tip: `$${total.toFixed(2)}` }));
+                                          setToast({ isVisible: true, message: "Tip cannot be more than the Total.", type: "error" });
+                                        } else {
+                                          setCurrencyInputs((p) => ({ ...p, tip: `$${sanitized}` }));
+                                        }
                                         if (!isNaN(parsed)) handleFieldChange("tip", parsed);
                                       }}
                                       onBlur={() =>
@@ -6523,6 +6565,12 @@ Thank you for using our receipt management system.
                                       setTipVisible(false);
                                       handleFieldChange("tip", "");
                                     } else {
+                                      const totalForTip =
+                                        parseFloat(editedReceipt.purchasePrice ?? r.purchasePrice ?? r.total ?? 0) || 0;
+                                      if (totalForTip <= 0) {
+                                        setToast({ isVisible: true, message: "Add a Total before adding a tip.", type: "error" });
+                                        return;
+                                      }
                                       setTipVisible(true);
                                       handleFieldChange("tip", "0");
                                       setTimeout(() => {

@@ -1791,6 +1791,38 @@ setMerchantsWithImages(
     );
   }, []);
 
+  // Persist profile fields (name + recovery / duplicate-eReceipt emails) to the backend
+  // and reflect them in the in-memory user so the UI updates without a reload.
+  const updateUserProfile = useCallback(async (fields) => {
+    const token = localStorage.getItem("token");
+    if (!token) return { ok: false, error: "Not authenticated" };
+    // Only send provided fields; the backend keeps unspecified ones intact.
+    const payload = {};
+    if (fields.firstName !== undefined) payload.firstName = fields.firstName ?? "";
+    if (fields.lastName !== undefined) payload.lastName = fields.lastName ?? "";
+    if (fields.recoveryEmail !== undefined) payload.recoveryEmail = fields.recoveryEmail ?? "";
+    if (fields.duplicate_eReciept_email !== undefined)
+      payload.duplicate_eReciept_email = fields.duplicate_eReciept_email ?? "";
+    try {
+      const qs = new URLSearchParams(payload).toString();
+      const res = await fetch(`${BASE_URL}/user/updateuser?${qs}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accesstoken: token },
+        body: JSON.stringify(payload),
+      });
+      const text = await res.text().catch(() => "");
+      let data = {};
+      try { data = JSON.parse(text); } catch { /* non-JSON */ }
+      if (!res.ok) return { ok: false, error: data?.message || text || "Update failed" };
+      // Merge the returned/updated fields into the user context.
+      const normalized = normalizeUserResponse(data) || {};
+      setUser((prev) => ({ ...(prev || {}), ...normalized, ...payload }));
+      return { ok: true, user: data };
+    } catch (err) {
+      return { ok: false, error: err?.message || "Update failed" };
+    }
+  }, []);
+
   const clearAllData = () => {
     userFetchedRef.current = false;
     setUser(null);
@@ -3295,6 +3327,7 @@ setMerchantsWithImages(
         refreshDataAfterAuth,
         silentRefreshData,
         markRecoveryEmailVerified,
+        updateUserProfile,
         calculateSubtotal,
         setDataContent,
         clearDataContent,

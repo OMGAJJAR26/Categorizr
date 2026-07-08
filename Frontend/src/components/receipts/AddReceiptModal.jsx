@@ -1097,7 +1097,10 @@ const [localMerchants, setLocalMerchants] = useState([]);
     }, 0);
     const denominator = 1 + nonManualRateSum;
     const subtotal = denominator > 0 ? (totalNum - tipNum - manualSum) / denominator : 0;
-    return subtotal > 0 ? subtotal.toFixed(2) : "0.00";
+    // Allow a negative subtotal (shown in red) when the tip/manual taxes exceed the
+    // total — e.g. after removing the total while a tip is present.
+    const s = subtotal.toFixed(2);
+    return s === "-0.00" ? "0.00" : s;
   };
 
   // Recalculate only non-manual tax lines; manual lines are returned unchanged.
@@ -1241,34 +1244,25 @@ const handleFieldChange = (field, value) => {
       const totalNum = parseFloat(value) || 0;
       const tipNum = parseFloat(newData.tip) || 0;
 
-      if (totalNum === 0) {
-        // Deleting the total clears the whole receipt amount: subtotal, every tax
-        // line, and the tip all go to 0 (don't leave stale tax amounts behind).
-        newData.subtotal = "0.00";
-        newData.receipt_tax_values = (newData.receipt_tax_values || []).map((t) => ({
-          ...t,
-          tax_amount: "0.00",
-        }));
-        newData.tip = "";
-      } else {
-        // Account for manually locked amounts in the subtotal formula
-        const subtotalFromTotal = calculateSubtotalWithManualOverrides(
-          value,
-          newData.receipt_tax_values,
-          newData.tip,
-        );
-        const subtotalNum = parseFloat(subtotalFromTotal) || 0;
-        newData.subtotal = subtotalFromTotal;
+      // Recompute subtotal + taxes from the total, preserving the tip (it's treated
+      // like the tax lines). When the tip/taxes exceed the total — e.g. after removing
+      // the total while a tip is present — the subtotal and taxes go negative (red).
+      const subtotalFromTotal = calculateSubtotalWithManualOverrides(
+        value,
+        newData.receipt_tax_values,
+        newData.tip,
+      );
+      const subtotalNum = parseFloat(subtotalFromTotal) || 0;
+      newData.subtotal = subtotalFromTotal;
 
-        if (newData.receipt_tax_values.length > 0 && subtotalNum > 0) {
-          newData.receipt_tax_values = newData.receipt_tax_values.map((t) => {
-            if (t._isManual) return t;
-            const rate = parseFloat(t.tax_rate) || 0;
-            return { ...t, tax_amount: rate > 0 ? ((subtotalNum * rate) / 100).toFixed(2) : "0.00" };
-          });
-        } else if (newData.receipt_tax_values.length === 0) {
-          newData.subtotal = (totalNum - tipNum).toFixed(2);
-        }
+      if (newData.receipt_tax_values.length > 0) {
+        newData.receipt_tax_values = newData.receipt_tax_values.map((t) => {
+          if (t._isManual) return t;
+          const rate = parseFloat(t.tax_rate) || 0;
+          return { ...t, tax_amount: rate > 0 ? ((subtotalNum * rate) / 100).toFixed(2) : "0.00" };
+        });
+      } else {
+        newData.subtotal = (totalNum - tipNum).toFixed(2);
       }
     }
 
@@ -1285,7 +1279,9 @@ const handleFieldChange = (field, value) => {
       const subtotalNum = parseFloat(subtotalFromTotal) || 0;
       newData.subtotal = subtotalFromTotal;
 
-      if (newData.receipt_tax_values.length > 0 && subtotalNum > 0) {
+      // Always recompute (no subtotal>0 guard) so removing/lowering the tip clears any
+      // previously negative tax amounts back to the correct value.
+      if (newData.receipt_tax_values.length > 0) {
         newData.receipt_tax_values = newData.receipt_tax_values.map((t) => {
           if (t._isManual) return t;
           const rate = parseFloat(t.tax_rate) || 0;
@@ -5901,8 +5897,17 @@ const handleSelectLogo = (index) => {
                               onKeyDown={preventInvalidMoneyKey}
                               onChange={(e) => {
                                 const normalized = normalizeCurrencyInput(e.target.value);
-                                setCurrencyInput("tip", normalized);
-                                handleFieldChange("tip", parseCurrencyToNumber(normalized));
+                                const total = parseFloat(formData.purchasePrice) || 0;
+                                let num = parseCurrencyToNumber(normalized);
+                                // A tip can never exceed the total; cap it and warn.
+                                if (num !== "" && parseFloat(num) > total) {
+                                  num = total.toFixed(2);
+                                  setCurrencyInput("tip", `$${total.toFixed(2)}`);
+                                  setToast({ isVisible: true, message: "Tip cannot be more than the Total.", type: "error" });
+                                } else {
+                                  setCurrencyInput("tip", normalized);
+                                }
+                                handleFieldChange("tip", num);
                               }}
                               onBlur={() => {
                                 const num = parseFloat(formData.tip);
@@ -5979,6 +5984,11 @@ const handleSelectLogo = (index) => {
                                 if (formData.tip !== "") {
                                   handleFieldChange("tip", "");
                                 } else {
+                                  const totalForTip = parseFloat(formData.purchasePrice) || 0;
+                                  if (totalForTip <= 0) {
+                                    setToast({ isVisible: true, message: "Add a Total before adding a tip.", type: "error" });
+                                    return;
+                                  }
                                   handleFieldChange("tip", "0");
                                   setTimeout(() => {
                                     document.getElementById("add-receipt-tip-input")?.focus();
