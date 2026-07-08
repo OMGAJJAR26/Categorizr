@@ -2987,10 +2987,12 @@ useEffect(() => {
   /** Open the split screen — validates required fields first */
   const handleOpenSplit = () => {
     const msg = getSplitReceiptValidationMessage({
+      // Use ?? (not ||) so a field the user explicitly cleared to "" is respected and
+      // still fails validation, instead of falling back to the original receipt value.
       product_date: editedReceipt.product_date ?? selectedReceipt?.product_date,
-      storeName: editedReceipt.storeName || selectedReceipt?.storeName,
-      expense_type: editedReceipt.expense_type || selectedReceipt?.expense_type,
-      purchasePrice: editedReceipt.purchasePrice || selectedReceipt?.purchasePrice,
+      storeName: editedReceipt.storeName ?? selectedReceipt?.storeName,
+      expense_type: editedReceipt.expense_type ?? selectedReceipt?.expense_type,
+      purchasePrice: editedReceipt.purchasePrice ?? selectedReceipt?.purchasePrice,
     });
     if (msg) {
       setSplitPrereqError(msg);
