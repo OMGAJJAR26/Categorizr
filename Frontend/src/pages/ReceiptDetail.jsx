@@ -1440,12 +1440,16 @@ useEffect(() => {
 
   const sanitizeMoneyInput = (raw) => {
     if (raw === null || raw === undefined) return "";
-    const cleaned = String(raw).replace(/[^0-9.]/g, "");
+    const str = String(raw);
+    // Preserve a leading minus so the +/- sign toggle can produce negative amounts.
+    const isNeg = str.trim().startsWith("-");
+    const cleaned = str.replace(/[^0-9.]/g, "");
     if (!cleaned) return "";
     const [intPartRaw = "", decRaw = ""] = cleaned.split(".");
     const intPart = intPartRaw.replace(/^0+(?=\d)/, "") || (intPartRaw ? "0" : "");
     const decPart = (decRaw || "").slice(0, 2);
-    return cleaned.includes(".") ? `${intPart || "0"}.${decPart}` : intPart;
+    const body = cleaned.includes(".") ? `${intPart || "0"}.${decPart}` : intPart;
+    return isNeg && parseFloat(body) !== 0 ? `-${body}` : body;
   };
   /** Block non-numeric keys from monetary inputs at the keyboard level. */
   const preventInvalidMoneyKey = (e) => {
@@ -1978,7 +1982,13 @@ useEffect(() => {
   const handleTaxAmountChange = (index, rawValue) => {
     const numeric = sanitizeMoneyInput(rawValue);
     const fieldKey = index === 0 ? "tax0" : "tax1";
-    setCurrencyInputs((p) => ({ ...p, [fieldKey]: numeric ? `$${numeric}` : "$" }));
+    const nNum = parseFloat(numeric);
+    setCurrencyInputs((p) => ({
+      ...p,
+      [fieldKey]: numeric
+        ? (nNum < 0 ? `-$${Math.abs(nNum).toFixed(2)}` : `$${numeric}`)
+        : "$",
+    }));
     setEditedReceipt((prev) => {
       const currentTaxValues =
         prev.receipt_tax_values ||
@@ -2035,6 +2045,32 @@ useEffect(() => {
       );
       return { ...prev, receipt_tax_values, subtotal, purchasePrice: prev.purchasePrice };
     });
+  };
+
+  // ── +/- sign toggle for currency fields (Total, Tip, Tax — not read-only Subtotal) ──
+  const formatSignedMoney = (n) =>
+    n < 0 ? `-$${Math.abs(n).toFixed(2)}` : `$${n.toFixed(2)}`;
+
+  const toggleTotalSign = () => {
+    const cur = parseFloat(editedReceipt.purchasePrice ?? r.purchasePrice ?? r.total ?? 0) || 0;
+    if (cur === 0) return; // nothing to toggle
+    const neg = -cur;
+    setCurrencyInputs((p) => ({ ...p, total: formatSignedMoney(neg) }));
+    handleFieldChange("purchasePrice", neg.toString());
+  };
+
+  const toggleTipSign = () => {
+    const cur = parseFloat(editedReceipt.tip ?? 0) || 0;
+    if (cur === 0) return;
+    const neg = -cur;
+    setCurrencyInputs((p) => ({ ...p, tip: formatSignedMoney(neg) }));
+    handleFieldChange("tip", neg.toString());
+  };
+
+  const toggleTaxSign = (index, currentAmount) => {
+    const cur = parseFloat(currentAmount ?? 0) || 0;
+    if (cur === 0) return;
+    handleTaxAmountChange(index, (-cur).toString());
   };
 
   // ── Tax field validation helpers ─────────────────────────────────────────
@@ -5679,11 +5715,16 @@ Thank you for using our receipt management system.
                                         className="flex-1 flex items-center gap-2 cursor-pointer"
                                         onClick={() => {
                                           if (isSelected) {
-                                            // Tapping the checked merchant unchecks it (clears the field).
+                                            // Edit screen: unselecting a merchant defaults to
+                                            // "Miscellaneous" (which itself cannot be unselected).
+                                            if (isMisc) {
+                                              setShowMerchantDropdown(false);
+                                              return;
+                                            }
                                             setEditedReceipt((prev) => ({
                                               ...prev,
-                                              storeName: "",
-                                              store_image: "",
+                                              storeName: "Miscellaneous",
+                                              store_image: getMerchantImage("Miscellaneous") || "",
                                             }));
                                             setShowMerchantDropdown(false);
                                             return;
@@ -6279,7 +6320,15 @@ Thank you for using our receipt management system.
                                       return `${d.tax_name} (${d.tax_rate}%)`;
                                     })()}
                                   </label>
-                                  <div className="flex items-center gap-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleTaxSign(0, currentTaxValues[0].tax_amount)}
+                                      title="Toggle + / − sign"
+                                      className="text-xs font-bold text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                                    >
+                                      +/−
+                                    </button>
                                     {currentTaxValues[0]?._isManual && (
                                       <button
                                         type="button"
@@ -6335,7 +6384,15 @@ Thank you for using our receipt management system.
                                       return `${d.tax_name} (${d.tax_rate}%)`;
                                     })()}
                                   </label>
-                                  <div className="flex items-center gap-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleTaxSign(1, currentTaxValues[1].tax_amount)}
+                                      title="Toggle + / − sign"
+                                      className="text-xs font-bold text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                                    >
+                                      +/−
+                                    </button>
                                     {currentTaxValues[1]?._isManual && (
                                       <button
                                         type="button"
@@ -6390,8 +6447,8 @@ Thank you for using our receipt management system.
                                   parseFloat(r.purchasePrice) ||
                                   0;
                                 const tipPercentage =
-                                  subtotal > 0 && tipNum > 0
-                                    ? Math.round((tipNum / subtotal) * 100)
+                                  Math.abs(subtotal) > 0 && tipNum !== 0
+                                    ? Math.round((Math.abs(tipNum) / Math.abs(subtotal)) * 100)
                                     : 0;
                                 return (
                                   <div className="mb-4 text-align-left">
@@ -6399,7 +6456,15 @@ Thank you for using our receipt management system.
                                       <label className="font-bold">
                                         TIP ({tipPercentage}%)
                                       </label>
-                                      <div className="flex items-center gap-1">
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={toggleTipSign}
+                                          title="Toggle + / − sign"
+                                          className="text-xs font-bold text-blue-600 hover:text-blue-800 px-2 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                                        >
+                                          +/−
+                                        </button>
                                         <button
                                           type="button"
                                           onClick={() => {
@@ -6417,18 +6482,18 @@ Thank you for using our receipt management system.
                                       id="edit-receipt-tip-input"
                                       type="text"
                                       inputMode="decimal"
-                                      className={`${inputClass}`}
+                                      className={`${inputClass} ${tipNum < 0 ? "text-red-600 font-medium" : ""}`}
                                       value={
                                         currencyInputs.tip !== undefined
                                           ? currencyInputs.tip
-                                          : tipNum > 0
-                                            ? `$${tipNum.toFixed(2)}`
+                                          : tipNum !== 0
+                                            ? formatSignedMoney(tipNum)
                                             : ""
                                       }
                                       onFocus={() =>
                                         setCurrencyInputs((p) => ({
                                           ...p,
-                                          tip: tipNum > 0 ? `$${tipNum.toFixed(2)}` : "$",
+                                          tip: tipNum !== 0 ? formatSignedMoney(tipNum) : "$",
                                         }))
                                       }
                                       onKeyDown={preventInvalidMoneyKey}
@@ -6438,6 +6503,12 @@ Thank you for using our receipt management system.
                                         const sanitized = sanitizeMoneyInput(numPart);
                                         const total =
                                           parseFloat(editedReceipt.purchasePrice ?? r.purchasePrice ?? r.total ?? 0) || 0;
+                                        // Deleting the tip → go to $0.00 (not the last partial digit).
+                                        if (sanitized === "") {
+                                          setCurrencyInputs((p) => ({ ...p, tip: "$" }));
+                                          handleFieldChange("tip", "0");
+                                          return;
+                                        }
                                         let parsed = parseFloat(raw.replace(/[^0-9.-]/g, ""));
                                         // A tip can never exceed the total; cap it and warn.
                                         if (!isNaN(parsed) && parsed > total) {
@@ -6462,7 +6533,17 @@ Thank you for using our receipt management system.
                         })()}
 
                         <div className="mb-4 text-align-left">
-                          <label className="font-bold">TOTAL</label>
+                          <div className="flex items-center justify-between">
+                            <label className="font-bold">TOTAL</label>
+                            <button
+                              type="button"
+                              onClick={toggleTotalSign}
+                              title="Toggle + / − sign"
+                              className="text-xs font-bold text-blue-600 hover:text-blue-800 px-2 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                            >
+                              +/−
+                            </button>
+                          </div>
                           <input
                             type="text"
                             inputMode="decimal"
@@ -6479,15 +6560,18 @@ Thank you for using our receipt management system.
                               const num = parseFloat(
                                 editedReceipt.purchasePrice ?? r.total ?? r.purchasePrice ?? 0
                               );
-                              return `$${isNaN(num) ? "0.00" : num.toFixed(2)}`;
+                              if (isNaN(num)) return "$0.00";
+                              return num < 0 ? `-$${Math.abs(num).toFixed(2)}` : `$${num.toFixed(2)}`;
                             })()}
                             onFocus={() => {
                               const num = parseFloat(
                                 editedReceipt.purchasePrice ?? r.total ?? r.purchasePrice ?? 0
                               );
+                              // Show just "$" for a zero/empty total so the user can type
+                              // straight away without backspacing "0.00".
                               setCurrencyInputs((p) => ({
                                 ...p,
-                                total: `$${isNaN(num) ? "0.00" : num.toFixed(2)}`,
+                                total: !num || isNaN(num) ? "$" : `$${num.toFixed(2)}`,
                               }));
                             }}
                             onKeyDown={preventInvalidMoneyKey}

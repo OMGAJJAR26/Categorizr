@@ -1121,12 +1121,16 @@ const [localMerchants, setLocalMerchants] = useState([]);
 
   const sanitizeMoneyInput = (raw) => {
     if (raw === null || raw === undefined) return "";
-    const cleaned = String(raw).replace(/[^0-9.]/g, "");
+    const str = String(raw);
+    // Preserve a leading minus so the +/- sign toggle can produce negative amounts.
+    const isNeg = str.trim().startsWith("-");
+    const cleaned = str.replace(/[^0-9.]/g, "");
     if (!cleaned) return "";
     const [intPartRaw = "", decRaw = ""] = cleaned.split(".");
     const intPart = intPartRaw.replace(/^0+(?=\d)/, "") || (intPartRaw ? "0" : "");
     const decPart = (decRaw || "").slice(0, 2);
-    return cleaned.includes(".") ? `${intPart || "0"}.${decPart}` : intPart;
+    const body = cleaned.includes(".") ? `${intPart || "0"}.${decPart}` : intPart;
+    return isNeg && parseFloat(body) !== 0 ? `-${body}` : body;
   };
   /** Block non-numeric keys from monetary inputs at the keyboard level. */
   const preventInvalidMoneyKey = (e) => {
@@ -1812,6 +1816,29 @@ const handleFieldChange = (field, value) => {
         purchasePrice: prev.purchasePrice,
       };
     });
+  };
+
+  // ── +/- sign toggle for currency fields (Total, Tip, Tax — not read-only Subtotal) ──
+  const toggleTotalSign = () => {
+    const cur = parseFloat(formData.purchasePrice) || 0;
+    if (cur === 0) return;
+    const neg = -cur;
+    setCurrencyInput("total", formatCurrencyDisplay(neg));
+    handleFieldChange("purchasePrice", neg.toString());
+  };
+  const toggleTipSign = () => {
+    const cur = parseFloat(formData.tip) || 0;
+    if (cur === 0) return;
+    const neg = -cur;
+    setCurrencyInput("tip", formatCurrencyDisplay(neg));
+    handleFieldChange("tip", neg.toString());
+  };
+  const toggleTaxSignAdd = (index, currentAmount) => {
+    const cur = parseFloat(currentAmount ?? 0) || 0;
+    if (cur === 0) return;
+    const neg = -cur;
+    setCurrencyInput(index === 0 ? "tax0" : "tax1", formatCurrencyDisplay(neg));
+    updateTaxAmount(index, neg.toString());
   };
 
   const handleUpload = async () => {
@@ -5642,6 +5669,14 @@ const handleSelectLogo = (index) => {
                               {`${formData.receipt_tax_values[0].tax_name} (${formatTaxRate(formData.receipt_tax_values[0].tax_rate)}%)`}
                             </label>
                             <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => toggleTaxSignAdd(0, formData.receipt_tax_values[0]?.tax_amount)}
+                                title="Toggle + / − sign"
+                                className="text-xs font-bold text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                              >
+                                +/−
+                              </button>
                               {formData.receipt_tax_values[0]?._isManual && (
                                 <button
                                   type="button"
@@ -5750,6 +5785,14 @@ const handleSelectLogo = (index) => {
                               {`${formData.receipt_tax_values[1].tax_name} (${formatTaxRate(formData.receipt_tax_values[1].tax_rate)}%)`}
                             </label>
                             <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => toggleTaxSignAdd(1, formData.receipt_tax_values[1]?.tax_amount)}
+                                title="Toggle + / − sign"
+                                className="text-xs font-bold text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                              >
+                                +/−
+                              </button>
                               {formData.receipt_tax_values[1]?._isManual && (
                                 <button
                                   type="button"
@@ -5870,6 +5913,14 @@ const handleSelectLogo = (index) => {
                               <div className="flex items-center gap-2">
                                 <button
                                   type="button"
+                                  onClick={toggleTipSign}
+                                  title="Toggle + / − sign"
+                                  className="text-xs font-bold text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                                >
+                                  +/−
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => {
                                     handleFieldChange("tip", "");
                                     setCurrencyInput("tip", "");
@@ -5921,7 +5972,17 @@ const handleSelectLogo = (index) => {
 
                         {/* Total */}
                         <div className="mb-4 text-align-left">
-                          <label className="font-bold">TOTAL</label>
+                          <div className="flex items-center justify-between">
+                            <label className="font-bold">TOTAL</label>
+                            <button
+                              type="button"
+                              onClick={toggleTotalSign}
+                              title="Toggle + / − sign"
+                              className="text-xs font-bold text-blue-600 hover:text-blue-800 px-2 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                            >
+                              +/−
+                            </button>
+                          </div>
                           <input
                             type="text"
                             inputMode="decimal"
