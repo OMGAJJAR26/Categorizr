@@ -604,104 +604,47 @@ const ReceiptDetail = ({
   // Keep total fixed: derive subtotal and per-tax amounts from rates.
   const recalculateReceiptTotalsFromFixedTotal = useCallback(
     (total, taxValues, tip) => {
+      const totalNum = parseFloat(total) || 0;
+      const tipNum = parseFloat(tip) || 0;
       const nonTipTaxes = (taxValues || []).filter(
         (t) => !(t.tax_name || "").toLowerCase().includes("tip"),
       );
 
-      // Total is 0/empty:
-      if ((parseFloat(total) || 0) === 0) {
-        if ((parseFloat(tip) || 0) === 0) {
-          // No tip → zero the whole receipt (avoids leaving stale tax amounts).
-          return {
-            subtotal: 0,
-            receipt_tax_values: nonTipTaxes.map((t) => ({ ...t, tax_amount: 0 })),
-          };
-        }
-        // A tip is present → subtotal & taxes go negative (red), recomputed from rates,
-        // and the tip is preserved (treated like the tax lines).
-        const tipN = parseFloat(tip) || 0;
-        const rateSum = nonTipTaxes.reduce(
-          (s, t) => s + resolveTaxRateForReceipt(t) / 100,
-          0,
-        );
-        const subN =
-          nonTipTaxes.length > 0 && rateSum > 0 ? -tipN / (1 + rateSum) : -tipN;
-        const subtotal = parseFloat(subN.toFixed(2));
-        const receipt_tax_values = nonTipTaxes.map((t) => {
-          const rate = resolveTaxRateForReceipt(t);
-          const tax_amount =
-            rate > 0 ? parseFloat(((subtotal * rate) / 100).toFixed(2)) : 0;
-          return {
-            ...t,
-            tax_rate: rate > 0 ? formatTaxRate(rate) : t.tax_rate || "0",
-            tax_amount,
-          };
-        });
-        return { subtotal, receipt_tax_values };
+      // Total is 0/empty with NO tip → zero the whole receipt (avoid stale amounts).
+      if (totalNum === 0 && tipNum === 0) {
+        return {
+          subtotal: 0,
+          receipt_tax_values: nonTipTaxes.map((t) => ({ ...t, tax_amount: 0 })),
+        };
       }
 
       // If all non-tip taxes have stored amounts AND none are manually locked,
-      // preserve all amounts and let subtotal absorb any total change.
+      // preserve all amounts and let subtotal absorb any total change. (Protects
+      // freshly-loaded / forwarded receipts from being wiped.)
       const preserved = preserveStoredReceiptTaxTotals(total, taxValues, tip);
       if (preserved) return preserved;
 
-      const totalNum = parseFloat(total) || 0;
-      const tipNum = parseFloat(tip) || 0;
-      const taxes = (taxValues || []).filter(
-        (t) => !(t.tax_name || "").toLowerCase().includes("tip"),
-      );
-
-      // If any tax line is manually locked, use the manual-override formula.
-      const hasManual = taxes.some((t) => t._isManual);
-      if (hasManual) {
-        const manualSum = taxes.reduce(
-          (sum, t) => (t._isManual ? sum + (parseFloat(t.tax_amount) || 0) : sum),
-          0,
-        );
-        const nonManualRateSum = taxes.reduce((sum, t) => {
-          if (t._isManual) return sum;
-          return sum + resolveTaxRateForReceipt(t) / 100;
-        }, 0);
-        const denominator = 1 + nonManualRateSum;
-        const subtotalNum =
-          denominator > 0 ? (totalNum - tipNum - manualSum) / denominator : 0;
-        const subtotal = subtotalNum > 0 ? parseFloat(subtotalNum.toFixed(2)) : 0;
-        const receipt_tax_values = taxes.map((t) => {
-          if (t._isManual) return { ...t, tax_amount: parseFloat(t.tax_amount) || 0 };
-          const rate = resolveTaxRateForReceipt(t);
-          const tax_amount =
-            subtotal > 0 && rate > 0
-              ? parseFloat(((subtotal * rate) / 100).toFixed(2))
-              : 0;
-          return { ...t, tax_rate: rate > 0 ? formatTaxRate(rate) : t.tax_rate || "0", tax_amount };
-        });
-        return { subtotal, receipt_tax_values };
-      }
-
-      const totalRateSum = taxes.reduce(
-        (sum, t) => sum + resolveTaxRateForReceipt(t) / 100,
-        0,
-      );
-      const subtotalNum =
-        taxes.length > 0 && totalRateSum > 0
-          ? (totalNum - tipNum) / (1 + totalRateSum)
-          : totalNum - tipNum;
-      const subtotal =
-        subtotalNum > 0 ? parseFloat(subtotalNum.toFixed(2)) : 0;
-
-      const receipt_tax_values = taxes.map((t) => {
+      // Otherwise recompute: each non-manual tax is inclusive of the SAME taxable base
+      // (total − tip), independent of the other taxes — amount = base * rate / (100 + rate).
+      // Manual lines keep their amount. The subtotal absorbs the remainder, and may go
+      // negative (red) when the tip/taxes exceed the total.
+      const base = totalNum - tipNum;
+      const receipt_tax_values = nonTipTaxes.map((t) => {
+        if (t._isManual) return { ...t, tax_amount: parseFloat(t.tax_amount) || 0 };
         const rate = resolveTaxRateForReceipt(t);
         const tax_amount =
-          subtotal > 0 && rate > 0
-            ? parseFloat(((subtotal * rate) / 100).toFixed(2))
-            : 0;
+          rate > 0 ? parseFloat(((base * rate) / (100 + rate)).toFixed(2)) : 0;
         return {
           ...t,
           tax_rate: rate > 0 ? formatTaxRate(rate) : t.tax_rate || "0",
           tax_amount,
         };
       });
-
+      const taxSum = receipt_tax_values.reduce(
+        (s, t) => s + (parseFloat(t.tax_amount) || 0),
+        0,
+      );
+      const subtotal = parseFloat((totalNum - taxSum - tipNum).toFixed(2));
       return { subtotal, receipt_tax_values };
     },
     [resolveTaxRateForReceipt],
@@ -1977,8 +1920,8 @@ useEffect(() => {
     });
   };
 
-  // Tax amount input: mark the edited line as manually overridden so the value is
-  // preserved across price/tip changes. Other non-manual lines recalculate from rates.
+  // Tax amount input: editing ONE tax changes only that tax line and the subtotal
+  // (the subtotal absorbs the change). Other tax lines and the tip are left untouched.
   const handleTaxAmountChange = (index, rawValue) => {
     const numeric = sanitizeMoneyInput(rawValue);
     const fieldKey = index === 0 ? "tax0" : "tax1";
@@ -1996,27 +1939,27 @@ useEffect(() => {
           (t) => !(t.tax_name || "").toLowerCase().includes("tip")
         ) ||
         [];
+      // Only the edited line changes (marked manual); every other line stays as-is.
       const updatedTaxValues = currentTaxValues.map((t, i) =>
         i === index
           ? { ...t, tax_amount: numeric === "" ? 0 : parseFloat(numeric), _isManual: true }
           : t
       );
+      // Respect an explicit $0/cleared total (?? not ||) so it isn't replaced by the original.
       const total =
-        parseFloat(prev.purchasePrice) ||
-        parseFloat(r.total) ||
-        parseFloat(r.purchasePrice) ||
-        0;
+        parseFloat(prev.purchasePrice ?? r.total ?? r.purchasePrice ?? 0) || 0;
       const tipAmount =
         parseFloat(prev.tip) ||
         (tipTax?.tax_amount ? parseFloat(tipTax.tax_amount) : 0);
-      const { subtotal, receipt_tax_values } = recalculateReceiptTotalsFromFixedTotal(
-        total,
-        updatedTaxValues,
-        tipAmount,
+      // Keep TOTAL fixed; the subtotal absorbs the change so the other taxes don't move.
+      const taxSum = updatedTaxValues.reduce(
+        (s, t) => s + (parseFloat(t.tax_amount) || 0),
+        0,
       );
+      const subtotal = parseFloat((total - taxSum - tipAmount).toFixed(2));
       return {
         ...prev,
-        receipt_tax_values,
+        receipt_tax_values: updatedTaxValues,
         subtotal,
         purchasePrice: prev.purchasePrice,
       };

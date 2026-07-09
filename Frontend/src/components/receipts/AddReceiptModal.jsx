@@ -1243,55 +1243,44 @@ const handleFieldChange = (field, value) => {
       );
     }
 
-    // When total changes, recalculate subtotal and non-manual tax amounts
+    // When total changes, recompute each non-manual tax INCLUSIVELY against the shared
+    // taxable base (total − tip), independent of the other taxes. Manual lines stay put.
+    // The subtotal absorbs the remainder. amount = base * rate / (100 + rate).
     if (field === "purchasePrice") {
       const totalNum = parseFloat(value) || 0;
       const tipNum = parseFloat(newData.tip) || 0;
+      const base = totalNum - tipNum;
 
-      // Recompute subtotal + taxes from the total, preserving the tip (it's treated
-      // like the tax lines). When the tip/taxes exceed the total — e.g. after removing
-      // the total while a tip is present — the subtotal and taxes go negative (red).
-      const subtotalFromTotal = calculateSubtotalWithManualOverrides(
-        value,
-        newData.receipt_tax_values,
-        newData.tip,
+      newData.receipt_tax_values = (newData.receipt_tax_values || []).map((t) => {
+        if (t._isManual) return t;
+        const rate = parseFloat(t.tax_rate) || 0;
+        const amt = rate > 0 ? (base * rate) / (100 + rate) : 0;
+        return { ...t, tax_amount: amt.toFixed(2) };
+      });
+      const taxSum = newData.receipt_tax_values.reduce(
+        (s, t) => s + (parseFloat(t.tax_amount) || 0),
+        0,
       );
-      const subtotalNum = parseFloat(subtotalFromTotal) || 0;
-      newData.subtotal = subtotalFromTotal;
-
-      if (newData.receipt_tax_values.length > 0) {
-        newData.receipt_tax_values = newData.receipt_tax_values.map((t) => {
-          if (t._isManual) return t;
-          const rate = parseFloat(t.tax_rate) || 0;
-          return { ...t, tax_amount: rate > 0 ? ((subtotalNum * rate) / 100).toFixed(2) : "0.00" };
-        });
-      } else {
-        newData.subtotal = (totalNum - tipNum).toFixed(2);
-      }
+      newData.subtotal = (totalNum - taxSum - tipNum).toFixed(2);
     }
 
-    // When tip changes, KEEP TOTAL FIXED and recalculate subtotal
+    // When tip changes, KEEP TOTAL FIXED and recompute the same way (base = total − tip).
     if (field === "tip") {
       const totalNum = parseFloat(newData.purchasePrice) || 0;
       const tipNum = parseFloat(value) || 0;
+      const base = totalNum - tipNum;
 
-      const subtotalFromTotal = calculateSubtotalWithManualOverrides(
-        totalNum,
-        newData.receipt_tax_values,
-        tipNum,
+      newData.receipt_tax_values = (newData.receipt_tax_values || []).map((t) => {
+        if (t._isManual) return t;
+        const rate = parseFloat(t.tax_rate) || 0;
+        const amt = rate > 0 ? (base * rate) / (100 + rate) : 0;
+        return { ...t, tax_amount: amt.toFixed(2) };
+      });
+      const taxSum = newData.receipt_tax_values.reduce(
+        (s, t) => s + (parseFloat(t.tax_amount) || 0),
+        0,
       );
-      const subtotalNum = parseFloat(subtotalFromTotal) || 0;
-      newData.subtotal = subtotalFromTotal;
-
-      // Always recompute (no subtotal>0 guard) so removing/lowering the tip clears any
-      // previously negative tax amounts back to the correct value.
-      if (newData.receipt_tax_values.length > 0) {
-        newData.receipt_tax_values = newData.receipt_tax_values.map((t) => {
-          if (t._isManual) return t;
-          const rate = parseFloat(t.tax_rate) || 0;
-          return { ...t, tax_amount: rate > 0 ? ((subtotalNum * rate) / 100).toFixed(2) : "0.00" };
-        });
-      }
+      newData.subtotal = (totalNum - taxSum - tipNum).toFixed(2);
 
       // Keep purchasePrice (total) unchanged
       newData.purchasePrice = prev.purchasePrice;
@@ -1355,47 +1344,69 @@ const handleFieldChange = (field, value) => {
         }
         return;
       }
-      // Use current total and tip to compute subtotal, then tax amounts
+      // Use current total and tip to compute the new line; existing lines stay frozen.
       const totalNum = parseFloat(formData.purchasePrice) || 0;
       const tipNum = parseFloat(formData.tip) || 0;
 
+      // Every tax line is computed inclusively against the SAME taxable base
+      // (total − tip), independent of the other tax lines — so adding a line never
+      // changes the existing ones. amount = base * rate / (100 + rate).
+      // e.g. $100 base @ 18% → 15.25 and @ 22% → 18.03; subtotal = 100 − 15.25 − 18.03.
+      const existingTaxSum = formData.receipt_tax_values.reduce(
+        (s, t) => s + (parseFloat(t.tax_amount) || 0),
+        0,
+      );
+      const taxableBase = totalNum - tipNum;
+      const newRate = parseFloat(tax.tax_rate) || 0;
+      const newAmount =
+        taxableBase > 0 && newRate > 0
+          ? (taxableBase * newRate) / (100 + newRate)
+          : 0;
+
       // IMPORTANT: When adding a tax from taxData, ensure fk_tax_id is set to the tax definition ID
       // This links the receipt tax to the tax definition in the tax table
+      const userId = parseInt(localStorage.getItem("fk_user_id")) || 0;
       const taxToAdd = {
         ...tax,
-        tax_amount: "0.00",
+        tax_amount: newAmount.toFixed(2),
         // Set fk_tax_id to the tax definition ID (from taxData)
         fk_tax_id: tax.id && tax.id > 0 ? tax.id : tax.fk_tax_id || 0,
         // Ensure id is 0 for new receipt tax entries (will be set by backend)
         id: 0,
+        // Normalize backend fields (previously done by applyTaxRecalc) so the new
+        // line saves correctly.
+        fk_user_id: tax.fk_user_id || userId,
+        created: tax.created || 0,
+        updated: tax.updated || 0,
+        // Auto (not manually overridden) — the "Auto" revert control keys off this.
+        _isManual: false,
       };
 
       // Sort alphabetically so tax fields always render in A→Z order
       const newTaxValues = [...formData.receipt_tax_values, taxToAdd]
         .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""));
 
-      // Recompute subtotal accounting for any existing manual overrides
-      const subtotalFromTotal = calculateSubtotalWithManualOverrides(
-        totalNum,
-        newTaxValues,
-        tipNum,
-      );
-
-      // Recalculate only non-manual lines; new tax is not manually overridden
-      const recalculatedTaxes = applyTaxRecalc(newTaxValues, subtotalFromTotal);
+      // Subtotal absorbs the new line; existing lines are untouched.
+      const subtotalFromTotal = (
+        totalNum - (existingTaxSum + newAmount) - tipNum
+      ).toFixed(2);
 
       console.log("Subtotal from total:", subtotalFromTotal);
-      console.log("Recalculated taxes:", recalculatedTaxes);
+      console.log("New tax amount:", taxToAdd.tax_amount);
 
+      // Adding re-sorts lines alphabetically, so existing per-index display
+      // overrides may now map to a different row. Clear them so the freshly
+      // computed amounts render with the correct sign.
+      setCurrencyInputs((prev) => ({ ...prev, tax0: "", tax1: "" }));
       setFormData((prev) => ({
         ...prev,
-        receipt_tax_values: recalculatedTaxes,
+        receipt_tax_values: newTaxValues,
         subtotal: subtotalFromTotal,
         // Keep purchasePrice (total) unchanged
         purchasePrice: prev.purchasePrice,
       }));
 
-      console.log("Tax added successfully without changing total");
+      console.log("Tax added successfully without changing total or other taxes");
     } else {
       console.log("Tax already exists, skipping");
     }
@@ -1405,16 +1416,24 @@ const handleFieldChange = (field, value) => {
 
   // Remove tax type and keep total fixed; recalc subtotal and remaining taxes
   const removeTaxType = (index) => {
+    // Rows are re-indexed after removal, so any per-index display override would now
+    // point at the wrong line. Clear them and let the recomputed amounts render.
+    setCurrencyInputs((prev) => ({ ...prev, tax0: "", tax1: "" }));
     setFormData((prev) => {
       const newTaxValues = prev.receipt_tax_values.filter((_, i) => i !== index);
       const totalNum = parseFloat(prev.purchasePrice) || 0;
       const tipNum = parseFloat(prev.tip) || 0;
-      const subtotalFromTotal = calculateSubtotalWithManualOverrides(totalNum, newTaxValues, tipNum);
-      const recalculatedTaxes = applyTaxRecalc(newTaxValues, subtotalFromTotal);
+      // Remaining tax lines stay frozen; the subtotal absorbs the removed line so the
+      // TOTAL stays fixed and the other taxes don't move.
+      const taxSum = newTaxValues.reduce(
+        (s, t) => s + (parseFloat(t.tax_amount) || 0),
+        0,
+      );
+      const subtotal = (totalNum - taxSum - tipNum).toFixed(2);
       return {
         ...prev,
-        receipt_tax_values: recalculatedTaxes,
-        subtotal: subtotalFromTotal,
+        receipt_tax_values: newTaxValues,
+        subtotal,
         purchasePrice: prev.purchasePrice,
       };
     });
@@ -1774,45 +1793,60 @@ const handleFieldChange = (field, value) => {
     setError(null);
   };
 
-  // Update tax amount and keep total fixed; recalc subtotal and taxes
+  // Editing ONE tax (typing an amount, or the +/- toggle) changes only that line and
+  // the subtotal. The TOTAL stays fixed and every OTHER tax line is left untouched.
   const updateTaxAmount = (index, amount) => {
     setFormData((prev) => {
-      // Mark this tax line as manually overridden so future recalculations preserve it.
+      // Only the edited line changes (marked manual); all other lines stay as-is.
       const newTaxValues = prev.receipt_tax_values.map((t, i) =>
         i === index ? { ...t, tax_amount: amount, _isManual: true } : t,
       );
-      // Subtotal: absorbs the manual lock; non-manual taxes recalculate from rates.
-      const subtotalFromTotal = calculateSubtotalWithManualOverrides(
-        prev.purchasePrice,
-        newTaxValues,
-        prev.tip,
+      const total = parseFloat(prev.purchasePrice) || 0;
+      const tip = parseFloat(prev.tip) || 0;
+      // Subtotal absorbs the change so the other taxes never move.
+      const taxSum = newTaxValues.reduce(
+        (s, t) => s + (parseFloat(t.tax_amount) || 0),
+        0,
       );
-      const recalculatedTaxes = applyTaxRecalc(newTaxValues, subtotalFromTotal);
+      const subtotal = (total - taxSum - tip).toFixed(2);
       return {
         ...prev,
-        receipt_tax_values: recalculatedTaxes,
-        subtotal: subtotalFromTotal,
+        receipt_tax_values: newTaxValues,
+        subtotal,
         purchasePrice: prev.purchasePrice,
       };
     });
   };
 
-  // Clear the manual override on a tax line and revert to rate-based auto-calculation.
+  // Revert ONE tax line back to its rate-based (inclusive auto) amount. Only that line
+  // and the subtotal change; every other tax line stays frozen.
   const resetTaxAmount = (index) => {
+    // Drop any frozen display strings so the reverted (auto, positive) amounts show.
+    setCurrencyInputs((prev) => ({ ...prev, tax0: "", tax1: "" }));
     setFormData((prev) => {
+      const total = parseFloat(prev.purchasePrice) || 0;
+      const tip = parseFloat(prev.tip) || 0;
+      const target = prev.receipt_tax_values[index];
+      const rate = parseFloat(target?.tax_rate) || 0;
+      // Auto value is this line's inclusive tax on the shared taxable base (total − tip),
+      // independent of the other lines (which stay frozen). Matches the add-tax calc.
+      const othersSum = prev.receipt_tax_values.reduce(
+        (s, t, i) => (i === index ? s : s + (parseFloat(t.tax_amount) || 0)),
+        0,
+      );
+      const taxableBase = total - tip;
+      const autoAmount =
+        taxableBase > 0 && rate > 0 ? (taxableBase * rate) / (100 + rate) : 0;
       const newTaxValues = prev.receipt_tax_values.map((t, i) =>
-        i === index ? { ...t, _isManual: false } : t,
+        i === index
+          ? { ...t, tax_amount: autoAmount.toFixed(2), _isManual: false }
+          : t,
       );
-      const subtotalFromTotal = calculateSubtotalWithManualOverrides(
-        prev.purchasePrice,
-        newTaxValues,
-        prev.tip,
-      );
-      const recalculatedTaxes = applyTaxRecalc(newTaxValues, subtotalFromTotal);
+      const subtotal = (total - (othersSum + autoAmount) - tip).toFixed(2);
       return {
         ...prev,
-        receipt_tax_values: recalculatedTaxes,
-        subtotal: subtotalFromTotal,
+        receipt_tax_values: newTaxValues,
+        subtotal,
         purchasePrice: prev.purchasePrice,
       };
     });
@@ -1837,7 +1871,10 @@ const handleFieldChange = (field, value) => {
     const cur = parseFloat(currentAmount ?? 0) || 0;
     if (cur === 0) return;
     const neg = -cur;
-    setCurrencyInput(index === 0 ? "tax0" : "tax1", formatCurrencyDisplay(neg));
+    // Clear any display override so the field tracks the underlying (now-signed)
+    // tax_amount. Keeping a frozen string here is what left stale "-$X" values on
+    // screen after the amount was later recomputed by add/remove/reset.
+    setCurrencyInput(index === 0 ? "tax0" : "tax1", "");
     updateTaxAmount(index, neg.toString());
   };
 
