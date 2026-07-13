@@ -1994,7 +1994,20 @@ const handleFieldChange = (field, value) => {
         setDetectedMerchantLogo(parsedReceiptData.merchantLogo);
       }
 
-      const cleanPaymentType = parsedReceiptData?.paymentMethod || "";
+      // Payment method from OCR. Protocol: OCR only auto-fills a payment method — and
+      // therefore only ever auto-creates a "new" one — when BOTH a card type AND a
+      // 4-digit number are detected. The parser returns e.g. "MasterCard *7836" when it
+      // finds the last 4, or just "MasterCard" when it can't. A card type with no 4
+      // digits is dropped, because a new payment method can't exist without a 4-digit
+      // number (defaults are the only digit-less methods, and those aren't OCR-created).
+      const ocrPaymentMethod = parsedReceiptData?.paymentMethod || "";
+      const ocrLast4Match = ocrPaymentMethod.match(/\*(\d{3,4})\b/);
+      const ocrHasLast4 = !!(
+        ocrLast4Match &&
+        ocrLast4Match[1] &&
+        ocrLast4Match[1] !== "0000"
+      );
+      const cleanPaymentType = ocrHasLast4 ? ocrPaymentMethod : "";
 
       const cleanNumericValue = (value) => {
         if (!value) return "";
@@ -5029,9 +5042,18 @@ const handleSelectLogo = (index) => {
           // Delay to allow click events on dropdown items
           setTimeout(() => {
             setIsMerchantTyping(false);
-            // Auto-fill expense category from merchant history if field is currently empty
             setFormData((prev) => {
-              if (prev.expense_type || !prev.storeName?.trim()) return prev;
+              // Removing/leaving the merchant empty defaults to "Miscellaneous" right
+              // away in the field (matches the Edit screen), not just on save.
+              if (!prev.storeName?.trim()) {
+                return {
+                  ...prev,
+                  storeName: "Miscellaneous",
+                  store_image: getMerchantImage("Miscellaneous") || "",
+                };
+              }
+              // Auto-fill expense category from merchant history if field is currently empty
+              if (prev.expense_type) return prev;
               const suggested = getMerchantDefaultCategory(prev.storeName);
               return suggested ? { ...prev, expense_type: suggested } : prev;
             });

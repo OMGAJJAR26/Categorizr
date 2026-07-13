@@ -28,7 +28,10 @@ export default function PdfDownload({ receipts, groupByCategory = false, groupBy
     if (!timestamp) return "-";
     const d = new Date(Number(timestamp) * 1000);
     if (Number.isNaN(d.getTime())) return "-";
+    // product_date is anchored to UTC noon; render in UTC so the calendar day
+    // never shifts by the viewer's local timezone (matches the main receipt UI).
     return d.toLocaleDateString("en-US", {
+      timeZone: "UTC",
       year: "numeric",
       month: "short",
       day: "2-digit",
@@ -39,7 +42,10 @@ export default function PdfDownload({ receipts, groupByCategory = false, groupBy
     if (!timestamp) return "Unknown";
     const d = new Date(Number(timestamp) * 1000);
     if (Number.isNaN(d.getTime())) return "Unknown";
+    // UTC to match formatDate above, so a receipt's month section can't disagree
+    // with its own displayed date on far-east timezones.
     return d.toLocaleDateString("en-US", {
+      timeZone: "UTC",
       year: "numeric",
       month: "long",
     });

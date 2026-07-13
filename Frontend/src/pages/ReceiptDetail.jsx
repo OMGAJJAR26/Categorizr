@@ -3376,13 +3376,21 @@ useEffect(() => {
       });
       if (tipLine) receiptTaxValuesPayload.push(tipLine);
 
-      // Get store_image from selected merchant if changed
-      const selectedMerchantImage = getMerchantImage(editedReceipt.storeName);
-      const storeImageToSave =
-        selectedMerchantImage ||
-        editedReceipt.store_image ||
-        selectedReceipt.store_image ||
-        "";
+      // Edit screen: a removed/cleared merchant defaults to "Miscellaneous" so a receipt
+      // never saves with an empty name + a stale logo (which showed as "logo + —" on Home).
+      // "" (explicitly cleared) still wins over the original, but an empty result falls
+      // back to Miscellaneous.
+      const resolvedStoreName =
+        (editedReceipt.storeName ?? selectedReceipt.storeName ?? "").trim() ||
+        "Miscellaneous";
+      const isMiscMerchant = resolvedStoreName.toLowerCase() === "miscellaneous";
+      const selectedMerchantImage = getMerchantImage(resolvedStoreName);
+      const storeImageToSave = isMiscMerchant
+        ? selectedMerchantImage || "" // never carry over the previous merchant's logo
+        : selectedMerchantImage ||
+          editedReceipt.store_image ||
+          selectedReceipt.store_image ||
+          "";
 
       // Determine card_issuer_name and last4 from payment type
       let last4 =
@@ -3435,6 +3443,7 @@ useEffect(() => {
         emailAttachment: combinedReceiptImages,
         receipt_tag: receiptTag,
         receipt_tax_values: receiptTaxValuesPayload,
+        storeName: resolvedStoreName,
         store_image: storeImageToSave,
         card_issuer_name: cardIssuerName,
         paymentType: finalPaymentTypeForAPI || "", // Send WITHOUT *last4 to API
@@ -3645,13 +3654,19 @@ useEffect(() => {
     });
     if (tipLine) receiptTaxValuesPayload.push(tipLine);
 
-    // Get store_image from selected merchant if changed
-    const selectedMerchantImage = getMerchantImage(editedReceipt.storeName);
-    const storeImageToSave =
-      selectedMerchantImage ||
-      editedReceipt.store_image ||
-      selectedReceipt.store_image ||
-      "";
+    // Edit screen: a removed/cleared merchant defaults to "Miscellaneous" so a receipt
+    // never saves with an empty name + a stale logo (which showed as "logo + —" on Home).
+    const resolvedStoreName =
+      (editedReceipt.storeName ?? selectedReceipt.storeName ?? "").trim() ||
+      "Miscellaneous";
+    const isMiscMerchant = resolvedStoreName.toLowerCase() === "miscellaneous";
+    const selectedMerchantImage = getMerchantImage(resolvedStoreName);
+    const storeImageToSave = isMiscMerchant
+      ? selectedMerchantImage || "" // never carry over the previous merchant's logo
+      : selectedMerchantImage ||
+        editedReceipt.store_image ||
+        selectedReceipt.store_image ||
+        "";
 
     // Determine card_issuer_name and last4 from payment type
     let last4 =
@@ -3695,6 +3710,7 @@ useEffect(() => {
       emailAttachment: combinedReceiptImages,
       receipt_tag: receiptTag,
       receipt_tax_values: receiptTaxValuesPayload,
+      storeName: resolvedStoreName,
       store_image: storeImageToSave,
       card_issuer_name: cardIssuerName,
       paymentType: finalPaymentTypeForAPI || "",
@@ -5622,6 +5638,22 @@ Thank you for using our receipt management system.
                               onFocus={() => {
                                 setIsMerchantTyping(false);
                                 setShowMerchantDropdown(true);
+                              }}
+                              onBlur={() => {
+                                // Removing the merchant (leaving it empty) defaults to
+                                // "Miscellaneous" right away in the field — not just on save.
+                                // The delay lets a dropdown selection / Add Merchant win first.
+                                setTimeout(() => {
+                                  setEditedReceipt((prev) => {
+                                    const cur = (prev.storeName ?? r.storeName ?? r.merchant ?? "").trim();
+                                    if (cur !== "") return prev;
+                                    return {
+                                      ...prev,
+                                      storeName: "Miscellaneous",
+                                      store_image: getMerchantImage("Miscellaneous") || "",
+                                    };
+                                  });
+                                }, 150);
                               }}
                               placeholder="Select or type merchant name"
                             />

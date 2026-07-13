@@ -39,7 +39,10 @@ const ViewReport = ({ receipt, onClose }) => {
   const formatDate = (timestamp) => {
     if (!timestamp) return "";
     const date = new Date(Number(timestamp) * 1000);
+    // product_date is anchored to UTC noon; render in UTC so the calendar day
+    // never shifts by the viewer's local timezone (matches the main receipt UI).
     return date.toLocaleDateString("en-US", {
+      timeZone: "UTC",
       month: "long",
       day: "numeric",
       year: "numeric",
