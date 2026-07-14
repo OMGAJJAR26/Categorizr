@@ -6007,16 +6007,11 @@ const handleSelectLogo = (index) => {
                               onKeyDown={preventInvalidMoneyKey}
                               onChange={(e) => {
                                 const normalized = normalizeCurrencyInput(e.target.value);
-                                const total = parseFloat(formData.purchasePrice) || 0;
-                                let num = parseCurrencyToNumber(normalized);
-                                // A tip can never exceed the total; cap it and warn.
-                                if (num !== "" && parseFloat(num) > total) {
-                                  num = total.toFixed(2);
-                                  setCurrencyInput("tip", `$${total.toFixed(2)}`);
-                                  setToast({ isVisible: true, message: "Tip cannot be more than the Total.", type: "error" });
-                                } else {
-                                  setCurrencyInput("tip", normalized);
-                                }
+                                const num = parseCurrencyToNumber(normalized);
+                                // A tip MAY exceed the total (matches iOS). The taxes and
+                                // subtotal simply go negative via the shared base
+                                // (total − tip) — no cap, no warning.
+                                setCurrencyInput("tip", normalized);
                                 handleFieldChange("tip", num);
                               }}
                               onBlur={() => {

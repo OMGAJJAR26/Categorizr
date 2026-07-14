@@ -621,8 +621,19 @@ const ReceiptDetail = ({
       // If all non-tip taxes have stored amounts AND none are manually locked,
       // preserve all amounts and let subtotal absorb any total change. (Protects
       // freshly-loaded / forwarded receipts from being wiped.)
-      const preserved = preserveStoredReceiptTaxTotals(total, taxValues, tip);
-      if (preserved) return preserved;
+      // EXCEPTION: when the tip/taxes exceed the total, the subtotal would be negative.
+      // preserveStoredReceiptTaxTotals clamps it to 0 and keeps the taxes positive, which
+      // hides the overage. In that case fall through to the rate-based recompute below so
+      // the taxes and subtotal go negative (matches iOS: tip > total is allowed).
+      const nonTipStoredSum = nonTipTaxes.reduce(
+        (s, t) => s + (parseFloat(t.tax_amount) || 0),
+        0,
+      );
+      const wouldGoNegative = totalNum - nonTipStoredSum - tipNum < 0;
+      if (!wouldGoNegative) {
+        const preserved = preserveStoredReceiptTaxTotals(total, taxValues, tip);
+        if (preserved) return preserved;
+      }
 
       // Otherwise recompute: each non-manual tax is inclusive of the SAME taxable base
       // (total − tip), independent of the other taxes — amount = base * rate / (100 + rate).
@@ -6476,23 +6487,17 @@ Thank you for using our receipt management system.
                                         const raw = e.target.value;
                                         const numPart = raw.replace(/^\$?/, "");
                                         const sanitized = sanitizeMoneyInput(numPart);
-                                        const total =
-                                          parseFloat(editedReceipt.purchasePrice ?? r.purchasePrice ?? r.total ?? 0) || 0;
                                         // Deleting the tip → go to $0.00 (not the last partial digit).
                                         if (sanitized === "") {
                                           setCurrencyInputs((p) => ({ ...p, tip: "$" }));
                                           handleFieldChange("tip", "0");
                                           return;
                                         }
-                                        let parsed = parseFloat(raw.replace(/[^0-9.-]/g, ""));
-                                        // A tip can never exceed the total; cap it and warn.
-                                        if (!isNaN(parsed) && parsed > total) {
-                                          parsed = total;
-                                          setCurrencyInputs((p) => ({ ...p, tip: `$${total.toFixed(2)}` }));
-                                          setToast({ isVisible: true, message: "Tip cannot be more than the Total.", type: "error" });
-                                        } else {
-                                          setCurrencyInputs((p) => ({ ...p, tip: `$${sanitized}` }));
-                                        }
+                                        const parsed = parseFloat(raw.replace(/[^0-9.-]/g, ""));
+                                        // A tip MAY exceed the total (matches iOS). The taxes
+                                        // and subtotal simply go negative via the shared base
+                                        // (total − tip) — no cap, no warning.
+                                        setCurrencyInputs((p) => ({ ...p, tip: `$${sanitized}` }));
                                         if (!isNaN(parsed)) handleFieldChange("tip", parsed);
                                       }}
                                       onBlur={() =>
