@@ -793,10 +793,32 @@ useEffect(() => {
       const receiptTip = tipEntry
         ? parseFloat(tipEntry.tax_amount) || 0
         : parseFloat(selectedReceipt.tip) || 0;
+
+      // A saved receipt doesn't persist the frontend-only `_isManual` flag, so a
+      // manually-entered tax loses it on reopen — which hides the "Auto" button AND
+      // lets the amount get recomputed (back to formulaic) when another tax is toggled.
+      // Restore it: if a stored amount differs from what the auto formula would produce
+      // (base = total − tip, same as the recalc), the amount was set manually → keep it
+      // manual until the user unselects that tax or taps "Auto".
+      const baseForManualDetect = receiptTotal - receiptTip;
+      const nonTipTaxValuesFlagged = nonTipTaxValues.map((t) => {
+        if (t._isManual) return t;
+        const stored = parseFloat(t.tax_amount);
+        if (isNaN(stored) || stored === 0) return t;
+        const rate = resolveTaxRateForReceipt(t);
+        const autoAmount =
+          rate > 0
+            ? parseFloat(((baseForManualDetect * rate) / (100 + rate)).toFixed(2))
+            : 0;
+        return Math.abs(stored - autoAmount) > 0.005
+          ? { ...t, _isManual: true }
+          : t;
+      });
+
       const { subtotal: initSubtotal, receipt_tax_values: initTaxValues } =
         recalculateReceiptTotalsFromFixedTotal(
           receiptTotal,
-          nonTipTaxValues,
+          nonTipTaxValuesFlagged,
           receiptTip,
         );
 
@@ -1408,7 +1430,14 @@ useEffect(() => {
   /** Block non-numeric keys from monetary inputs at the keyboard level. */
   const preventInvalidMoneyKey = (e) => {
     if (e.ctrlKey || e.metaKey) return; // allow Ctrl+C, Ctrl+V, Ctrl+A, etc.
-    const allowed = ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab", "Enter", "Home", "End"];
+    // Enter/Return commits the field just like tapping out with the mouse (blur):
+    // it triggers onBlur, which formats the value to two decimals.
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.currentTarget.blur();
+      return;
+    }
+    const allowed = ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab", "Home", "End"];
     if (allowed.includes(e.key)) return;
     if (/^\d$/.test(e.key)) return; // digits 0-9
     if (e.key === ".") return;       // decimal point

@@ -1135,7 +1135,14 @@ const [localMerchants, setLocalMerchants] = useState([]);
   /** Block non-numeric keys from monetary inputs at the keyboard level. */
   const preventInvalidMoneyKey = (e) => {
     if (e.ctrlKey || e.metaKey) return; // allow Ctrl+C, Ctrl+V, Ctrl+A, etc.
-    const allowed = ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab", "Enter", "Home", "End"];
+    // Enter/Return commits the field just like tapping out with the mouse (blur):
+    // it triggers onBlur, which formats the value to two decimals.
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.currentTarget.blur();
+      return;
+    }
+    const allowed = ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab", "Home", "End"];
     if (allowed.includes(e.key)) return;
     if (/^\d$/.test(e.key)) return; // digits 0-9
     if (e.key === ".") return;       // decimal point
@@ -4956,7 +4963,18 @@ const handleSelectLogo = (index) => {
                   </div>
                 ) : (
                   /* Form Step - Same layout as ReceiptDetail */
-                  <form id="add-receipt-form" onSubmit={handleSaveReceipt}>
+                  <form
+                    id="add-receipt-form"
+                    onSubmit={handleSaveReceipt}
+                    onKeyDown={(e) => {
+                      // Enter/Return must never save the receipt. Allow it in textareas
+                      // (newlines); everywhere else block the implicit form submit. Money
+                      // fields still handle Enter themselves (blur → format).
+                      if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") {
+                        e.preventDefault();
+                      }
+                    }}
+                  >
                     {/* Duplicate mode banner */}
                     {isDuplicateMode && (
                       <div className="mx-3 sm:mx-6 mt-3 px-4 py-3 bg-blue-50 border border-blue-300 rounded-lg flex items-center gap-2 text-blue-700 text-sm font-medium">
@@ -5995,7 +6013,7 @@ const handleSelectLogo = (index) => {
                               id="add-receipt-tip-input"
                               type="text"
                               inputMode="decimal"
-                              className={inputClass}
+                              className={`${inputClass} ${parseFloat(formData.tip) < 0 ? "text-red-600 font-medium" : ""}`}
                               value={
                                 currencyInputs.tip ||
                                 formatCurrencyDisplay(formData.tip)
@@ -6011,12 +6029,16 @@ const handleSelectLogo = (index) => {
                                 // A tip MAY exceed the total (matches iOS). The taxes and
                                 // subtotal simply go negative via the shared base
                                 // (total − tip) — no cap, no warning.
+                                // Emptying the field keeps the tip at 0 (line stays visible);
+                                // only the trash icon removes the tip line.
                                 setCurrencyInput("tip", normalized);
-                                handleFieldChange("tip", num);
+                                handleFieldChange("tip", num === "" ? "0" : num);
                               }}
                               onBlur={() => {
                                 const num = parseFloat(formData.tip);
-                                handleFieldChange("tip", isNaN(num) ? "" : num.toFixed(2));
+                                // Cleared tip → "0.00" (stays as $0.00), never "" (which would
+                                // remove the line). Removal is only via the trash icon.
+                                handleFieldChange("tip", isNaN(num) ? "0.00" : num.toFixed(2));
                                 setCurrencyInput("tip", "");
                               }}
                               placeholder="$0.00"
