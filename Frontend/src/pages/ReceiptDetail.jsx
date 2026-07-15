@@ -635,27 +635,34 @@ const ReceiptDetail = ({
         if (preserved) return preserved;
       }
 
-      // Otherwise recompute: each non-manual tax is inclusive of the SAME taxable base
-      // (total − tip), independent of the other taxes — amount = base * rate / (100 + rate).
-      // Manual lines keep their amount. The subtotal absorbs the remainder, and may go
-      // negative (red) when the tip/taxes exceed the total.
-      const base = totalNum - tipNum;
+      // Combined-tax model: ALL auto (non-manual) taxes share ONE subtotal derived from
+      // the COMBINED rate, so any tax set with the same total rate gives the same subtotal
+      // (5%+8% == 13%). subtotal = (total − tip − Σmanual) / (1 + Σauto rates); each auto
+      // tax = subtotal × rate. Manual lines keep their amount. Subtotal/taxes may go
+      // negative (red) when the tip/manual taxes exceed the total.
+      const manualSum = nonTipTaxes.reduce(
+        (s, t) => (t._isManual ? s + (parseFloat(t.tax_amount) || 0) : s),
+        0,
+      );
+      const autoRateSum = nonTipTaxes.reduce(
+        (s, t) => (t._isManual ? s : s + resolveTaxRateForReceipt(t) / 100),
+        0,
+      );
+      const denom = 1 + autoRateSum;
+      const subtotal = parseFloat(
+        (denom !== 0 ? (totalNum - tipNum - manualSum) / denom : 0).toFixed(2),
+      );
       const receipt_tax_values = nonTipTaxes.map((t) => {
         if (t._isManual) return { ...t, tax_amount: parseFloat(t.tax_amount) || 0 };
         const rate = resolveTaxRateForReceipt(t);
         const tax_amount =
-          rate > 0 ? parseFloat(((base * rate) / (100 + rate)).toFixed(2)) : 0;
+          rate > 0 ? parseFloat(((subtotal * rate) / 100).toFixed(2)) : 0;
         return {
           ...t,
           tax_rate: rate > 0 ? formatTaxRate(rate) : t.tax_rate || "0",
           tax_amount,
         };
       });
-      const taxSum = receipt_tax_values.reduce(
-        (s, t) => s + (parseFloat(t.tax_amount) || 0),
-        0,
-      );
-      const subtotal = parseFloat((totalNum - taxSum - tipNum).toFixed(2));
       return { subtotal, receipt_tax_values };
     },
     [resolveTaxRateForReceipt],
@@ -797,10 +804,16 @@ useEffect(() => {
       // A saved receipt doesn't persist the frontend-only `_isManual` flag, so a
       // manually-entered tax loses it on reopen — which hides the "Auto" button AND
       // lets the amount get recomputed (back to formulaic) when another tax is toggled.
-      // Restore it: if a stored amount differs from what the auto formula would produce
-      // (base = total − tip, same as the recalc), the amount was set manually → keep it
-      // manual until the user unselects that tax or taps "Auto".
-      const baseForManualDetect = receiptTotal - receiptTip;
+      // Restore it: if a stored amount differs from what the auto (combined) formula would
+      // produce, the amount was set manually → keep it manual until the user unselects that
+      // tax or taps "Auto". Auto amount = allAutoSubtotal × rate, where the all-auto
+      // subtotal = (total − tip) / (1 + Σ all rates) — matches the combined recalc.
+      const allRateSum = nonTipTaxValues.reduce(
+        (s, t) => s + resolveTaxRateForReceipt(t) / 100,
+        0,
+      );
+      const allAutoSubtotal =
+        1 + allRateSum !== 0 ? (receiptTotal - receiptTip) / (1 + allRateSum) : 0;
       const nonTipTaxValuesFlagged = nonTipTaxValues.map((t) => {
         if (t._isManual) return t;
         const stored = parseFloat(t.tax_amount);
@@ -808,7 +821,7 @@ useEffect(() => {
         const rate = resolveTaxRateForReceipt(t);
         const autoAmount =
           rate > 0
-            ? parseFloat(((baseForManualDetect * rate) / (100 + rate)).toFixed(2))
+            ? parseFloat(((allAutoSubtotal * rate) / 100).toFixed(2))
             : 0;
         return Math.abs(stored - autoAmount) > 0.005
           ? { ...t, _isManual: true }
