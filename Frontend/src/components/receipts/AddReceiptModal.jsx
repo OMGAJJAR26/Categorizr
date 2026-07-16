@@ -5999,6 +5999,7 @@ const handleSelectLogo = (index) => {
                               id="add-receipt-tip-input"
                               type="text"
                               inputMode="decimal"
+                              autoComplete="off"
                               className={`${inputClass} ${parseFloat(formData.tip) < 0 ? "text-red-600 font-medium" : ""}`}
                               value={
                                 currencyInputs.tip ||
@@ -6131,7 +6132,7 @@ const handleSelectLogo = (index) => {
                           {/* Row 3: Scrollable tax pills — selected first (A→Z), then unselected (A→Z) */}
                           <div
                             className="flex gap-2 overflow-x-auto pb-1"
-                            style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+                            style={{ scrollbarWidth: "none", msOverflowStyle: "none", overscrollBehaviorX: "contain" }}
                           >
                             {[...allTaxTypes]
                               .map((tax) => ({

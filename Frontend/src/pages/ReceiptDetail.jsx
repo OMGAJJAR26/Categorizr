@@ -6548,6 +6548,7 @@ Thank you for using our receipt management system.
                                       id="edit-receipt-tip-input"
                                       type="text"
                                       inputMode="decimal"
+                                      autoComplete="off"
                                       className={`${inputClass} ${tipNum < 0 ? "text-red-600 font-medium" : ""}`}
                                       value={
                                         currencyInputs.tip !== undefined
@@ -6737,7 +6738,7 @@ Thank you for using our receipt management system.
                               {/* Row 3: Scrollable tax pills — selected first (A→Z), then unselected (A→Z) */}
                               <div
                                 className="flex gap-2 overflow-x-auto pb-1"
-                                style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+                                style={{ scrollbarWidth: "none", msOverflowStyle: "none", overscrollBehaviorX: "contain" }}
                               >
                                 {sortedTaxPills.map((tax, idx) => {
                                   const isSelected = tax._selIdx !== -1;
