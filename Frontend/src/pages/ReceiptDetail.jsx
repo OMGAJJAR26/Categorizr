@@ -1141,13 +1141,18 @@ useEffect(() => {
     if (!draftSig) return "";
 
     const excludeApiId = payModalEditMode?.apiId;
-    const excludeSig = payModalEditMode?.name
-      ? getPaymentSignature(
-          payModalEditMode.name,
-          inferCardTypeFromPayment(payModalEditMode.name),
-          payCardMap
-        )
-      : "";
+    // Use the signature captured when the edit opened (built from the RESOLVED card type),
+    // falling back to name inference. Inference alone fails for custom issuers like
+    // "And Bank 1 *1111" → "Other", which made a payment flag itself as a duplicate.
+    const excludeSig =
+      payModalEditMode?.originalSig ||
+      (payModalEditMode?.name
+        ? getPaymentSignature(
+            payModalEditMode.name,
+            inferCardTypeFromPayment(payModalEditMode.name),
+            payCardMap
+          )
+        : "");
 
     const duplicateInApi = (apiPaymentMethods || []).some((p) => {
       const pid = p.id ?? p.payment_method_id;
@@ -1751,7 +1756,11 @@ useEffect(() => {
     setNewPaymentCategoryType(
       _pet[method] || paymentCategoryFromApiEnum(apiMatch?.default_payment_category) || ""
     );
-    setPayModalEditMode({ name: method, apiId });
+    // Store the signature of the payment being edited using its RESOLVED card type, so the
+    // duplicate check can exclude it. Inferring the brand from the display name fails for
+    // custom issuers (e.g. "And Bank 1 *1111" → "Other"), which made it flag itself.
+    const originalSig = getPaymentSignature(method, cardType, _pct);
+    setPayModalEditMode({ name: method, apiId, originalSig });
     setPayModalError(null);
     setShowAddPaymentModal(true);
     setShowPaymentDropdown(false);
