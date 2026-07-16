@@ -3985,31 +3985,53 @@ const handleSelectLogo = (index) => {
     );
   };
 
+  // Order dropdown options with the currently-selected one FIRST (injecting it if the
+  // derived list omits it — e.g. a forwarded/received receipt's value, whose checkmark
+  // would otherwise be missing), then the rest alphabetically. keyOf extracts the
+  // comparable string; injectFn builds the missing selected item.
+  const orderOptionsSelectedFirst = (list, selectedKey, keyOf, injectFn) => {
+    const selKey = (selectedKey || "").toString().trim().toLowerCase();
+    let sel = null;
+    const rest = [];
+    (list || []).forEach((item) => {
+      const k = (keyOf(item) || "").toString().trim().toLowerCase();
+      if (selKey && k === selKey && !sel) sel = item;
+      else rest.push(item);
+    });
+    rest.sort((a, b) =>
+      (keyOf(a) || "").toString().toLowerCase().localeCompare((keyOf(b) || "").toString().toLowerCase())
+    );
+    if (selKey && !sel && injectFn) sel = injectFn();
+    return sel ? [sel, ...rest] : rest;
+  };
+
   const filteredMerchants = (() => {
-    if (!isMerchantTyping && !formData.storeName) {
-      // Show all when dropdown opens and no value
-      return sortMerchantsAlpha(allMerchantsWithImages);
+    const searchTerm = (formData.storeName || "").toLowerCase().trim();
+    // Filter only while the user is actively typing a search.
+    if (isMerchantTyping && searchTerm) {
+      return sortMerchantsAlpha(
+        allMerchantsWithImages.filter((m) => m.name?.toLowerCase().includes(searchTerm)),
+      );
     }
-    if (!isMerchantTyping) {
-      // Show all when dropdown opens even if there's a value (from auto-detection)
-      return sortMerchantsAlpha(allMerchantsWithImages);
-    }
-    // Filter only when user is actively typing
-    const searchTerm = (formData.storeName || "").toLowerCase();
-    if (!searchTerm) {
-      return sortMerchantsAlpha(allMerchantsWithImages);
-    }
-    return sortMerchantsAlpha(allMerchantsWithImages.filter((m) =>
-      m.name?.toLowerCase().includes(searchTerm)
-    ));
+    // Opened (not searching) → selected merchant first, rest alphabetical.
+    const selected = (formData.storeName || "").toString().trim();
+    return orderOptionsSelectedFirst(
+      allMerchantsWithImages,
+      selected,
+      (m) => m?.name,
+      () => ({ name: selected, image: getMerchantImage(selected) || detectedMerchantLogo || "" }),
+    );
   })();
 
-  // Show all categories when not typing; filter only while user is actively typing
-  const filteredCategories = isCategoryTyping
-    ? allExpenseCategories.filter((c) =>
-        c.toLowerCase().includes((formData.expense_type || "").toLowerCase())
-      )
-    : allExpenseCategories;
+  // Selected category first; filter only while user is actively typing.
+  const filteredCategories = (() => {
+    const searchTerm = (formData.expense_type || "").toLowerCase().trim();
+    if (isCategoryTyping && searchTerm) {
+      return allExpenseCategories.filter((c) => c.toLowerCase().includes(searchTerm));
+    }
+    const selected = (formData.expense_type || "").toString().trim();
+    return orderOptionsSelectedFirst(allExpenseCategories, selected, (c) => c, () => selected);
+  })();
 
   // Payment card types are now defined in EditPaymentMethodModal (PAYMENT_CARD_TYPES)
 
@@ -4179,26 +4201,32 @@ const handleSelectLogo = (index) => {
       ...localPaymentMethodStrings,
     ];
     const deduplicated = deduplicatePaymentMethods(allMethodsCombined);
-
-    if (!isPaymentTyping && !formData.paymentType) {
-      // Show all when dropdown opens and no value
-      return deduplicated;
-    }
-    if (!isPaymentTyping) {
-      // Show all when dropdown opens even if there's a value (from auto-detection)
-      return deduplicated;
-    }
-    // Filter only when user is actively typing
     const searchTerm = (formData.paymentType || "").toLowerCase().trim();
-    if (!searchTerm) {
-      return deduplicated;
+
+    // Filter only while the user is actively typing a search.
+    if (isPaymentTyping && searchTerm) {
+      const matches = deduplicated.filter((p) => {
+        const pLower =
+          typeof p === "string" ? p.toLowerCase() : String(p).toLowerCase();
+        return pLower.includes(searchTerm) || searchTerm.includes(pLower);
+      });
+      return matches.length > 0 ? matches : deduplicated;
     }
-    const matches = deduplicated.filter((p) => {
-      const pLower =
-        typeof p === "string" ? p.toLowerCase() : String(p).toLowerCase();
-      return pLower.includes(searchTerm) || searchTerm.includes(pLower);
-    });
-    return matches.length > 0 ? matches : deduplicated;
+
+    // Opened (not searching) → selected payment first (injected if missing), rest alphabetical.
+    const selLast4 = (formData.last_4_digit_card || "").toString().replace(/\D/g, "").slice(-4);
+    const selIssuer = (formData.card_issuer_name || formData.paymentType || "")
+      .toString()
+      .replace(/\s*\*\d+/g, "")
+      .trim();
+    const selPay = selIssuer ? (selLast4 ? `${selIssuer} *${selLast4}` : selIssuer) : "";
+    const keyOf = (m) => (typeof m === "string" ? m : m?.paymentType || String(m));
+    return orderOptionsSelectedFirst(
+      deduplicated,
+      selPay,
+      keyOf,
+      selPay ? () => selPay : null,
+    );
   })();
 
   // Get image preview URL
@@ -5070,7 +5098,7 @@ const handleSelectLogo = (index) => {
                   return (
                     <div
                       key={idx}
-                      className="group px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2"
+                      className={`group px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2 ${isSelected ? "bg-blue-50/70" : ""}`}
                     >
                       {/* Selectable area */}
                       <div
@@ -5194,7 +5222,7 @@ const handleSelectLogo = (index) => {
               return (
               <div
                 key={idx}
-                className="px-3 py-2 hover:bg-blue-50 text-left flex items-center justify-between group"
+                className={`px-3 py-2 hover:bg-blue-50 text-left flex items-center justify-between group ${isSelected ? "bg-blue-50/70" : ""}`}
               >
                 <span
                   className="flex-1 cursor-pointer text-sm flex items-center gap-2"
@@ -5458,7 +5486,7 @@ const handleSelectLogo = (index) => {
               return (
                 <div
                   key={`payment-${methodString}-${idx}`}
-                  className="px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2"
+                  className={`px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2 ${isSelected ? "bg-blue-50/70" : ""}`}
                   style={{ cursor: "default" }}
                 >
                 <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }} onClick={() => {

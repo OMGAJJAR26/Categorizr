@@ -1048,41 +1048,74 @@ useEffect(() => {
     );
   };
 
+  // Order dropdown options with the currently-selected one FIRST — injecting it when the
+  // derived list omits it (e.g. a forwarded/received receipt whose merchant / category /
+  // payment isn't in the recipient's list, so its checkmark would otherwise be missing) —
+  // then the rest alphabetically. keyOf extracts the comparable string; injectFn builds
+  // the missing selected item.
+  const orderOptionsSelectedFirst = (list, selectedKey, keyOf, injectFn) => {
+    const selKey = (selectedKey || "").toString().trim().toLowerCase();
+    let sel = null;
+    const rest = [];
+    (list || []).forEach((item) => {
+      const k = (keyOf(item) || "").toString().trim().toLowerCase();
+      if (selKey && k === selKey && !sel) sel = item;
+      else rest.push(item);
+    });
+    rest.sort((a, b) =>
+      (keyOf(a) || "").toString().toLowerCase().localeCompare((keyOf(b) || "").toString().toLowerCase())
+    );
+    if (selKey && !sel && injectFn) sel = injectFn();
+    return sel ? [sel, ...rest] : rest;
+  };
+
   const filteredMerchants = React.useMemo(() => {
-    if (!isMerchantTyping) return sortMerchantsAlpha(allMerchantsWithImages);
     const searchTerm = (editedReceipt.storeName || "").toLowerCase().trim();
-    if (!searchTerm) return sortMerchantsAlpha(allMerchantsWithImages);
-    return sortMerchantsAlpha(allMerchantsWithImages.filter((m) =>
-      m.name?.toLowerCase().includes(searchTerm)
-    ));
-  }, [allMerchantsWithImages, editedReceipt.storeName, isMerchantTyping]);
+    // Actively typing a search → filtered, alphabetical.
+    if (isMerchantTyping && searchTerm) {
+      return sortMerchantsAlpha(
+        allMerchantsWithImages.filter((m) => m.name?.toLowerCase().includes(searchTerm)),
+      );
+    }
+    // Opened (not searching) → selected merchant first, rest alphabetical.
+    // (Use selectedReceipt directly — `r` isn't defined yet at this point in render.)
+    const selected = (editedReceipt.storeName ?? selectedReceipt?.storeName ?? "").toString().trim();
+    return orderOptionsSelectedFirst(
+      allMerchantsWithImages,
+      selected,
+      (m) => m?.name,
+      () => ({ name: selected, image: editedReceipt.store_image ?? selectedReceipt?.store_image ?? "" }),
+    );
+  }, [allMerchantsWithImages, editedReceipt.storeName, editedReceipt.store_image, isMerchantTyping, selectedReceipt]);
 
   const filteredCategories = React.useMemo(() => {
-    if (!isCategoryTyping) return allExpenseCategories; // show all on open
     const searchTerm = (editedReceipt.expense_type || "").toLowerCase().trim();
-    if (!searchTerm) return allExpenseCategories;
-    return allExpenseCategories.filter((c) =>
-      c.toLowerCase().includes(searchTerm)
-    );
-  }, [allExpenseCategories, editedReceipt.expense_type, isCategoryTyping]);
+    if (isCategoryTyping && searchTerm) {
+      return allExpenseCategories.filter((c) => c.toLowerCase().includes(searchTerm));
+    }
+    const selected = (editedReceipt.expense_type ?? selectedReceipt?.expense_type ?? "").toString().trim();
+    return orderOptionsSelectedFirst(allExpenseCategories, selected, (c) => c, () => selected);
+  }, [allExpenseCategories, editedReceipt.expense_type, isCategoryTyping, selectedReceipt]);
 
   const filteredPaymentMethods = React.useMemo(() => {
-    if (!isPaymentTyping) return allPaymentMethods; // show all on open
     const searchTerm = (
       editedReceipt.card_issuer_name || editedReceipt.paymentType || ""
     ).toLowerCase().trim();
-    if (!searchTerm) return allPaymentMethods;
-    const matches = allPaymentMethods.filter((p) => {
-      const pLower = p.toLowerCase();
-      return pLower.includes(searchTerm) || searchTerm.includes(pLower);
-    });
-    return matches.length > 0 ? matches : allPaymentMethods;
-  }, [
-    allPaymentMethods,
-    editedReceipt.card_issuer_name,
-    editedReceipt.paymentType,
-    isPaymentTyping,
-  ]);
+    if (isPaymentTyping && searchTerm) {
+      const matches = allPaymentMethods.filter((p) => {
+        const pLower = p.toLowerCase();
+        return pLower.includes(searchTerm) || searchTerm.includes(pLower);
+      });
+      return matches.length > 0 ? matches : allPaymentMethods;
+    }
+    const selectedPay = getPaymentDisplayName({ ...selectedReceipt, ...editedReceipt }) || "";
+    return orderOptionsSelectedFirst(
+      allPaymentMethods,
+      selectedPay && selectedPay !== "-" ? selectedPay : "",
+      (p) => p,
+      () => selectedPay,
+    );
+  }, [allPaymentMethods, editedReceipt, isPaymentTyping, selectedReceipt, getPaymentDisplayName]);
 
   const expenseCategoryExists = (name, excludeName = "") => {
     const normalized = (name || "").trim().toLowerCase();
@@ -5587,7 +5620,7 @@ Thank you for using our receipt management system.
                     {editedTags.locked && (
                       <div className="mx-3 sm:mx-6 mt-3 px-4 py-3 bg-red-50 border border-red-300 rounded-lg flex items-center gap-2 text-red-700 text-sm font-medium">
                         <img src={locked} alt="Locked" className="w-4 h-4 object-contain" />
-                        This receipt is locked. Unlock it in Tags below to edit and save changes.
+                        Please tap the lock button to unlock the screen and edit information
                       </div>
                     )}
                     <div ref={editableContentRef} className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 p-3 sm:p-6 text-sm text-gray-800">
@@ -5737,7 +5770,7 @@ Thank you for using our receipt management system.
                                     return (
                                     <div
                                       key={idx}
-                                      className="group px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2"
+                                      className={`group px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2 ${isSelected ? "bg-blue-50/70" : ""}`}
                                     >
                                       <div
                                         className="flex-1 flex items-center gap-2 cursor-pointer"
@@ -5861,7 +5894,7 @@ Thank you for using our receipt management system.
                                     return (
                                     <div
                                       key={idx}
-                                      className="px-3 py-2 hover:bg-blue-50 text-left flex items-center justify-between group"
+                                      className={`px-3 py-2 hover:bg-blue-50 text-left flex items-center justify-between group ${isSelected ? "bg-blue-50/70" : ""}`}
                                     >
                                       <span
                                         className="flex-1 cursor-pointer text-sm flex items-center gap-2"
@@ -6056,11 +6089,16 @@ Thank you for using our receipt management system.
                                         ? getPaymentLogo({ paymentType: _pct[method] })
                                         : getPaymentLogo(method);
                                   const currentPaymentDisplay = getPaymentDisplayName({ ...r, ...editedReceipt }) || "";
-                                  const isSelected = currentPaymentDisplay !== "-" && currentPaymentDisplay === method;
+                                  // Case-insensitive so a forwarded/iOS payment (e.g. "VISA *1234"
+                                  // vs "Visa *1234") still matches and shows its checkmark.
+                                  const isSelected =
+                                    currentPaymentDisplay !== "-" &&
+                                    currentPaymentDisplay.trim().toLowerCase() ===
+                                      (method || "").trim().toLowerCase();
                                   return (
                                     <div
                                       key={idx}
-                                      className="px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2"
+                                      className={`px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2 ${isSelected ? "bg-blue-50/70" : ""}`}
                                       style={{ cursor: "default" }}
                                     >
                                     <div
