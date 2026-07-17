@@ -5136,7 +5136,7 @@ const handleSelectLogo = (index) => {
                         />
                         <span className="truncate">{merchant.name}</span>
                         {isSelected && (
-                          <Check size={15} className="text-blue-600 flex-shrink-0 ml-auto" />
+                          <Check size={15} className="text-blue-600 flex-shrink-0" />
                         )}
                       </div>
                       {/* Edit / Delete — hidden for Miscellaneous, visible on hover */}
@@ -5666,7 +5666,7 @@ const handleSelectLogo = (index) => {
                       />
                     ) : null;
                   })()}
-                  <span style={{ flex: 1 }}>{displayText}</span>
+                  <span className="truncate" style={{ minWidth: 0 }}>{displayText}</span>
                   {isSelected && (
                     <Check size={15} className="text-blue-600 flex-shrink-0" />
                   )}

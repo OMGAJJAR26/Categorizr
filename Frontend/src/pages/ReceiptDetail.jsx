@@ -5819,7 +5819,7 @@ Thank you for using our receipt management system.
                                         />
                                         <span className="truncate">{merchant.name}</span>
                                         {isSelected && (
-                                          <Check size={15} className="text-blue-600 flex-shrink-0 ml-auto" />
+                                          <Check size={15} className="text-blue-600 flex-shrink-0" />
                                         )}
                                       </div>
                                       {!isMisc && (
@@ -6299,7 +6299,7 @@ Thank you for using our receipt management system.
                                           style={{ flexShrink: 0 }}
                                         />
                                       )}
-                                      <span style={{ flex: 1 }}>{method}</span>
+                                      <span className="truncate" style={{ minWidth: 0 }}>{method}</span>
                                       {isSelected && (
                                         <Check size={15} className="text-blue-600 flex-shrink-0" />
                                       )}
