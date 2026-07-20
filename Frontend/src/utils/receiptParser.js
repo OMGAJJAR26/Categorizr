@@ -188,23 +188,58 @@ export async function extractReceiptData(fileOrUrl) {
   const imageSource = await _prepareImageForOCR(fileOrUrl);
 
   console.log('=== STARTING TESSERACT OCR ===');
-  const { data } = await Tesseract.recognize(imageSource, 'eng', {
+  // Tesseract.js v5+ returns ONLY `text` by default — the line/word bounding-box
+  // data that total/subtotal/tax parsing relies on lives in `blocks`, which must
+  // be explicitly requested. The convenience `Tesseract.recognize()` helper never
+  // passes an `output` option, so `data.blocks` (and the derived lines/words) came
+  // back empty and NO Total was ever detected. Use a worker, opt into `blocks`,
+  // then flatten the block → paragraph → line tree into the flat `lines` array the
+  // parser expects: { text, bbox, words: [{ text, bbox }] }.
+  const worker = await Tesseract.createWorker('eng', 1, {
     logger: (m) => {
       if (m.status === 'recognizing text') {
         console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
-      } else if (m.status === 'loading tesseract core') {
-        console.log('Loading Tesseract core...');
-      } else if (m.status === 'initializing tesseract') {
-        console.log('Initializing Tesseract...');
-      } else if (m.status === 'loading language traineddata') {
-        console.log('Loading language data...');
       }
     },
   });
 
+  let data;
+  try {
+    ({ data } = await worker.recognize(imageSource, {}, { text: true, blocks: true }));
+  } finally {
+    await worker.terminate();
+  }
+
   const text = data.text || '';
-  const lines = data.lines || [];
-  const words = data.words || [];
+
+  let lines = [];
+  for (const block of data.blocks || []) {
+    for (const paragraph of block.paragraphs || []) {
+      for (const line of paragraph.lines || []) {
+        lines.push({
+          text: line.text || '',
+          bbox: line.bbox || null,
+          words: (line.words || []).map((w) => ({
+            text: w.text || '',
+            bbox: w.bbox || null,
+          })),
+        });
+      }
+    }
+  }
+
+  // Fallback: if block data is unavailable, derive lines from the raw text so the
+  // keyword-based total/subtotal/tax matching still works (column detection needs
+  // bbox data and is skipped in this path).
+  if (lines.length === 0 && text) {
+    lines = text
+      .split('\n')
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .map((t) => ({ text: t, bbox: null, words: [] }));
+  }
+
+  const words = lines.flatMap((l) => l.words);
 
   console.log(`=== OCR COMPLETED === ${text.length} chars, ${lines.length} lines, ${words.length} words`);
   console.log('First 200 chars:', text.substring(0, 200));
