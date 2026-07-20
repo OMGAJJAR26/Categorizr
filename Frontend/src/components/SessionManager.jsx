@@ -1,6 +1,7 @@
 // src/components/SessionManager.jsx
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { clearAuthLocalStorage } from "../utils/authStorage";
 
 const SessionManager = ({ children }) => {
   const navigate = useNavigate();
@@ -13,9 +14,7 @@ const SessionManager = ({ children }) => {
       clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
     
-        const forwarded = localStorage.getItem("cat_locally_forwarded");
-        localStorage.clear();
-        if (forwarded) localStorage.setItem("cat_locally_forwarded", forwarded);
+        clearAuthLocalStorage();
         window.dispatchEvent(new CustomEvent("cat:session-expired"));
         navigate("/login");
       }, TIMEOUT);

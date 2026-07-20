@@ -6,6 +6,7 @@ import { useData } from "../context/DataContext";
 import { useCurrency } from "../context/CurrencyContext";
 import { useTheme } from "../context/ThemeContext";
 import LogoutConfirmationDialog from "./LogoutConfirmationDialog";
+import { clearAuthLocalStorage } from "../utils/authStorage";
 
 const Header = () => {
   const navigate = useNavigate();
@@ -24,9 +25,7 @@ const Header = () => {
     setShowProfileMenu(false);
     setShowLogoutConfirm(false);
     clearAllData();
-    const forwarded = localStorage.getItem("cat_locally_forwarded");
-    localStorage.clear();
-    if (forwarded) localStorage.setItem("cat_locally_forwarded", forwarded);
+    clearAuthLocalStorage();
     navigate("/login", { replace: true });
   };
 

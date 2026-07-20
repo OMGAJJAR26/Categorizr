@@ -89,6 +89,7 @@ import {
   getExpenseCategoryRecordName,
   getExpenseCategoryRecordId,
 } from "../utils/expenseCategories";
+import { clearAuthLocalStorage } from "../utils/authStorage";
 
 /* ─── Helpers ─────────────────────────────────────────── */
 
@@ -1204,7 +1205,7 @@ const Settings = () => {
 
   const handleLogout = () => {
     clearAllData();
-    localStorage.clear();
+    clearAuthLocalStorage();
     navigate("/login", { replace: true });
   };
 
