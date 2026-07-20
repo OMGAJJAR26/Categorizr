@@ -1739,6 +1739,69 @@ setMerchantsWithImages(
         )
       );
 
+      // ── Backfill payment methods from NORMAL receipts into the API ────────────
+      // Payment lists (Settings/Filter/Add) are API-only (PAYMENT_METHODS_API_ONLY),
+      // so a valid card entered/imported on a normal receipt would otherwise only
+      // ever appear inside that one receipt's edit dropdown — never in Settings,
+      // Filter, or Add Receipt. Ensure any receipt-carried card with a real 4-digit
+      // last4 exists as a manageable API record. Network-forwarded receipts are
+      // skipped here (syncForwardedReceiptData already reconciles those, with extra
+      // forwarded-specific correction). Idempotent: methods already in the API are
+      // skipped, and once created they load from the API on the next fetch so they
+      // are never re-created. Requires a 4-digit last4 (the uniqueness key per the
+      // app spec) so OCR noise without a card number never becomes a payment method.
+      try {
+        const createdSigs = new Set();
+        const pmTasks = [];
+        for (const receipt of receiptsWithIntegrations) {
+          if (isNetworkReceivedReceipt(receipt)) continue;
+          const pmLast4 = (receipt.last_4_digit_card || receipt.last4DigitCard || "")
+            .replace(/\D/g, "")
+            .slice(-4);
+          if (pmLast4.length !== 4) continue;
+          const issuerStr = (receipt.card_issuer_name || receipt.cardIssuerName || "")
+            .replace(/\s*\*\d+/g, "")
+            .trim();
+          const payTypeStr = (receipt.paymentType || receipt.payment_type || "")
+            .replace(/\s*\*\d+/g, "")
+            .trim();
+          if (`${issuerStr} ${payTypeStr}`.toLowerCase().includes("cash")) continue;
+          const brandFromIssuer = inferCardTypeFromPayment(issuerStr);
+          const resolvedBrand =
+            brandFromIssuer !== "Other"
+              ? brandFromIssuer
+              : inferCardTypeFromPayment(payTypeStr) || "Other";
+          const pmIssuer = issuerStr || payTypeStr;
+          const pmSig = `${pmIssuer.toLowerCase()}|${pmLast4}`;
+          if (createdSigs.has(pmSig)) continue;
+          const existingPm = (apiPaymentMethodsData || []).find((pm) => {
+            const eLast4 = getLast4FromPaymentApiRecord(pm);
+            const eIssuer = (pm.card_issuer_name || "").trim().toLowerCase();
+            if (`${eIssuer}|${eLast4}` === pmSig) return true;
+            if (!eIssuer && eLast4 === pmLast4) {
+              const eBrand = cardTypeIntToBrand(parseInt(pm.card_type ?? "", 10));
+              if (eBrand && eBrand !== "Other" && eBrand.toLowerCase() === resolvedBrand.toLowerCase())
+                return true;
+            }
+            return false;
+          });
+          if (existingPm) continue;
+          createdSigs.add(pmSig);
+          const pmInput =
+            resolvedBrand !== "Other" ? { ...receipt, cardTypeBrand: resolvedBrand } : receipt;
+          const pmLogoUrl =
+            receipt.payment_logo_url || receipt.paymentDisplay?.logoUrl || "";
+          pmTasks.push(addApiPaymentMethod(pmInput, pmLogoUrl, receipt.expense_type || ""));
+        }
+        if (pmTasks.length > 0) {
+          Promise.allSettled(pmTasks).then(() => {
+            fetchApiPaymentMethods();
+          });
+        }
+      } catch (pmBackfillErr) {
+        console.error("[fetchData] payment method backfill error", pmBackfillErr);
+      }
+
       setExpenseType([
         ...new Set(
           receiptsWithIntegrations.map((r) => String(r.receipt_category))
