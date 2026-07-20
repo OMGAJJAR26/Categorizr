@@ -6894,7 +6894,7 @@ Thank you for using our receipt management system.
                         </div>
                       </div>
 
-                      <div className="border border-dashed border-blue-400 rounded-lg p-3 flex gap-4 flex-wrap">
+                      <div className="border border-dashed border-blue-400 rounded-lg p-3 flex items-start gap-4 flex-wrap">
                         {(() => {
                           // Prefer editedReceipt values so that annotated
                           // images (and newly added photos) are reflected
@@ -7008,7 +7008,7 @@ Thank you for using our receipt management system.
                                           : { type: "existing", sourceUrl }
                                       );
                                     }}
-                                    className="absolute top-1 right-8 bg-white/90 hover:bg-blue-600 hover:text-white text-gray-700 rounded p-1 opacity-0 group-hover:opacity-100 transition-all shadow"
+                                    className="absolute top-1 left-1 bg-white/90 hover:bg-blue-600 hover:text-white text-gray-700 rounded p-1 opacity-0 group-hover:opacity-100 transition-all shadow"
                                     title="Edit receipt image"
                                   >
                                     <PenLine size={11} />
