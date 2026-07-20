@@ -1752,6 +1752,7 @@ setMerchantsWithImages(
       // app spec) so OCR noise without a card number never becomes a payment method.
       try {
         const createdSigs = new Set();
+        const usedPlaceholderIds = new Set();
         const pmTasks = [];
         for (const receipt of receiptsWithIntegrations) {
           if (isNetworkReceivedReceipt(receipt)) continue;
@@ -1786,11 +1787,48 @@ setMerchantsWithImages(
             return false;
           });
           if (existingPm) continue;
-          createdSigs.add(pmSig);
           const pmInput =
             resolvedBrand !== "Other" ? { ...receipt, cardTypeBrand: resolvedBrand } : receipt;
           const pmLogoUrl =
             receipt.payment_logo_url || receipt.paymentDisplay?.logoUrl || "";
+
+          // Upgrade a stale brand-only placeholder record (same card brand, no last4,
+          // no custom issuer) with this receipt's last4 instead of leaving a digit-less
+          // duplicate. This is why an OCR-created "MasterCard *7836" could show as a bare
+          // "MasterCard" (no 4 digits): a legacy placeholder record had card_number "-".
+          // Only applies when the receipt itself is a bare-brand card (no custom issuer),
+          // so a "Chase *7836" receipt never overwrites a generic "Visa" placeholder.
+          const receiptHasCustomIssuer =
+            !!issuerStr && issuerStr.toLowerCase() !== resolvedBrand.toLowerCase();
+          if (resolvedBrand !== "Other" && !receiptHasCustomIssuer) {
+            const placeholderPm = (apiPaymentMethodsData || []).find((pm) => {
+              const pid = pm?.id;
+              if (pid == null || String(pid) === "" || String(pid) === "0") return false;
+              if (usedPlaceholderIds.has(String(pid))) return false;
+              if (getLast4FromPaymentApiRecord(pm)) return false; // already has a last4
+              const eBrand = cardTypeIntToBrand(parseInt(pm.card_type ?? "", 10));
+              if (!eBrand || eBrand === "Other") return false;
+              if (eBrand.toLowerCase() !== resolvedBrand.toLowerCase()) return false;
+              const eIssuer = (pm.card_issuer_name || "").trim();
+              // Only a bare brand-only record (no custom issuer, or issuer repeats brand)
+              return !eIssuer || eIssuer.toLowerCase() === eBrand.toLowerCase();
+            });
+            if (placeholderPm) {
+              createdSigs.add(pmSig);
+              usedPlaceholderIds.add(String(placeholderPm.id));
+              pmTasks.push(
+                updateApiPaymentMethod(
+                  placeholderPm.id,
+                  pmInput,
+                  pmLogoUrl,
+                  receipt.expense_type || ""
+                )
+              );
+              continue;
+            }
+          }
+
+          createdSigs.add(pmSig);
           pmTasks.push(addApiPaymentMethod(pmInput, pmLogoUrl, receipt.expense_type || ""));
         }
         if (pmTasks.length > 0) {
