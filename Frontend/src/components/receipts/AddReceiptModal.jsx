@@ -6653,11 +6653,16 @@ const handleSelectLogo = (index) => {
                       <p className="text-sm font-medium text-gray-700 flex-shrink-0">Selected:</p>
                       <div className="p-2 border border-gray-300 rounded bg-white flex items-center justify-center min-w-[64px] min-h-[64px]">
                         <img
-                          src={editMerchantLogo}
+                          key={editLogoOptions[editSelectedLogoIndex]?.displayUrl || editMerchantLogo}
+                          src={editLogoOptions[editSelectedLogoIndex]?.displayUrl || editMerchantLogo}
                           alt="Selected merchant logo"
                           className="max-w-full max-h-16 w-auto h-auto object-contain"
                           style={{ imageRendering: "auto" }}
-                          onError={(e) => { e.target.style.display = "none"; }}
+                          onError={(e) => {
+                            const fallback = editLogoOptions[editSelectedLogoIndex]?.storeUrl || editMerchantLogo;
+                            if (fallback && e.target.src !== fallback) e.target.src = fallback;
+                            else e.target.style.display = "none";
+                          }}
                         />
                       </div>
                     </div>
@@ -6840,11 +6845,16 @@ const handleSelectLogo = (index) => {
                       <p className="text-sm font-medium text-gray-700 flex-shrink-0">Selected:</p>
                       <div className="p-2 border border-gray-300 rounded bg-white flex items-center justify-center min-w-[64px] min-h-[64px]">
                         <img
-                          src={newMerchantLogo}
+                          key={logoOptions[selectedLogoIndex]?.displayUrl || newMerchantLogo}
+                          src={logoOptions[selectedLogoIndex]?.displayUrl || newMerchantLogo}
                           alt="Selected merchant logo"
                           className="max-w-full max-h-16 w-auto h-auto object-contain"
                           style={{ imageRendering: "auto" }}
-                          onError={(e) => { e.target.style.display = "none"; }}
+                          onError={(e) => {
+                            const fallback = logoOptions[selectedLogoIndex]?.storeUrl || newMerchantLogo;
+                            if (fallback && e.target.src !== fallback) e.target.src = fallback;
+                            else e.target.style.display = "none";
+                          }}
                         />
                       </div>
                     </div>

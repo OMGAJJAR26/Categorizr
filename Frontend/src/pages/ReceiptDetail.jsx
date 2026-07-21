@@ -7530,7 +7530,17 @@ Thank you for using our receipt management system.
                     <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center gap-3">
                       <p className="text-sm font-medium text-gray-700 flex-shrink-0">Selected:</p>
                       <div className="p-2 border border-gray-300 rounded bg-white flex items-center justify-center min-w-[64px] min-h-[64px]">
-                        <img src={editMerchantLogo} alt="Selected logo" className="max-w-full max-h-16 w-auto h-auto object-contain" onError={(e) => { e.target.style.display = "none"; }} />
+                        <img
+                          key={editLogoOptions[editSelectedLogoIndex]?.displayUrl || editMerchantLogo}
+                          src={editLogoOptions[editSelectedLogoIndex]?.displayUrl || editMerchantLogo}
+                          alt="Selected logo"
+                          className="max-w-full max-h-16 w-auto h-auto object-contain"
+                          onError={(e) => {
+                            const fallback = editLogoOptions[editSelectedLogoIndex]?.storeUrl || editMerchantLogo;
+                            if (fallback && e.target.src !== fallback) e.target.src = fallback;
+                            else e.target.style.display = "none";
+                          }}
+                        />
                       </div>
                     </div>
                   )}
@@ -7684,10 +7694,15 @@ Thank you for using our receipt management system.
                       <p className="text-sm font-medium text-gray-700 flex-shrink-0">Selected:</p>
                       <div className="p-1 border border-gray-200 rounded bg-white flex items-center justify-center min-w-[48px] min-h-[48px]">
                         <img
-                          src={newMerchantLogo}
+                          key={logoOptions[selectedLogoIndex]?.displayUrl || newMerchantLogo}
+                          src={logoOptions[selectedLogoIndex]?.displayUrl || newMerchantLogo}
                           alt="Selected logo"
                           className="w-12 h-12 object-contain"
-                          onError={(e) => { e.target.style.display = "none"; }}
+                          onError={(e) => {
+                            const fallback = logoOptions[selectedLogoIndex]?.storeUrl || newMerchantLogo;
+                            if (fallback && e.target.src !== fallback) e.target.src = fallback;
+                            else e.target.style.display = "none";
+                          }}
                         />
                       </div>
                     </div>
