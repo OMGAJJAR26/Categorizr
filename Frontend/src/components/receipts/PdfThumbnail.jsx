@@ -10,6 +10,7 @@ export default function PdfThumbnail({
   url,
   className = "w-24 h-32",
   title = "Open PDF",
+  linkless = false,
 }) {
   const [thumbSrc, setThumbSrc] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -44,14 +45,8 @@ export default function PdfThumbnail({
 
   const shellClass = `${className} bg-gray-100 border rounded overflow-hidden relative block focus:outline-none`;
 
-  return (
-    <a
-      href={openUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={shellClass}
-      title={title}
-    >
+  const content = (
+    <>
       {loading ? (
         <Centered>
           <span className="w-5 h-5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
@@ -70,6 +65,26 @@ export default function PdfThumbnail({
       <div className="absolute bottom-1 left-1 right-1 text-center text-[10px] font-semibold bg-white/80 rounded p-0.5">
         PDF
       </div>
+    </>
+  );
+
+  if (linkless) {
+    return (
+      <div className={shellClass} title={title}>
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <a
+      href={openUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={shellClass}
+      title={title}
+    >
+      {content}
     </a>
   );
 }

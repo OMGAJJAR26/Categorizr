@@ -13,6 +13,7 @@ import ReceiptDetail from "./ReceiptDetail";
 import FilterBar from "../components/filters/FilterBar";
 import SortMenu from "../components/filters/SortMenu";
 import ReportOptions from "../components/reports/ReportOptions";
+import ReceiptsMoreMenu from "../components/receipts/ReceiptsMoreMenu";
 import ActiveFiltersBar from "../components/ActiveFiltersBar";
 import ReceiptsTable from "../components/receipts/ReceiptsTable";
 import ReceiptsMobileView from "../components/receipts/ReceiptsMobileView";
@@ -73,6 +74,17 @@ const HomePage = () => {
     // Fallback (no grouping available yet)
     return ordered.length > 0 ? ordered : filteredReceipts;
   }, [draftReceipts, sortedYears, groupedReceipts, filteredReceipts]);
+
+  const receiptsForExport = useMemo(() => {
+    const seen = new Set();
+    const ordered = [];
+    [...draftReceipts, ...swipeOrderedReceipts].forEach((r) => {
+      if (!r?.id || seen.has(r.id)) return;
+      seen.add(r.id);
+      ordered.push(r);
+    });
+    return ordered;
+  }, [draftReceipts, swipeOrderedReceipts]);
 
   const {
     showReportModal,
@@ -1021,6 +1033,16 @@ const HomePage = () => {
                     updateSort={updateSort}
                     iconOnly
                   />
+                  <ReceiptsMoreMenu
+                    activeMenu={activeMenu}
+                    setActiveMenu={setActiveMenu}
+                    onSelectReport={handleCreateReport}
+                    onApplyTaxTypes={handleApplyTaxTypes}
+                    selectedTaxAndTipsTypes={filters.taxTypes}
+                    setShowCustomizedReport={setShowCustomizedReport}
+                    receiptsForExport={receiptsForExport}
+                    iconOnly
+                  />
                   <button
                     type="button"
                     onClick={() => setShowIntegrationsModal(true)}
@@ -1098,6 +1120,16 @@ const HomePage = () => {
                       onApplyTaxTypes={handleApplyTaxTypes}
                       selectedTaxAndTipsTypes={filters.taxTypes}
                       setShowCustomizedReport={setShowCustomizedReport}
+                    />
+
+                    <ReceiptsMoreMenu
+                      activeMenu={activeMenu}
+                      setActiveMenu={setActiveMenu}
+                      onSelectReport={handleCreateReport}
+                      onApplyTaxTypes={handleApplyTaxTypes}
+                      selectedTaxAndTipsTypes={filters.taxTypes}
+                      setShowCustomizedReport={setShowCustomizedReport}
+                      receiptsForExport={receiptsForExport}
                     />
 
                     <button
