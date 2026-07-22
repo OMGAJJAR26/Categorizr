@@ -178,6 +178,65 @@ async function _prepareImageForOCR(fileOrUrl) {
 }
 
 /**
+ * Read the embedded text layer of a (digital) PDF directly, reconstructing lines
+ * from text-item positions. Digital receipt PDFs carry crisp, exact text — reading
+ * it beats rasterizing the page and OCR'ing it (Tesseract mangles masked card
+ * numbers like "XXXXXXXXXXXX7836 MASTERCARD"). Returns { text, lines } in the same
+ * shape as the OCR path, or null when the PDF has no usable text (scanned/image PDF).
+ */
+async function extractPdfTextLines(pdfFile) {
+  const arrayBuffer = await pdfFile.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, verbosity: 0 }).promise;
+  const lines = [];
+  let fullText = '';
+  const numPages = Math.min(pdf.numPages, 5);
+
+  for (let p = 1; p <= numPages; p++) {
+    const page = await pdf.getPage(p);
+    const viewport = page.getViewport({ scale: 1 });
+    const content = await page.getTextContent();
+
+    // Group text items into rows by their (flipped) y position, 4px tolerance.
+    const rows = new Map();
+    for (const item of content.items) {
+      const str = (item.str || '');
+      if (!str.trim()) continue;
+      const tr = item.transform; // [a, b, c, d, e(x), f(y)]
+      const x = tr[4];
+      const yTop = viewport.height - tr[5]; // flip so top of page = 0
+      const h = item.height || 10;
+      const w = item.width || str.length * h * 0.5;
+      const key = Math.round(yTop / 4);
+      if (!rows.has(key)) rows.set(key, []);
+      rows.get(key).push({ str, x, y: yTop, w, h });
+    }
+
+    for (const key of [...rows.keys()].sort((a, b) => a - b)) {
+      const items = rows.get(key).sort((a, b) => a.x - b.x);
+      const text = items.map((i) => i.str).join(' ').replace(/\s+/g, ' ').trim();
+      if (!text) continue;
+      const words = items.map((i) => ({
+        text: i.str,
+        bbox: { x0: i.x, y0: i.y, x1: i.x + i.w, y1: i.y + i.h },
+      }));
+      lines.push({
+        text,
+        bbox: {
+          x0: Math.min(...items.map((i) => i.x)),
+          y0: Math.min(...items.map((i) => i.y)),
+          x1: Math.max(...items.map((i) => i.x + i.w)),
+          y1: Math.max(...items.map((i) => i.y + i.h)),
+        },
+        words,
+      });
+      fullText += text + '\n';
+    }
+  }
+
+  return { text: fullText, lines };
+}
+
+/**
  * Extract OCR data from a receipt image or PDF.
  * Returns { text, lines, words } where lines/words include Tesseract bounding box data.
  *
@@ -185,6 +244,26 @@ async function _prepareImageForOCR(fileOrUrl) {
  * words[i]  = { text: string, bbox: { x0, y0, x1, y1 }, confidence: number }
  */
 export async function extractReceiptData(fileOrUrl) {
+  // For digital PDFs, read the embedded text layer directly — it is exact, whereas
+  // OCR'ing a rasterized page mis-reads masked card numbers, small digits, etc.
+  // Fall back to OCR only when the PDF has too little text (scanned/image-only PDF).
+  if (fileOrUrl instanceof File && isPDF(fileOrUrl)) {
+    try {
+      const pdfData = await extractPdfTextLines(fileOrUrl);
+      const wordCount = (pdfData.text.match(/[A-Za-z0-9]{2,}/g) || []).length;
+      if (wordCount >= 10) {
+        const words = pdfData.lines.flatMap((l) => l.words);
+        console.log(
+          `=== PDF TEXT LAYER USED === ${pdfData.text.length} chars, ${pdfData.lines.length} lines, ${words.length} words`
+        );
+        return { text: pdfData.text, lines: pdfData.lines, words };
+      }
+      console.log('PDF text layer too sparse — falling back to OCR.');
+    } catch (pdfTextErr) {
+      console.warn('PDF text-layer extraction failed — falling back to OCR:', pdfTextErr);
+    }
+  }
+
   const imageSource = await _prepareImageForOCR(fileOrUrl);
 
   console.log('=== STARTING TESSERACT OCR ===');

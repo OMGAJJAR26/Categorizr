@@ -1991,7 +1991,10 @@ const handleFieldChange = (field, value) => {
         expense_type: autoCategory,
         paymentType: cleanPaymentType,
         card_issuer_name: "",
-        last_4_digit_card: "",
+        // Populate the dedicated last4 field from the OCR-detected card so the
+        // payment dropdown's selected label and the Edit Payment Method modal show
+        // the 4 digits ("MasterCard *7836") instead of a bare brand ("MasterCard").
+        last_4_digit_card: ocrHasLast4 ? ocrLast4Match[1] : "",
         product_date: parsedDate,
         subtotal: cleanNumericValue(parsedReceiptData?.subtotal),
         purchasePrice: cleanNumericValue(parsedReceiptData?.total || parsedReceiptData?.subtotal),
@@ -4214,7 +4217,11 @@ const handleSelectLogo = (index) => {
     }
 
     // Opened (not searching) → selected payment first (injected if missing), rest alphabetical.
-    const selLast4 = (formData.last_4_digit_card || "").toString().replace(/\D/g, "").slice(-4);
+    // Fall back to the last4 embedded in paymentType (e.g. "MasterCard *7836") so the
+    // selected label keeps its 4 digits even when last_4_digit_card isn't set yet.
+    const rawSelLast4 = (formData.last_4_digit_card || "").toString().replace(/\D/g, "");
+    const typeSelLast4 = ((formData.paymentType || "").toString().match(/\*(\d{3,4})\b/) || [])[1] || "";
+    const selLast4 = (rawSelLast4 || typeSelLast4).slice(-4);
     const selIssuer = (formData.card_issuer_name || formData.paymentType || "")
       .toString()
       .replace(/\s*\*\d+/g, "")
