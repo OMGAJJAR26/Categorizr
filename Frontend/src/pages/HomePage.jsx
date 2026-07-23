@@ -36,6 +36,7 @@ import RecoveryEmailVerificationFlow from "../components/RecoveryEmailVerificati
 import { isTimestampFromToday } from "../components/RecoveryEmailVerificationFlow";
 import { isRecoveryEmailVerified } from "../utils/userUtils";
 import { getReceiptExpenseType } from "../utils/expenseCategories";
+import { hasActiveReceiptFilters } from "../utils/receiptGallery";
 import "./HomePage.css";
 
 const HomePage = () => {
@@ -85,6 +86,8 @@ const HomePage = () => {
     });
     return ordered;
   }, [draftReceipts, swipeOrderedReceipts]);
+
+  const galleryIsFiltered = hasActiveReceiptFilters(filters, searchTerm);
 
   const {
     showReportModal,
@@ -1041,6 +1044,7 @@ const HomePage = () => {
                     selectedTaxAndTipsTypes={filters.taxTypes}
                     setShowCustomizedReport={setShowCustomizedReport}
                     receiptsForExport={receiptsForExport}
+                    isFiltered={galleryIsFiltered}
                     iconOnly
                   />
                   <button
@@ -1130,6 +1134,7 @@ const HomePage = () => {
                       selectedTaxAndTipsTypes={filters.taxTypes}
                       setShowCustomizedReport={setShowCustomizedReport}
                       receiptsForExport={receiptsForExport}
+                      isFiltered={galleryIsFiltered}
                     />
 
                     <button

@@ -139,11 +139,21 @@ const ActiveFiltersBar = ({
     activeFilters.push({ label, key: "price" });
   }
 
-  if (selectedDateRange) {
-    activeFilters.push({
-      label: `Date : ${selectedDateRange.startDate.toLocaleDateString()} - ${selectedDateRange.endDate.toLocaleDateString()}`,
-      key: "date",
-    });
+  if (selectedDateRange?.startDate && selectedDateRange?.endDate) {
+    const start =
+      selectedDateRange.startDate instanceof Date
+        ? selectedDateRange.startDate
+        : new Date(selectedDateRange.startDate);
+    const end =
+      selectedDateRange.endDate instanceof Date
+        ? selectedDateRange.endDate
+        : new Date(selectedDateRange.endDate);
+    if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+      activeFilters.push({
+        label: `Date : ${start.toLocaleDateString()} - ${end.toLocaleDateString()}`,
+        key: "date",
+      });
+    }
   }
 
   if (selectedMerchants.length > 0) {

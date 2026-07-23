@@ -14,6 +14,7 @@ const ReceiptsMoreMenu = ({
   selectedTaxAndTipsTypes,
   setShowCustomizedReport,
   receiptsForExport = [],
+  isFiltered = false,
   iconOnly = false,
 }) => {
   const navigate = useNavigate();
@@ -91,7 +92,12 @@ const ReceiptsMoreMenu = ({
 
   const handleReceiptGallery = () => {
     dismiss();
-    navigate("/receipt-gallery");
+    navigate("/receipt-gallery", {
+      state: {
+        receiptIds: receiptsForExport.map((r) => r?.id).filter((id) => id != null),
+        isFiltered: !!isFiltered,
+      },
+    });
   };
 
   const handleReportClick = (type) => {

@@ -16,6 +16,17 @@ export const FILTER_TYPES = {
 
 const FILTERS_STORAGE_KEY = 'receiptFilters';
 
+/** JSON.stringify turns Date into ISO strings — revive them on load. */
+const reviveDateRange = (dateRange) => {
+  if (!dateRange || typeof dateRange !== "object") return null;
+  const start = dateRange.startDate ? new Date(dateRange.startDate) : null;
+  const end = dateRange.endDate ? new Date(dateRange.endDate) : null;
+  if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return null;
+  }
+  return { ...dateRange, startDate: start, endDate: end };
+};
+
 // Helper to get initial filters from localStorage
 const getInitialFilters = () => {
   const defaultFilters = {
@@ -37,6 +48,7 @@ const getInitialFilters = () => {
       const parsed = JSON.parse(saved);
       // Merge with defaults to ensure all keys exist
       const merged = { ...defaultFilters, ...parsed };
+      merged[FILTER_TYPES.DATE] = reviveDateRange(merged[FILTER_TYPES.DATE]);
       merged[FILTER_TYPES.TAGS] = normalizeSelectedTags(merged[FILTER_TYPES.TAGS] || []);
       return merged;
     }
@@ -99,7 +111,7 @@ export const useReceiptFilters = () => {
           break;
         
         case FILTER_TYPES.DATE:
-          newFilters[FILTER_TYPES.DATE] = value;
+          newFilters[FILTER_TYPES.DATE] = reviveDateRange(value) ?? value;
           break;
         
         case FILTER_TYPES.MERCHANT:

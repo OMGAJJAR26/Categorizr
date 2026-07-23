@@ -78,8 +78,17 @@ const matchesPrice = (receipt, priceFilter) => {
 const matchesDate = (receipt, dateRange) => {
   if (!dateRange || !receipt.product_date) return true;
 
+  const start = dateRange.startDate instanceof Date
+    ? dateRange.startDate
+    : new Date(dateRange.startDate);
+  const end = dateRange.endDate instanceof Date
+    ? dateRange.endDate
+    : new Date(dateRange.endDate);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return true;
+
   const productDate = new Date(Number(receipt.product_date) * 1000);
-  return productDate >= dateRange.startDate && productDate <= dateRange.endDate;
+  return productDate >= start && productDate <= end;
 };
 
 const matchesMerchants = (receipt, merchants) => {

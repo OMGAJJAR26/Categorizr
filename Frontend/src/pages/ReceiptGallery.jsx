@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import Header from "../components/Header";
 import PropagateLoader from "react-spinners/PropagateLoader";
@@ -17,6 +17,7 @@ import {
 
 const ReceiptGallery = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { receipts, loading } = useData();
   const { filters, searchTerm } = useReceiptFilters();
   const { sortConfig } = useReceiptSorting();
@@ -29,7 +30,21 @@ const ReceiptGallery = () => {
 
   const [lightboxIndex, setLightboxIndex] = useState(null);
 
+  // Prefer the exact filtered list passed from HomePage so the gallery
+  // matches what the user was looking at (avoids localStorage date/filter drift).
+  const navReceiptIds = location.state?.receiptIds;
+  const hasNavReceiptIds = Array.isArray(navReceiptIds);
+
   const visibleReceipts = useMemo(() => {
+    if (hasNavReceiptIds) {
+      const byId = new Map(
+        (receipts || []).map((r) => [String(r?.id), r])
+      );
+      return navReceiptIds
+        .map((id) => byId.get(String(id)))
+        .filter(Boolean);
+    }
+
     const seen = new Set();
     const ordered = [];
     [...draftReceipts, ...filteredReceipts].forEach((r) => {
@@ -38,14 +53,23 @@ const ReceiptGallery = () => {
       ordered.push(r);
     });
     return ordered;
-  }, [draftReceipts, filteredReceipts]);
+  }, [
+    hasNavReceiptIds,
+    navReceiptIds,
+    receipts,
+    draftReceipts,
+    filteredReceipts,
+  ]);
 
   const galleryItems = useMemo(
     () => buildReceiptGalleryItems(visibleReceipts),
     [visibleReceipts]
   );
 
-  const isFiltered = hasActiveReceiptFilters(filters, searchTerm);
+  const isFiltered =
+    typeof location.state?.isFiltered === "boolean"
+      ? location.state.isFiltered
+      : hasActiveReceiptFilters(filters, searchTerm);
   const pageTitle = isFiltered ? "Receipt Images (Filtered)" : "Receipt Images";
 
   return (
