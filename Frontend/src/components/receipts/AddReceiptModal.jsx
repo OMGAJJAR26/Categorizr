@@ -1985,6 +1985,54 @@ const handleFieldChange = (field, value) => {
       const ocrCategory = cleanTextValue(parsedReceiptData?.category || "");
       const autoCategory = ocrCategory || getMerchantDefaultCategory(merchantName);
 
+      // ── Default tax auto-population from OCR ────────────────────────────────
+      // Populate the user's default tax type(s) for the OCR total. If OCR also found
+      // a tax amount that matches what the default tax rate would calculate for that
+      // total, trust it and lock it in as a manual (confirmed) amount. Otherwise
+      // auto-calculate the tax by its rate and IGNORE the OCR tax amount — it's
+      // inconsistent with the tax type (e.g. GST 5% on a $113 total is $5.38, so an
+      // OCR-read $10.00 is discarded in favour of the rate calculation).
+      const ocrTotalNum =
+        parseFloat(parsedReceiptData?.total ?? parsedReceiptData?.subtotal) || 0;
+      const ocrTaxNum = parseFloat(parsedReceiptData?.taxAmount);
+      const baseTaxLines = defaultTaxIds
+        .map((id) => {
+          const taxType = taxData?.find((t) => t.id === id);
+          if (!taxType) return null;
+          return {
+            fk_tax_id: taxType.id,
+            tax_name: taxType.tax_name,
+            tax_rate: taxType.tax_rate,
+            tax_amount: "",
+            _isManual: false,
+          };
+        })
+        .filter(Boolean);
+      const ocrTaxSubtotal = calculateSubtotalWithManualOverrides(
+        ocrTotalNum,
+        baseTaxLines,
+        0,
+      );
+      const formulaicTaxes = applyTaxRecalc(baseTaxLines, ocrTaxSubtotal);
+      const formulaicCombined = formulaicTaxes.reduce(
+        (sum, t) => sum + (parseFloat(t.tax_amount) || 0),
+        0,
+      );
+      const ocrTaxMatchesDefault =
+        !isNaN(ocrTaxNum) &&
+        ocrTaxNum > 0 &&
+        formulaicCombined > 0 &&
+        Math.abs(ocrTaxNum - formulaicCombined) <= 0.02;
+      const ocrTaxValues = ocrTaxMatchesDefault
+        ? formulaicTaxes.length === 1
+          ? [{ ...formulaicTaxes[0], tax_amount: ocrTaxNum.toFixed(2), _isManual: true }]
+          : formulaicTaxes.map((t) => ({ ...t, _isManual: true }))
+        : formulaicTaxes.map((t) => ({ ...t, _isManual: false }));
+      const ocrTaxSubtotalFinal =
+        baseTaxLines.length > 0
+          ? calculateSubtotalWithManualOverrides(ocrTotalNum, ocrTaxValues, 0)
+          : cleanNumericValue(parsedReceiptData?.subtotal);
+
       setFormData((prev) => ({
         ...prev,
         storeName: merchantName,
@@ -1996,17 +2044,11 @@ const handleFieldChange = (field, value) => {
         // the 4 digits ("MasterCard *7836") instead of a bare brand ("MasterCard").
         last_4_digit_card: ocrHasLast4 ? ocrLast4Match[1] : "",
         product_date: parsedDate,
-        subtotal: cleanNumericValue(parsedReceiptData?.subtotal),
+        subtotal: ocrTaxSubtotalFinal,
         purchasePrice: cleanNumericValue(parsedReceiptData?.total || parsedReceiptData?.subtotal),
         product_name: cleanTextValue(parsedReceiptData?.productName || ""),
         notes: "",
-        receipt_tax_values: defaultTaxIds.map(id => {
-          const taxType = taxData?.find(t => t.id === id);
-          if (taxType) {
-            return { fk_tax_id: taxType.id, tax_name: taxType.tax_name, tax_rate: taxType.tax_rate, tax_amount: "" };
-          }
-          return null;
-        }).filter(Boolean),
+        receipt_tax_values: ocrTaxValues,
         tip: cleanNumericValue(parsedReceiptData?.tip),
       }));
 
