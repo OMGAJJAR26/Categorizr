@@ -164,6 +164,7 @@ const AddReceiptModal = ({ onClose, onReceiptAdded, initialData = null, onDuplic
 
  // Add Merchant modal state
 const [showAddMerchantModal, setShowAddMerchantModal] = useState(false);
+const [isSavingMerchant, setIsSavingMerchant] = useState(false);
 const [newMerchantName, setNewMerchantName] = useState("");
 const [newMerchantLogo, setNewMerchantLogo] = useState("");
 const [isFetchingLogos, setIsFetchingLogos] = useState(false);
@@ -785,6 +786,62 @@ const [localMerchants, setLocalMerchants] = useState([]);
 
     return urls;
   }, [repairReceiptMediaOnServer]);
+
+  // Match mobile: persist a chosen merchant logo on Categorizr storage so it shows
+  // everywhere (server, mobile, web) indefinitely. External image-search URLs expire,
+  // and many full-size source URLs (logo.wine, fbsbx, yorkdale…) aren't fetchable via
+  // the proxy, while the gstatic thumbnail reliably is. So try each candidate URL in
+  // order (full URL first for quality, thumbnail as the reliable fallback) and upload
+  // the first that yields a real image. Falls back to the original URL if none upload.
+  const materializeMerchantLogo = useCallback(
+    async (...candidateUrls) => {
+      const candidates = candidateUrls
+        .map((u) => (u || "").toString().trim())
+        .filter(Boolean);
+      const firstUrl = candidates[0] || "";
+      if (!firstUrl) return "";
+      // If any candidate is already Categorizr-hosted, keep it as-is.
+      const hosted = candidates.find((u) =>
+        /categorizr-images-production|storage\.googleapis\.com/i.test(u),
+      );
+      if (hosted) return hosted;
+
+      const fetchImageBlob = async (u) => {
+        try {
+          const proxied = u.includes("/api/imageproxy?url=")
+            ? u
+            : `/api/imageproxy?url=${encodeURIComponent(u)}`;
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 12000);
+          const resp = await fetch(proxied, { signal: ctrl.signal });
+          clearTimeout(timer);
+          if (!resp.ok) return null;
+          const blob = await resp.blob();
+          if (!blob || blob.size === 0 || !/^image\//i.test(blob.type || "")) return null;
+          return blob;
+        } catch {
+          return null;
+        }
+      };
+
+      for (const u of candidates) {
+        const blob = await fetchImageBlob(u);
+        if (!blob) continue;
+        try {
+          const ext = ((blob.type.split("/")[1] || "png").split("+")[0]);
+          const file = new File([blob], `merchant-logo-${Date.now()}.${ext}`, {
+            type: blob.type,
+          });
+          const uploaded = await uploadFilesToMedia([file]);
+          if (Array.isArray(uploaded) && uploaded[0]) return uploaded[0];
+        } catch {
+          /* try next candidate */
+        }
+      }
+      return firstUrl;
+    },
+    [uploadFilesToMedia],
+  );
 
   const collectAddReceiptMediaUrlsForSave = useCallback(() => {
     const urls = [];
@@ -3271,8 +3328,14 @@ const handleFieldChange = (field, value) => {
     setEditMerchantError(null);
     const oldName = editingMerchant.name;
     const newName = editMerchantName.trim();
-    const newLogo = editMerchantLogo || editingMerchant.image || "";
+    const editOpt =
+      editSelectedLogoIndex !== null ? editLogoOptions[editSelectedLogoIndex] : null;
     try {
+      // Upload the chosen logo to Categorizr storage so it persists everywhere.
+      const newLogo = await materializeMerchantLogo(
+        editOpt?.storeUrl || editMerchantLogo || editingMerchant.image || "",
+        editOpt?.displayUrl || "",
+      );
       const affected = (receipts || []).filter(
         (r) => (r.storeName || r.store_name || "").toLowerCase() === oldName.toLowerCase()
       );
@@ -3683,14 +3746,19 @@ const handleSelectLogo = (index) => {
       return;
     }
 
-    // 3. Get selected logo (optional)
-    const selectedLogoUrl =
-      selectedLogoIndex !== null
-        ? logoOptions[selectedLogoIndex]?.storeUrl || ""
-        : newMerchantLogo || "";
+    // 3. Get selected logo (optional) and upload it to Categorizr storage so it
+    // persists everywhere (matches mobile), instead of saving an ephemeral URL.
+    const selectedOpt =
+      selectedLogoIndex !== null ? logoOptions[selectedLogoIndex] : null;
+    setIsSavingMerchant(true);
+    const selectedLogoUrl = await materializeMerchantLogo(
+      selectedOpt?.storeUrl || newMerchantLogo || "",
+      selectedOpt?.displayUrl || "",
+    );
 
     // 4. Persist to API (re-fetches list with server-assigned id)
     const addResult = await addApiMerchant(name, selectedLogoUrl);
+    setIsSavingMerchant(false);
     if (!addResult?.ok) {
       setError(addResult?.error || "Failed to add merchant");
       return;
@@ -6930,11 +6998,11 @@ const handleSelectLogo = (index) => {
                     type="button"
                     onClick={handleAddMerchant}
                     disabled={
-                      !newMerchantName || isFetchingLogos
+                      !newMerchantName || isFetchingLogos || isSavingMerchant
                     }
                     className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
-                    Add Merchant
+                    {isSavingMerchant ? "Adding..." : "Add Merchant"}
                   </button>
                 </div>
               </div>

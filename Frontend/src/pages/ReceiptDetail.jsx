@@ -2565,14 +2565,17 @@ useEffect(() => {
       return;
     }
 
-    const selectedLogoUrl =
-      selectedLogoIndex !== null
-        ? logoOptions[selectedLogoIndex]?.storeUrl || ""
-        : newMerchantLogo || "";
+    const selectedOpt =
+      selectedLogoIndex !== null ? logoOptions[selectedLogoIndex] : null;
 
     setIsSavingMerchant(true);
     setAddMerchantError(null);
     try {
+      // Upload the chosen logo to Categorizr storage so it persists everywhere.
+      const selectedLogoUrl = await materializeMerchantLogo(
+        selectedOpt?.storeUrl || newMerchantLogo || "",
+        selectedOpt?.displayUrl || "",
+      );
       const addResult = await addApiMerchant(name, selectedLogoUrl);
       if (!addResult?.ok) {
         setAddMerchantError(addResult?.error || "Failed to add merchant");
@@ -2654,8 +2657,14 @@ useEffect(() => {
     setEditMerchantError(null);
     const oldName = editingMerchant.name;
     const newName = editMerchantName.trim();
-    const newLogo = editMerchantLogo || editingMerchant.image || "";
+    const editOpt =
+      editSelectedLogoIndex !== null ? editLogoOptions[editSelectedLogoIndex] : null;
     try {
+      // Upload the chosen logo to Categorizr storage so it persists everywhere.
+      const newLogo = await materializeMerchantLogo(
+        editOpt?.storeUrl || editMerchantLogo || editingMerchant.image || "",
+        editOpt?.displayUrl || "",
+      );
       const affected = (receipts || []).filter(
         (r) => (r.storeName || r.store_name || "").toLowerCase() === oldName.toLowerCase()
       );
@@ -2790,6 +2799,59 @@ useEffect(() => {
     }
     if (data?.fullImageUrl) return data.fullImageUrl;
     throw new Error("No URL returned from upload");
+  };
+
+  // Match mobile: persist a chosen merchant logo on Categorizr storage so it shows
+  // everywhere (server, mobile, web) indefinitely. External image-search URLs
+  // (logo.wine, gstatic, etc.) expire; upload the image to our own storage and
+  // return that permanent URL. Falls back to the original URL if it can't upload.
+  const materializeMerchantLogo = async (...candidateUrls) => {
+    const candidates = candidateUrls
+      .map((u) => (u || "").toString().trim())
+      .filter(Boolean);
+    const firstUrl = candidates[0] || "";
+    if (!firstUrl) return "";
+    // If any candidate is already Categorizr-hosted, keep it as-is.
+    const hosted = candidates.find((u) =>
+      /categorizr-images-production|storage\.googleapis\.com/i.test(u),
+    );
+    if (hosted) return hosted;
+
+    const fetchImageBlob = async (u) => {
+      try {
+        const proxied = u.includes("/api/imageproxy?url=")
+          ? u
+          : `/api/imageproxy?url=${encodeURIComponent(u)}`;
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 12000);
+        const resp = await fetch(proxied, { signal: ctrl.signal });
+        clearTimeout(timer);
+        if (!resp.ok) return null;
+        const blob = await resp.blob();
+        if (!blob || blob.size === 0 || !/^image\//i.test(blob.type || "")) return null;
+        return blob;
+      } catch {
+        return null;
+      }
+    };
+
+    for (const u of candidates) {
+      const blob = await fetchImageBlob(u);
+      if (!blob) continue;
+      try {
+        const ext = (blob.type.split("/")[1] || "png").split("+")[0];
+        const file = new File([blob], `merchant-logo-${Date.now()}.${ext}`, {
+          type: blob.type,
+        });
+        const uploaded = await uploadPhotoToMedia(file);
+        // uploadmediaV1 attaches the new URL to receipts — clean that up.
+        if (repairReceiptMediaOnServer) void repairReceiptMediaOnServer({ force: true });
+        if (uploaded) return uploaded;
+      } catch {
+        /* try next candidate */
+      }
+    }
+    return firstUrl;
   };
 
   const handleAddPhotoSelect = async (e) => {
