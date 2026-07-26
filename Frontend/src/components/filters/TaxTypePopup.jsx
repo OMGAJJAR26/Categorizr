@@ -1,7 +1,7 @@
 // src/components/TaxTypePopup.jsx
 import { X } from "lucide-react";
 import { useData } from "../../context/DataContext";
-import { formatTaxRate } from "../../utils/receiptFormatters";
+import { toTaxLabel } from "../../utils/receiptFormatters";
 // Remove the import for generateTaxReportPDF since we don't want auto-download
 // import { generateTaxReportPDF } from "../../generatePDF";
 
@@ -17,38 +17,34 @@ export default function TaxTypePopup({
 
   if (!show) return null;
 
-  // Combine taxData from API with receiptTaxValues for backward compatibility
+  // Combine taxData (saved tax types) with receiptTaxValues (backward compat),
+  // de-duplicating by the NORMALIZED tax label — same as the Filter popup. This
+  // collapses all per-receipt "Tip (x%)" lines into a single "Tip" and merges
+  // rate-format differences (e.g. "5.0000" vs "5"), so the report popup shows the
+  // same clean list as Filter / Settings / Add-Edit instead of duplicates.
   const taxMap = new Map();
-  
-  // Add taxes from taxData API (saved tax types)
-  if (Array.isArray(taxData)) {
-    taxData.forEach((tax) => {
-      const name = (tax.tax_name || "").toString().trim();
-      const rate = (tax.tax_rate || "").toString().trim();
-      if (name && rate) {
-        const key = `${name}|${rate}`;
-        if (!taxMap.has(key)) {
-          taxMap.set(key, tax);
-        }
-      }
-    });
-  }
-  
-  // Also include taxes from receiptTaxValues for backward compatibility
-  if (Array.isArray(receiptTaxValues)) {
-    receiptTaxValues.forEach((tax) => {
-      const name = (tax.tax_name || "").toString().trim();
-      const rate = (tax.tax_rate || "").toString().trim();
-      if (name && rate) {
-        const key = `${name}|${rate}`;
-        if (!taxMap.has(key)) {
-          taxMap.set(key, tax);
-        }
-      }
-    });
-  }
-  
-  const uniqueTaxData = Array.from(taxMap.values());
+  const addTax = (tax) => {
+    const name = (tax?.tax_name || "").toString().trim();
+    if (!name) return;
+    const isTip = name.toLowerCase().startsWith("tip");
+    const rate = (tax?.tax_rate ?? "").toString().trim();
+    if (!isTip && !rate) return; // a non-tip tax needs a rate to be valid
+    const label = toTaxLabel(tax);
+    if (!taxMap.has(label)) {
+      // Store a clean representative object (all tips collapse to one "Tip").
+      taxMap.set(label, isTip ? { tax_name: "Tip", tax_rate: "0" } : tax);
+    }
+  };
+  if (Array.isArray(taxData)) taxData.forEach(addTax);
+  if (Array.isArray(receiptTaxValues)) receiptTaxValues.forEach(addTax);
+
+  // Order non-tip taxes first (alphabetical by label), then Tip — matches Filter.
+  const uniqueTaxData = Array.from(taxMap.values()).sort((a, b) => {
+    const aTip = (a.tax_name || "").toLowerCase().startsWith("tip");
+    const bTip = (b.tax_name || "").toLowerCase().startsWith("tip");
+    if (aTip !== bTip) return aTip ? 1 : -1;
+    return toTaxLabel(a).localeCompare(toTaxLabel(b));
+  });
 
   const mkKey = (name, rate) =>
     `${(name ?? "").toString().trim()}|${(rate ?? "").toString().trim()}`;
@@ -115,9 +111,7 @@ export default function TaxTypePopup({
                     }
                   }}
                 />
-                <span>
-                 {tax.tax_name} ({formatTaxRate(tax.tax_rate)}%)
-                </span>
+                <span>{toTaxLabel(tax)}</span>
               </label>
             );
           })
