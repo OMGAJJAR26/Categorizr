@@ -44,3 +44,34 @@ export const clearAuthLocalStorage = () => {
     }
   }
 };
+
+// Device-level preferences that are NOT user data and may survive a user switch.
+const DEVICE_PREF_KEYS = ["cat_theme", "appLanguage"];
+
+/**
+ * Wipe ALL locally-saved data when a DIFFERENT user signs in / signs up on a
+ * device that a prior user used. This prevents one user's cached data (tax types,
+ * merchants, payment methods, expense categories, filters, hidden lists, custom
+ * lists, forwarded/seen tracking, etc.) from leaking into the next user's session.
+ * Only neutral device preferences (theme, language) are kept. Nothing user-scoped
+ * is preserved here — unlike logout, a different user must start completely clean.
+ */
+export const clearLocalDataForUserSwitch = () => {
+  try {
+    const preserved = {};
+    for (const key of DEVICE_PREF_KEYS) {
+      const value = localStorage.getItem(key);
+      if (value != null) preserved[key] = value;
+    }
+    localStorage.clear();
+    for (const [key, value] of Object.entries(preserved)) {
+      if (value != null) localStorage.setItem(key, value);
+    }
+  } catch {
+    try {
+      localStorage.clear();
+    } catch {
+      /* noop */
+    }
+  }
+};

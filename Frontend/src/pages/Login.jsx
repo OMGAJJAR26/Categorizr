@@ -17,6 +17,7 @@ import { Formik, Form, Field, ErrorMessage } from "formik";
 import * as Yup from "yup";
 import { useLoader } from "../context/LoaderContext";
 import { useData } from "../context/DataContext";
+import { clearLocalDataForUserSwitch } from "../utils/authStorage";
 import ForgotPasswordModal from "./ForgotPasswordModel";
 import ForgotUsernameModal from "./ForgotUsernameModel";
 
@@ -60,9 +61,24 @@ const Login = () => {
       });
       const data = await res.json();
       if (res.ok && data.authenticationToken) {
+        // If a DIFFERENT user is signing in on a device a prior user used, wipe all
+        // prior local data first so nothing (tax types, merchants, payment methods,
+        // expense categories, filters, etc.) leaks across accounts. The user id is
+        // nested under data.user (top-level data.id is undefined).
+        const newId = String(data.user?.id ?? data.id ?? "");
+        const prevId = String(
+          localStorage.getItem("fk_user_id") || localStorage.getItem("id") || ""
+        );
+        // Only treat as a different user when we can positively identify a new id
+        // that differs — never wipe when the id is unknown.
+        const isDifferentUser = !!prevId && !!newId && prevId !== newId;
+        if (isDifferentUser) {
+          clearLocalDataForUserSwitch();
+        }
+
         localStorage.setItem("token", data.authenticationToken);
-        localStorage.setItem("id", data.id);
-        localStorage.setItem("fk_user_id", data.id);
+        localStorage.setItem("id", newId || data.id);
+        localStorage.setItem("fk_user_id", newId || data.id);
         // Register device once per login — fire and forget, non-blocking
         const deviceParams = new URLSearchParams({
           deviceId: "0", deviceType: "2", deviceToken: "0", version: "-",
@@ -71,6 +87,12 @@ const Login = () => {
           method: "POST",
           headers: { "Content-Type": "application/json", Accesstoken: data.authenticationToken },
         }).catch(() => {});
+        if (isDifferentUser) {
+          // Hard reload so every in-memory cache and localStorage-seeded state
+          // re-initializes clean for the new user (no stale prior-user data).
+          window.location.replace("/homepage");
+          return;
+        }
         // Load user + receipts before navigating so header/receipts render immediately
         await refreshDataAfterAuth();
         navigate("/homepage", { replace: true });

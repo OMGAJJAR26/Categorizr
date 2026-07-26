@@ -17,6 +17,7 @@ import { useFormik } from "formik";
 import * as Yup from "yup";
 import { useLoader } from "../context/LoaderContext";
 import { useData } from "../context/DataContext";
+import { clearLocalDataForUserSwitch } from "../utils/authStorage";
 
 const getBrowserCountry = async () => {
   try {
@@ -144,11 +145,25 @@ const Signup = () => {
           }
 
           const token = data.authenticationToken || "";
+          let didWipePriorUser = false;
           if (token) {
+            // A brand-new account is always a different user — wipe any prior
+            // user's local data on this device so nothing (tax types, merchants,
+            // payment methods, expense categories, filters, etc.) leaks across.
+            // The user id is nested under data.user (top-level data.id is undefined).
+            const newId = String(data.user?.id ?? data.id ?? "");
+            const prevId = String(
+              localStorage.getItem("fk_user_id") || localStorage.getItem("id") || ""
+            );
+            if (prevId && newId && prevId !== newId) {
+              clearLocalDataForUserSwitch();
+              didWipePriorUser = true;
+            }
             localStorage.setItem("token", token);
-            if (data.id) {
-              localStorage.setItem("id", data.id);
-              localStorage.setItem("fk_user_id", data.id);
+            const resolvedId = data.user?.id ?? data.id;
+            if (resolvedId) {
+              localStorage.setItem("id", resolvedId);
+              localStorage.setItem("fk_user_id", resolvedId);
             }
             localStorage.removeItem("cat_confirmEmailPopupTs");
 
@@ -180,6 +195,12 @@ const Signup = () => {
             message: data.message || "Signup successful",
             type: "success",
           });
+          if (didWipePriorUser) {
+            // Hard reload so every in-memory cache and localStorage-seeded state
+            // re-initializes clean for the new user (no stale prior-user data).
+            window.location.replace("/homepage");
+            return;
+          }
           await refreshDataAfterAuth();
           navigate("/homepage", { replace: true });
         } else {
