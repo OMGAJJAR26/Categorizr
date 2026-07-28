@@ -5795,14 +5795,15 @@ const handleSelectLogo = (index) => {
                       );
                     }
 
-                    // Auto-apply Personal/Business preference saved in Settings
-                    const _petMap = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
-                    const _storedExpType = _petMap[methodString] || _petMap[displayText];
-                    if (_storedExpType === "Business") {
-                      handleFieldChange("receipt_category", "1");
-                    } else if (_storedExpType === "Personal") {
-                      handleFieldChange("receipt_category", "0");
-                    }
+                    // Auto-apply the payment method's default expense type
+                    // (Personal/Business). Checks the Settings local override AND the API
+                    // record's default_payment_category (e.g. a default set on mobile), so
+                    // selecting a payment sets the Expense Type — matching Edit Receipt.
+                    const _defExpType =
+                      getPaymentDefaultExpenseType(methodString, apiPaymentMethods) ||
+                      getPaymentDefaultExpenseType(displayText, apiPaymentMethods);
+                    const _rc = expenseTypeToReceiptCategory(_defExpType);
+                    if (_rc) handleFieldChange("receipt_category", _rc);
 
                     setIsPaymentTyping(false);
                     setShowPaymentDropdown(false);
