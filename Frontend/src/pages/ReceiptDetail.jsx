@@ -62,6 +62,8 @@ import {
   normalizePaymentMatchKey,
   parsePaymentDisplay,
   paymentCategoryFromApiEnum,
+  getPaymentDefaultExpenseType,
+  expenseTypeToReceiptCategory,
   readPayCardTypeMap,
   storedCardIssuerName,
 } from "../utils/paymentMethodUtils";
@@ -3620,6 +3622,29 @@ useEffect(() => {
         if (updatedData.expense_type && updatedData.expense_type.trim()) {
           addExpenseCategory(updatedData.expense_type.trim());
         }
+        // Likewise, ensure the receipt's payment method exists as a manageable API
+        // record right away so it shows in Settings and Filter immediately (not only
+        // after the next background refresh's backfill). Create only a genuinely new
+        // card with a valid 4-digit last4 that isn't already in the API.
+        if (last4 && /^\d{4}$/.test(last4) && !/cash/i.test(cardIssuerName || "")) {
+          const alreadyInApi = (apiPaymentMethods || []).some((m) => {
+            if (getLast4FromPaymentApiRecord(m) !== last4) return false;
+            const eIssuer = (m.card_issuer_name || "").trim().toLowerCase();
+            return eIssuer === (cardIssuerName || "").trim().toLowerCase();
+          });
+          if (!alreadyInApi) {
+            const brandFromIssuer = inferCardTypeFromPayment(cardIssuerName || "");
+            const resolvedBrand =
+              brandFromIssuer !== "Other"
+                ? brandFromIssuer
+                : inferCardTypeFromPayment(finalPaymentTypeForAPI || "") || "Other";
+            void addApiPaymentMethod(
+              { cardIssuerName, cardTypeBrand: resolvedBrand, last4 },
+              "",
+              updatedData.expense_type || ""
+            );
+          }
+        }
         // Update local state and close popup
         setSelectedReceipt((prev) => ({
           ...prev,
@@ -6341,14 +6366,18 @@ Thank you for using our receipt management system.
                                           );
                                         }
 
-                                        // Auto-apply Personal/Business preference saved in Settings
-                                        const _petMap = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
-                                        const _storedExpType = _petMap[method];
-                                        if (_storedExpType === "Business") {
-                                          handleFieldChange("receipt_category", "1");
-                                        } else if (_storedExpType === "Personal") {
-                                          handleFieldChange("receipt_category", "0");
-                                        }
+                                        // Auto-apply the payment method's default expense
+                                        // type (Personal/Business) — checks the Settings
+                                        // local override AND the API record's
+                                        // default_payment_category. User selecting a
+                                        // different payment is a user-initiated change, so
+                                        // the receipt follows the new default.
+                                        const _defExpType = getPaymentDefaultExpenseType(
+                                          method,
+                                          apiPaymentMethods
+                                        );
+                                        const _rc = expenseTypeToReceiptCategory(_defExpType);
+                                        if (_rc) handleFieldChange("receipt_category", _rc);
 
                                         setShowPaymentDropdown(false);
                                       }}

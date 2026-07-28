@@ -28,6 +28,8 @@ import {
   normalizePaymentMatchKey,
   parsePaymentDisplay,
   paymentCategoryFromApiEnum,
+  getPaymentDefaultExpenseType,
+  expenseTypeToReceiptCategory,
   readPayCardTypeMap,
   storedCardIssuerName,
 } from "../../utils/paymentMethodUtils";
@@ -2090,10 +2092,19 @@ const handleFieldChange = (field, value) => {
           ? calculateSubtotalWithManualOverrides(ocrTotalNum, ocrTaxValues, 0)
           : cleanNumericValue(parsedReceiptData?.subtotal);
 
+      // If the OCR-detected payment method has a default expense type (Personal/
+      // Business), auto-select that type for the new receipt (matches mobile).
+      const ocrDefaultExpType = getPaymentDefaultExpenseType(
+        cleanPaymentType,
+        apiPaymentMethods
+      );
+      const ocrReceiptCategory = expenseTypeToReceiptCategory(ocrDefaultExpType);
+
       setFormData((prev) => ({
         ...prev,
         storeName: merchantName,
         expense_type: autoCategory,
+        ...(ocrReceiptCategory ? { receipt_category: ocrReceiptCategory } : {}),
         paymentType: cleanPaymentType,
         card_issuer_name: "",
         // Populate the dedicated last4 field from the OCR-detected card so the
@@ -2775,6 +2786,30 @@ const handleFieldChange = (field, value) => {
       // shows up in Filter → Expense Category without waiting for a full data refresh.
       if (formData.expense_type && formData.expense_type.trim()) {
         addExpenseCategory(formData.expense_type.trim());
+      }
+
+      // Likewise ensure the receipt's payment method exists as a manageable API
+      // record right away so it shows in Settings and Filter immediately (not only
+      // after the next background refresh's backfill). Create only a genuinely new
+      // card with a valid 4-digit last4 that isn't already in the API.
+      if (last4 && /^\d{4}$/.test(last4) && !/cash/i.test(cardIssuerName || "")) {
+        const alreadyInApi = (apiPaymentMethods || []).some((m) => {
+          if (getLast4FromPaymentApiRecord(m) !== last4) return false;
+          const eIssuer = (m.card_issuer_name || "").trim().toLowerCase();
+          return eIssuer === (cardIssuerName || "").trim().toLowerCase();
+        });
+        if (!alreadyInApi) {
+          const brandFromIssuer = inferCardTypeFromPayment(cardIssuerName || "");
+          const resolvedBrand =
+            brandFromIssuer !== "Other"
+              ? brandFromIssuer
+              : inferCardTypeFromPayment(finalPaymentType || "") || "Other";
+          void addApiPaymentMethod(
+            { cardIssuerName, cardTypeBrand: resolvedBrand, last4 },
+            "",
+            formData.expense_type || ""
+          );
+        }
       }
 
       // Persist merchant logo to localStorage and the backend merchant record so
@@ -3810,9 +3845,9 @@ const handleSelectLogo = (index) => {
     setNewPaymentCardType("");
     setNewCardIssuerName("");
     setNewLast4Digits("");
-    setNewPaymentCategoryType(
-      formData.receipt_category === "1" ? "Business" : "Personal",
-    );
+    // A new payment method starts with no default expense type ("Select Category Type"),
+    // not a pre-selected Business/Personal.
+    setNewPaymentCategoryType("");
     setShowAddPaymentModal(true);
     setShowPaymentDropdown(false);
   };
@@ -3853,7 +3888,12 @@ const handleSelectLogo = (index) => {
     setNewPaymentCategoryType(
       _pet[method] || paymentCategoryFromApiEnum(apiMatch?.default_payment_category) || ""
     );
-    setPayModalEditMode({ name: method, apiId });
+    // Capture the signature using the RESOLVED card type so the duplicate check can
+    // exclude the payment being edited. Inferring the brand from the display name
+    // fails for custom issuers (e.g. "Bnak 7 *7777" → "Other"), which made a payment
+    // flag itself as a duplicate (spurious red "Payment Method already exists").
+    const originalSig = getPaymentSignature(method, cardType, _pct);
+    setPayModalEditMode({ name: method, apiId, originalSig });
     setPayModalError(null);
     setShowAddPaymentModal(true);
     setShowPaymentDropdown(false);
@@ -4246,13 +4286,17 @@ const handleSelectLogo = (index) => {
     if (!draftSig) return "";
 
     const excludeApiId = payModalEditMode?.apiId;
-    const excludeSig = payModalEditMode?.name
-      ? getPaymentSignature(
-          payModalEditMode.name,
-          inferCardTypeFromPayment(payModalEditMode.name),
-          payCardMap
-        )
-      : "";
+    // Prefer the signature captured (from the resolved card type) when the edit opened;
+    // name-based inference fails for custom issuers and made a payment flag itself.
+    const excludeSig =
+      payModalEditMode?.originalSig ||
+      (payModalEditMode?.name
+        ? getPaymentSignature(
+            payModalEditMode.name,
+            inferCardTypeFromPayment(payModalEditMode.name),
+            payCardMap
+          )
+        : "");
 
     const duplicateInApi = (apiPaymentMethods || []).some((p) => {
       const pid = p.id ?? p.payment_method_id;

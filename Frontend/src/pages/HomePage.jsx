@@ -36,12 +36,16 @@ import RecoveryEmailVerificationFlow from "../components/RecoveryEmailVerificati
 import { isTimestampFromToday } from "../components/RecoveryEmailVerificationFlow";
 import { isRecoveryEmailVerified } from "../utils/userUtils";
 import { getReceiptExpenseType } from "../utils/expenseCategories";
+import {
+  getPaymentDefaultExpenseType,
+  expenseTypeToReceiptCategory,
+} from "../utils/paymentMethodUtils";
 import { hasActiveReceiptFilters } from "../utils/receiptGallery";
 import "./HomePage.css";
 
 const HomePage = () => {
   const navigate = useNavigate();
-  const { refreshData, silentRefreshData, receipts, loading, updateReceiptStatus, deleteReceipt, updateReceipt, user, syncForwardedReceiptData, markRecoveryEmailVerified, apiExpenseCategories } = useData();
+  const { refreshData, silentRefreshData, receipts, loading, updateReceiptStatus, deleteReceipt, updateReceipt, user, syncForwardedReceiptData, markRecoveryEmailVerified, apiExpenseCategories, apiPaymentMethods } = useData();
   const { formatCurrency } = useCurrency();
 
   // Custom hooks for complex logic
@@ -504,6 +508,54 @@ const HomePage = () => {
       });
     }
   }, [receipts, user?.id, syncForwardedReceiptData, apiExpenseCategories]);
+
+  // ── B3: apply a matching payment method's Default Expense Type to new eReceipts ──
+  // When a receipt arrives by email (fk_incoming_email_id set) and its payment method
+  // has a Default Expense Type (Personal/Business) configured, set the receipt's
+  // Expense Type from that default — same behaviour as Add-Receipt and Edit-Receipt.
+  //
+  // Scope guards match the user's spec:
+  //  • Only EMAIL eReceipts. NETWORK-forwarded receipts (fk_forward_from_receipt_id)
+  //    keep the sender's Expense Type untouched (Note 2).
+  //  • One-time per receipt (tracked in localStorage). Setting a default later never
+  //    rewrites receipts already processed, so existing receipts are left alone (Note 1).
+  useEffect(() => {
+    if (!receipts || !user?.id) return;
+
+    const appliedKey = `cat_exptype_applied_${user.id}`;
+    let applied;
+    try { applied = new Set(JSON.parse(localStorage.getItem(appliedKey) || "[]")); }
+    catch { applied = new Set(); }
+
+    const isNetworkForward = (r) => {
+      const fwd = r.fk_forward_from_receipt_id;
+      return fwd != null && String(fwd) !== "0";
+    };
+    const isEmailEReceipt = (r) => {
+      const email = r.fk_incoming_email_id;
+      return email != null && String(email) !== "0" && !isNetworkForward(r);
+    };
+
+    const toApply = receipts.filter(
+      (r) => isEmailEReceipt(r) && !applied.has(String(r.id))
+    );
+    if (toApply.length === 0) return;
+
+    // Mark upfront so a default configured later never retroactively rewrites these
+    // (Note 1) and so rapid re-renders don't double-process.
+    toApply.forEach((r) => applied.add(String(r.id)));
+    try { localStorage.setItem(appliedKey, JSON.stringify([...applied])); } catch { /* quota */ }
+
+    toApply.forEach((r) => {
+      const payDisplay = getPaymentDisplay ? getPaymentDisplay(r) : "";
+      if (!payDisplay || payDisplay === "-") return;
+      const defExpType = getPaymentDefaultExpenseType(payDisplay, apiPaymentMethods);
+      const targetRc = expenseTypeToReceiptCategory(defExpType);
+      if (!targetRc) return; // payment has no default → leave the eReceipt as-is
+      if (String(r.receipt_category ?? "").trim() === targetRc) return; // already correct
+      updateReceipt(r.id, { receipt_category: targetRc });
+    });
+  }, [receipts, user?.id, apiPaymentMethods, updateReceipt, getPaymentDisplay]);
 
   const handleReceiptClick = async (receipt, index) => {
     if (receipt.status === "0") {

@@ -138,6 +138,42 @@ export const paymentCategoryFromApiEnum = (value) => {
   return "";
 };
 
+/** LocalStorage map (payment display string → "Personal"/"Business") override. */
+const readPayExpenseTypeMap = () => {
+  try {
+    return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}");
+  } catch {
+    return {};
+  }
+};
+
+/**
+ * The default expense TYPE ("Personal" | "Business" | "") configured for a payment
+ * method. Checks the local override map first, then the API record's
+ * default_payment_category. `paymentDisplay` is the label like "Visa *1234".
+ */
+export const getPaymentDefaultExpenseType = (paymentDisplay, apiPaymentMethods = []) => {
+  const name = (paymentDisplay || "").toString().trim();
+  if (!name) return "";
+  const map = readPayExpenseTypeMap();
+  if (map[name]) return paymentCategoryFromApiEnum(map[name]);
+  const apiMatch = (apiPaymentMethods || []).find((m) =>
+    apiPaymentMethodMatchesLabel(m, name)
+  );
+  return paymentCategoryFromApiEnum(apiMatch?.default_payment_category);
+};
+
+/**
+ * Convert a "Personal"/"Business" expense type to the receipt_category value used on
+ * receipts ("0" = Personal, "1" = Business). Returns "" when there is no default.
+ */
+export const expenseTypeToReceiptCategory = (expenseType) => {
+  const v = (expenseType || "").toString().trim().toLowerCase();
+  if (v === "business" || v === "1") return "1";
+  if (v === "personal" || v === "0") return "0";
+  return "";
+};
+
 export const brandToCardTypeInt = (brand) => {
   const v = (brand || "").toLowerCase();
   if (v.includes("american") || v.includes("amex")) return 0;
