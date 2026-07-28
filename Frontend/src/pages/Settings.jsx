@@ -74,6 +74,7 @@ import { useData } from "../context/DataContext";
 import { getReceiptsMatchingPaymentMethod } from "../hooks/usePaymentDisplay";
 import {
   apiPaymentMethodMatchesLabel,
+  dedupeApiPaymentMethodRecords,
   getApiPaymentMethodDisplayName,
   getClearPaymentMethodUpdates,
   getLast4FromPaymentApiRecord,
@@ -457,8 +458,21 @@ const ManageModal = ({ type, onClose }) => {
         const directApiId = item?.apiId ?? getApiPaymentId(
           (apiPaymentMethods || []).find(p => normalizeMatchKey(p?.card_number) === normalizeMatchKey(item.name))
         ) ?? null;
-        const result = await deleteApiPaymentMethod(directApiId, item.name);
-        if (!result?.ok) throw new Error(result?.error || "Failed to delete payment method");
+        // Delete this record AND any duplicate API records for the same card (e.g. the
+        // "*7777" and "7777" copies the backend stored), so the entry doesn't linger
+        // after a single delete.
+        const idsToDelete = [directApiId, ...(item?.duplicateIds || [])].filter(
+          (id) => id != null && String(id) !== ""
+        );
+        if (idsToDelete.length === 0) idsToDelete.push(directApiId);
+        let anyDeleted = false;
+        let lastErr = null;
+        for (const id of idsToDelete) {
+          const result = await deleteApiPaymentMethod(id, item.name);
+          if (result?.ok) anyDeleted = true;
+          else lastErr = result?.error;
+        }
+        if (!anyDeleted) throw new Error(lastErr || "Failed to delete payment method");
         hidePaymentMethod(item.key || item.name);
         deleteCustomPaymentMethod(item.key || item.name);
         await fetchApiPaymentMethods();
@@ -561,20 +575,17 @@ const ManageModal = ({ type, onClose }) => {
     if (type === "categories") return customCategories.filter(c => !hiddenCategories.has(c)).map(c => ({ key: c, name: c, logo: null }));
     if (type === "payments") {
       if (PAYMENT_METHODS_API_ONLY) {
-        return (apiPaymentMethods || [])
-          .filter(isPaymentApiRecord)
-          .map((p, index) => {
-            const apiId = getApiPaymentId(p);
-            const cardName = getApiPaymentMethodDisplayName(p);
-            if (!cardName || hiddenPaymentMethods.has(cardName)) return null;
-            return {
-              key: apiId != null ? `api_${apiId}` : `api_idx_${index}`,
-              name: cardName,
-              logo: getApiPaymentMethodLogo(p),
-              apiId,
-            };
-          })
-          .filter(Boolean);
+        // Dedupe by display name so a card stored twice by the backend (e.g. card_number
+        // "*7777" and "7777") shows once — matching the Add/Edit dropdowns and Filter.
+        return dedupeApiPaymentMethodRecords(apiPaymentMethods, {
+          isHidden: (name) => hiddenPaymentMethods.has(name),
+        }).map(({ record, name, apiId, duplicateIds }, index) => ({
+          key: apiId != null ? `api_${apiId}` : `api_idx_${index}`,
+          name,
+          logo: getApiPaymentMethodLogo(record),
+          apiId,
+          duplicateIds,
+        }));
       }
       const customItems = customPaymentMethods
         .filter(p => !hiddenPaymentMethods.has(p))
@@ -2845,22 +2856,21 @@ const isBlockedTaxRateInput = (val) => {
       };
 
       if (PAYMENT_METHODS_API_ONLY) {
-        return (apiPaymentMethods || [])
-          .filter(isPaymentApiRecord)
-          .map((m, index) => {
-            const apiId = getApiEntityId(m);
-            const name = getApiPaymentMethodDisplayName(m);
-            if (!name || isPaymentMethodHidden(name)) return null;
-            return {
-              key: apiId != null ? `api_${apiId}` : `api_idx_${index}`,
-              name,
-              logo: resolvePaymentLogoFromApi(m, name),
-              isReceiptItem: false,
-              isApiItem: true,
-              apiId,
-            };
-          })
-          .filter(Boolean);
+        // Dedupe by display name (same card stored twice as "*7777"/"7777" shows once).
+        return dedupeApiPaymentMethodRecords(apiPaymentMethods, {
+          isHidden: (name) => isPaymentMethodHidden(name),
+        }).map(({ record, name, duplicateIds }, index) => {
+          const apiId = getApiEntityId(record);
+          return {
+            key: apiId != null ? `api_${apiId}` : `api_idx_${index}`,
+            name,
+            logo: resolvePaymentLogoFromApi(record, name),
+            isReceiptItem: false,
+            isApiItem: true,
+            apiId,
+            duplicateIds,
+          };
+        });
       }
 
       const buildPaymentItemFromLabel = (label) => {

@@ -380,6 +380,40 @@ export const mergePaymentMethodLabels = ({
   return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
 };
 
+/**
+ * Dedupe API payment-method RECORDS by their normalized display name.
+ *
+ * Surfaces that render records (e.g. the Settings list) need one row per card even when
+ * the backend stored the same card twice — e.g. card_number "*7777" and "7777", which both
+ * resolve to the same display name "Bnak 7 *7777". The dropdowns/Filter already collapse
+ * these (they dedupe by display name), so this makes Settings consistent with them.
+ *
+ * Keeps the FIRST record for each name (same record the dropdowns match first) and records
+ * the ids of the duplicates it dropped, so a single delete can remove every stored copy.
+ * Returns [{ record, name, apiId, duplicateIds }].
+ */
+export const dedupeApiPaymentMethodRecords = (
+  apiPaymentMethods = [],
+  { isHidden = () => false } = {}
+) => {
+  const byName = new Map();
+  (apiPaymentMethods || []).forEach((m) => {
+    if (!isPaymentApiRecord(m)) return;
+    const name = getApiPaymentMethodDisplayName(m);
+    if (!name || isHidden(name)) return;
+    const key = normalizePaymentMatchKey(name);
+    if (!key) return;
+    const id = m?.id ?? m?.payment_method_id ?? m?.fk_payment_method_id ?? null;
+    const existing = byName.get(key);
+    if (!existing) {
+      byName.set(key, { record: m, name, apiId: id, duplicateIds: [] });
+    } else if (id != null && String(id) !== String(existing.apiId)) {
+      existing.duplicateIds.push(id);
+    }
+  });
+  return Array.from(byName.values());
+};
+
 /** brand|last4 signature for duplicate detection (matches iOS / Settings). */
 export const getPaymentSignature = (paymentName, fallbackCardType = "", payCardMap = {}) => {
   const { last4 } = parsePaymentDisplay(paymentName);
