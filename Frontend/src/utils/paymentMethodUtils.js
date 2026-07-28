@@ -119,19 +119,21 @@ export const CARD_TYPE_INT_TO_BRAND = {
   8: "Other",
 };
 
-/** API enum for default_payment_category: "0" = none, "1" = Personal, "2" = Business */
+/** API enum for default_payment_category: "0" = Personal, "1" = Business, "2" = None
+ *  (matches the backend / mobile app). "None" means no default expense type. */
 export const paymentCategoryToApiEnum = (value) => {
   const v = String(value ?? "").trim().toLowerCase();
-  if (v === "2" || v === "business") return "2";
-  if (v === "1" || v === "personal") return "1";
-  return "0";
+  if (v === "0" || v === "personal") return "0";
+  if (v === "1" || v === "business") return "1";
+  // Blank / "2" / "none" → no default.
+  return "2";
 };
 
 export const paymentCategoryFromApiEnum = (value) => {
   const v = String(value ?? "").trim();
-  if (v === "0" || v === "") return "";
-  if (v === "1") return "Personal";
-  if (v === "2") return "Business";
+  if (v === "0") return "Personal";
+  if (v === "1") return "Business";
+  if (v === "2" || v === "") return "";
   const lower = v.toLowerCase();
   if (lower === "personal") return "Personal";
   if (lower === "business") return "Business";

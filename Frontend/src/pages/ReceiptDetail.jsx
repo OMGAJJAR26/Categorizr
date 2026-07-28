@@ -1156,10 +1156,25 @@ useEffect(() => {
           )
         : "");
 
+    // The card being edited may be stored as SEVERAL API records (e.g. the backend kept
+    // both "*5555" and "5555"). Derive the edited record's real signature so every copy of
+    // it is excluded — otherwise editing a card flags its own duplicate as "already exists".
+    const editedApiRecord =
+      excludeApiId != null
+        ? (apiPaymentMethods || []).find(
+            (p) => String(p.id ?? p.payment_method_id) === String(excludeApiId)
+          )
+        : null;
+    const editedSig =
+      (editedApiRecord && getApiPaymentMethodSignature(editedApiRecord)) ||
+      excludeSig ||
+      "";
+
     const duplicateInApi = (apiPaymentMethods || []).some((p) => {
       const pid = p.id ?? p.payment_method_id;
       if (excludeApiId != null && String(pid) === String(excludeApiId)) return false;
       const sig = getApiPaymentMethodSignature(p);
+      if (editedSig && sig === editedSig) return false; // another copy of the edited card
       return sig && sig === draftSig;
     });
     if (duplicateInApi) return "Payment Method already exists";
@@ -1172,7 +1187,7 @@ useEffect(() => {
       const pmLast4 = (pm.last4DigitCard || "").toString().replace(/\D/g, "").slice(0, 4);
       if (!brand || pmLast4.length !== 4) return false;
       const sig = `${brand}|${pmLast4}`;
-      if (excludeSig && sig === excludeSig) return false;
+      if (editedSig && sig === editedSig) return false;
       return sig === draftSig;
     });
     if (duplicateInLocal) return "Payment Method already exists";
@@ -1187,7 +1202,7 @@ useEffect(() => {
         .slice(-4);
       if (!brand || brand === "other" || rLast4.length !== 4) return false;
       const receiptSig = `${brand}|${rLast4}`;
-      if (excludeSig && receiptSig === excludeSig) return false;
+      if (editedSig && receiptSig === editedSig) return false;
       return receiptSig === draftSig;
     });
     if (duplicateInReceipts) return "Payment Method already exists";

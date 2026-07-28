@@ -76,6 +76,7 @@ import {
   apiPaymentMethodMatchesLabel,
   dedupeApiPaymentMethodRecords,
   getApiPaymentMethodDisplayName,
+  getApiPaymentMethodSignature,
   getClearPaymentMethodUpdates,
   getLast4FromPaymentApiRecord,
   isCashPaymentVariant,
@@ -1992,7 +1993,7 @@ const isBlockedTaxRateInput = (val) => {
             const iLast4 = (parsePaymentDisplay(i.name).last4 || "").trim();
             if (editedLast4 && iLast4 && editedLast4 === iLast4) return false;
           }
-          const sig = getPaymentSignature(i.name);
+          const sig = i.sig || getPaymentSignature(i.name);
           return sig && newSig && sig === newSig;
         });
         if (dupExists) return toast("error", "Payment Method already exists");
@@ -2086,7 +2087,7 @@ const isBlockedTaxRateInput = (val) => {
         // registrations). The user should be able to explicitly add any card even if it
         // appeared in a receipt — only check API/custom/default items.
         if (item.isReceiptItem) return false;
-        const sig = getPaymentSignature(item.name);
+        const sig = item.sig || getPaymentSignature(item.name);
         return sig && sig === nextSignature;
       });
       if (duplicateExists) return toast("error", "Payment Method already exists");
@@ -2508,7 +2509,7 @@ const isBlockedTaxRateInput = (val) => {
           const oLast4 = (parsePaymentDisplay(other.name).last4 || "").trim();
           if (editedLast4Inline && oLast4 && editedLast4Inline === oLast4) return false;
         }
-        const sig = getPaymentSignature(other.name);
+        const sig = other.sig || getPaymentSignature(other.name);
         return sig && sig === newSignature;
       });
       if (duplicatePayment) {
@@ -2869,6 +2870,10 @@ const isBlockedTaxRateInput = (val) => {
             isApiItem: true,
             apiId,
             duplicateIds,
+            // Signature straight from the record's real card_type (not inferred from the
+            // display name or receipts), so duplicate detection works for issuers like
+            // "Din Bank"/"FL Bank 1" whose brand can't be guessed from the text.
+            sig: getApiPaymentMethodSignature(record),
           };
         });
       }
@@ -2888,6 +2893,7 @@ const isBlockedTaxRateInput = (val) => {
             isReceiptItem: false,
             isApiItem: true,
             apiId,
+            sig: getApiPaymentMethodSignature(apiRec),
           };
         }
         const isFromReceipt = (receiptPaymentsRaw || []).some(
@@ -2952,7 +2958,7 @@ const isBlockedTaxRateInput = (val) => {
                 return false;
               }
             }
-            const sig = getPaymentSignature(item.name);
+            const sig = item.sig || getPaymentSignature(item.name);
             return sig && sig === nextSignature;
           });
           return dupExists ? "Payment Method already exists" : "";
