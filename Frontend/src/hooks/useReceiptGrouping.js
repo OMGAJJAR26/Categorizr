@@ -78,7 +78,7 @@ export const useReceiptGrouping = (receipts, filters, sortConfig, searchTerm) =>
     const groupedByYear = sortedReceipts.reduce((acc, receipt) => {
       const year = receipt.product_date
         ? new Date(Number(receipt.product_date) * 1000).getUTCFullYear()
-        : "Unknown";
+        : "No Date";
       if (!acc[year]) acc[year] = [];
       acc[year].push(receipt);
       return acc;

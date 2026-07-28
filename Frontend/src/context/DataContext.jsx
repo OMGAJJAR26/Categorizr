@@ -42,6 +42,7 @@ import {
   parseReceiptUnix,
   resolveReceiptCalendarUnix,
   calendarUnixToMobileUnix,
+  NO_DATE_SENTINEL_UNIX,
 } from "../utils/receiptDate";
 import { normalizeUserResponse } from "../utils/userUtils";
 
@@ -1240,7 +1241,18 @@ export const DataProvider = ({ children }) => {
 
               // Treat timestamps < 1,000,000 as invalid (too close to 1970-01-01)
               if (normalisedProductDate === 0 || normalisedProductDate < 1000000) {
-                if (createDate >= 1000000) {
+                // Fall back to create_date (the day it arrived ≈ "today") ONLY for an
+                // unverified eReceipt/draft whose scanner never found a date. A regular
+                // or already-saved receipt with no date stays undated ("No Date"), so a
+                // user who clears the date isn't silently handed the create date back.
+                const hasEmailId =
+                  r.fk_incoming_email_id != null &&
+                  r.fk_incoming_email_id !== "" &&
+                  String(r.fk_incoming_email_id) !== "0";
+                const isUnverifiedDraft =
+                  (r.is_draft === "1" || r.is_draft === 1 || hasEmailId) &&
+                  String(r.is_verify ?? "0") !== "1";
+                if (isUnverifiedDraft && createDate >= 1000000) {
                   normalisedProductDate = createDate;
                 } else {
                   normalisedProductDate = 0;
@@ -2618,6 +2630,20 @@ setMerchantsWithImages(
           return resolveFreshestReceiptTaxValues(receiptId) || (Array.isArray(candidate) ? candidate : []);
         })(),
       };
+
+      // Explicit date clear → "No Date". The user cleared the date when product_date is
+      // present in the update but empty/0. The backend treats 0/""/null as "no change"
+      // (keeps the old date), so we persist a tiny sentinel (< 1,000,000) instead; both
+      // web and mobile render it as "No Date" and the fetch normaliser collapses it to 0.
+      // Applied here so it covers BOTH payload branches (clear-payment row build + inline).
+      if (Object.prototype.hasOwnProperty.call(apiUpdates, "product_date")) {
+        const rawPd = apiUpdates["product_date"];
+        const rawPdStr =
+          rawPd === null || rawPd === undefined ? "" : String(rawPd).trim();
+        if (rawPdStr === "" || rawPdStr === "0") {
+          updatePayload.product_date = NO_DATE_SENTINEL_UNIX;
+        }
+      }
 
       // Try multiple possible endpoints
       const editEndpoints = [

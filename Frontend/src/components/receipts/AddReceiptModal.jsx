@@ -3,7 +3,24 @@ import { formatTaxRate, taxTypeDedupKey, taxTypesMatch, getSplitReceiptValidatio
 import {
   parseDateInputToUnix,
   todayLocalCalendarUnix,
+  NO_DATE_SENTINEL_UNIX,
 } from "../../utils/receiptDate";
+
+/**
+ * Resolve the product_date to save from the Add-Receipt form.
+ *  • Empty field  → the user explicitly cleared it → "No Date" sentinel. (The form
+ *    always pre-fills today or the scanner's date, so an empty field is a deliberate
+ *    clear, never a missing scan.)
+ *  • Valid date   → that date.
+ *  • Unparseable  → today (defensive fallback; e.g. a corrupt value).
+ */
+const resolveAddReceiptProductDate = (rawValue) => {
+  const raw = (rawValue ?? "").toString().trim();
+  if (raw === "") return NO_DATE_SENTINEL_UNIX; // user cleared → No Date
+  const parsed = parseDateInputToUnix(raw);
+  if (!parsed || parsed < 1000000) return todayLocalCalendarUnix();
+  return parsed;
+};
 import { containsEmoji, stripEmoji } from "../../utils/emojiUtils";
 import SimpleAlertModal from "../SimpleAlertModal";
 import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus, MoreHorizontal, Minus, ChevronLeft, ChevronRight, Pencil, Camera, PenLine, AlertCircle, RotateCcw, Check } from "lucide-react";
@@ -2289,14 +2306,10 @@ const handleFieldChange = (field, value) => {
         tags.warrantied ? "1" : "0",
       ].join(",");
 
-      // Build payload matching API model structure
-      // Validate date - ensure it's valid and not empty
-      let productDate = parseDateInputToUnix(formData.product_date);
-
-      // If date is still invalid, use today's local calendar date (not Date.now())
-      if (productDate === 0 || productDate < 1000000) {
-        productDate = todayLocalCalendarUnix();
-      }
+      // Build payload matching API model structure.
+      // A cleared date is saved as "No Date"; a valid date is kept; anything unparseable
+      // falls back to today. (See resolveAddReceiptProductDate.)
+      const productDate = resolveAddReceiptProductDate(formData.product_date);
 
       const purchasePrice = parseFloat(formData.purchasePrice) || 0;
       const tipAmount = parseFloat(formData.tip) || 0;
@@ -2863,8 +2876,7 @@ const handleFieldChange = (field, value) => {
 
   /** Build a minimal receipt API payload from current form state */
   const buildQuickPayload = (overrideId = null) => {
-    let productDate = parseDateInputToUnix(formData.product_date);
-    if (!productDate) productDate = todayLocalCalendarUnix();
+    const productDate = resolveAddReceiptProductDate(formData.product_date);
 
     const receiptTag = [
       "0",
@@ -3206,8 +3218,7 @@ const handleFieldChange = (field, value) => {
     setError(null);
     try {
       const fkUserId = parseInt(localStorage.getItem("fk_user_id")) || 0;
-      let productDate = parseDateInputToUnix(formData.product_date);
-      if (!productDate) productDate = todayLocalCalendarUnix();
+      const productDate = resolveAddReceiptProductDate(formData.product_date);
       const receiptTag = ["0","0","0","0","0","0","0"].join(",");
       const { rawCount: splitMediaRawCount, combined: combinedImageUrls } =
         await resolveAddReceiptEmailAttachment();

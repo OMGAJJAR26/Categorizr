@@ -520,16 +520,22 @@ export const generateSummaryHTML = ({
   filteredReceipts.forEach((receipt) => {
     const year = receipt.product_date
       ? new Date(Number(receipt.product_date) * 1000).getFullYear()
-      : "Unknown";
+      : "No Date";
     if (!groupedByYear[year]) groupedByYear[year] = [];
     groupedByYear[year].push(receipt);
   });
 
   let globalIndex = 1;
 
-  Object.keys(groupedByYear)
-    .sort((a, b) => b - a) // Sort years newest first
-    .forEach((year) => {
+  // Real years newest-first, with the undated "No Date" group always at the end.
+  const groupKeys = Object.keys(groupedByYear);
+  const hasNoDate = groupKeys.includes("No Date");
+  const orderedYears = [
+    ...groupKeys.filter((y) => y !== "No Date").sort((a, b) => b - a),
+    ...(hasNoDate ? ["No Date"] : []),
+  ];
+
+  orderedYears.forEach((year) => {
       const yearReceipts = groupedByYear[year];
       const yearTotal = yearReceipts.reduce(
         (sum, r) => sum + (Number(r.purchasePrice) || 0),

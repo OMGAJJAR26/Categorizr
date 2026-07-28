@@ -94,7 +94,7 @@ import {
   formatReceiptDateLong,
   parseDateInputToUnix,
   productDateToInputValue,
-  todayLocalCalendarUnix,
+  NO_DATE_SENTINEL_UNIX,
 } from "../utils/receiptDate";
 
 // Default payment methods
@@ -3331,9 +3331,11 @@ useEffect(() => {
         (selectedReceipt?.card_issuer_name ?? selectedReceipt?.cardIssuerName ?? "")
           .toString()
           .trim();
+      // Splits inherit the parent's date. If the parent is undated ("No Date"), the
+      // splits stay undated too (sentinel), rather than silently getting today's date.
       let productDate = Number(editedReceipt.product_date || selectedReceipt?.product_date) || 0;
       if (!productDate || productDate < 1000000) {
-        productDate = todayLocalCalendarUnix();
+        productDate = NO_DATE_SENTINEL_UNIX;
       }
       const receiptTag = ["0","0","0","0","0","0","0"].join(",");
 

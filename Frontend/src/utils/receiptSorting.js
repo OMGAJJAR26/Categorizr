@@ -34,22 +34,30 @@ export const sortReceipts = (receipts, sortConfig) => {
 };
 
 export const sortYears = (groupedReceipts, yearTotals, sortConfig) => {
-  const years = Object.keys(groupedReceipts);
-  
+  const NO_DATE = "No Date";
+  const allKeys = Object.keys(groupedReceipts);
+  // Undated receipts ("No Date") always sink to the very bottom, like the iPhone app,
+  // regardless of the active sort. Sort the real years, then append "No Date".
+  const hasNoDate = allKeys.includes(NO_DATE);
+  const years = allKeys.filter((y) => y !== NO_DATE);
+
+  let sorted;
   if (sortConfig.date === "newest") {
-    return years.sort((a, b) => b - a);
+    sorted = years.sort((a, b) => b - a);
   } else if (sortConfig.date === "oldest") {
-    return years.sort((a, b) => a - b);
+    sorted = years.sort((a, b) => a - b);
   } else if (sortConfig.amount === "asc") {
-    return years.sort((a, b) => yearTotals[a] - yearTotals[b]);
+    sorted = years.sort((a, b) => yearTotals[a] - yearTotals[b]);
   } else if (sortConfig.amount === "desc") {
-    return years.sort((a, b) => yearTotals[b] - yearTotals[a]);
+    sorted = years.sort((a, b) => yearTotals[b] - yearTotals[a]);
   } else if (sortConfig.order === "az") {
-    return years.sort((a, b) => a.localeCompare(b));
+    sorted = years.sort((a, b) => a.localeCompare(b));
   } else if (sortConfig.order === "za") {
-    return years.sort((a, b) => b.localeCompare(a));
+    sorted = years.sort((a, b) => b.localeCompare(a));
+  } else {
+    // Default: newest year first
+    sorted = years.sort((a, b) => b - a);
   }
-  
-  // Default: newest year first
-  return years.sort((a, b) => b - a);
+
+  return hasNoDate ? [...sorted, NO_DATE] : sorted;
 };
