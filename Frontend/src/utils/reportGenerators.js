@@ -1,7 +1,36 @@
 import { parseReceiptTags, toTaxLabel } from "./receiptFormatters";
+import { collectReceiptMediaUrls } from "./mediaUrlUtils";
 
-// Unified payment display logic
-const getPaymentDisplay = (r) => {
+/**
+ * Build the "View" receipt-image cell for a report row.
+ *
+ * Fixes: previously the cell linked to the raw `emailAttachment` field, which is often
+ * "0", empty, or several comma-joined URLs — so the link pointed at nothing. Here we
+ * collect the receipt's real image URLs (emailAttachment + receipt_image, split &
+ * deduped) and:
+ *   • link the first image via a normal href (works in PDF and as a fallback), and
+ *   • carry ALL urls in data-images so the preview window's viewer can page through
+ *     them with next/prev when a receipt has more than one image.
+ * The onclick calls the viewer when present (interactive preview) and otherwise just
+ * follows the href (PDF / plain new tab).
+ */
+const buildReceiptImageCell = (receipt, fontSize = "11px") => {
+  const urls = collectReceiptMediaUrls(receipt);
+  if (!urls.length) return `<span style="color: #999;">—</span>`;
+  const label = urls.length > 1 ? `View (${urls.length})` : "View";
+  const dataImages = urls.join("|").replace(/"/g, "&quot;");
+  const firstUrl = urls[0].replace(/"/g, "&quot;");
+  return (
+    `<a href="${firstUrl}" target="_blank" rel="noopener noreferrer" ` +
+    `data-images="${dataImages}" ` +
+    `onclick="return window.__openReceiptImages ? window.__openReceiptImages(event, this) : true" ` +
+    `style="color: #1a73e8; text-decoration: none; font-weight: 500; cursor: pointer; font-size: ${fontSize};">${label}</a>`
+  );
+};
+
+// Unified payment display logic (exported so the CSV/ZIP export renders the exact
+// same payment string as the on-screen/PDF report table).
+export const getPaymentDisplay = (r) => {
   if (!r.paymentType && !r.card_issuer_name) return "—";
 
   if (r.paymentType && r.card_issuer_name && r.last_4_digit_card) {
@@ -27,6 +56,23 @@ const getPaymentDisplay = (r) => {
   if (r.paymentType && r.last_4_digit_card) {
     const basePaymentType = r.paymentType.replace(/\s*\*\d+$/, "").trim();
     return `${basePaymentType} *${r.last_4_digit_card}`;
+  }
+
+  // Card network + issuer but no last 4 (e.g. "MasterCard" + "Bank of America"):
+  // keep the issuer instead of dropping it, so it reads "MasterCard Bank of America".
+  if (r.paymentType && r.card_issuer_name) {
+    const basePaymentType = r.paymentType.replace(/\s*\*\d+$/, "").trim();
+    const normalizedBase = basePaymentType.toLowerCase();
+    const normalizedIssuer = r.card_issuer_name.toLowerCase();
+    if (
+      normalizedBase.includes(normalizedIssuer) ||
+      normalizedIssuer.includes(normalizedBase)
+    ) {
+      return basePaymentType.length > r.card_issuer_name.length
+        ? basePaymentType
+        : r.card_issuer_name;
+    }
+    return `${basePaymentType} ${r.card_issuer_name}`;
   }
 
   if (r.paymentType) {
@@ -299,7 +345,7 @@ export const generateTaxReportHTML = ({
         <thead style="background: #f8f9fa; font-weight: bold; border-bottom: 2px solid #333;">
           <tr>
             <th style="text-align: center; padding: 2px 4px; border: 1px solid #ddd;">#</th>
-            <th style="text-align: left; padding: 2px 4px; border: 1px solid #ddd;">DATE</th>
+            <th style="text-align: left; padding: 2px 4px; border: 1px solid #ddd; white-space: nowrap;">DATE</th>
             <th style="text-align: left; padding: 2px 4px; border: 1px solid #ddd; white-space: nowrap;">MERCHANT</th>
             <th style="text-align: left; padding: 2px 4px; border: 1px solid #ddd; white-space: nowrap;">PAYMENT METHOD</th>
             <th style="text-align: left; padding: 2px 4px; border: 1px solid #ddd;">EXPENSE CATEGORY</th>
@@ -325,6 +371,7 @@ export const generateTaxReportHTML = ({
     const background = index % 2 === 0 ? "#ffffff" : "#f8f9fa";
     const dateStr = receipt.product_date
       ? new Date(Number(receipt.product_date) * 1000).toLocaleDateString("en-US", {
+          timeZone: "UTC", // UTC calendar day — avoid off-by-one in timezones behind UTC.
           day: "numeric",
           month: "short",
           year: "numeric",
@@ -391,9 +438,7 @@ export const generateTaxReportHTML = ({
     // Get payment display
     const paymentDisplayText = getPaymentDisplay(receipt);
 
-    const viewIconHTML = receipt.emailAttachment
-      ? `<a href="${receipt.emailAttachment}" target="_blank" style="text-decoration: none; color: #1e40af; font-size: 8px; font-weight: 500;">View</a>`
-      : "<span style='color: #999;'>—</span>";
+    const viewIconHTML = buildReceiptImageCell(receipt, "8px");
 
     html += `
       <tr style="background: ${background};">
@@ -551,7 +596,7 @@ export const generateSummaryHTML = ({
           <thead style="background: #f1f1f1; font-weight: bold;">
             <tr>
               <th style="text-align: left; padding: 6px; width: 35px;">#</th>
-              <th style="text-align: left; padding: 6px; width: 75px;">DATE</th>
+              <th style="text-align: left; padding: 6px; width: 90px; white-space: nowrap;">DATE</th>
               <th style="text-align: left; padding: 6px;">MERCHANT</th>
               <th style="text-align: left; padding: 6px;">EXPENSE CATEGORY</th>
               <th style="text-align: left; padding: 6px;">PAYMENT METHOD</th>
@@ -565,16 +610,15 @@ export const generateSummaryHTML = ({
       yearReceipts.forEach((receipt, idx) => {
         const dateStr = receipt.product_date
           ? new Date(Number(receipt.product_date) * 1000).toLocaleDateString("en-US", {
-              day: "numeric",
+              timeZone: "UTC", // product_date is a UTC calendar day — format in UTC so it
+              day: "numeric",  // never shows one day earlier in timezones behind UTC.
               month: "short",
               year: "numeric",
             })
           : "—";
 
         const background = idx % 2 === 0 ? "#ffffff" : "#f8f9fa";
-        const imageUrl = receipt.emailAttachment && receipt.emailAttachment.trim() !== ""
-          ? receipt.emailAttachment
-          : null;
+        const imageCellHTML = buildReceiptImageCell(receipt);
 
         // Simple payment display for summary report
         const paymentDisplayText = getPaymentDisplay(receipt);
@@ -584,7 +628,7 @@ export const generateSummaryHTML = ({
           <td style="text-align: left; padding: 6px; font-size: 11px;">${String(
             globalIndex
           ).padStart(3, "0")}</td>
-          <td style="text-align: left; padding: 6px; font-size: 11px;">${dateStr}</td>
+          <td style="text-align: left; padding: 6px; font-size: 11px; white-space: nowrap;">${dateStr}</td>
           <td style="text-align: left; padding: 6px; font-size: 11px;">${
             receipt.storeName || "Untitled"
           }</td>
@@ -596,16 +640,7 @@ export const generateSummaryHTML = ({
             receipt.purchasePrice || 0
           )}</td>
           <td style="text-align: center; padding: 6px; font-size: 11px;">
-          ${
-            imageUrl
-              ? `<a href="${imageUrl}" target="_blank" rel="noopener noreferrer" style="
-                  color: #1a73e8;
-                  text-decoration: none;
-                  font-weight: 500;
-                  cursor: pointer;
-                ">View</a>`
-              : `<span style="color: #999;">—</span>`
-          }
+          ${imageCellHTML}
           </td>
         </tr>
       `;
