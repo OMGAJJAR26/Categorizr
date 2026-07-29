@@ -4117,11 +4117,13 @@ const handleSelectLogo = (index) => {
       // update to apiPaymentMethods. Fetching immediately can race with the server and overwrite
       // the new entry with a stale list, making the method invisible until next page load.
 
-      // For "Other" card type, store the full "Other *XXXX" string as paymentType so the dropdown
-      // can match it; for all other known brands, store just the brand name (standard data model).
-      const paymentTypeForForm = selectedCardTypeForLogo === "Other"
-        ? paymentMethodString
-        : (selectedCardTypeForLogo || paymentMethodString);
+      // Store the selected card brand as paymentType — INCLUDING "Other". Previously "Other"
+      // cards stored the issuer-based string (e.g. "jjj *3455"), which the logo resolver
+      // couldn't recognise as "Other", so it fell through to the bank/last4 fallback
+      // (LOGO_MAP.bank = the MasterCard icon). Storing "Other" gives the generic icon and
+      // matches what re-selecting the card produces. Issuer + last4 (stored separately)
+      // still drive the display label ("jjj *3455").
+      const paymentTypeForForm = selectedCardTypeForLogo || paymentMethodString;
       handleFieldChange("paymentType", paymentTypeForForm);
       handleFieldChange("card_issuer_name", storedIssuer);
       if (last4Final) handleFieldChange("last_4_digit_card", last4Final);
@@ -5714,13 +5716,16 @@ const handleSelectLogo = (index) => {
                       const baseName = cardIssuerName.toLowerCase();
                       let cardType = cardIssuerName; // Default
 
-                      // 1. API card_type is authoritative (e.g. card_type=5 → "Diners Club")
+                      // 1. API card_type is authoritative (e.g. card_type=5 → "Diners Club",
+                      //    card_type=8 → "Other"). Trust it INCLUDING "Other" so a card the
+                      //    user saved as "Other" keeps the generic logo and isn't overridden
+                      //    by a matching receipt's stale scanned brand (e.g. "MasterCard").
                       const _apiRecForClick = (apiPaymentMethods || []).find(
                         (p) => apiPaymentMethodMatchesLabel(p, methodString)
                       );
                       const _brandFromApi = _apiRecForClick ? cardTypeIntToBrand(_apiRecForClick.card_type) : null;
 
-                      if (_brandFromApi && _brandFromApi !== "Other") {
+                      if (_brandFromApi) {
                         cardType = _brandFromApi;
                       } else if (baseName.includes("visa")) {
                         cardType = "Visa";
