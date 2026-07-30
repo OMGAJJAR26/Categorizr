@@ -28,6 +28,7 @@ import {
   cardTypeIntToBrand,
   getApiPaymentMethodCacheKey,
   getApiPaymentMethodDisplayName,
+  getApiPaymentMethodSignature,
   getLast4FromPaymentApiRecord,
   inferCardTypeFromPayment,
   isPaymentApiRecord,
@@ -761,28 +762,71 @@ export const DataProvider = ({ children }) => {
       { id, fk_user_id, ...normalized },
       escapeSqlApostrophe
     );
-    const updatePayQuery = paymentMethodPayloadToQuery(payload);
-    console.log("%c[PaymentMethods] POST /userpaymentmethod/updatePaymentMethodv1 →", "color:#f59e0b;font-weight:bold", payload);
-    try {
-      const res = await fetch(`${BASE_URL}/userpaymentmethod/updatePaymentMethodv1?${updatePayQuery}`, {
+
+    // The API returns HTTP 200 even on a rejected update: success carries the record
+    // (a card_number), while a failure carries only { code, message }. Detect real
+    // outcomes instead of trusting res.ok — otherwise a change (e.g. default expense
+    // type) looks saved in-session but never persists, and reverts after logout.
+    const postUpdate = async () => {
+      const q = paymentMethodPayloadToQuery(payload);
+      const res = await fetch(`${BASE_URL}/userpaymentmethod/updatePaymentMethodv1?${q}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload),
       });
-      if (res.ok) {
-        const data = await res.json();
-        console.log("%c[PaymentMethods] updateApiPaymentMethod response:", "color:#f59e0b;font-weight:bold", data);
-        const entity =
-          data && typeof data === "object" ? data : { ...payload };
+      let data = null;
+      try { data = await res.json(); } catch { /* non-JSON */ }
+      const succeeded =
+        res.ok &&
+        data &&
+        typeof data === "object" &&
+        data.card_number != null &&
+        !/duplicate/i.test(data.message || "");
+      const isDuplicate =
+        !succeeded && !!data && /duplicate/i.test(data.message || "");
+      return { res, data, succeeded, isDuplicate };
+    };
+
+    console.log("%c[PaymentMethods] POST /userpaymentmethod/updatePaymentMethodv1 →", "color:#f59e0b;font-weight:bold", payload);
+    try {
+      let result = await postUpdate();
+      console.log("%c[PaymentMethods] updateApiPaymentMethod response:", "color:#f59e0b;font-weight:bold", result.data);
+
+      // "Duplicate entry with card number and type not allowed": the same card is stored
+      // as more than one record (e.g. "*5555" and "5555"), so updating one collides with
+      // its twin. Delete the redundant duplicate(s) and retry so the edit actually saves.
+      if (result.isDuplicate) {
+        const targetSig = getApiPaymentMethodSignature({
+          card_number: payload.card_number,
+          card_type: payload.card_type,
+          card_issuer_name: payload.card_issuer_name,
+        });
+        const conflicts = (apiPaymentMethods || []).filter((m) => {
+          const mid = m?.id ?? m?.payment_method_id;
+          if (mid == null || String(mid) === String(id)) return false;
+          const sig = getApiPaymentMethodSignature(m);
+          return sig && targetSig && sig === targetSig;
+        });
+        for (const c of conflicts) {
+          await deleteApiPaymentMethod(c.id ?? c.payment_method_id, c.card_number);
+        }
+        if (conflicts.length > 0) {
+          result = await postUpdate();
+          console.log("%c[PaymentMethods] retried after removing duplicate(s):", "color:#f59e0b;font-weight:bold", result.data);
+        }
+      }
+
+      if (result.succeeded) {
+        const entity = result.data;
         setApiPaymentMethods((prev) =>
           prev.map((m) => (String(m.id ?? "") === String(id) ? { ...m, ...entity, id } : m))
         );
         _cachePaymentId(getApiPaymentMethodCacheKey(entity), id);
         return { ok: true, data: entity, error: null };
-      } else {
-        console.warn("[PaymentMethods] updateApiPaymentMethod failed, status:", res.status);
-        return { ok: false, data: null, error: `Failed with status ${res.status}` };
       }
+      const errMsg = result.data?.message || `Failed with status ${result.res.status}`;
+      console.warn("[PaymentMethods] updateApiPaymentMethod failed:", errMsg);
+      return { ok: false, data: null, error: errMsg };
     } catch (e) {
       console.error("[PaymentMethods] updateApiPaymentMethod error", e);
       return { ok: false, data: null, error: e.message || "Failed to update payment method" };
