@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 import SimpleAlertModal from "../SimpleAlertModal";
 import { collectReceiptMediaUrls } from "../../utils/mediaUrlUtils";
 import { getPaymentDisplay as getReportPaymentDisplay } from "../../utils/reportGenerators";
+import { matchesTaxTypes } from "../../utils/receiptFilters";
 
 // Format a receipt's product_date the same way the report tables do: UTC calendar day
 // (never one day earlier in timezones behind UTC), or "No Date" when undated.
@@ -29,17 +30,32 @@ const ReportModals = ({
   generateTaxReport,
   generateSummaryReport,
   formatCurrencyFixed2,
-  onApplyTaxTypes
+  onApplyTaxTypes,
+  reportTaxTypes = [],
 }) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [alertMsg, setAlertMsg] = useState(null);
 
   if (!showReportModal) return null;
 
+  // Tax types for the TAX REPORT — chosen in the report's own popup (reportTaxTypes) or,
+  // when the user already narrowed the list via the homepage filter, filters.taxTypes.
+  // The report filters ITS OWN copy of the receipts by these, so selecting tax types for
+  // the report never filters the main receipt screen.
+  const taxReportTaxTypes =
+    reportTaxTypes && reportTaxTypes.length > 0
+      ? reportTaxTypes
+      : (filters?.taxTypes || []);
+  const taxReportReceipts =
+    taxReportTaxTypes.length > 0
+      ? (filteredReceipts || []).filter((r) => matchesTaxTypes(r, taxReportTaxTypes))
+      : (filteredReceipts || []);
+  const taxReportFilters = { ...filters, taxTypes: taxReportTaxTypes };
+
   // Helper function to generate CSV data
   const generateCSVData = () => {
     if (reportType === "tax") {
-      return filteredReceipts.map((receipt, index) => {
+      return taxReportReceipts.map((receipt, index) => {
         const taxValues = receipt.receipt_tax_values || [];
         const taxes = taxValues.filter(
           (tax) => !(tax.tax_name || "").toLowerCase().includes("tip")
@@ -155,12 +171,11 @@ const ReportModals = ({
       // Generate PDF
       let htmlContent = "";
       if (reportType === "tax") {
-        const taxTypesToUse = filters.taxTypes.length > 0 ? filters.taxTypes : [];
         htmlContent = generateTaxReport({
-          receipts: filteredReceipts,
-          selectedTaxes: taxTypesToUse,
+          receipts: taxReportReceipts,
+          selectedTaxes: taxReportTaxTypes,
           monthLabel: "",
-          filters,
+          filters: taxReportFilters,
           sortConfig,
           searchTerm,
           formatCurrencyFixed2,
@@ -219,20 +234,16 @@ const ReportModals = ({
       let fileName = "";
 
       if (reportType === "tax") {
-        const taxTypesToUse = filters.taxTypes.length > 0 
-          ? filters.taxTypes 
-          : [];
-        
         htmlContent = generateTaxReport({
-          receipts: filteredReceipts,
-          selectedTaxes: taxTypesToUse,
+          receipts: taxReportReceipts,
+          selectedTaxes: taxReportTaxTypes,
           monthLabel: "",
-          filters,
+          filters: taxReportFilters,
           sortConfig,
           searchTerm,
           formatCurrencyFixed2
         });
-        
+
         fileName = `tax-report-${new Date().toISOString().split("T")[0]}`;
       } else if (reportType === "summary") {
         htmlContent = generateSummaryReport({

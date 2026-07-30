@@ -142,7 +142,7 @@ const matchesPaymentMethod = (receipt, paymentMethods) => {
   });
 };
 
-const matchesTaxTypes = (receipt, taxTypes) => {
+export const matchesTaxTypes = (receipt, taxTypes) => {
   if (!taxTypes || !taxTypes.length) return true;
 
   const taxLabels = Array.isArray(receipt?.receipt_tax_values)

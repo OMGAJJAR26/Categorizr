@@ -107,6 +107,9 @@ const HomePage = () => {
   const [selectedReceipt, setSelectedReceipt] = useState(null);
   const [selectedIndex, setSelectedIndex] = useState(null);
   const [showCustomizedReport, setShowCustomizedReport] = useState(false);
+  // Tax types chosen FOR the Tax Report only. Kept separate from the homepage filter
+  // (filters.taxTypes) so picking tax types for the report never filters the main list.
+  const [reportTaxTypes, setReportTaxTypes] = useState([]);
   const [showAddReceiptModal, setShowAddReceiptModal] = useState(false);
   const [duplicateInitialData, setDuplicateInitialData] = useState(null);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
@@ -583,8 +586,11 @@ const HomePage = () => {
     setSelectedIndex(null);
   };
 
-  const handleCreateReport = (type) => {
+  const handleCreateReport = (type, taxTypes = null) => {
     setReportType(type);
+    // Tax Report only: remember the tax types chosen for the report (from the popup or
+    // the active filter) WITHOUT writing them into the homepage filter.
+    setReportTaxTypes(Array.isArray(taxTypes) ? taxTypes : []);
     setShowReportModal(true);
   };
 
@@ -1382,6 +1388,7 @@ const HomePage = () => {
             generateSummaryReport={generateSummaryReport}
             formatCurrencyFixed2={formatCurrency}
             onApplyTaxTypes={handleApplyTaxTypes}
+            reportTaxTypes={reportTaxTypes}
           />
 
           <IntegrationsModal
