@@ -42,6 +42,7 @@ import {
   parseReceiptUnix,
   resolveReceiptCalendarUnix,
   calendarUnixToMobileUnix,
+  productDateUnixToApiUnix,
   NO_DATE_SENTINEL_UNIX,
 } from "../utils/receiptDate";
 import { normalizeUserResponse } from "../utils/userUtils";
@@ -1259,7 +1260,7 @@ export const DataProvider = ({ children }) => {
                 }
               }
 
-              normalisedProductDate = resolveReceiptCalendarUnix(
+              const _resolvedDay = resolveReceiptCalendarUnix(
                 normalisedProductDate,
                 createDate,
                 {
@@ -1267,6 +1268,14 @@ export const DataProvider = ({ children }) => {
                   fk_incoming_email_id: r.fk_incoming_email_id,
                 },
               );
+              // Store the resolved calendar day as UTC NOON (not midnight). resolveReceiptCalendarUnix
+              // is then idempotent when the value is re-resolved for display: a UTC-noon value
+              // short-circuits and returns the same day, so it is never shifted back a day by the
+              // create_date "created early-morning → prior day" heuristic — which only applies to raw
+              // UTC-midnight timestamps and otherwise reverts an edit made to the receipt's own
+              // create-date day (e.g. setting the date to Jul 2 on a receipt created Jul 2 06:37).
+              // 0 ("No Date") passes through unchanged.
+              normalisedProductDate = productDateUnixToApiUnix(_resolvedDay);
 
               return {
                 ...r,
