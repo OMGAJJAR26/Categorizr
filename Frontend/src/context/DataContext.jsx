@@ -35,6 +35,7 @@ import {
   mergePaymentMethodLabels,
   normalizeApiPaymentMethodInput,
   normalizePaymentField,
+  paymentCategoryToApiEnum,
   paymentMethodPayloadToQuery,
   syncReceiptPaymentFieldAliases,
   CLEAR_PAYMENT_API_VALUE,
@@ -819,7 +820,20 @@ export const DataProvider = ({ children }) => {
       if (result.succeeded) {
         const entity = result.data;
         setApiPaymentMethods((prev) =>
-          prev.map((m) => (String(m.id ?? "") === String(id) ? { ...m, ...entity, id } : m))
+          prev.map((m) =>
+            String(m.id ?? "") === String(id)
+              ? {
+                  ...m,
+                  ...entity,
+                  id,
+                  // The update always persists default_payment_category (it is part of every
+                  // payload), but the server response may not echo it — keep the in-memory
+                  // record in sync with what we just wrote so edit modals prefill the correct
+                  // category without needing a page reload.
+                  default_payment_category: payload.default_payment_category,
+                }
+              : m
+          )
         );
         _cachePaymentId(getApiPaymentMethodCacheKey(entity), id);
         return { ok: true, data: entity, error: null };
@@ -3001,12 +3015,32 @@ setMerchantsWithImages(
       const pmInput = finalBrand !== "Other"
         ? { ...receipt, cardTypeBrand: finalBrand }
         : receipt;
+      // Carry the sender's payment-method default (Business/Personal) so the received
+      // card is not created with "None". The forward stores it in payment_category_type
+      // ("0" Personal, "1" Business, "2"/"" None) — NOT in expense_type (a category name
+      // like "1a", which would resolve to None).
+      const forwardedPmDefault = receipt.payment_category_type ?? "";
+      const forwardedPmDefaultEnum = paymentCategoryToApiEnum(forwardedPmDefault);
       if (!alreadyHave) {
-        tasks.push(addApiPaymentMethod(pmInput, pmLogoUrl, receipt.expense_type || ""));
-      } else if (existingPm?.id && brandFromLogo && existingPm.icon_image !== pmLogoUrl) {
-        // The receipt carries an authoritative logo URL that differs from what is stored —
-        // update the existing PM so Settings/Filter show the correct logo going forward.
-        tasks.push(updateApiPaymentMethod(existingPm.id, pmInput, pmLogoUrl, receipt.expense_type || ""));
+        tasks.push(addApiPaymentMethod(pmInput, pmLogoUrl, forwardedPmDefault));
+      } else if (existingPm?.id) {
+        const logoNeedsUpdate = !!brandFromLogo && existingPm.icon_image !== pmLogoUrl;
+        // Backfill the default category when the received card is still "None" but the
+        // forward carries a real Business/Personal default. Guarded to only-when-None so a
+        // default the receiver set themselves is never clobbered.
+        const existingDefaultEnum = paymentCategoryToApiEnum(existingPm.default_payment_category);
+        const defaultNeedsUpdate =
+          (forwardedPmDefaultEnum === "0" || forwardedPmDefaultEnum === "1") &&
+          existingDefaultEnum === "2";
+        if (logoNeedsUpdate || defaultNeedsUpdate) {
+          // The receipt carries an authoritative logo URL that differs from what is stored —
+          // update the existing PM so Settings/Filter show the correct logo going forward.
+          const logoForUpdate = logoNeedsUpdate ? pmLogoUrl : (existingPm.icon_image || pmLogoUrl);
+          const defaultForUpdate = defaultNeedsUpdate
+            ? forwardedPmDefault
+            : (existingPm.default_payment_category ?? "");
+          tasks.push(updateApiPaymentMethod(existingPm.id, pmInput, logoForUpdate, defaultForUpdate));
+        }
       }
     }
 

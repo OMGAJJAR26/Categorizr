@@ -421,7 +421,11 @@ const HomePage = () => {
     }
 
     // ── Sync tracking (separate key — existing receipts may not have been synced yet) ──
-    const syncKey = `cat_synced_forwards_${user.id}`;
+    // v2: bumped so every already-received forwarded receipt re-syncs ONCE. This backfills
+    // the payment-method default category (Business/Personal) onto cards that an earlier
+    // build created as "None". The sync is idempotent (guarded by alreadyHave + only-when-None),
+    // so the one-time re-run is safe.
+    const syncKey = `cat_synced_forwards_v2_${user.id}`;
     let synced;
     try {
       synced = new Set(JSON.parse(localStorage.getItem(syncKey) || "[]"));

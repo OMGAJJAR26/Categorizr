@@ -914,8 +914,12 @@ useEffect(() => {
         paymentLogoUrl: "",
         card_issuer_name: selectedReceipt.card_issuer_name || "",
         last_4_digit_card: selectedReceipt.last_4_digit_card || "",
+        // initSubtotal already accounts for the tip (= total − tip − taxes), so use it
+        // whenever there's a tip OR non-tip taxes. Falling back to purchasePrice when
+        // only a tip is present (common on forwarded receipts) showed the full total as
+        // the subtotal without subtracting the tip.
         subtotal:
-          initTaxValues.length > 0
+          initTaxValues.length > 0 || receiptTip > 0
             ? initSubtotal
             : selectedReceipt.subtotal || selectedReceipt.purchasePrice || 0,
         purchasePrice: selectedReceipt.purchasePrice || 0,
