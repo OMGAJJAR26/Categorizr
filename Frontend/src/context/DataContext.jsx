@@ -16,7 +16,7 @@ import {
   resolveReceiptMediaFieldsForApi,
   receiptMediaStorageKey,
 } from "../utils/mediaUrlUtils";
-import { isMerchantSupersededByApi } from "../utils/merchantListUtils";
+import { isMerchantSupersededByApi, unescapeMerchantName } from "../utils/merchantListUtils";
 import { isNetworkReceivedReceipt } from "../utils/networkReceiptUtils";
 import {
   buildHomepageFilterMerchantsWithImages,
@@ -429,7 +429,13 @@ export const DataProvider = ({ children }) => {
       });
       if (res.ok) {
         const data = await res.json();
-        const merchants = Array.isArray(data) ? data.filter(m => m.store_name) : [];
+        // Undo the SQL '' apostrophe artifact on read so every consumer (Filter, Settings,
+        // receipt cards) shows and dedupes the same clean name (Longo''s → Longo's).
+        const merchants = Array.isArray(data)
+          ? data
+              .filter((m) => m.store_name)
+              .map((m) => ({ ...m, store_name: unescapeMerchantName(m.store_name) }))
+          : [];
         console.log("%c[Merchants] fetchApiMerchants response:", "color:#6366f1;font-weight:bold", merchants);
         setApiMerchants(merchants);
         // Server-backed stores must stay visible in Manage Merchants even if the name
@@ -1223,7 +1229,13 @@ export const DataProvider = ({ children }) => {
         console.log("%c[fetchData] GET /userstore/getStorev1", "color:#6366f1;font-weight:bold");
         if (apiStoreResRaw?.ok) {
           const apiStoreJson = await apiStoreResRaw.json();
-          apiMerchantsData = Array.isArray(apiStoreJson) ? apiStoreJson.filter(m => m.store_name) : [];
+          // Undo the SQL '' apostrophe artifact on read (Longo''s → Longo's) so every
+          // consumer shows and dedupes the same clean name. Mirrors fetchApiMerchants.
+          apiMerchantsData = Array.isArray(apiStoreJson)
+            ? apiStoreJson
+                .filter((m) => m.store_name)
+                .map((m) => ({ ...m, store_name: unescapeMerchantName(m.store_name) }))
+            : [];
           console.log("%c[fetchData] Merchants from API:", "color:#6366f1;font-weight:bold", apiMerchantsData);
           setApiMerchants(apiMerchantsData);
           purgeCustomMerchantsMatchingApi(apiMerchantsData);

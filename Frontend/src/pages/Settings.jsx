@@ -12,6 +12,7 @@ import {
 import {
   findRenamedApiMerchant,
   isMerchantSupersededByApi,
+  normalizeMerchantKey,
 } from "../utils/merchantListUtils";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -2763,10 +2764,10 @@ const isBlockedTaxRateInput = (val) => {
           isReceiptItem: true,
           isApiItem: false,
         }));
-      const rKeys = new Set(rItems.map(m => m.name.toLowerCase()));
+      const rKeys = new Set(rItems.map(m => normalizeMerchantKey(m.name)));
       // API merchants are the source of truth (GET /userstore/getStorev1)
       const apiItems = (apiMerchants || [])
-        .filter(m => m.store_name && !rKeys.has((m.store_name || "").toLowerCase()))
+        .filter(m => m.store_name && !rKeys.has(normalizeMerchantKey(m.store_name)))
         .map(m => {
           const apiId = m?.id ?? m?.store_id ?? m?.fk_store_id ?? null;
           return {
@@ -2778,17 +2779,17 @@ const isBlockedTaxRateInput = (val) => {
             isApiItem: true,
           };
         });
-      const apiNameKeys = new Set(apiItems.map((m) => m.name.toLowerCase()));
+      const apiNameKeys = new Set(apiItems.map((m) => normalizeMerchantKey(m.name)));
       const cItems = customMerchants
-        .filter(m => !rKeys.has(m.toLowerCase()) && !apiNameKeys.has(m.toLowerCase()) && !isMerchantHidden(m))
+        .filter(m => !rKeys.has(normalizeMerchantKey(m)) && !apiNameKeys.has(normalizeMerchantKey(m)) && !isMerchantHidden(m))
         .map(m => ({ key: m, name: m, logo: merchLogos[m] || null, isReceiptItem: false, isApiItem: false }));
       const allWithApi = [...rItems, ...apiItems, ...cItems];
-      const existingAfterApi = new Set(allWithApi.map((m) => (m.name || "").toLowerCase()));
+      const existingAfterApi = new Set(allWithApi.map((m) => normalizeMerchantKey(m.name)));
       const defaultItems = SETTINGS_DEFAULT_MERCHANTS_WITH_LOGOS
         .filter(
           (m) =>
             m.name &&
-            !existingAfterApi.has((m.name || "").toLowerCase()) &&
+            !existingAfterApi.has(normalizeMerchantKey(m.name)) &&
             !isMerchantHidden(m.name) &&
             !isMerchantSupersededByApi(m.name, apiMerchants)
         )

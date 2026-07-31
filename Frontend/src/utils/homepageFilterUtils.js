@@ -6,6 +6,7 @@ import {
   normalizePaymentMatchKey,
 } from "./paymentMethodUtils";
 import { isNetworkReceivedReceipt } from "./networkReceiptUtils";
+import { normalizeMerchantKey } from "./merchantListUtils";
 
 export const buildHomepageFilterMerchantsWithImages = (
   baseMerchantsWithImages,
@@ -14,11 +15,11 @@ export const buildHomepageFilterMerchantsWithImages = (
 ) => {
   const existing = new Set(
     (baseMerchantsWithImages || [])
-      .map((m) => (m?.name || "").trim().toLowerCase())
+      .map((m) => normalizeMerchantKey(m?.name))
       .filter(Boolean)
   );
   (apiMerchants || []).forEach((m) => {
-    const n = (m?.store_name || "").trim().toLowerCase();
+    const n = normalizeMerchantKey(m?.store_name);
     if (n) existing.add(n);
   });
 
@@ -26,7 +27,7 @@ export const buildHomepageFilterMerchantsWithImages = (
   (receipts || []).filter(isNetworkReceivedReceipt).forEach((r) => {
     const name = (r.storeName || "").trim();
     if (!name) return;
-    const key = name.toLowerCase();
+    const key = normalizeMerchantKey(name);
     if (existing.has(key)) return;
     extras.push({ name, image: r.store_image || "" });
     existing.add(key);

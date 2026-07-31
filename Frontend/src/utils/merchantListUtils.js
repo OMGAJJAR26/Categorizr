@@ -1,6 +1,20 @@
-/** Normalize merchant names for case-insensitive comparison. */
+/**
+ * Undo SQL apostrophe escaping the backend stored literally (Longo''s → Longo's).
+ * The write path escapes apostrophes for the query (' → ''); when that escaped form
+ * gets persisted verbatim it reads back doubled, splitting one store into "Longo''s",
+ * "Longo's", "Longos". Use for the display name so lists show it correctly.
+ */
+export const unescapeMerchantName = (value) =>
+  String(value || "").replace(/''/g, "'");
+
+/**
+ * Normalize merchant names for case-insensitive comparison / dedupe.
+ * Undoes the SQL '' artifact and folds curly apostrophes to straight so the same store
+ * never appears as multiple rows in one list but a single row in another.
+ */
 export const normalizeMerchantKey = (value) =>
-  String(value || "")
+  unescapeMerchantName(value)
+    .replace(/[‘’]/g, "'")
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase();
