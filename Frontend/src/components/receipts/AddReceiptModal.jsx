@@ -2094,20 +2094,44 @@ const handleFieldChange = (field, value) => {
         (sum, t) => sum + (parseFloat(t.tax_amount) || 0),
         0,
       );
+      // Behavior:
+      //  • No default tax type → never add the scanned tax (baseTaxLines is empty, so
+      //    the receipt gets no tax line and the subtotal equals the total).
+      //  • Default tax set + scanned tax ≈ the rate calc → use the rate-calculated amount
+      //    (auto, no reload button — the scanned amount adds nothing new).
+      //  • Default tax set + scanned tax differs from the rate calc (single default tax)
+      //    → keep the scanned amount as a manual override so the reload button and the
+      //    "Tax amount found on receipt" hint appear; the subtotal recomputes as usual.
+      const hasOcrTax = !isNaN(ocrTaxNum) && ocrTaxNum > 0;
       const ocrTaxMatchesDefault =
-        !isNaN(ocrTaxNum) &&
-        ocrTaxNum > 0 &&
+        hasOcrTax &&
         formulaicCombined > 0 &&
         Math.abs(ocrTaxNum - formulaicCombined) <= 0.02;
-      const ocrTaxValues = ocrTaxMatchesDefault
-        ? formulaicTaxes.length === 1
-          ? [{ ...formulaicTaxes[0], tax_amount: ocrTaxNum.toFixed(2), _isManual: true }]
-          : formulaicTaxes.map((t) => ({ ...t, _isManual: true }))
-        : formulaicTaxes.map((t) => ({ ...t, _isManual: false }));
+      let ocrTaxValues;
+      if (baseTaxLines.length === 0) {
+        // No default tax type — the scanned tax amount is ignored entirely.
+        ocrTaxValues = [];
+      } else if (hasOcrTax && !ocrTaxMatchesDefault && formulaicTaxes.length === 1) {
+        // Scanned tax differs from the rate calc — trust the receipt amount as a manual
+        // value and flag it so the UI shows the reload button + found-on-receipt hint.
+        ocrTaxValues = [
+          {
+            ...formulaicTaxes[0],
+            tax_amount: ocrTaxNum.toFixed(2),
+            _isManual: true,
+            _ocrFound: true,
+          },
+        ];
+      } else {
+        // Scanned tax matches the rate calc, no scanned tax was found, or there are
+        // multiple default taxes (a single scanned amount can't be attributed) — use the
+        // rate-calculated amounts with no manual override.
+        ocrTaxValues = formulaicTaxes.map((t) => ({ ...t, _isManual: false }));
+      }
       const ocrTaxSubtotalFinal =
         baseTaxLines.length > 0
           ? calculateSubtotalWithManualOverrides(ocrTotalNum, ocrTaxValues, 0)
-          : cleanNumericValue(parsedReceiptData?.subtotal);
+          : cleanNumericValue(parsedReceiptData?.total || parsedReceiptData?.subtotal);
 
       // If the OCR-detected payment method has a default expense type (Personal/
       // Business), auto-select that type for the new receipt (matches mobile).
@@ -5981,6 +6005,12 @@ const handleSelectLogo = (index) => {
                               placeholder="$0.00"
                             />
                           </div>
+                          {formData.receipt_tax_values[0]?._ocrFound &&
+                            formData.receipt_tax_values[0]?._isManual && (
+                            <p className="mt-1 text-xs text-blue-600 text-left">
+                              Tax amount found on receipt
+                            </p>
+                          )}
                         </div>
                         ) : null}
                             {showTaxDropdown === 1 && (
