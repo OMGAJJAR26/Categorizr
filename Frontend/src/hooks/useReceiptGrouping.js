@@ -31,6 +31,11 @@ const isToBeVerified = (r) => {
  */
 export const isNewForwardedReceipt = (r) => {
   if (!r || r.is_draft === "1" || r.is_verify !== "0") return false;
+  // Respect the cross-device read state. The mobile app marks a received receipt as
+  // read by setting status="1" (it does NOT touch is_verify — only the WebApp's own
+  // open handler sets is_verify="1"). Without this check a receipt already opened on
+  // Android (status="1", is_verify="0") would light up "New" again on the WebApp.
+  if (String(r.status) === "1") return false;
   // Only network-forwarded receipts get the blue "New" badge.
   // Email-received eReceipts belong in Draft Mode, not here.
   const isNetworkReceived =
