@@ -977,6 +977,57 @@ export function parseTotalFromLines(lines) {
   return { total, subtotal, taxAmount, tip };
 }
 
+/**
+ * Detect individual, NAMED tax-type lines (name + rate + amount) from receipt lines.
+ * Recognizes the common labels HST/GST/PST/QST/VAT. The rate is read from a printed
+ * "NN%" on the line when present, otherwise inferred from amount ÷ subtotal.
+ * Best-effort: only fires when the receipt prints a labelled tax breakdown. Generic
+ * unlabelled "Tax" lines are intentionally NOT returned here — those are handled by the
+ * existing taxAmount + default-tax-type behaviour. Capped at 2 (the receipt UI shows 2).
+ * @returns {Array<{name: string, rate: number|null, amount: number}>}
+ */
+export function parseTaxTypesFromLines(lines, subtotal = null) {
+  if (!lines || lines.length === 0) return [];
+  const sub = parseFloat(subtotal) || 0;
+  const LABEL_RE = /\b(HST|GST|PST|QST|VAT)\b/i;
+  const results = [];
+  const seen = new Set();
+
+  for (const line of lines) {
+    const text = (line.text || '').trim();
+    if (!text) continue;
+    const lower = text.toLowerCase();
+    // Skip subtotal / grand-total rows — they are not per-type tax lines.
+    if (/\b(subtotal|sub\s*total|sub-total)\b/.test(lower)) continue;
+    if (/\btotal\b/.test(lower) && !LABEL_RE.test(text)) continue;
+
+    const labelMatch = text.match(LABEL_RE);
+    if (!labelMatch) continue; // only named taxes here
+
+    const price = extractPriceFromText(text);
+    if (!price || price <= 0) continue;
+
+    const name = labelMatch[1].toUpperCase();
+
+    // Rate: prefer a printed "NN%" on the line; otherwise infer from amount ÷ subtotal.
+    let rate = null;
+    const rateMatch = text.match(/(\d+(?:\.\d+)?)\s*%/);
+    if (rateMatch) {
+      rate = parseFloat(rateMatch[1]);
+    } else if (sub > 0) {
+      rate = parseFloat(((price / sub) * 100).toFixed(2));
+    }
+
+    const key = `${name}|${price.toFixed(2)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    results.push({ name, rate, amount: price });
+    if (results.length >= 2) break;
+  }
+
+  return results;
+}
+
 // ─────────────────────────────────────────────────────────
 // MERCHANT LOGO
 // ─────────────────────────────────────────────────────────
@@ -1088,6 +1139,7 @@ export async function parseReceipt(fileOrUrl, merchantsList = []) {
     const purchaseDate = parsePurchaseDate(extractedText);
     const paymentMethod = parsePaymentMethod(extractedText);
     const { total, subtotal, taxAmount, tip } = parseTotalFromLines(lines);
+    const detectedTaxes = parseTaxTypesFromLines(lines, subtotal);
 
     // Fetch merchant logo (slow, do last)
     let merchantLogo = null;
@@ -1120,6 +1172,7 @@ export async function parseReceipt(fileOrUrl, merchantsList = []) {
       subtotal,
       taxAmount,
       tip,
+      detectedTaxes,
       rawText: extractedText,
     };
   } catch (error) {
@@ -1133,6 +1186,7 @@ export async function parseReceipt(fileOrUrl, merchantsList = []) {
       subtotal: null,
       taxAmount: null,
       tip: null,
+      detectedTaxes: [],
       rawText: '',
     };
   }

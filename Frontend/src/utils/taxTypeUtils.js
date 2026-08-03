@@ -3,6 +3,60 @@ import { formatTaxRate } from "./receiptFormatters";
 export const normalizeTaxNameKey = (name) =>
   (name || "").toString().trim().toLowerCase();
 
+/**
+ * Turn OCR-detected tax lines (name + rate + amount) into receipt tax-value entries,
+ * matched against the account's tax types BY NAME.
+ *
+ * - Same name AND same rate → reuse the existing tax type (no account change).
+ * - Same name, different rate → a new tax type (flagged _ocrNew) — per product decision
+ *   we ADD a separate variant rather than editing the existing rate.
+ * - New name → a new tax type (flagged _ocrNew).
+ *
+ * Every entry is flagged _ocrDetected so the UI can show a "from receipt" note, and the
+ * amount is kept as the scanned value (_isManual) so the subtotal reflects the receipt.
+ * Capped at 2 (the receipt UI shows two tax lines).
+ *
+ * @param {Array<{name:string, rate:number|null, amount:number}>} detectedTaxes
+ * @param {Array} accountTaxTypes - taxData records ({ id, tax_name, tax_rate })
+ */
+export function resolveOcrDetectedTaxes(detectedTaxes, accountTaxTypes = []) {
+  const nameKey = (s) => String(s || "").trim().toLowerCase();
+  const ratesMatch = (a, b) =>
+    Math.abs((parseFloat(a) || 0) - (parseFloat(b) || 0)) < 0.01;
+
+  return (detectedTaxes || [])
+    .filter((d) => d && d.name && parseFloat(d.amount) > 0)
+    .slice(0, 2)
+    .map((d) => {
+      const rate = d.rate != null ? parseFloat(d.rate) : 0;
+      const amount = parseFloat(d.amount).toFixed(2);
+      const sameName = (accountTaxTypes || []).filter(
+        (t) => nameKey(t.tax_name) === nameKey(d.name)
+      );
+      const exact = sameName.find((t) => ratesMatch(t.tax_rate, rate));
+      if (exact) {
+        return {
+          fk_tax_id: exact.id,
+          tax_name: exact.tax_name,
+          tax_rate: String(exact.tax_rate ?? rate),
+          tax_amount: amount,
+          _isManual: true,
+          _ocrDetected: true,
+          _ocrNew: false,
+        };
+      }
+      return {
+        fk_tax_id: 0,
+        tax_name: d.name,
+        tax_rate: String(rate),
+        tax_amount: amount,
+        _isManual: true,
+        _ocrDetected: true,
+        _ocrNew: true,
+      };
+    });
+}
+
 export const isTipTax = (tax) =>
   (tax?.tax_name || "").toString().toLowerCase().includes("tip");
 

@@ -65,6 +65,7 @@ import {
   filterNonTipReceiptTaxValues,
   findTipLineInReceiptTaxValues,
   getReceiptsUsingTax,
+  resolveOcrDetectedTaxes,
 } from "../../utils/taxTypeUtils";
 import {
   splitMediaField,
@@ -1893,6 +1894,77 @@ const handleFieldChange = (field, value) => {
     });
   };
 
+  // Save an OCR-detected tax type (new to the account) into the user's tax types.
+  // This is the "confirm before saving account-wide" step — the tax is already applied on
+  // the receipt; this button persists it so it's reusable and stops being flagged as new.
+  const [savingOcrTaxIdx, setSavingOcrTaxIdx] = useState(null);
+  const saveOcrTaxToAccount = async (index) => {
+    const tax = formData.receipt_tax_values?.[index];
+    if (!tax || !tax._ocrNew || savingOcrTaxIdx != null) return;
+    setSavingOcrTaxIdx(index);
+    try {
+      const fk_user_id = localStorage.getItem("fk_user_id") || "";
+      const saved = await addTax({
+        tax_name: tax.tax_name,
+        tax_rate: String(tax.tax_rate ?? "0"),
+        tax_number: "", // backend requires the field (empty is accepted)
+        fk_user_id,
+        is_default_tax: 0,
+      });
+      const newId = saved?.id ?? saved?.data?.id ?? saved?.tax?.id ?? 0;
+      // The API returns HTTP 200 even on a soft failure (e.g. {code:"002"} with no id).
+      // Only clear the "new" flag when a real tax record came back, so the user can retry.
+      if (!newId) {
+        console.warn("[OCR tax] not saved to account:", saved);
+        return;
+      }
+      setFormData((prev) => {
+        const arr = [...(prev.receipt_tax_values || [])];
+        if (arr[index]) {
+          arr[index] = {
+            ...arr[index],
+            _ocrNew: false,
+            fk_tax_id: newId,
+          };
+        }
+        return { ...prev, receipt_tax_values: arr };
+      });
+    } catch (e) {
+      console.error("Failed to save OCR-detected tax type", e);
+    } finally {
+      setSavingOcrTaxIdx(null);
+    }
+  };
+
+  // Small note under a tax line: "From receipt" for a scanner-detected tax type (with a
+  // "Save to my tax types" button when it's new to the account), or "Tax amount found on
+  // receipt" for the default-tax amount case.
+  const ocrTaxNote = (index) => {
+    const tax = formData.receipt_tax_values?.[index];
+    if (!tax) return null;
+    const isDetected = !!tax._ocrDetected;
+    const isFoundAmount = !isDetected && tax._ocrFound && tax._isManual;
+    if (!isDetected && !isFoundAmount) return null;
+    return (
+      <div className="mt-1 text-xs text-left flex items-center gap-2 flex-wrap">
+        <span className="text-blue-600">
+          {isDetected ? "From receipt" : "Tax amount found on receipt"}
+        </span>
+        {tax._ocrNew && (
+          <button
+            type="button"
+            onClick={() => saveOcrTaxToAccount(index)}
+            disabled={savingOcrTaxIdx === index}
+            className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors disabled:opacity-50"
+          >
+            <Plus size={11} />
+            {savingOcrTaxIdx === index ? "Saving…" : "Save to my tax types"}
+          </button>
+        )}
+      </div>
+    );
+  };
+
   // ── +/- sign toggle for currency fields (Total, Tip, Tax — not read-only Subtotal) ──
   const toggleTotalSign = () => {
     const cur = parseFloat(formData.purchasePrice) || 0;
@@ -2094,9 +2166,16 @@ const handleFieldChange = (field, value) => {
         (sum, t) => sum + (parseFloat(t.tax_amount) || 0),
         0,
       );
-      // Behavior:
-      //  • No default tax type → never add the scanned tax (baseTaxLines is empty, so
-      //    the receipt gets no tax line and the subtotal equals the total).
+      // Tax types the scanner read off the receipt (e.g. "HST 13% $1.03") take priority
+      // over the account default — they are the receipt's real taxes. Entries not already
+      // in the account are flagged (_ocrNew) so the UI can offer to save them.
+      const detectedTaxLines = resolveOcrDetectedTaxes(
+        parsedReceiptData?.detectedTaxes,
+        taxData,
+      );
+
+      // Behavior when the scan did NOT read named tax types (fall back to the default):
+      //  • No default tax type → never add the scanned tax (subtotal equals the total).
       //  • Default tax set + scanned tax ≈ the rate calc → use the rate-calculated amount
       //    (auto, no reload button — the scanned amount adds nothing new).
       //  • Default tax set + scanned tax differs from the rate calc (single default tax)
@@ -2108,7 +2187,10 @@ const handleFieldChange = (field, value) => {
         formulaicCombined > 0 &&
         Math.abs(ocrTaxNum - formulaicCombined) <= 0.02;
       let ocrTaxValues;
-      if (baseTaxLines.length === 0) {
+      if (detectedTaxLines.length > 0) {
+        // The receipt's own named tax types win over the account default.
+        ocrTaxValues = detectedTaxLines;
+      } else if (baseTaxLines.length === 0) {
         // No default tax type — the scanned tax amount is ignored entirely.
         ocrTaxValues = [];
       } else if (hasOcrTax && !ocrTaxMatchesDefault && formulaicTaxes.length === 1) {
@@ -2129,7 +2211,7 @@ const handleFieldChange = (field, value) => {
         ocrTaxValues = formulaicTaxes.map((t) => ({ ...t, _isManual: false }));
       }
       const ocrTaxSubtotalFinal =
-        baseTaxLines.length > 0
+        ocrTaxValues.length > 0
           ? calculateSubtotalWithManualOverrides(ocrTotalNum, ocrTaxValues, 0)
           : cleanNumericValue(parsedReceiptData?.total || parsedReceiptData?.subtotal);
 
@@ -6005,12 +6087,7 @@ const handleSelectLogo = (index) => {
                               placeholder="$0.00"
                             />
                           </div>
-                          {formData.receipt_tax_values[0]?._ocrFound &&
-                            formData.receipt_tax_values[0]?._isManual && (
-                            <p className="mt-1 text-xs text-blue-600 text-left">
-                              Tax amount found on receipt
-                            </p>
-                          )}
+                          {ocrTaxNote(0)}
                         </div>
                         ) : null}
                             {showTaxDropdown === 1 && (
@@ -6127,6 +6204,7 @@ const handleSelectLogo = (index) => {
                               placeholder="$0.00"
                             />
                           </div>
+                          {ocrTaxNote(1)}
                         </div>
                         ) : null}
                             {showTaxDropdown === 2 && (
