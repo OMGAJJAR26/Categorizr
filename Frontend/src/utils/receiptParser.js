@@ -989,39 +989,63 @@ export function parseTotalFromLines(lines) {
 export function parseTaxTypesFromLines(lines, subtotal = null) {
   if (!lines || lines.length === 0) return [];
   const sub = parseFloat(subtotal) || 0;
-  const LABEL_RE = /\b(HST|GST|PST|QST|VAT)\b/i;
+  const RATE_RE = /(\d{1,2}(?:\.\d+)?)\s*%/;
+  const PRIORITY = ['HST', 'GST', 'PST', 'QST', 'VAT'];
+
+  // Pick the tax label from a line, preferring HST — a combined "GST/HST" label is the
+  // harmonized tax (HST), and receipts often print both.
+  const pickLabel = (text) => {
+    const up = (text || '').toUpperCase();
+    for (const l of PRIORITY) {
+      if (new RegExp(`\\b${l}\\b`).test(up)) return l;
+    }
+    return null;
+  };
+
+  // Pass 1 — collect a printed rate per label from ANY line (the rate is often on a
+  // separate line from the amount, e.g. "13%  HST R135772911").
+  const rateByLabel = {};
+  for (const line of lines) {
+    const text = (line.text || '').trim();
+    if (!text) continue;
+    const rateM = text.match(RATE_RE);
+    if (!rateM) continue;
+    const label = pickLabel(text);
+    if (!label) continue;
+    const r = parseFloat(rateM[1]);
+    if (r > 0 && r <= 30 && rateByLabel[label] == null) rateByLabel[label] = r;
+  }
+
+  // Pass 2 — collect the tax amount from each labelled line.
   const results = [];
   const seen = new Set();
-
   for (const line of lines) {
     const text = (line.text || '').trim();
     if (!text) continue;
     const lower = text.toLowerCase();
-    // Skip subtotal / grand-total rows — they are not per-type tax lines.
-    if (/\b(subtotal|sub\s*total|sub-total)\b/.test(lower)) continue;
-    if (/\btotal\b/.test(lower) && !LABEL_RE.test(text)) continue;
+    // Skip subtotal / grand-total rows and registration-number lines.
+    if (/\b(subtotal|sub\s*total|sub-total|total)\b/.test(lower)) continue;
+    if (/\bR\d{5,}\b/.test(text)) continue; // e.g. "13% HST R135772911" — rate only, no amount
 
-    const labelMatch = text.match(LABEL_RE);
-    if (!labelMatch) continue; // only named taxes here
+    const label = pickLabel(text);
+    if (!label) continue;
 
     const price = extractPriceFromText(text);
     if (!price || price <= 0) continue;
+    // A tax is a fraction of the subtotal — guard against grabbing a large id/number.
+    if (sub > 0 && price > sub * 1.5) continue;
 
-    const name = labelMatch[1].toUpperCase();
-
-    // Rate: prefer a printed "NN%" on the line; otherwise infer from amount ÷ subtotal.
+    // Rate: printed on this line → the label's printed rate from pass 1 → inferred.
     let rate = null;
-    const rateMatch = text.match(/(\d+(?:\.\d+)?)\s*%/);
-    if (rateMatch) {
-      rate = parseFloat(rateMatch[1]);
-    } else if (sub > 0) {
-      rate = parseFloat(((price / sub) * 100).toFixed(2));
-    }
+    const rateM = text.match(RATE_RE);
+    if (rateM) rate = parseFloat(rateM[1]);
+    else if (rateByLabel[label] != null) rate = rateByLabel[label];
+    else if (sub > 0) rate = parseFloat(((price / sub) * 100).toFixed(2));
 
-    const key = `${name}|${price.toFixed(2)}`;
+    const key = `${label}|${price.toFixed(2)}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    results.push({ name, rate, amount: price });
+    results.push({ name: label, rate, amount: price });
     if (results.length >= 2) break;
   }
 
