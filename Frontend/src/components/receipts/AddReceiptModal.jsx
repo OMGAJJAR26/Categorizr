@@ -3132,22 +3132,29 @@ const handleFieldChange = (field, value) => {
   const createSplit = (existingSplits = []) => {
     const mainTotal = parseFloat(formData.purchasePrice) || 0;
     const mainSubtotal = parseFloat(formData.subtotal) || mainTotal;
-    const mainTaxes = formData.receipt_tax_values || [];
+    const mainTip = parseFloat(formData.tip) || 0;
+    // Tip is tracked separately (formData.tip); never treat it as a tax line here.
+    const mainTaxes = filterNonTipReceiptTaxValues(formData.receipt_tax_values || []);
     const n = existingSplits.length + 1;
     const frac = mainSubtotal > 0 ? (1 / n) : 0;
     const splitSubtotal = parseFloat((mainSubtotal * frac).toFixed(2));
-    const splitTotal = parseFloat((mainTotal * frac).toFixed(2));
+    const splitTip = parseFloat((mainTip * frac).toFixed(2));
+    const splitTaxes = mainTaxes.map(t => ({
+      ...t,
+      tax_amount: parseFloat(((parseFloat(t.tax_rate) / 100) * splitSubtotal).toFixed(2)),
+    }));
+    const splitTaxSum = splitTaxes.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0);
+    // Total = Subtotal + Taxes + Tip (rebuilt from parts so it always reconciles).
+    const splitTotal = parseFloat((splitSubtotal + splitTaxSum + splitTip).toFixed(2));
     return {
       _id: Date.now() + Math.random(),
       receipt_category: formData.receipt_category || 0,
       expense_type: formData.expense_type || "",
       subtotal: splitSubtotal,
+      tip: splitTip,
       purchasePrice: splitTotal,
       product_name: "",
-      receipt_tax_values: mainTaxes.map(t => ({
-        ...t,
-        tax_amount: parseFloat(((parseFloat(t.tax_rate) / 100) * splitSubtotal).toFixed(2)),
-      })),
+      receipt_tax_values: splitTaxes,
     };
   };
 
@@ -3177,7 +3184,7 @@ const handleFieldChange = (field, value) => {
    *
    *  Amounts are capped at the main receipt's values; an alert fires if exceeded. */
   const updateSplitField = (idx, field, value) => {
-    if (field === "subtotal" || field === "purchasePrice") {
+    if (field === "subtotal" || field === "purchasePrice" || field === "tip") {
       value = sanitizeMoneyInput(value);
     }
     if (field === "product_name") {
@@ -3185,6 +3192,7 @@ const handleFieldChange = (field, value) => {
     }
     const mainSubtotal = parseFloat(formData.subtotal) || parseFloat(formData.purchasePrice) || 0;
     const mainTotal    = parseFloat(formData.purchasePrice) || 0;
+    const mainTip      = parseFloat(formData.tip) || 0;
 
     // ── Max-amount guards ────────────────────────────────────────────────────
     if (field === "subtotal") {
@@ -3201,27 +3209,35 @@ const handleFieldChange = (field, value) => {
         return;
       }
     }
+    if (field === "tip") {
+      const tip = parseFloat(value) || 0;
+      if (mainTip > 0 && tip > mainTip) {
+        setAlertMsg(`Tip cannot exceed $${mainTip.toFixed(2)}`);
+        return;
+      }
+    }
 
     setSplits(prev => {
       const updated = [...prev];
       const split   = updated[idx];
 
       if (field === "purchasePrice") {
-        // ── Same as main form: total → subtotal → taxes ───────────────────
+        // ── Same as main form: total → subtotal → taxes (net of tip) ──────
+        // Subtotal is derived (read-only): subtotal = (total − tip) / (1 + Σrate/100)
         const totalNum = parseFloat(value) || 0;
+        const tipNum   = parseFloat(split.tip) || 0;
         if (totalNum > 0) {
-          // subtotal = total / (1 + Σ rate/100)
-          const rateSum    = (split.receipt_tax_values || []).reduce(
+          const rateSum = (split.receipt_tax_values || []).reduce(
             (s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0
           );
-          const sub = parseFloat((totalNum / (1 + rateSum)).toFixed(2));
+          const sub = parseFloat(((totalNum - tipNum) / (1 + rateSum)).toFixed(2));
           const taxes = (split.receipt_tax_values || []).map(t => ({
             ...t,
-            tax_amount: sub > 0
+            tax_amount: sub !== 0
               ? parseFloat(((parseFloat(t.tax_rate) / 100) * sub).toFixed(2))
               : "",
           }));
-          updated[idx] = { ...split, purchasePrice: value, subtotal: sub > 0 ? sub.toString() : "", receipt_tax_values: taxes };
+          updated[idx] = { ...split, purchasePrice: value, subtotal: sub !== 0 ? sub.toString() : "", receipt_tax_values: taxes };
         } else {
           // total cleared → clear subtotal and taxes too
           updated[idx] = {
@@ -3232,16 +3248,41 @@ const handleFieldChange = (field, value) => {
           };
         }
 
+      } else if (field === "tip") {
+        // ── Same as main form: changing tip KEEPS TOTAL FIXED and recomputes
+        //    subtotal + taxes from the shared base (total − tip). ───────────
+        const tipNum   = parseFloat(value) || 0;
+        const totalNum = parseFloat(split.purchasePrice) || 0;
+        const rateSum  = (split.receipt_tax_values || []).reduce(
+          (s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0
+        );
+        const sub = totalNum > 0
+          ? parseFloat(((totalNum - tipNum) / (1 + rateSum)).toFixed(2))
+          : 0;
+        const taxes = (split.receipt_tax_values || []).map(t => ({
+          ...t,
+          tax_amount: sub !== 0
+            ? parseFloat(((parseFloat(t.tax_rate) / 100) * sub).toFixed(2))
+            : "",
+        }));
+        updated[idx] = {
+          ...split,
+          tip: value,
+          subtotal: totalNum > 0 ? sub.toString() : "",
+          receipt_tax_values: taxes,
+        };
+
       } else if (field === "subtotal") {
-        // ── Same as main form: subtotal → taxes → total ───────────────────
+        // ── Same as main form: subtotal → taxes → total (adds tip) ────────
         const sub = parseFloat(value) || 0;
+        const tipNum = parseFloat(split.tip) || 0;
         const taxes = (split.receipt_tax_values || []).map(t => ({
           ...t,
           tax_amount: sub > 0
             ? parseFloat(((parseFloat(t.tax_rate) / 100) * sub).toFixed(2))
             : "",
         }));
-        const total = sub + taxes.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0);
+        const total = sub + taxes.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0) + tipNum;
         updated[idx] = {
           ...split,
           subtotal: value,
@@ -3366,13 +3407,24 @@ const handleFieldChange = (field, value) => {
       // Save every user-defined split
       for (const split of splits) {
         const splitSubtotal = parseFloat(split.subtotal) || 0;
-        const taxValues = (split.receipt_tax_values || []).map(t => ({
+        const splitTip      = parseFloat(split.tip) || 0;
+        const taxValues = filterNonTipReceiptTaxValues(split.receipt_tax_values || []).map(t => ({
           id: 0, fk_user_id: fkUserId, fk_receipt_id: 0,
           fk_tax_id: parseInt(t.fk_tax_id) || 0,
           tax_name: t.tax_name || "", tax_rate: t.tax_rate || "0",
           tax_amount: (parseFloat(t.tax_amount) || 0).toString(),
           created: 0, updated: 0,
         }));
+        // Persist tip like the main receipt does — as a "Tip" tax line.
+        const splitTipLine = buildReceiptTipTaxEntry({
+          tipAmount: splitTip,
+          subtotal: splitSubtotal,
+          taxDefinitions: taxData,
+          existingTipLine: null,
+          fk_receipt_id: 0,
+          fk_user_id: fkUserId,
+        });
+        if (splitTipLine) taxValues.push(splitTipLine);
         const splitTotal = parseFloat(split.purchasePrice) ||
           parseFloat((splitSubtotal + taxValues.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0)).toFixed(2));
 
@@ -3396,10 +3448,16 @@ const handleFieldChange = (field, value) => {
       const remainder   = parseFloat((mainTotal - splitsTotal).toFixed(2));
 
       if (remainder > 0.009) {   // ignore sub-cent floating-point noise
-        // Back-calculate remainder subtotal using the main receipt's tax rates
-        const mainTaxRates = formData.receipt_tax_values || [];
+        // Leftover tip = main tip minus the tip already allocated across splits.
+        const mainTip       = parseFloat(formData.tip) || 0;
+        const splitsTipTotal = parseFloat(
+          splits.reduce((s, sp) => s + (parseFloat(sp.tip) || 0), 0).toFixed(2)
+        );
+        const remTip = parseFloat(Math.max(mainTip - splitsTipTotal, 0).toFixed(2));
+        // Back-calculate remainder subtotal (net of tip) using the main tax rates
+        const mainTaxRates = filterNonTipReceiptTaxValues(formData.receipt_tax_values || []);
         const rateSum      = mainTaxRates.reduce((s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0);
-        const remSubtotal  = parseFloat((remainder / (1 + rateSum)).toFixed(2));
+        const remSubtotal  = parseFloat(((remainder - remTip) / (1 + rateSum)).toFixed(2));
         const remTaxValues = mainTaxRates.map(t => ({
           id: 0, fk_user_id: fkUserId, fk_receipt_id: 0,
           fk_tax_id: parseInt(t.fk_tax_id) || 0,
@@ -3407,6 +3465,16 @@ const handleFieldChange = (field, value) => {
           tax_amount: parseFloat(((parseFloat(t.tax_rate) / 100) * remSubtotal).toFixed(2)).toString(),
           created: 0, updated: 0,
         }));
+        // Persist the leftover tip as a "Tip" tax line on the remainder receipt.
+        const remTipLine = buildReceiptTipTaxEntry({
+          tipAmount: remTip,
+          subtotal: remSubtotal,
+          taxDefinitions: taxData,
+          existingTipLine: null,
+          fk_receipt_id: 0,
+          fk_user_id: fkUserId,
+        });
+        if (remTipLine) remTaxValues.push(remTipLine);
 
         const remPayload = buildSplitPayload({
           total: remainder,
@@ -4815,6 +4883,8 @@ const handleSelectLogo = (index) => {
                         const split = splits[activeSplitIndex];
                         const mainSubtotal = parseFloat(formData.subtotal) || parseFloat(formData.purchasePrice) || 0;
                         const mainTotal    = parseFloat(formData.purchasePrice) || 0;
+                        const mainTip      = parseFloat(formData.tip) || 0;
+                        const hasTip       = mainTip > 0;
                         const fieldErr     = splitErrors[split._id] || {};
                         const hasAmountErr = !!fieldErr.amount;
                         return (
@@ -4851,30 +4921,24 @@ const handleSelectLogo = (index) => {
                               </select>
                             </div>
 
-                            {/* Subtotal */}
+                            {/* Subtotal (read-only, derived from Total − Tip) */}
                             <div>
                               <div className="flex items-center justify-between mb-1">
-                                <label className={`text-xs font-bold uppercase tracking-wide ${hasAmountErr ? "text-red-500" : "text-gray-500"}`}>
-                                  Subtotal *
+                                <label className="text-xs font-bold uppercase tracking-wide text-gray-500">
+                                  Subtotal
                                 </label>
                                 <span className="text-xs text-gray-400">Max: ${mainSubtotal.toFixed(2)}</span>
                               </div>
                               <div className="relative">
                                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
                                 <input
-                                  type="number"
-                                  className={`w-full text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800 border ${hasAmountErr ? "border-red-400 ring-1 ring-red-300" : "border-blue-400"}`}
-                                  value={split.subtotal ?? ""}
-                                  onChange={(e) => updateSplitField(activeSplitIndex, "subtotal", e.target.value)}
+                                  type="text"
+                                  readOnly
+                                  className={`w-full text-sm pl-6 pr-2 py-2 rounded-md bg-gray-50 border border-gray-200 cursor-not-allowed ${parseFloat(split.subtotal) < 0 ? "text-red-600 font-medium" : "text-gray-700"}`}
+                                  value={split.subtotal !== "" && split.subtotal != null ? parseFloat(split.subtotal).toFixed(2) : ""}
                                   placeholder="0.00"
-                                  min="0"
-                                  max={mainSubtotal}
-                                  step="0.01"
                                 />
                               </div>
-                              {hasAmountErr && (
-                                <p className="mt-1 text-xs text-red-500">{fieldErr.amount}</p>
-                              )}
                             </div>
 
                             {/* Tax fields */}
@@ -4911,6 +4975,33 @@ const handleSelectLogo = (index) => {
                                 </div>
                               );
                             })}
+
+                            {/* Tip — only when the original receipt has a tip */}
+                            {hasTip && (
+                              <div>
+                                <div className="flex items-center justify-between mb-1">
+                                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">
+                                    Tip{split.subtotal && parseFloat(split.subtotal) > 0
+                                      ? ` (${Math.round((parseFloat(split.tip || 0) / parseFloat(split.subtotal)) * 100)}%)`
+                                      : ""}
+                                  </label>
+                                  <span className="text-xs text-gray-400">Max: ${mainTip.toFixed(2)}</span>
+                                </div>
+                                <div className="relative">
+                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
+                                  <input
+                                    type="number"
+                                    className="w-full border border-blue-400 text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800"
+                                    value={split.tip ?? ""}
+                                    onChange={(e) => updateSplitField(activeSplitIndex, "tip", e.target.value)}
+                                    placeholder="0.00"
+                                    min="0"
+                                    max={mainTip}
+                                    step="0.01"
+                                  />
+                                </div>
+                              </div>
+                            )}
 
                             {/* Total */}
                             <div>
@@ -4969,12 +5060,18 @@ const handleSelectLogo = (index) => {
                               <span>${parseFloat(formData.subtotal).toFixed(2)}</span>
                             </div>
                           )}
-                          {(formData.receipt_tax_values || []).map((t, i) => (
+                          {filterNonTipReceiptTaxValues(formData.receipt_tax_values || []).map((t, i) => (
                             <div key={i} className="flex items-center justify-between text-xs text-gray-500">
                               <span>{t.tax_name} ({t.tax_rate}%)</span>
                               <span>${parseFloat(t.tax_amount || 0).toFixed(2)}</span>
                             </div>
                           ))}
+                          {parseFloat(formData.tip) > 0 && (
+                            <div className="flex items-center justify-between text-xs text-gray-500">
+                              <span>Tip</span>
+                              <span>${parseFloat(formData.tip).toFixed(2)}</span>
+                            </div>
+                          )}
                         </div>
 
                         {/* Splits list — or empty state */}
@@ -5022,12 +5119,18 @@ const handleSelectLogo = (index) => {
                                         <span>${parseFloat(split.subtotal).toFixed(2)}</span>
                                       </div>
                                     )}
-                                    {(split.receipt_tax_values || []).filter(t => parseFloat(t.tax_amount) > 0).map((t, ti) => (
+                                    {filterNonTipReceiptTaxValues(split.receipt_tax_values || []).filter(t => parseFloat(t.tax_amount) > 0).map((t, ti) => (
                                       <div key={ti} className="flex items-center justify-between text-xs text-gray-500">
                                         <span>{t.tax_name}</span>
                                         <span>${parseFloat(t.tax_amount).toFixed(2)}</span>
                                       </div>
                                     ))}
+                                    {parseFloat(split.tip) > 0 && (
+                                      <div className="flex items-center justify-between text-xs text-gray-500">
+                                        <span>Tip</span>
+                                        <span>${parseFloat(split.tip).toFixed(2)}</span>
+                                      </div>
+                                    )}
                                     {split.expense_type && (
                                       <p className="mt-1 text-xs text-gray-400">{split.expense_type}</p>
                                     )}
