@@ -2198,6 +2198,101 @@ setMerchantsWithImages(
     return false;
   };
 
+  // Delete many receipts at once. Deletes hit the API in PARALLEL (fast), then local state
+  // is updated in ONE pass — so the list actually reflects every deletion. (Calling the
+  // single deleteReceipt in a loop is buggy: each call closes over the same `receipts`
+  // snapshot, so successive setReceipts() calls resurrect the earlier-removed rows.)
+  const bulkDeleteReceipts = async (receiptIds) => {
+    const token = localStorage.getItem("token");
+    const ids = [...new Set((receiptIds || []).map((x) => String(x)))];
+    if (!token || ids.length === 0) return { ok: 0, fail: ids.length };
+
+    const deleteOne = async (receiptId) => {
+      const endpoints = [
+        `${BASE_URL}/receipt/deleteReceipt?receiptid=${receiptId}`,
+        `${BASE_URL}/receipt/deletereceiptv1?receiptid=${receiptId}`,
+        `${BASE_URL}/receipt/deleteReceiptv1?receiptid=${receiptId}`,
+      ];
+      for (const endpoint of endpoints) {
+        try {
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accesstoken: token },
+          });
+          if (response.ok) {
+            const data = await response.json().catch(() => ({}));
+            const isSuccess =
+              data.success === true ||
+              data.status === "success" ||
+              data.message?.toLowerCase().includes("success") ||
+              data.message?.toLowerCase().includes("deleted") ||
+              response.status === 200;
+            if (isSuccess) return true;
+          }
+        } catch (e) {
+          console.warn(`Bulk delete endpoint failed for ${receiptId}: ${e.message}`);
+        }
+      }
+      return false;
+    };
+
+    const results = await Promise.all(
+      ids.map(async (id) => ({ id, ok: await deleteOne(id) })),
+    );
+    const deletedIds = results.filter((r) => r.ok).map((r) => r.id);
+    if (deletedIds.length === 0) return { ok: 0, fail: ids.length };
+
+    const deletedSet = new Set(deletedIds);
+    const deletedReceipts = receipts.filter((r) => deletedSet.has(String(r.id)));
+    const remaining = receipts.filter((r) => !deletedSet.has(String(r.id)));
+
+    // Single state update — removes every deleted receipt at once (race-free).
+    setReceipts(remaining);
+
+    // Prune merchants / categories / payment methods that no receipt references anymore.
+    deletedReceipts.forEach((deletedReceipt) => {
+      const merchantName = (deletedReceipt.storeName || deletedReceipt.store_name || "").toString().trim();
+      if (merchantName && merchantName.toLowerCase() !== "miscellaneous") {
+        const stillExists = remaining.some(
+          (r) => (r.storeName || r.store_name || "").toString().trim() === merchantName,
+        );
+        if (!stillExists) {
+          setMerchants((prev) => prev.filter((m) => m !== merchantName));
+          setMerchantsWithImages((prev) => prev.filter((m) => m.name !== merchantName));
+        }
+      }
+
+      const category = (deletedReceipt.expense_type || deletedReceipt.expenseType || "").toString().trim();
+      if (category && category !== "0") {
+        const catStillExists = remaining.some(
+          (r) => (r.expense_type || r.expenseType || "").toString().trim() === category,
+        );
+        if (!catStillExists) setExpenseCategories((prev) => prev.filter((c) => c !== category));
+      }
+
+      const issuer = (deletedReceipt.card_issuer_name || deletedReceipt.cardIssuerName || "").toString().trim();
+      const last4 = (deletedReceipt.last_4_digit_card || deletedReceipt.last4DigitCard || "").toString().trim();
+      const payDisplay =
+        issuer && issuer !== "0"
+          ? last4 && last4 !== "0" ? `${issuer} *${last4}` : issuer
+          : (deletedReceipt.paymentType || deletedReceipt.payment_type || "").toString().trim();
+      if (payDisplay && payDisplay !== "0") {
+        const payStillExists = remaining.some((r) => {
+          const rIssuer = (r.card_issuer_name || r.cardIssuerName || "").toString().trim();
+          const rLast4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
+          const rDisp =
+            rIssuer && rIssuer !== "0"
+              ? rLast4 && rLast4 !== "0" ? `${rIssuer} *${rLast4}` : rIssuer
+              : (r.paymentType || r.payment_type || "").toString().trim();
+          return rDisp === payDisplay;
+        });
+        if (!payStillExists) setPaymentMethods((prev) => prev.filter((p) => p !== payDisplay));
+      }
+    });
+
+    return { ok: deletedIds.length, fail: ids.length - deletedIds.length };
+  };
+
   const postReceiptUpdatePayload = async (payload, token) => {
     if (!token || !payload?.id) return false;
     const editEndpoints = [
@@ -3561,6 +3656,7 @@ setMerchantsWithImages(
         getReceiptBadgeStatus,
         updateReceiptStatus,
         deleteReceipt,
+        bulkDeleteReceipts,
         updateReceipt,
         markReceiptAsForwarded,
         repairReceiptMediaOnServer,

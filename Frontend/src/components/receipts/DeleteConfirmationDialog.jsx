@@ -1,6 +1,15 @@
 import { motion, AnimatePresence } from "framer-motion";
 
-const DeleteConfirmationDialog = ({ isOpen, onClose, onConfirm, isDeleting }) => {
+const DeleteConfirmationDialog = ({
+  isOpen,
+  onClose,
+  onConfirm,
+  isDeleting,
+  message = "Are you sure you want to delete this Receipt?",
+  subtext = "This action is irreversible.",
+  confirmLabel = "Delete",
+  confirmingLabel = "Deleting...",
+}) => {
   if (!isOpen) return null;
 
   const backdropVariants = {
@@ -42,10 +51,10 @@ const DeleteConfirmationDialog = ({ isOpen, onClose, onConfirm, isDeleting }) =>
               Confirmation
             </h2>
             <p className="text-gray-600 mb-1">
-              Are you sure you want to delete this Receipt?
+              {message}
             </p>
             <p className="text-gray-500 text-sm">
-              This action is irreversible.
+              {subtext}
             </p>
           </div>
 
@@ -63,7 +72,7 @@ const DeleteConfirmationDialog = ({ isOpen, onClose, onConfirm, isDeleting }) =>
               disabled={isDeleting}
               className="flex-1 px-4 py-3 text-blue-600 font-semibold hover:bg-gray-50 transition-colors disabled:opacity-50"
             >
-              {isDeleting ? "Deleting..." : "Delete"}
+              {isDeleting ? confirmingLabel : confirmLabel}
             </button>
           </div>
         </motion.div>

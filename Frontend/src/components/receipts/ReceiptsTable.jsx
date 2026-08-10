@@ -5,6 +5,7 @@ import ReceiptBadges from "../ReceiptBadges";
 import SimpleAlertModal from "../SimpleAlertModal";
 import { formatReceiptDate } from "../../utils/receiptDate";
 import { isNewForwardedReceipt } from "../../hooks/useReceiptGrouping";
+import RowSelectCheckbox from "./RowSelectCheckbox";
 
 const ReceiptsTable = ({
   receipt,
@@ -23,6 +24,9 @@ const ReceiptsTable = ({
   onClearQuickbooksLink,
   isToBeVerified = false,
   disableDelete = false,
+  selectionMode = false,
+  isSelected = false,
+  onToggleSelect,
 }) => {
   const [showIntegrateMenu, setShowIntegrateMenu] = useState(false);
   const [showCloudPopup, setShowCloudPopup] = useState(false);
@@ -63,8 +67,9 @@ const ReceiptsTable = ({
           <ReceiptBadges receipt={receipt} isToBeVerified={isToBeVerified} isNewForwarded={isNewForwarded} />
         </div>
 
-        <div className="text-gray-800 font-medium text-sm xl:text-base">
-          {getFormattedDate()}
+        <div className="text-gray-800 font-medium text-sm xl:text-base flex items-center gap-2.5">
+          <RowSelectCheckbox selectionMode={selectionMode} isSelected={isSelected} onToggleSelect={onToggleSelect} />
+          <span>{getFormattedDate()}</span>
         </div>
 
         <div className="font-bold text-gray-900 text-sm xl:text-base">
@@ -238,8 +243,9 @@ const ReceiptsTable = ({
           <ReceiptBadges receipt={receipt} isToBeVerified={isToBeVerified} isNewForwarded={isNewForwarded} />
         </div>
 
-        <div className="flex justify-between items-start mb-2">
-          <div className="flex items-center gap-2">
+        <div className="flex justify-between items-center mb-2">
+          <div className="flex items-center gap-2.5">
+            <RowSelectCheckbox selectionMode={selectionMode} isSelected={isSelected} onToggleSelect={onToggleSelect} />
             <MerchantAvatar
               name={receipt.storeName || receipt.merchant}
               explicitUrl={receipt.store_image}

@@ -8,7 +8,7 @@ import PropagateLoader from "react-spinners/PropagateLoader";
 import Slider from "react-slick";
 import "slick-carousel/slick/slick.css";
 import "slick-carousel/slick/slick-theme.css";
-import { Search, Plus, Link } from "lucide-react";
+import { Search, Plus, Link, ListChecks, Check } from "lucide-react";
 import ReceiptDetail from "./ReceiptDetail";
 import FilterBar from "../components/filters/FilterBar";
 import SortMenu from "../components/filters/SortMenu";
@@ -21,6 +21,7 @@ import ReportModals from "../components/reports/ReportModals";
 import CustomizedReportModal from "../components/receipts/CustomizedReportModal";
 import AddReceiptModal from "../components/receipts/AddReceiptModal";
 import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationDialog";
+import BulkActionBar from "../components/receipts/BulkActionBar";
 import Toast from "../components/Toast";
 import IntegrationsModal from "../components/IntegrationsModal";
 import { useReceiptFilters } from "../hooks/useReceiptFilters";
@@ -45,7 +46,7 @@ import "./HomePage.css";
 
 const HomePage = () => {
   const navigate = useNavigate();
-  const { refreshData, silentRefreshData, receipts, loading, updateReceiptStatus, deleteReceipt, updateReceipt, user, syncForwardedReceiptData, markRecoveryEmailVerified, apiExpenseCategories, apiPaymentMethods } = useData();
+  const { refreshData, silentRefreshData, receipts, loading, updateReceiptStatus, deleteReceipt, bulkDeleteReceipts, updateReceipt, user, syncForwardedReceiptData, markRecoveryEmailVerified, apiExpenseCategories, apiPaymentMethods } = useData();
   const { formatCurrency } = useCurrency();
 
   // Custom hooks for complex logic
@@ -115,6 +116,12 @@ const HomePage = () => {
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [receiptToDelete, setReceiptToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  // ── Multi-select (bulk delete / bulk send) ──
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedReceiptIds, setSelectedReceiptIds] = useState(() => new Set());
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [isBulkSending, setIsBulkSending] = useState(false);
   const [toast, setToast] = useState({ 
     isVisible: false, 
     message: "", 
@@ -658,6 +665,144 @@ const HomePage = () => {
     setReceiptToDelete(null);
   };
 
+  // ── Multi-select (bulk delete / bulk send) ──
+  const visibleReceiptIds = useMemo(() => {
+    const ids = [];
+    (draftReceipts || []).forEach((r) => r?.id != null && ids.push(String(r.id)));
+    (sortedYears || []).forEach((y) =>
+      (groupedReceipts?.[y] || []).forEach((r) => r?.id != null && ids.push(String(r.id))),
+    );
+    return ids;
+  }, [draftReceipts, groupedReceipts, sortedYears]);
+
+  const toggleSelectReceipt = (id) => {
+    const key = String(id);
+    setSelectedReceiptIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const exitSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedReceiptIds(new Set());
+  };
+
+  const allVisibleSelected =
+    visibleReceiptIds.length > 0 &&
+    visibleReceiptIds.every((id) => selectedReceiptIds.has(id));
+
+  const toggleSelectAll = () => {
+    setSelectedReceiptIds((prev) => {
+      if (visibleReceiptIds.length > 0 && visibleReceiptIds.every((id) => prev.has(id))) {
+        return new Set();
+      }
+      return new Set(visibleReceiptIds);
+    });
+  };
+
+  // Deletes in parallel and updates the list in one pass (see bulkDeleteReceipts). The
+  // loader (isBulkDeleting) stays up until the receipts are actually gone from state, then
+  // the popup closes — so the dialog never closes while rows are still showing.
+  const handleBulkDeleteConfirm = async () => {
+    const ids = [...selectedReceiptIds];
+    if (ids.length === 0) return;
+    setIsBulkDeleting(true);
+    let result = { ok: 0, fail: ids.length };
+    try {
+      result = await bulkDeleteReceipts(ids);
+    } catch (e) {
+      console.error("Bulk delete failed:", e);
+    }
+    const { ok, fail } = result;
+    setIsBulkDeleting(false);
+    setShowBulkDeleteConfirm(false);
+    setSelectedReceiptIds(new Set());
+    setSelectionMode(false);
+    setToast({
+      isVisible: true,
+      message:
+        fail === 0
+          ? `${ok} receipt${ok === 1 ? "" : "s"} deleted`
+          : `Deleted ${ok}, ${fail} failed. Please try again.`,
+      type: fail === 0 ? "success" : "error",
+    });
+  };
+
+  // Tools shown in the bulk "Send to" menu (Sage is always offered, matching the row menu).
+  const bulkProviders = [
+    { key: "quickbooks", name: "QuickBooks Online", connected: quickbooksConnected },
+    { key: "sage-bc", name: "Sage", connected: true },
+    { key: "xero", name: "Xero", connected: xeroConnected },
+  ];
+
+  const handleBulkSend = async (providerKey) => {
+    const selected = (receipts || []).filter((r) => selectedReceiptIds.has(String(r.id)));
+    if (selected.length === 0) return;
+    const handler =
+      providerKey === "quickbooks"
+        ? handleLinkToQuickBooks
+        : providerKey === "xero"
+          ? handleLinkToXero
+          : providerKey === "sage-bc"
+            ? handleLinkToSage
+            : null;
+    if (!handler) return;
+    setIsBulkSending(true);
+    let ok = 0;
+    let fail = 0;
+    for (const r of selected) {
+      try {
+        await handler(r);
+        ok += 1;
+      } catch (e) {
+        console.error("Bulk send error for", r?.id, e);
+        fail += 1;
+      }
+    }
+    setIsBulkSending(false);
+    setToast({
+      isVisible: true,
+      message:
+        fail === 0
+          ? `Sent ${ok} receipt${ok === 1 ? "" : "s"}`
+          : `Sent ${ok}, ${fail} failed.`,
+      type: fail === 0 ? "success" : "error",
+    });
+  };
+
+  // Renders one receipt's desktop + mobile row, prefixed with a selection checkbox while
+  // in multi-select mode. Used by both the draft and year-grouped lists.
+  const renderReceiptRow = (receipt, index, isToBeVerified = false) => {
+    const rowProps = {
+      receipt,
+      getPaymentLogo,
+      getPaymentDisplay,
+      onViewClick: () => handleReceiptClick(receipt, index),
+      onDeleteClick: handleDeleteClick,
+      onLinkToQuickBooks: quickbooksConnected ? () => handleLinkToQuickBooks(receipt) : undefined,
+      quickbooksConnected,
+      onLinkToSage: () => handleLinkToSage(receipt),
+      onLinkToXero: xeroConnected ? () => handleLinkToXero(receipt) : undefined,
+      isLinking: linkingReceiptId === receipt.id,
+      isLinkingSage: linkingSageReceiptId === receipt.id,
+      isLinkingXero: linkingXeroReceiptId === receipt.id,
+      formatCurrency,
+      isToBeVerified,
+      selectionMode,
+      isSelected: selectedReceiptIds.has(String(receipt.id)),
+      onToggleSelect: () => toggleSelectReceipt(receipt.id),
+    };
+    return (
+      <>
+        <ReceiptsTable {...rowProps} />
+        <ReceiptsMobileView {...rowProps} />
+      </>
+    );
+  };
+
   const getReceiptImageUrl = (receipt) => {
     const candidates = [
       receipt.receipt_image,
@@ -1117,6 +1262,14 @@ const HomePage = () => {
                   >
                     <Link size={18} strokeWidth={2.6} />
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => (selectionMode ? exitSelectionMode() : setSelectionMode(true))}
+                    className={`home-integrations-btn home-mobile-icon-btn ${selectionMode ? "text-blue-600" : ""}`}
+                    title={selectionMode ? "Exit selection" : "Select receipts"}
+                  >
+                    <ListChecks size={18} strokeWidth={2.4} />
+                  </button>
                 </div>
                 {showMobileSearch && (
                   <div className="relative w-full home-search-wrap mt-1">
@@ -1207,6 +1360,15 @@ const HomePage = () => {
                     >
                       <Link size={18} strokeWidth={2.6} />
                     </button>
+
+                    <button
+                      type="button"
+                      onClick={() => (selectionMode ? exitSelectionMode() : setSelectionMode(true))}
+                      className={`home-integrations-btn ${selectionMode ? "text-blue-600" : ""}`}
+                      title={selectionMode ? "Exit selection" : "Select receipts"}
+                    >
+                      <ListChecks size={18} strokeWidth={2.4} />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1233,6 +1395,22 @@ const HomePage = () => {
 
             <div ref={receiptsScrollRef} className="max-h-[calc(100vh-200px)] overflow-y-auto">
 
+              {selectionMode && (
+                <BulkActionBar
+                  count={selectedReceiptIds.size}
+                  total={visibleReceiptIds.length}
+                  allSelected={allVisibleSelected}
+                  onToggleSelectAll={toggleSelectAll}
+                  onClear={() => setSelectedReceiptIds(new Set())}
+                  onDelete={() => selectedReceiptIds.size > 0 && setShowBulkDeleteConfirm(true)}
+                  onExit={exitSelectionMode}
+                  providers={bulkProviders}
+                  onSend={handleBulkSend}
+                  isDeleting={isBulkDeleting}
+                  isSending={isBulkSending}
+                />
+              )}
+
               {/* ── Draft / To Be Verified receipts ── */}
               {draftReceipts.length > 0 && (
                 <div className="mb-4">
@@ -1250,38 +1428,7 @@ const HomePage = () => {
                   <div className="home-receipts-inner">
                     {draftReceipts.map((receipt, index) => (
                       <div key={receipt.id || index} className="mb-3">
-                        <ReceiptsTable
-                          receipt={receipt}
-                          getPaymentLogo={getPaymentLogo}
-                          getPaymentDisplay={getPaymentDisplay}
-                          onViewClick={() => handleReceiptClick(receipt, index)}
-                          onDeleteClick={handleDeleteClick}
-                          onLinkToQuickBooks={quickbooksConnected ? () => handleLinkToQuickBooks(receipt) : undefined}
-                          quickbooksConnected={quickbooksConnected}
-                          onLinkToSage={() => handleLinkToSage(receipt)}
-                          onLinkToXero={xeroConnected ? () => handleLinkToXero(receipt) : undefined}
-                          isLinking={linkingReceiptId === receipt.id}
-                          isLinkingSage={linkingSageReceiptId === receipt.id}
-                          isLinkingXero={linkingXeroReceiptId === receipt.id}
-                          formatCurrency={formatCurrency}
-                          isToBeVerified={true}
-                        />
-                        <ReceiptsMobileView
-                          receipt={receipt}
-                          getPaymentLogo={getPaymentLogo}
-                          getPaymentDisplay={getPaymentDisplay}
-                          onViewClick={() => handleReceiptClick(receipt, index)}
-                          onDeleteClick={handleDeleteClick}
-                          onLinkToQuickBooks={quickbooksConnected ? () => handleLinkToQuickBooks(receipt) : undefined}
-                          quickbooksConnected={quickbooksConnected}
-                          onLinkToSage={() => handleLinkToSage(receipt)}
-                          onLinkToXero={xeroConnected ? () => handleLinkToXero(receipt) : undefined}
-                          isLinking={linkingReceiptId === receipt.id}
-                          isLinkingSage={linkingSageReceiptId === receipt.id}
-                          isLinkingXero={linkingXeroReceiptId === receipt.id}
-                          formatCurrency={formatCurrency}
-                          isToBeVerified={true}
-                        />
+                        {renderReceiptRow(receipt, index, true)}
                         {selectedReceipt?.id === receipt.id && (
                           <ReceiptDetail
                             receipt={selectedReceipt}
@@ -1320,37 +1467,7 @@ const HomePage = () => {
                     <div className="home-receipts-inner">
                       {yearReceipts.map((receipt, index) => (
                         <div key={receipt.id || index} className="mb-3">
-                          <ReceiptsTable
-                            receipt={receipt}
-                            getPaymentLogo={getPaymentLogo}
-                            getPaymentDisplay={getPaymentDisplay}
-                            onViewClick={() => handleReceiptClick(receipt, index)}
-                            onDeleteClick={handleDeleteClick}
-                            onLinkToQuickBooks={quickbooksConnected ? () => handleLinkToQuickBooks(receipt) : undefined}
-                            quickbooksConnected={quickbooksConnected}
-                            onLinkToSage={() => handleLinkToSage(receipt)}
-                            onLinkToXero={xeroConnected ? () => handleLinkToXero(receipt) : undefined}
-                            isLinking={linkingReceiptId === receipt.id}
-                            isLinkingSage={linkingSageReceiptId === receipt.id}
-                            isLinkingXero={linkingXeroReceiptId === receipt.id}
-                            formatCurrency={formatCurrency}
-                          />
-
-                          <ReceiptsMobileView
-                            receipt={receipt}
-                            getPaymentLogo={getPaymentLogo}
-                            getPaymentDisplay={getPaymentDisplay}
-                            onViewClick={() => handleReceiptClick(receipt, index)}
-                            onDeleteClick={handleDeleteClick}
-                            onLinkToQuickBooks={quickbooksConnected ? () => handleLinkToQuickBooks(receipt) : undefined}
-                            quickbooksConnected={quickbooksConnected}
-                            onLinkToSage={() => handleLinkToSage(receipt)}
-                            onLinkToXero={xeroConnected ? () => handleLinkToXero(receipt) : undefined}
-                            isLinking={linkingReceiptId === receipt.id}
-                            isLinkingSage={linkingSageReceiptId === receipt.id}
-                            isLinkingXero={linkingXeroReceiptId === receipt.id}
-                            formatCurrency={formatCurrency}
-                          />
+                          {renderReceiptRow(receipt, index, false)}
 
                           {selectedReceipt?.id === receipt.id && (
                             <>
@@ -1436,6 +1553,17 @@ const HomePage = () => {
             onClose={handleCancelDelete}
             onConfirm={handleConfirmDelete}
             isDeleting={isDeleting}
+          />
+
+          <DeleteConfirmationDialog
+            isOpen={showBulkDeleteConfirm}
+            onClose={() => !isBulkDeleting && setShowBulkDeleteConfirm(false)}
+            onConfirm={handleBulkDeleteConfirm}
+            isDeleting={isBulkDeleting}
+            message={`Are you sure you want to delete ${selectedReceiptIds.size} receipt${selectedReceiptIds.size === 1 ? "" : "s"}?`}
+            subtext="This action is irreversible."
+            confirmLabel={`Delete ${selectedReceiptIds.size}`}
+            confirmingLabel="Deleting…"
           />
 
           <Toast
