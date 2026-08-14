@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
-import { X, Loader2, Network, Send } from "lucide-react";
+import { useMemo, useState, useEffect } from "react";
+import { X, Loader2, Network, Send, Search } from "lucide-react";
 import {
   getMyNetwork,
+  getNetworkMemberUser,
   getNetworkMemberUserId,
   getUserDisplayName,
-  getUserEmail,
 } from "../../api/networkApi";
 import { forwardReceiptToUser } from "../../api/receiptForwardApi";
 import { useData } from "../../context/DataContext";
@@ -18,6 +18,7 @@ const UserAvatar = ({ name }) => (
 const ForwardReceiptModal = ({ receipt, onClose, onSuccess }) => {
   const { user } = useData();
   const [members, setMembers] = useState([]);
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [forwardingId, setForwardingId] = useState(null);
   const [error, setError] = useState("");
@@ -72,15 +73,33 @@ const ForwardReceiptModal = ({ receipt, onClose, onSuccess }) => {
     setForwardingId(null);
   };
 
+  const getMemberUsername = (member) => {
+    const u = getNetworkMemberUser(member);
+    return (u?.userName || u?.emailAddress || "").trim();
+  };
+
+  const filteredMembers = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return members;
+    return members.filter((member) => {
+      const u = getNetworkMemberUser(member);
+      const fields = [
+        getUserDisplayName(member),
+        u?.userName,
+        u?.fullName,
+        u?.firstName,
+        u?.lastName,
+        u?.emailAddress,
+      ]
+        .filter(Boolean)
+        .map((v) => String(v).toLowerCase());
+      return fields.some((field) => field.includes(q));
+    });
+  }, [members, search]);
+
   return (
-    <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
           <div>
             <h2 className="text-lg font-bold text-slate-900">Forward Receipt</h2>
@@ -91,19 +110,35 @@ const ForwardReceiptModal = ({ receipt, onClose, onSuccess }) => {
           <button
             type="button"
             onClick={onClose}
+            aria-label="Cancel"
             className="p-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
           >
             <X size={18} />
           </button>
         </div>
 
-        <div className="px-5 py-3 border-b border-slate-100 bg-slate-50">
-          <p className="text-sm font-semibold text-slate-800 truncate">
-            {receipt?.storeName || "Receipt"}
-          </p>
-          <p className="text-xs text-slate-500 truncate">
-            {[receipt?.expense_type, receipt?.paymentType].filter(Boolean).join(" · ")}
-          </p>
+        <div className="px-5 pt-4">
+          <div className="relative">
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+            />
+            <input
+              className="w-full bg-white border border-slate-200 text-sm text-slate-900 rounded-xl pl-8 pr-8 py-2.5 placeholder-slate-400 focus:outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-500/10"
+              placeholder="Search your network…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
         </div>
 
         {error && (
@@ -128,9 +163,13 @@ const ForwardReceiptModal = ({ receipt, onClose, onSuccess }) => {
                 Add connections in Settings → My Network first.
               </p>
             </div>
+          ) : filteredMembers.length === 0 ? (
+            <p className="text-sm text-slate-400 py-8 text-center">
+              No matching connections.
+            </p>
           ) : (
             <div className="flex flex-col gap-2">
-              {members.map((member) => {
+              {filteredMembers.map((member) => {
                 const memberKey =
                   getNetworkMemberUserId(
                     member,
@@ -147,7 +186,7 @@ const ForwardReceiptModal = ({ receipt, onClose, onSuccess }) => {
                       {getUserDisplayName(member)}
                     </p>
                     <p className="text-xs text-slate-400 truncate">
-                      {getUserEmail(member) || member.userName || "—"}
+                      {getMemberUsername(member) || "—"}
                     </p>
                   </div>
                   <button
@@ -173,6 +212,16 @@ const ForwardReceiptModal = ({ receipt, onClose, onSuccess }) => {
               })}
             </div>
           )}
+        </div>
+
+        <div className="px-5 py-4 border-t border-slate-200">
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full px-3 py-2.5 bg-gray-200 text-slate-700 text-sm font-semibold rounded-xl hover:bg-gray-300"
+          >
+            Cancel
+          </button>
         </div>
       </div>
     </div>
