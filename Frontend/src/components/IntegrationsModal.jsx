@@ -6,6 +6,11 @@ const QB_APP_URL = "https://app.qbo.intuit.com/app/homepage";
 const SAGE_APP_URL = "https://www.sageone.com/";
 const XERO_APP_URL = "https://go.xero.com/";
 
+// Sign-up entry points for users who don't have a QuickBooks account yet.
+// US and Canada QuickBooks are separate — send the user to the right one.
+const QB_SIGNUP_US_URL = "https://quickbooks.intuit.com/signup/";
+const QB_SIGNUP_CA_URL = "https://quickbooks.intuit.com/ca/pricing/";
+
 const providers = [
   {
     id: "quickbooks",
@@ -39,10 +44,12 @@ const providers = [
   },
 ];
 
+const getFkUserId = () => localStorage.getItem("fk_user_id") || "";
+
 const getConnectUrl = (id) => {
   switch (id) {
     case "quickbooks":
-      return `${NODE_API_URL}/api/integrations/quickbooks/connect`;
+      return `${NODE_API_URL}/api/integrations/quickbooks/connect?fk_user_id=${encodeURIComponent(getFkUserId())}&return_url=${encodeURIComponent(window.location.origin)}`;
     case "xero":
       return `${NODE_API_URL}/api/integrations/xero/connect`;
     case "sage-bc":
@@ -68,7 +75,7 @@ const IntegrationsModal = ({ open, onClose }) => {
     const fetchQuickBooksStatus = async () => {
       setQuickbooksLoading(true);
       try {
-        const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/status`);
+        const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/status?fk_user_id=${encodeURIComponent(getFkUserId())}`);
         const data = await res.json();
         if (data.success && data.connected) {
           setQuickbooksConnected(true);
@@ -134,9 +141,7 @@ const IntegrationsModal = ({ open, onClose }) => {
     
     setQuickbooksLoading(true);
     try {
-      const url = quickbooksRealmId
-        ? `${NODE_API_URL}/api/integrations/quickbooks/disconnect?realmId=${encodeURIComponent(quickbooksRealmId)}`
-        : `${NODE_API_URL}/api/integrations/quickbooks/disconnect`;
+      const url = `${NODE_API_URL}/api/integrations/quickbooks/disconnect?fk_user_id=${encodeURIComponent(getFkUserId())}`;
       const res = await fetch(url, { method: "DELETE" });
       const data = await res.json();
       
@@ -252,6 +257,28 @@ const IntegrationsModal = ({ open, onClose }) => {
                   >
                     Connect
                   </button>
+                )}
+                {isQuickBooks && !isQBConnected && (
+                  <p className="mt-2 text-center text-xs text-slate-500">
+                    New to QuickBooks?{" "}
+                    <a
+                      href={QB_SIGNUP_US_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-blue-600 hover:underline"
+                    >
+                      Sign up (US)
+                    </a>
+                    <span className="mx-1 text-slate-300">|</span>
+                    <a
+                      href={QB_SIGNUP_CA_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-blue-600 hover:underline"
+                    >
+                      Canada
+                    </a>
+                  </p>
                 )}
               </div>
             );

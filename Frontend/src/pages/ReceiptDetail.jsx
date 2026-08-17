@@ -746,7 +746,7 @@ useEffect(() => {
     if (!shareMenu) return;
     const fetchQBStatus = async () => {
       try {
-        const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/status`);
+        const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/status?fk_user_id=${encodeURIComponent(localStorage.getItem("fk_user_id") || "")}`);
         const data = await res.json();
         if (data.success && data.connected) {
           setQuickbooksConnected(true);
@@ -4067,6 +4067,7 @@ useEffect(() => {
           Accesstoken: token || "",
         },
         body: JSON.stringify({
+          fk_user_id: localStorage.getItem("fk_user_id") || "",
           realmId: quickbooksRealmId,
           receiptId: latestRec.id,
           storeName: latestRec.storeName || latestRec.merchant || "",
@@ -4086,6 +4087,13 @@ useEffect(() => {
           notes: latestRec.notes || "",
           receipt_image: imageUrl,
           emailAttachment: imageUrl,
+          receiptImages: [
+            ...splitMediaField(latestRec.receipt_image || ""),
+            ...splitMediaField(latestRec.emailAttachment || ""),
+          ]
+            .map((u) => normalizeMediaUrl(u))
+            .filter((u) => u && u !== "0" && !["null", "undefined", "@"].includes(u.toLowerCase()))
+            .filter((u, i, arr) => arr.indexOf(u) === i),
           receiptFileName: `receipt_${latestRec.id || Date.now()}.jpg`,
         }),
       });

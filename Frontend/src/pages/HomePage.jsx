@@ -246,7 +246,7 @@ const HomePage = () => {
 
   const fetchQBStatus = async () => {
     try {
-      const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/status`);
+      const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/status?fk_user_id=${encodeURIComponent(localStorage.getItem("fk_user_id") || "")}`);
       const data = await res.json();
       if (data.success && data.connected) {
         setQuickbooksConnected(true);
@@ -848,6 +848,47 @@ const HomePage = () => {
     return null;
   };
 
+  // Return ALL valid image URLs on a receipt (for multi-image attachments).
+  const getReceiptImageUrls = (receipt) => {
+    const candidates = [
+      receipt.receipt_image,
+      receipt.emailAttachment,
+      receipt.receiptImage,
+      receipt.email_attachment,
+      receipt.emailattachment,
+      receipt.receiptimage,
+    ];
+    const invalidPatterns = ["android.resource://", "content://", "file://", "resource://"];
+    const seen = new Set();
+    const urls = [];
+    for (const field of candidates) {
+      if (!field || typeof field !== "string") continue;
+      for (const raw of splitMediaField(field)) {
+        const trimmed = (raw || "").trim();
+        if (!trimmed || ["0", "null", "@", "undefined", ""].includes(trimmed.toLowerCase())) continue;
+        if (invalidPatterns.some((p) => trimmed.startsWith(p))) continue;
+
+        let normalized;
+        if (trimmed.startsWith("/") || (!trimmed.startsWith("http://") && !trimmed.startsWith("https://") && !trimmed.startsWith("data:"))) {
+          if (trimmed.startsWith("/9j/") || /^[A-Za-z0-9+/=]+$/.test(trimmed.slice(0, 100))) {
+            normalized = trimmed.startsWith("data:") ? trimmed : `data:image/jpeg;base64,${trimmed}`;
+          } else if (trimmed.startsWith("/")) {
+            normalized = `https://categorizr.com${trimmed}`;
+          } else {
+            normalized = `https://categorizr.com/emailserver/${trimmed}`;
+          }
+        } else {
+          normalized = trimmed;
+        }
+        if (normalized && !seen.has(normalized)) {
+          seen.add(normalized);
+          urls.push(normalized);
+        }
+      }
+    }
+    return urls;
+  };
+
   // Helper: mark a receipt as QB-linked in local state + localStorage
   const markQbLinked = (receiptId) => {
     if (receiptId == null) return;
@@ -890,6 +931,7 @@ const HomePage = () => {
           Accesstoken: token || "",
         },
         body: JSON.stringify({
+          fk_user_id: localStorage.getItem("fk_user_id") || "",
           realmId: quickbooksRealmId,
           receiptId: receipt.id,
           storeName: receipt.storeName || receipt.merchant || "",
@@ -906,6 +948,7 @@ const HomePage = () => {
           notes: receipt.notes || "",
           receipt_image: imageUrl,
           emailAttachment: imageUrl,
+          receiptImages: getReceiptImageUrls(receipt),
           receiptFileName: `receipt_${receipt.id || Date.now()}.jpg`,
         }),
       });
