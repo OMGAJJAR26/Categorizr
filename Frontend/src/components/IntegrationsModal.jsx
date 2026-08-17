@@ -49,7 +49,7 @@ const getFkUserId = () => localStorage.getItem("fk_user_id") || "";
 const getConnectUrl = (id) => {
   switch (id) {
     case "quickbooks":
-      return `${NODE_API_URL}/api/integrations/quickbooks/connect?fk_user_id=${encodeURIComponent(getFkUserId())}`;
+      return `${NODE_API_URL}/api/integrations/quickbooks/connect?fk_user_id=${encodeURIComponent(getFkUserId())}&return_url=${encodeURIComponent(window.location.origin)}`;
     case "xero":
       return `${NODE_API_URL}/api/integrations/xero/connect`;
     case "sage-bc":
