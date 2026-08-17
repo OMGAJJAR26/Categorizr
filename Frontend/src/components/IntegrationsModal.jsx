@@ -44,10 +44,12 @@ const providers = [
   },
 ];
 
+const getFkUserId = () => localStorage.getItem("fk_user_id") || "";
+
 const getConnectUrl = (id) => {
   switch (id) {
     case "quickbooks":
-      return `${NODE_API_URL}/api/integrations/quickbooks/connect`;
+      return `${NODE_API_URL}/api/integrations/quickbooks/connect?fk_user_id=${encodeURIComponent(getFkUserId())}`;
     case "xero":
       return `${NODE_API_URL}/api/integrations/xero/connect`;
     case "sage-bc":
@@ -73,7 +75,7 @@ const IntegrationsModal = ({ open, onClose }) => {
     const fetchQuickBooksStatus = async () => {
       setQuickbooksLoading(true);
       try {
-        const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/status`);
+        const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/status?fk_user_id=${encodeURIComponent(getFkUserId())}`);
         const data = await res.json();
         if (data.success && data.connected) {
           setQuickbooksConnected(true);
@@ -139,9 +141,7 @@ const IntegrationsModal = ({ open, onClose }) => {
     
     setQuickbooksLoading(true);
     try {
-      const url = quickbooksRealmId
-        ? `${NODE_API_URL}/api/integrations/quickbooks/disconnect?realmId=${encodeURIComponent(quickbooksRealmId)}`
-        : `${NODE_API_URL}/api/integrations/quickbooks/disconnect`;
+      const url = `${NODE_API_URL}/api/integrations/quickbooks/disconnect?fk_user_id=${encodeURIComponent(getFkUserId())}`;
       const res = await fetch(url, { method: "DELETE" });
       const data = await res.json();
       

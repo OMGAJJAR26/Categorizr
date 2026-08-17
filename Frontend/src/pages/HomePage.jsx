@@ -246,7 +246,7 @@ const HomePage = () => {
 
   const fetchQBStatus = async () => {
     try {
-      const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/status`);
+      const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/status?fk_user_id=${encodeURIComponent(localStorage.getItem("fk_user_id") || "")}`);
       const data = await res.json();
       if (data.success && data.connected) {
         setQuickbooksConnected(true);
@@ -931,6 +931,7 @@ const HomePage = () => {
           Accesstoken: token || "",
         },
         body: JSON.stringify({
+          fk_user_id: localStorage.getItem("fk_user_id") || "",
           realmId: quickbooksRealmId,
           receiptId: receipt.id,
           storeName: receipt.storeName || receipt.merchant || "",
