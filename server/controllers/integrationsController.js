@@ -72,11 +72,14 @@ function getQuickBooksClient() {
 export async function quickbooksConnect(req, res) {
   if (!ensureEnv(["QB_CLIENT_ID", "QB_CLIENT_SECRET", "QB_REDIRECT_URI"], res, "QuickBooks")) return;
 
-  // Carry the Categorizr user id through OAuth via `state` so the callback can
-  // store the token against the right user (fk_user_id).
+  // Carry the Categorizr user id AND the initiating frontend origin through OAuth
+  // via `state`, so the callback can (a) store the token against the right user
+  // (fk_user_id) and (b) return the user to the SAME origin they started from —
+  // otherwise they land on a different origin with no session and get logged out.
   const fkUserId = req.query.fk_user_id || req.query.fkUserId || "";
+  const returnUrl = req.query.return_url || "";
   const state = Buffer.from(
-    JSON.stringify({ u: String(fkUserId), n: crypto.randomUUID() })
+    JSON.stringify({ u: String(fkUserId), r: String(returnUrl), n: crypto.randomUUID() })
   ).toString("base64url");
 
   const client = getQuickBooksClient();
@@ -107,13 +110,15 @@ export async function quickbooksCallback(req, res) {
     const token = client.getToken();
     const realmId = token?.realmId || req.query.realmId;
 
-    // Recover fk_user_id from the OAuth state.
+    // Recover fk_user_id + return origin from the OAuth state.
     let fkUserId = "";
+    let returnUrl = "";
     try {
       const decoded = JSON.parse(
         Buffer.from(req.query.state || "", "base64url").toString()
       );
       fkUserId = decoded.u || "";
+      returnUrl = decoded.r || "";
     } catch { /* no/invalid state */ }
 
     if (fkUserId && realmId) {
@@ -129,14 +134,31 @@ export async function quickbooksCallback(req, res) {
       console.warn("QuickBooks callback missing fk_user_id or realmId — token not saved", { fkUserId, realmId });
     }
 
-    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+    const frontendUrl = resolveFrontendOrigin(returnUrl);
     const redirectUrl = `${frontendUrl}/?quickbooks=connected&realmId=${encodeURIComponent(realmId || "")}`;
     return res.redirect(redirectUrl);
   } catch (err) {
     console.error("QuickBooks callback error", err);
-    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-    return res.redirect(`${frontendUrl}/?quickbooks=error`);
+    let returnUrl = "";
+    try {
+      returnUrl = JSON.parse(Buffer.from(req.query.state || "", "base64url").toString()).r || "";
+    } catch { /* ignore */ }
+    return res.redirect(`${resolveFrontendOrigin(returnUrl)}/?quickbooks=error`);
   }
+}
+
+// Return the origin to send the user back to after OAuth. Prefer the origin they
+// started from (so they stay logged in), but only if it's one of our own Categorizr
+// Vercel origins (main + preview deploys); otherwise fall back to FRONTEND_URL.
+function resolveFrontendOrigin(returnUrl) {
+  const fallback = process.env.FRONTEND_URL || "http://localhost:5173";
+  if (
+    typeof returnUrl === "string" &&
+    /^https:\/\/categorizr-staging[a-z0-9-]*\.vercel\.app$/i.test(returnUrl)
+  ) {
+    return returnUrl;
+  }
+  return fallback;
 }
 
 export async function quickbooksStatus(req, res) {
