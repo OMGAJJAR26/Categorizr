@@ -6,6 +6,11 @@ const QB_APP_URL = "https://app.qbo.intuit.com/app/homepage";
 const SAGE_APP_URL = "https://www.sageone.com/";
 const XERO_APP_URL = "https://go.xero.com/";
 
+// Sign-up entry points for users who don't have a QuickBooks account yet.
+// US and Canada QuickBooks are separate — send the user to the right one.
+const QB_SIGNUP_US_URL = "https://quickbooks.intuit.com/signup/";
+const QB_SIGNUP_CA_URL = "https://quickbooks.intuit.com/ca/pricing/";
+
 const providers = [
   {
     id: "quickbooks",
@@ -252,6 +257,28 @@ const IntegrationsModal = ({ open, onClose }) => {
                   >
                     Connect
                   </button>
+                )}
+                {isQuickBooks && !isQBConnected && (
+                  <p className="mt-2 text-center text-xs text-slate-500">
+                    New to QuickBooks?{" "}
+                    <a
+                      href={QB_SIGNUP_US_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-blue-600 hover:underline"
+                    >
+                      Sign up (US)
+                    </a>
+                    <span className="mx-1 text-slate-300">|</span>
+                    <a
+                      href={QB_SIGNUP_CA_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-blue-600 hover:underline"
+                    >
+                      Canada
+                    </a>
+                  </p>
                 )}
               </div>
             );
