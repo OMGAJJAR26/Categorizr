@@ -338,10 +338,13 @@ export async function quickbooksUploadReceipt(req, res) {
             // Create a new expense account with the expense_type name
             try {
               const createAccountUrl = `${baseUrl}/v3/company/${rid}/account`;
+              // Account Type "Expenses" + Detail Type "Other Business Expenses"
+              // (AccountSubType "OtherBusinessExpenses") — matches the detail type
+              // the client wants for auto-created Categorizr expense categories.
               const accountData = {
                 Name: accountName,
                 AccountType: "Expense",
-                AccountSubType: "OtherMiscellaneousServiceCost",
+                AccountSubType: "OtherBusinessExpenses",
               };
               const createAccountRes = await axios.post(createAccountUrl, accountData, {
                 headers: {
@@ -976,29 +979,36 @@ export async function quickbooksUploadReceipt(req, res) {
           filename: "file_metadata_01",
         });
 
-        // Upload attachment - simplified approach without getLength
         let attachmentSuccess = false;
         let attachableId = null;
         let attachmentWarning = null;
-        
+
         try {
+          // Intuit's /upload endpoint rejects chunked transfer-encoding — it needs an
+          // explicit Content-Length. Send the multipart body as a single Buffer and set
+          // the length, instead of streaming the FormData object (which axios sends
+          // chunked, causing the attachment to silently fault while the Purchase succeeds).
+          const formBuffer = form.getBuffer();
           const headers = {
             Authorization: `Bearer ${token.access_token}`,
+            Accept: "application/json",
             ...form.getHeaders(),
+            "Content-Length": formBuffer.length,
           };
-          
+
           console.log("Uploading attachment to QuickBooks:", {
             url: uploadUrl,
             fileName: cleanFileName,
             contentType: contentType,
             fileSize: fileBuffer.length,
+            bodySize: formBuffer.length,
             purchaseId: purchaseId,
             metadata: JSON.stringify(metadata, null, 2),
           });
 
-          const response = await axios.post(uploadUrl, form, { 
-            headers, 
-            maxBodyLength: Infinity, 
+          const response = await axios.post(uploadUrl, formBuffer, {
+            headers,
+            maxBodyLength: Infinity,
             maxContentLength: Infinity,
             timeout: 60000,
           });
