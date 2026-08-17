@@ -29,6 +29,7 @@ const pool = mysql.createPool({
   connectionLimit: 5,
   charset: "utf8mb4",
   timezone: "Z",
+  connectTimeout: 8000, // fail fast if the DB host is unreachable (e.g. IP not allow-listed)
 });
 
 const toMysqlUTC = (date) => date.toISOString().slice(0, 19).replace("T", " ");
