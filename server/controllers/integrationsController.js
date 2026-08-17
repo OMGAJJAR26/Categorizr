@@ -7,6 +7,12 @@ import OAuthClient from "intuit-oauth";
 import { XeroClient } from "xero-node";
 import axios from "axios";
 import { create } from "xmlbuilder2";
+import {
+  saveQuickBooksToken,
+  getQuickBooksToken,
+  deleteQuickBooksToken,
+  getValidQuickBooksToken,
+} from "../services/quickbooksTokenStore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QB_TOKENS_PATH = path.join(__dirname, "..", "data", "quickbooks-tokens.json");
@@ -66,6 +72,13 @@ function getQuickBooksClient() {
 export async function quickbooksConnect(req, res) {
   if (!ensureEnv(["QB_CLIENT_ID", "QB_CLIENT_SECRET", "QB_REDIRECT_URI"], res, "QuickBooks")) return;
 
+  // Carry the Categorizr user id through OAuth via `state` so the callback can
+  // store the token against the right user (fk_user_id).
+  const fkUserId = req.query.fk_user_id || req.query.fkUserId || "";
+  const state = Buffer.from(
+    JSON.stringify({ u: String(fkUserId), n: crypto.randomUUID() })
+  ).toString("base64url");
+
   const client = getQuickBooksClient();
   try {
     const authUri = client.authorizeUri({
@@ -76,7 +89,7 @@ export async function quickbooksConnect(req, res) {
         "email",
         "phone",
       ],
-      state: crypto.randomUUID(),
+      state,
     });
     return res.redirect(authUri);
   } catch (err) {
@@ -92,11 +105,30 @@ export async function quickbooksCallback(req, res) {
   try {
     await client.createToken(req.url);
     const token = client.getToken();
-    const realmId = client.getToken()?.realmId || req.query.realmId;
-    if (realmId) {
-      quickbooksTokens.set(realmId, token);
-      saveQuickBooksTokens();
+    const realmId = token?.realmId || req.query.realmId;
+
+    // Recover fk_user_id from the OAuth state.
+    let fkUserId = "";
+    try {
+      const decoded = JSON.parse(
+        Buffer.from(req.query.state || "", "base64url").toString()
+      );
+      fkUserId = decoded.u || "";
+    } catch { /* no/invalid state */ }
+
+    if (fkUserId && realmId) {
+      await saveQuickBooksToken({
+        fkUserId,
+        realmId,
+        accessToken: token.access_token,
+        refreshToken: token.refresh_token,
+        expiresIn: token.expires_in,
+        xRefreshExpiresIn: token.x_refresh_token_expires_in,
+      });
+    } else {
+      console.warn("QuickBooks callback missing fk_user_id or realmId — token not saved", { fkUserId, realmId });
     }
+
     const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
     const redirectUrl = `${frontendUrl}/?quickbooks=connected&realmId=${encodeURIComponent(realmId || "")}`;
     return res.redirect(redirectUrl);
@@ -108,55 +140,34 @@ export async function quickbooksCallback(req, res) {
 }
 
 export async function quickbooksStatus(req, res) {
-  const realmId = req.query.realmId;
-  let connected = false;
-  let resolvedRealmId = null;
-  if (realmId) {
-    connected = quickbooksTokens.has(realmId);
-    if (connected) resolvedRealmId = realmId;
-  } else {
-    const first = quickbooksTokens.keys().next();
-    if (!first.done) {
-      resolvedRealmId = first.value;
-      connected = true;
+  try {
+    const fkUserId = req.query.fk_user_id || req.query.fkUserId;
+    if (!fkUserId) {
+      return res.status(200).json({ success: true, connected: false });
     }
+    const row = await getQuickBooksToken(fkUserId);
+    return res.status(200).json({
+      success: true,
+      connected: !!row,
+      realmId: row?.realm_id || undefined,
+    });
+  } catch (err) {
+    console.error("QuickBooks status error", err);
+    return res.status(200).json({ success: true, connected: false });
   }
-  return res.status(200).json({
-    success: true,
-    connected,
-    realmId: resolvedRealmId || undefined,
-  });
 }
 
 export async function quickbooksDisconnect(req, res) {
   try {
-    const realmId = req.query.realmId;
-    
-    if (realmId) {
-      // Disconnect specific realmId
-      if (quickbooksTokens.has(realmId)) {
-        quickbooksTokens.delete(realmId);
-        saveQuickBooksTokens();
-        return res.status(200).json({
-          success: true,
-          message: "QuickBooks disconnected successfully",
-        });
-      } else {
-        return res.status(404).json({
-          success: false,
-          error: "QuickBooks account not found",
-        });
-      }
-    } else {
-      // Disconnect all accounts
-      const count = quickbooksTokens.size;
-      quickbooksTokens.clear();
-      saveQuickBooksTokens();
-      return res.status(200).json({
-        success: true,
-        message: `Disconnected ${count} QuickBooks account(s)`,
-      });
+    const fkUserId = req.query.fk_user_id || req.query.fkUserId;
+    if (!fkUserId) {
+      return res.status(400).json({ success: false, error: "Missing fk_user_id" });
     }
+    await deleteQuickBooksToken(fkUserId);
+    return res.status(200).json({
+      success: true,
+      message: "QuickBooks disconnected successfully",
+    });
   } catch (err) {
     console.error("QuickBooks disconnect error", err);
     return res.status(500).json({ error: "Failed to disconnect QuickBooks" });
@@ -316,29 +327,30 @@ export async function quickbooksUploadReceipt(req, res) {
       hasEmailAttachment: !!emailAttachment,
     });
 
-    let client;
-    try {
-      client = await getValidQuickBooksClient(realmId);
-    } catch (clientErr) {
-      console.error("Error getting QuickBooks client:", clientErr);
-      return res.status(500).json({ error: "Failed to initialize QuickBooks client: " + clientErr.message });
+    // Load a valid access token from the DB for this user (auto-refreshes).
+    const fkUserId = req.body.fk_user_id || req.body.fkUserId;
+    if (!fkUserId) {
+      return res.status(400).json({ error: "Missing fk_user_id. Cannot resolve QuickBooks connection." });
     }
-    
-    if (!client) {
+    let validToken;
+    try {
+      validToken = await getValidQuickBooksToken(fkUserId);
+    } catch (clientErr) {
+      console.error("Error getting QuickBooks token:", clientErr);
+      return res.status(500).json({ error: "Failed to get QuickBooks token: " + clientErr.message });
+    }
+    if (!validToken || !validToken.accessToken) {
       return res.status(400).json({ error: "QuickBooks not connected. Connect QuickBooks first." });
     }
 
-    const token = client.getToken();
-    if (!token || !token.access_token) {
-      return res.status(400).json({ error: "Invalid QuickBooks token. Please reconnect." });
-    }
-
-    const rid = realmId || token.realmId;
+    // Existing code below reads token.access_token — keep that shape.
+    const token = { access_token: validToken.accessToken };
+    const rid = validToken.realmId || realmId;
     if (!rid) {
       return res.status(400).json({ error: "QuickBooks company ID not found. Please reconnect." });
     }
-    
-    console.log("QuickBooks client and token validated, realmId:", rid);
+
+    console.log("QuickBooks token validated, realmId:", rid);
 
     const baseUrl =
       (process.env.QB_ENVIRONMENT || "sandbox") === "production"
