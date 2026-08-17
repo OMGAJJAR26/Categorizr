@@ -4086,6 +4086,13 @@ useEffect(() => {
           notes: latestRec.notes || "",
           receipt_image: imageUrl,
           emailAttachment: imageUrl,
+          receiptImages: [
+            ...splitMediaField(latestRec.receipt_image || ""),
+            ...splitMediaField(latestRec.emailAttachment || ""),
+          ]
+            .map((u) => normalizeMediaUrl(u))
+            .filter((u) => u && u !== "0" && !["null", "undefined", "@"].includes(u.toLowerCase()))
+            .filter((u, i, arr) => arr.indexOf(u) === i),
           receiptFileName: `receipt_${latestRec.id || Date.now()}.jpg`,
         }),
       });
