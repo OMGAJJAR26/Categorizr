@@ -1,14 +1,14 @@
 // server/services/quickbooksTokenStore.js
 //
 // QuickBooks OAuth tokens are stored in SiteGround MySQL table
-// `tbl_quickbooks_online` (one row per Categorizr user).
+// `tbl_quickbooks_token` (one row per Categorizr user).
 // Linked receipts live in `tbl_quickbooks_linked_receipt`.
 //
 // Required env vars (set in Render — never hardcode secrets):
 //   DB_HOST, DB_PORT (default 3306), DB_USER, DB_PASS, DB_NAME
 //   QB_CLIENT_ID, QB_CLIENT_SECRET
 // Optional:
-//   QB_TOKEN_TABLE=tbl_quickbooks_online
+//   QB_TOKEN_TABLE=tbl_quickbooks_token
 //
 // SiteGround: Site Tools > MySQL > Remote — allow-list the Render outbound IP.
 
@@ -17,7 +17,8 @@ import axios from "axios";
 
 const QB_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
-const DEFAULT_TOKEN_TABLE = "tbl_quickbooks_online";
+const DEFAULT_TOKEN_TABLE = "tbl_quickbooks_token";
+const FALLBACK_TOKEN_TABLES = ["tbl_quickbooks_online", "quickbooks_tokens"];
 const LINKED_RECEIPT_TABLE = "tbl_quickbooks_linked_receipt";
 
 let pool = null;
@@ -78,7 +79,46 @@ async function tableExists(tableName) {
   return Boolean(rows?.[0]);
 }
 
-async function ensureOnlineTokenTable() {
+async function resolveTokenTable() {
+  if (cachedTokenTable) return cachedTokenTable;
+  const candidates = [
+    preferredTokenTable(),
+    DEFAULT_TOKEN_TABLE,
+    ...FALLBACK_TOKEN_TABLES,
+  ].filter((name, idx, arr) => name && arr.indexOf(name) === idx);
+
+  for (const tableName of candidates) {
+    if (await tableExists(tableName)) {
+      cachedTokenTable = tableName;
+      console.log(`Using QuickBooks token table: ${tableName}`);
+      return cachedTokenTable;
+    }
+  }
+
+  const existing = await listQuickBooksTables();
+  const usable = existing.filter(
+    (name) => String(name).toLowerCase() !== LINKED_RECEIPT_TABLE
+  );
+  if (usable.length) {
+    console.warn(
+      `Preferred QuickBooks token tables not found. Using existing table "${usable[0]}". Found: ${existing.join(", ")}`
+    );
+    cachedTokenTable = usable[0];
+    return cachedTokenTable;
+  }
+
+  try {
+    await ensureTokenTable();
+    cachedTokenTable = DEFAULT_TOKEN_TABLE;
+    return cachedTokenTable;
+  } catch (err) {
+    throw new Error(
+      `QuickBooks token table "${DEFAULT_TOKEN_TABLE}" does not exist and could not be created: ${err.message}`
+    );
+  }
+}
+
+async function ensureTokenTable() {
   await getPool().execute(`
     CREATE TABLE IF NOT EXISTS \`${DEFAULT_TOKEN_TABLE}\` (
       fk_user_id VARCHAR(64) NOT NULL,
@@ -93,37 +133,6 @@ async function ensureOnlineTokenTable() {
       KEY idx_realm_id (realm_id)
     )
   `);
-}
-
-async function resolveTokenTable() {
-  if (cachedTokenTable) return cachedTokenTable;
-  const preferred = preferredTokenTable();
-  if (await tableExists(preferred)) {
-    cachedTokenTable = preferred;
-    return cachedTokenTable;
-  }
-
-  const existing = await listQuickBooksTables();
-  const usable = existing.filter(
-    (name) => String(name).toLowerCase() !== LINKED_RECEIPT_TABLE
-  );
-  if (usable.length) {
-    console.warn(
-      `QuickBooks token table "${preferred}" was not found. Using existing table "${usable[0]}". Found: ${existing.join(", ")}`
-    );
-    cachedTokenTable = usable[0];
-    return cachedTokenTable;
-  }
-
-  try {
-    await ensureOnlineTokenTable();
-    cachedTokenTable = DEFAULT_TOKEN_TABLE;
-    return cachedTokenTable;
-  } catch (err) {
-    throw new Error(
-      `QuickBooks token table "${preferred}" does not exist and could not be created: ${err.message}`
-    );
-  }
 }
 
 async function getTableColumns(tableName) {
