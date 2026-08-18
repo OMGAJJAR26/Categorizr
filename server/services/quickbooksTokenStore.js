@@ -1,29 +1,28 @@
 // server/services/quickbooksTokenStore.js
 //
-// QuickBooks OAuth token store + auto-refresh — all in Node, backed by MySQL.
-// Writes to BOTH tables so a SiteGround handoff of either name still works:
-//   - quickbooks_tokens        (staging’s original table)
-//   - tbl_quickbooks_token     (SQL handoff table)
-// Linked receipts live in tbl_quickbooks_linked_receipt (one row per receipt).
+// QuickBooks OAuth tokens are stored in SiteGround MySQL table
+// `tbl_quickbooks_online` (one row per Categorizr user).
+// Linked receipts live in `tbl_quickbooks_linked_receipt`.
 //
 // Required env vars (set in Render — never hardcode secrets):
 //   DB_HOST, DB_PORT (default 3306), DB_USER, DB_PASS, DB_NAME
-//   QB_CLIENT_ID, QB_CLIENT_SECRET   (already set for the OAuth flow)
+//   QB_CLIENT_ID, QB_CLIENT_SECRET
+// Optional:
+//   QB_TOKEN_TABLE=tbl_quickbooks_online
 //
-// NOTE: the MySQL host must allow remote connections from the Node host
-// (SiteGround: Site Tools > MySQL > Remote — allow-list the Render outbound IP).
+// SiteGround: Site Tools > MySQL > Remote — allow-list the Render outbound IP.
 
 import mysql from "mysql2/promise";
 import axios from "axios";
 
 const QB_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
-const REFRESH_BUFFER_MS = 5 * 60 * 1000; // refresh when <5 min of access-token life left
-const LEGACY_TOKEN_TABLE = "quickbooks_tokens";
-const PRIMARY_TOKEN_TABLE = "tbl_quickbooks_token";
+const REFRESH_BUFFER_MS = 5 * 60 * 1000;
+const DEFAULT_TOKEN_TABLE = "tbl_quickbooks_online";
 const LINKED_RECEIPT_TABLE = "tbl_quickbooks_linked_receipt";
 
 let pool = null;
-let tokenTablesReady = false;
+let cachedTokenTable = null;
+const columnCache = new Map();
 let linkedTableReady = false;
 
 export function isMysqlConfigured() {
@@ -53,26 +52,35 @@ function getPool() {
 
 const toMysqlUTC = (date) => date.toISOString().slice(0, 19).replace("T", " ");
 
-async function ensureTokenTables() {
-  if (tokenTablesReady) return;
-  const db = getPool();
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS ${LEGACY_TOKEN_TABLE} (
-      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-      fk_user_id VARCHAR(64) NOT NULL,
-      realm_id VARCHAR(64) NOT NULL,
-      access_token TEXT NOT NULL,
-      refresh_token TEXT NOT NULL,
-      access_token_expires_at DATETIME NOT NULL,
-      refresh_token_expires_at DATETIME NOT NULL,
-      created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      PRIMARY KEY (id),
-      UNIQUE KEY uniq_fk_user (fk_user_id)
-    )
-  `);
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS ${PRIMARY_TOKEN_TABLE} (
+function preferredTokenTable() {
+  return String(process.env.QB_TOKEN_TABLE || DEFAULT_TOKEN_TABLE).trim() || DEFAULT_TOKEN_TABLE;
+}
+
+async function listQuickBooksTables() {
+  const [rows] = await getPool().query(
+    `SELECT TABLE_NAME AS name
+       FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND LOWER(TABLE_NAME) LIKE '%quickbooks%'`
+  );
+  return (rows || []).map((row) => row.name).filter(Boolean);
+}
+
+async function tableExists(tableName) {
+  const [rows] = await getPool().query(
+    `SELECT TABLE_NAME AS name
+       FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?
+      LIMIT 1`,
+    [tableName]
+  );
+  return Boolean(rows?.[0]);
+}
+
+async function ensureOnlineTokenTable() {
+  await getPool().execute(`
+    CREATE TABLE IF NOT EXISTS \`${DEFAULT_TOKEN_TABLE}\` (
       fk_user_id VARCHAR(64) NOT NULL,
       realm_id VARCHAR(128) DEFAULT NULL,
       access_token TEXT DEFAULT NULL,
@@ -85,75 +93,94 @@ async function ensureTokenTables() {
       KEY idx_realm_id (realm_id)
     )
   `);
-  tokenTablesReady = true;
 }
 
-function normalizeTokenRow(row) {
-  if (!row) return null;
-  if (row.access_token_expires_at) return row;
-  if (row.expires_at) {
-    const accessExpires = new Date(Number(row.expires_at) * 1000);
-    return {
-      ...row,
-      access_token_expires_at: toMysqlUTC(accessExpires),
-      refresh_token_expires_at:
-        row.refresh_token_expires_at ||
-        toMysqlUTC(new Date(Date.now() + 100 * 24 * 3600 * 1000)),
-    };
+async function resolveTokenTable() {
+  if (cachedTokenTable) return cachedTokenTable;
+  const preferred = preferredTokenTable();
+  if (await tableExists(preferred)) {
+    cachedTokenTable = preferred;
+    return cachedTokenTable;
   }
-  return row;
-}
 
-async function saveToLegacyTable({
-  fkUserId,
-  realmId,
-  accessToken,
-  refreshToken,
-  accessExpiresAt,
-  refreshExpiresAt,
-}) {
-  await getPool().execute(
-    `INSERT INTO ${LEGACY_TOKEN_TABLE}
-       (fk_user_id, realm_id, access_token, refresh_token,
-        access_token_expires_at, refresh_token_expires_at)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE
-       realm_id                 = VALUES(realm_id),
-       access_token             = VALUES(access_token),
-       refresh_token            = VALUES(refresh_token),
-       access_token_expires_at  = VALUES(access_token_expires_at),
-       refresh_token_expires_at = VALUES(refresh_token_expires_at)`,
-    [fkUserId, realmId, accessToken, refreshToken, accessExpiresAt, refreshExpiresAt]
+  const existing = await listQuickBooksTables();
+  const usable = existing.filter(
+    (name) => String(name).toLowerCase() !== LINKED_RECEIPT_TABLE
   );
+  if (usable.length) {
+    console.warn(
+      `QuickBooks token table "${preferred}" was not found. Using existing table "${usable[0]}". Found: ${existing.join(", ")}`
+    );
+    cachedTokenTable = usable[0];
+    return cachedTokenTable;
+  }
+
+  try {
+    await ensureOnlineTokenTable();
+    cachedTokenTable = DEFAULT_TOKEN_TABLE;
+    return cachedTokenTable;
+  } catch (err) {
+    throw new Error(
+      `QuickBooks token table "${preferred}" does not exist and could not be created: ${err.message}`
+    );
+  }
 }
 
-async function saveToPrimaryTable({
-  fkUserId,
-  realmId,
-  accessToken,
-  refreshToken,
-  tokenJson,
-  expiresIn,
-}) {
-  const now = Math.floor(Date.now() / 1000);
-  const expiresAt = now + Number(expiresIn || 3600);
-  const json = tokenJson ? JSON.stringify(tokenJson) : null;
-  await getPool().execute(
-    `INSERT INTO ${PRIMARY_TOKEN_TABLE}
-       (fk_user_id, realm_id, access_token, refresh_token, token_json, expires_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE
-       realm_id      = VALUES(realm_id),
-       access_token  = VALUES(access_token),
-       refresh_token = VALUES(refresh_token),
-       token_json    = VALUES(token_json),
-       expires_at    = VALUES(expires_at),
-       updated_at    = VALUES(updated_at)`,
-    [fkUserId, realmId, accessToken, refreshToken, json, expiresAt, now, now]
+async function getTableColumns(tableName) {
+  if (columnCache.has(tableName)) return columnCache.get(tableName);
+  const [rows] = await getPool().query(
+    `SELECT COLUMN_NAME AS name, DATA_TYPE AS dataType, EXTRA AS extra, COLUMN_KEY AS columnKey
+       FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?
+      ORDER BY ORDINAL_POSITION`,
+    [tableName]
   );
+  const columns = (rows || []).map((row) => ({
+    name: row.name,
+    dataType: String(row.dataType || "").toLowerCase(),
+    extra: String(row.extra || "").toLowerCase(),
+    columnKey: String(row.columnKey || "").toLowerCase(),
+  }));
+  if (!columns.length) {
+    throw new Error(`Could not read columns for ${tableName}. Check DB_NAME and table name.`);
+  }
+  columnCache.set(tableName, columns);
+  return columns;
 }
 
-export async function saveQuickBooksToken({
+function pickColumn(columns, aliases) {
+  const wanted = aliases.map((name) => name.toLowerCase());
+  return columns.find((col) => wanted.includes(col.name.toLowerCase())) || null;
+}
+
+function valueForColumn(column, unixSeconds, datetimeUtc) {
+  if (["datetime", "timestamp", "date"].includes(column.dataType)) return datetimeUtc;
+  return unixSeconds;
+}
+
+function tokenFieldMap(row) {
+  if (!row) return null;
+  const accessToken = row.access_token || row.accessToken || row.qb_access_token || null;
+  const refreshToken = row.refresh_token || row.refreshToken || row.qb_refresh_token || null;
+  const realmId = row.realm_id || row.realmId || row.company_id || row.qb_realm_id || null;
+  const fkUserId = row.fk_user_id || row.user_id || row.fkUserId || null;
+  let accessExpiresAt = row.access_token_expires_at || null;
+  if (!accessExpiresAt && row.expires_at) {
+    const raw = Number(row.expires_at);
+    accessExpiresAt = raw > 1e12 ? toMysqlUTC(new Date(raw)) : toMysqlUTC(new Date(raw * 1000));
+  }
+  return {
+    ...row,
+    fk_user_id: fkUserId,
+    realm_id: realmId,
+    access_token: accessToken,
+    refresh_token: refreshToken,
+    access_token_expires_at: accessExpiresAt,
+  };
+}
+
+async function saveToResolvedTable({
   fkUserId,
   realmId,
   accessToken,
@@ -162,93 +189,118 @@ export async function saveQuickBooksToken({
   xRefreshExpiresIn = 8726400,
   tokenJson = null,
 }) {
-  if (!fkUserId || !realmId || !accessToken || !refreshToken) {
-    throw new Error("Cannot save QuickBooks token: missing user id, company id, or tokens.");
+  const table = await resolveTokenTable();
+  const columns = await getTableColumns(table);
+  const writable = columns.filter((col) => !col.extra.includes("auto_increment"));
+
+  const nowUnix = Math.floor(Date.now() / 1000);
+  const accessUnix = nowUnix + Number(expiresIn || 3600);
+  const refreshUnix = nowUnix + Number(xRefreshExpiresIn || 8726400);
+  const accessUtc = toMysqlUTC(new Date(accessUnix * 1000));
+  const refreshUtc = toMysqlUTC(new Date(refreshUnix * 1000));
+  const nowUtc = toMysqlUTC(new Date());
+
+  const userCol = pickColumn(writable, ["fk_user_id", "user_id", "fkUserId"]);
+  if (!userCol) {
+    throw new Error(
+      `${table} has no user id column (expected fk_user_id). Columns: ${columns.map((c) => c.name).join(", ")}`
+    );
   }
 
-  try {
-    await ensureTokenTables();
-  } catch (err) {
-    console.warn("Could not auto-create QuickBooks token tables:", err.message);
-  }
-
-  const accessExpiresAt = toMysqlUTC(new Date(Date.now() + Number(expiresIn) * 1000));
-  const refreshExpiresAt = toMysqlUTC(new Date(Date.now() + Number(xRefreshExpiresIn) * 1000));
-  const payload = {
-    fkUserId: String(fkUserId),
-    realmId: String(realmId),
-    accessToken,
-    refreshToken,
-    accessExpiresAt,
-    refreshExpiresAt,
-    tokenJson,
-    expiresIn,
+  const assignments = new Map();
+  const setIfPresent = (aliases, value) => {
+    const col = pickColumn(writable, aliases);
+    if (col && value != null) assignments.set(col.name, value);
   };
 
-  const errors = [];
-  try {
-    await saveToLegacyTable(payload);
-  } catch (err) {
-    errors.push(`${LEGACY_TOKEN_TABLE}: ${err.message}`);
+  setIfPresent(["fk_user_id", "user_id", "fkUserId"], String(fkUserId));
+  setIfPresent(["realm_id", "realmId", "company_id", "qb_realm_id", "qb_company_id"], String(realmId));
+  setIfPresent(["access_token", "accessToken", "qb_access_token"], accessToken);
+  setIfPresent(["refresh_token", "refreshToken", "qb_refresh_token"], refreshToken);
+  setIfPresent(["token_json", "token_data", "tokens", "raw_token"], tokenJson ? JSON.stringify(tokenJson) : null);
+
+  const accessExpCol = pickColumn(writable, ["access_token_expires_at", "expires_at", "expiry", "token_expiry"]);
+  if (accessExpCol) {
+    assignments.set(accessExpCol.name, valueForColumn(accessExpCol, accessUnix, accessUtc));
   }
-  try {
-    await saveToPrimaryTable(payload);
-  } catch (err) {
-    errors.push(`${PRIMARY_TOKEN_TABLE}: ${err.message}`);
+  const refreshExpCol = pickColumn(writable, ["refresh_token_expires_at"]);
+  if (refreshExpCol) {
+    assignments.set(refreshExpCol.name, valueForColumn(refreshExpCol, refreshUnix, refreshUtc));
+  }
+  const createdCol = pickColumn(writable, ["created_at", "createdAt"]);
+  const updatedCol = pickColumn(writable, ["updated_at", "updatedAt"]);
+  if (updatedCol) {
+    assignments.set(updatedCol.name, valueForColumn(updatedCol, nowUnix, nowUtc));
   }
 
-  if (errors.length === 2) {
-    throw new Error(`QuickBooks token was not saved. ${errors.join(" | ")}`);
+  const insertAssignments = new Map(assignments);
+  if (createdCol) {
+    insertAssignments.set(createdCol.name, valueForColumn(createdCol, nowUnix, nowUtc));
   }
-  if (errors.length === 1) {
-    console.warn("QuickBooks token saved to one table only:", errors[0]);
+
+  if (insertAssignments.size < 4) {
+    throw new Error(
+      `${table} does not have enough token columns to save a connection. Columns: ${columns.map((c) => c.name).join(", ")}`
+    );
   }
+
+  const updateCols = [...assignments.keys()].filter(
+    (name) => name.toLowerCase() !== userCol.name.toLowerCase()
+  );
+  if (updateCols.length) {
+    const [updateResult] = await getPool().execute(
+      `UPDATE \`${table}\`
+          SET ${updateCols.map((name) => `\`${name}\` = ?`).join(", ")}
+        WHERE \`${userCol.name}\` = ?`,
+      [...updateCols.map((name) => assignments.get(name)), String(fkUserId)]
+    );
+    if (updateResult.affectedRows > 0) {
+      console.log(`Saved QuickBooks token for user ${fkUserId} in ${table} (update)`);
+      return table;
+    }
+  }
+
+  const insertCols = [...insertAssignments.keys()];
+  await getPool().execute(
+    `INSERT INTO \`${table}\` (${insertCols.map((name) => `\`${name}\``).join(", ")})
+     VALUES (${insertCols.map(() => "?").join(", ")})`,
+    insertCols.map((name) => insertAssignments.get(name))
+  );
+  console.log(`Saved QuickBooks token for user ${fkUserId} in ${table} (insert)`);
+  return table;
+}
+
+export async function saveQuickBooksToken(payload) {
+  if (!payload?.fkUserId || !payload?.realmId || !payload?.accessToken || !payload?.refreshToken) {
+    throw new Error("Cannot save QuickBooks token: missing user id, company id, or tokens.");
+  }
+  await saveToResolvedTable(payload);
 }
 
 export async function getQuickBooksToken(fkUserId) {
   if (!fkUserId) return null;
-  try {
-    await ensureTokenTables();
-  } catch (err) {
-    console.warn("Could not auto-create QuickBooks token tables:", err.message);
-  }
-
-  try {
-    const [rows] = await getPool().execute(
-      `SELECT * FROM ${LEGACY_TOKEN_TABLE} WHERE fk_user_id = ? LIMIT 1`,
-      [String(fkUserId)]
-    );
-    if (rows[0]) return normalizeTokenRow(rows[0]);
-  } catch (err) {
-    console.warn(`${LEGACY_TOKEN_TABLE} read failed:`, err.message);
-  }
-
-  try {
-    const [rows] = await getPool().execute(
-      `SELECT * FROM ${PRIMARY_TOKEN_TABLE} WHERE fk_user_id = ? LIMIT 1`,
-      [String(fkUserId)]
-    );
-    if (rows[0]) return normalizeTokenRow(rows[0]);
-  } catch (err) {
-    console.warn(`${PRIMARY_TOKEN_TABLE} read failed:`, err.message);
-  }
-
-  return null;
+  const table = await resolveTokenTable();
+  const columns = await getTableColumns(table);
+  const userCol = pickColumn(columns, ["fk_user_id", "user_id", "fkUserId"]);
+  if (!userCol) return null;
+  const [rows] = await getPool().execute(
+    `SELECT * FROM \`${table}\` WHERE \`${userCol.name}\` = ? LIMIT 1`,
+    [String(fkUserId)]
+  );
+  return tokenFieldMap(rows[0] || null);
 }
 
 export async function deleteQuickBooksToken(fkUserId) {
   const userId = String(fkUserId || "").trim();
   if (!userId) return;
-  try {
-    await getPool().execute(`DELETE FROM ${LEGACY_TOKEN_TABLE} WHERE fk_user_id = ?`, [userId]);
-  } catch (err) {
-    console.warn(`${LEGACY_TOKEN_TABLE} delete failed:`, err.message);
-  }
-  try {
-    await getPool().execute(`DELETE FROM ${PRIMARY_TOKEN_TABLE} WHERE fk_user_id = ?`, [userId]);
-  } catch (err) {
-    console.warn(`${PRIMARY_TOKEN_TABLE} delete failed:`, err.message);
-  }
+  const table = await resolveTokenTable();
+  const columns = await getTableColumns(table);
+  const userCol = pickColumn(columns, ["fk_user_id", "user_id", "fkUserId"]);
+  if (!userCol) return;
+  await getPool().execute(
+    `DELETE FROM \`${table}\` WHERE \`${userCol.name}\` = ?`,
+    [userId]
+  );
 }
 
 export async function exchangeQuickBooksAuthorizationCode(code) {
@@ -333,16 +385,12 @@ async function refreshQuickBooksToken(row) {
   };
 }
 
-/**
- * Returns an always-valid token for the user, refreshing automatically.
- *   { accessToken, refreshToken, realmId, fkUserId }  or  null (not connected).
- */
 export async function getValidQuickBooksToken(fkUserId) {
   let row = await getQuickBooksToken(fkUserId);
   if (!row) return null;
 
-  const expiresAt = new Date(row.access_token_expires_at).getTime();
-  if (!expiresAt || expiresAt <= Date.now() + REFRESH_BUFFER_MS) {
+  const expiresAt = row.access_token_expires_at ? new Date(row.access_token_expires_at).getTime() : 0;
+  if (expiresAt && expiresAt <= Date.now() + REFRESH_BUFFER_MS) {
     row = await refreshQuickBooksToken(row);
   }
 

@@ -52,6 +52,8 @@ services:
         sync: false
       - key: DB_NAME
         sync: false
+      - key: QB_TOKEN_TABLE
+        value: tbl_quickbooks_online
 
       # --- Xero ---
       - key: XERO_CLIENT_ID
