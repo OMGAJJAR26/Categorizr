@@ -33,11 +33,12 @@ import ChatButton from "../components/chat/ChatButton";
 import ChatPanel from "../components/chat/ChatPanel";
 import RecoveryEmailVerificationFlow from "../components/RecoveryEmailVerificationFlow";
 import { isTimestampFromToday } from "../components/RecoveryEmailVerificationFlow";
+import { loadQbLinkedReceipts, getFkUserId } from "../utils/qbStorage";
 import "./HomePage.css";
 
 const HomePage = () => {
   const navigate = useNavigate();
-  const { refreshData, silentRefreshData, receipts, loading, updateReceiptStatus, deleteReceipt, updateReceipt, user } = useData();
+  const { refreshData, silentRefreshData, receipts, loading, updateReceiptStatus, deleteReceipt, updateReceipt, user, applyQuickbooksLinkedIds, markReceiptQuickbooksLinked } = useData();
   const { formatCurrency } = useCurrency();
 
   // Custom hooks for complex logic
@@ -109,16 +110,7 @@ const HomePage = () => {
   // ── Recovery-email verification popup ──
   const [showRecoveryEmailFlow, setShowRecoveryEmailFlow] = useState(false);
   const [linkingXeroReceiptId, setLinkingXeroReceiptId] = useState(null);
-  const [linkedQuickbooksReceiptIds, setLinkedQuickbooksReceiptIds] = useState(() => {
-    try {
-      const stored = localStorage.getItem("qbLinkedReceipts");
-      const parsed = stored ? JSON.parse(stored) : [];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (e) {
-      console.error("Failed to parse QuickBooks-linked receipts from storage:", e);
-      return [];
-    }
-  });
+  const [linkedQuickbooksReceiptIds, setLinkedQuickbooksReceiptIds] = useState(() => loadQbLinkedReceipts());
 
   // Chat assistant hook
   const {
@@ -221,8 +213,13 @@ const HomePage = () => {
 
   const fetchQBStatus = async () => {
     try {
-      const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/status`);
+      const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/status?fk_user_id=${encodeURIComponent(getFkUserId())}`);
       const data = await res.json();
+      const serverIds = Array.isArray(data.linkedReceiptIds) ? data.linkedReceiptIds : [];
+      if (serverIds.length) {
+        const merged = applyQuickbooksLinkedIds(serverIds);
+        setLinkedQuickbooksReceiptIds(merged);
+      }
       if (data.success && data.connected) {
         setQuickbooksConnected(true);
         setQuickbooksRealmId(data.realmId || null);
@@ -571,17 +568,8 @@ const HomePage = () => {
   // Helper: mark a receipt as QB-linked in local state + localStorage
   const markQbLinked = (receiptId) => {
     if (receiptId == null) return;
-    const idStr = receiptId.toString();
-    setLinkedQuickbooksReceiptIds((prev) => {
-      if (prev.includes(idStr)) return prev;
-      const next = [...prev, idStr];
-      try {
-        localStorage.setItem("qbLinkedReceipts", JSON.stringify(next));
-      } catch (e) {
-        console.error("Failed to persist QB-linked receipts:", e);
-      }
-      return next;
-    });
+    const next = markReceiptQuickbooksLinked(receiptId);
+    setLinkedQuickbooksReceiptIds(next);
   };
 
   const handleLinkToQuickBooks = async (receipt) => {
@@ -610,6 +598,7 @@ const HomePage = () => {
           Accesstoken: token || "",
         },
         body: JSON.stringify({
+          fk_user_id: getFkUserId(),
           realmId: quickbooksRealmId,
           receiptId: receipt.id,
           storeName: receipt.storeName || receipt.merchant || "",

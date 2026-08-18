@@ -38,6 +38,7 @@ import {
   resolveReceiptCalendarUnix,
   calendarUnixToMobileUnix,
 } from "../utils/receiptDate";
+import { loadQbLinkedReceipts, saveQbLinkedReceipts, addQbLinkedReceipt } from "../utils/qbStorage";
 
 const DataContext = createContext();
 const BASE_URL = "/api";
@@ -1326,14 +1327,8 @@ export const DataProvider = ({ children }) => {
       // receipts have already been sent to QuickBooks even after a reload.
       let receiptsWithIntegrations = formattedReceiptsDeduped;
       try {
-        const storedQbIds = JSON.parse(
-          localStorage.getItem("qbLinkedReceipts") || "[]"
-        );
-        const qbIdSet = new Set(
-          Array.isArray(storedQbIds)
-            ? storedQbIds.map((id) => id.toString())
-            : []
-        );
+        const storedQbIds = loadQbLinkedReceipts();
+        const qbIdSet = new Set(storedQbIds.map((id) => id.toString()));
 
         receiptsWithIntegrations = formattedReceiptsDeduped.map((r) =>
           qbIdSet.has(r.id?.toString())
@@ -1776,6 +1771,37 @@ setMerchantsWithImages(
       return false;
     }
   };
+
+  const applyQuickbooksLinkedIds = useCallback((ids = []) => {
+    const merged = saveQbLinkedReceipts([
+      ...loadQbLinkedReceipts(),
+      ...ids,
+    ]);
+    const qbIdSet = new Set(merged);
+    setReceipts((prev) =>
+      prev.map((receipt) =>
+        qbIdSet.has(receipt.id?.toString())
+          ? { ...receipt, quickbooksLinked: true }
+          : receipt
+      )
+    );
+    return merged;
+  }, []);
+
+  const markReceiptQuickbooksLinked = useCallback((receiptId) => {
+    const merged = addQbLinkedReceipt(receiptId);
+    const idStr = receiptId?.toString();
+    if (idStr) {
+      setReceipts((prev) =>
+        prev.map((receipt) =>
+          receipt.id?.toString() === idStr
+            ? { ...receipt, quickbooksLinked: true }
+            : receipt
+        )
+      );
+    }
+    return merged;
+  }, []);
 
   // Delete receipt function - calls backend API to permanently delete
   // API uses query parameter: ?receiptid=123
@@ -2789,6 +2815,8 @@ setMerchantsWithImages(
         clearAllData,
         getReceiptBadgeStatus,
         updateReceiptStatus,
+        applyQuickbooksLinkedIds,
+        markReceiptQuickbooksLinked,
         deleteReceipt,
         updateReceipt,
         repairReceiptMediaOnServer,

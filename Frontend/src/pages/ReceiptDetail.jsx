@@ -202,6 +202,8 @@ const ReceiptDetail = ({
     taxData,
     refreshData,
     silentRefreshData,
+    markReceiptQuickbooksLinked,
+    applyQuickbooksLinkedIds,
     addTax,
     updateTax,
     deleteTax,
@@ -703,11 +705,12 @@ useEffect(() => {
     if (!shareMenu) return;
     const fetchQBStatus = async () => {
       try {
-        const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/status`);
+        const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/status?fk_user_id=${encodeURIComponent(localStorage.getItem("fk_user_id") || "")}`);
         const data = await res.json();
         if (data.success && data.connected) {
           setQuickbooksConnected(true);
           setQuickbooksRealmId(data.realmId || null);
+          applyQuickbooksLinkedIds(Array.isArray(data.linkedReceiptIds) ? data.linkedReceiptIds : []);
         } else {
           setQuickbooksConnected(false);
           setQuickbooksRealmId(null);
@@ -3584,6 +3587,7 @@ useEffect(() => {
           Accesstoken: token || "",
         },
         body: JSON.stringify({
+          fk_user_id: localStorage.getItem("fk_user_id") || "",
           realmId: quickbooksRealmId,
           receiptId: latestRec.id,
           storeName: latestRec.storeName || latestRec.merchant || "",
@@ -3713,6 +3717,7 @@ useEffect(() => {
 
         // Update local state only (no API call) - refreshData will fetch fresh data
         if (latestRec.id != null) {
+          markReceiptQuickbooksLinked(latestRec.id);
           setSelectedReceipt((prev) =>
             prev ? { ...prev, quickbooksLinked: true } : prev
           );

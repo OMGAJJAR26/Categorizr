@@ -1,6 +1,7 @@
 // src/components/SessionManager.jsx
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { clearAuthLocalStorage } from "../utils/authStorage";
 
 const SessionManager = ({ children }) => {
   const navigate = useNavigate();
@@ -13,7 +14,7 @@ const SessionManager = ({ children }) => {
       clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
     
-        localStorage.clear();
+        clearAuthLocalStorage();
         navigate("/login");
       }, TIMEOUT);
     };

@@ -6,6 +6,7 @@ import { useData } from "../context/DataContext";
 import { useCurrency } from "../context/CurrencyContext";
 // import { useTheme } from "../context/ThemeContext";
 import LogoutConfirmationDialog from "./LogoutConfirmationDialog";
+import { clearAuthLocalStorage } from "../utils/authStorage";
 
 const Header = () => {
   const navigate = useNavigate();
@@ -25,8 +26,7 @@ const Header = () => {
     setShowLogoutConfirm(false);
     // Clear all data first
     clearAllData();
-    // Then clear localStorage
-    localStorage.clear();
+    clearAuthLocalStorage();
     // Navigate to login
     navigate("/login", { replace: true });
   };

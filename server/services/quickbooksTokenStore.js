@@ -141,4 +141,55 @@ export async function getValidQuickBooksToken(fkUserId) {
   };
 }
 
+const LINKED_RECEIPT_TABLE = "tbl_quickbooks_linked_receipt";
+let linkedTableReady = false;
+
+async function ensureLinkedReceiptTable() {
+  if (linkedTableReady) return;
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS ${LINKED_RECEIPT_TABLE} (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      fk_user_id VARCHAR(64) NOT NULL,
+      fk_receipt_id VARCHAR(64) NOT NULL,
+      purchase_id VARCHAR(64) NULL,
+      created_at BIGINT NOT NULL,
+      PRIMARY KEY (id),
+      UNIQUE KEY uniq_user_receipt (fk_user_id, fk_receipt_id),
+      KEY idx_user (fk_user_id),
+      KEY idx_receipt (fk_receipt_id)
+    )
+  `);
+  linkedTableReady = true;
+}
+
+export async function getLinkedReceiptIds(fkUserId) {
+  if (!fkUserId) return [];
+  try {
+    await ensureLinkedReceiptTable();
+    const [rows] = await pool.execute(
+      `SELECT fk_receipt_id FROM ${LINKED_RECEIPT_TABLE} WHERE fk_user_id = ?`,
+      [String(fkUserId)]
+    );
+    return (rows || []).map((row) => String(row.fk_receipt_id));
+  } catch (err) {
+    console.warn("QuickBooks linked receipts lookup failed:", err.message);
+    return [];
+  }
+}
+
+export async function addLinkedReceipt(fkUserId, receiptId, purchaseId) {
+  const userId = String(fkUserId || "").trim();
+  const receipt = String(receiptId || "").trim();
+  if (!userId || !receipt) return [];
+  await ensureLinkedReceiptTable();
+  await pool.execute(
+    `INSERT INTO ${LINKED_RECEIPT_TABLE}
+      (fk_user_id, fk_receipt_id, purchase_id, created_at)
+     VALUES (?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE purchase_id = VALUES(purchase_id)`,
+    [userId, receipt, purchaseId ? String(purchaseId) : null, Math.floor(Date.now() / 1000)]
+  );
+  return getLinkedReceiptIds(userId);
+}
+
 export default pool;

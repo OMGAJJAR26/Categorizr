@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { NODE_API_URL } from "../api/Axios";
 import SimpleAlertModal from "./SimpleAlertModal";
+import { getFkUserId } from "../utils/qbStorage";
 
 const QB_APP_URL = "https://app.qbo.intuit.com/app/homepage";
 const SAGE_APP_URL = "https://www.sageone.com/";
@@ -42,7 +43,7 @@ const providers = [
 const getConnectUrl = (id) => {
   switch (id) {
     case "quickbooks":
-      return `${NODE_API_URL}/api/integrations/quickbooks/connect`;
+      return `${NODE_API_URL}/api/integrations/quickbooks/connect?fk_user_id=${encodeURIComponent(getFkUserId())}&return_url=${encodeURIComponent(window.location.origin)}`;
     case "xero":
       return `${NODE_API_URL}/api/integrations/xero/connect`;
     case "sage-bc":
@@ -68,7 +69,7 @@ const IntegrationsModal = ({ open, onClose }) => {
     const fetchQuickBooksStatus = async () => {
       setQuickbooksLoading(true);
       try {
-        const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/status`);
+        const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/status?fk_user_id=${encodeURIComponent(getFkUserId())}`);
         const data = await res.json();
         if (data.success && data.connected) {
           setQuickbooksConnected(true);
@@ -134,9 +135,7 @@ const IntegrationsModal = ({ open, onClose }) => {
     
     setQuickbooksLoading(true);
     try {
-      const url = quickbooksRealmId
-        ? `${NODE_API_URL}/api/integrations/quickbooks/disconnect?realmId=${encodeURIComponent(quickbooksRealmId)}`
-        : `${NODE_API_URL}/api/integrations/quickbooks/disconnect`;
+      const url = `${NODE_API_URL}/api/integrations/quickbooks/disconnect?fk_user_id=${encodeURIComponent(getFkUserId())}`;
       const res = await fetch(url, { method: "DELETE" });
       const data = await res.json();
       

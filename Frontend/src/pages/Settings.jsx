@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { clearAuthLocalStorage } from "../utils/authStorage";
 import { containsEmoji, stripEmoji } from "../utils/emojiUtils";
 import { parseTaxRateInput, createTaxRateKeyDownHandler } from "../utils/taxRateInput";
 import { useTaxRateLimitAlert } from "../hooks/useTaxRateLimitAlert";
@@ -1175,7 +1176,7 @@ const Settings = () => {
 
   const handleLogout = () => {
     clearAllData();
-    localStorage.clear();
+    clearAuthLocalStorage();
     navigate("/login", { replace: true });
   };
 

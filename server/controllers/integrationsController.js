@@ -12,6 +12,8 @@ import {
   getQuickBooksToken,
   deleteQuickBooksToken,
   getValidQuickBooksToken,
+  getLinkedReceiptIds,
+  addLinkedReceipt,
 } from "../services/quickbooksTokenStore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -168,10 +170,12 @@ export async function quickbooksStatus(req, res) {
       return res.status(200).json({ success: true, connected: false });
     }
     const row = await getQuickBooksToken(fkUserId);
+    const linkedReceiptIds = await getLinkedReceiptIds(fkUserId);
     return res.status(200).json({
       success: true,
       connected: !!row,
       realmId: row?.realm_id || undefined,
+      linkedReceiptIds,
     });
   } catch (err) {
     console.error("QuickBooks status error", err);
@@ -1085,6 +1089,14 @@ export async function quickbooksUploadReceipt(req, res) {
 
     if (!purchaseId) {
       return res.status(400).json({ error: "Failed to create expense transaction in QuickBooks." });
+    }
+
+    if (fkUserId && receiptId) {
+      try {
+        await addLinkedReceipt(fkUserId, receiptId, purchaseId);
+      } catch (linkErr) {
+        console.warn("Could not persist QuickBooks-linked receipt id:", linkErr.message);
+      }
     }
 
     // Attach EVERY receipt image to the Purchase (QuickBooks Attachable).
