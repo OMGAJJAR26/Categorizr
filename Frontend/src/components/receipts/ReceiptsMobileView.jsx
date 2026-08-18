@@ -3,6 +3,7 @@ import { Trash2, Link2, Loader2 } from "lucide-react";
 import MerchantAvatar from "../MerchantAvatar";
 import SimpleAlertModal from "../SimpleAlertModal";
 import { formatReceiptDate } from "../../utils/receiptDate";
+import RowSelectCheckbox from "./RowSelectCheckbox";
 
 const ReceiptsMobileView = ({
   receipt,
@@ -21,6 +22,9 @@ const ReceiptsMobileView = ({
   onClearQuickbooksLink,
   isToBeVerified = false,
   disableDelete = false,
+  selectionMode = false,
+  isSelected = false,
+  onToggleSelect,
 }) => {
   const [showIntegrateMenu, setShowIntegrateMenu] = useState(false);
   const [showCloudPopup, setShowCloudPopup] = useState(false);
@@ -67,8 +71,11 @@ const ReceiptsMobileView = ({
         </span>
       )}
       <div className={`flex justify-between items-center ${isUnread ? 'text-gray-400' : 'text-gray-800'}`}>
-        <div className={`font-semibold ${isUnread ? 'text-gray-400' : ''}`}>
-          {getFormattedDate()}
+        <div className="flex items-center gap-2.5">
+          <RowSelectCheckbox selectionMode={selectionMode} isSelected={isSelected} onToggleSelect={onToggleSelect} />
+          <div className={`font-semibold ${isUnread ? 'text-gray-400' : ''}`}>
+            {getFormattedDate()}
+          </div>
         </div>
         <div className={`font-bold text-base ${getTotalColor()}`}>
           {formatCurrency(receipt.purchasePrice || 0)}
