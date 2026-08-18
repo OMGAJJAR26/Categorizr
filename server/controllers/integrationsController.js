@@ -14,6 +14,8 @@ import {
   getValidQuickBooksToken,
   getLinkedReceiptIds,
   addLinkedReceipt,
+  exchangeQuickBooksAuthorizationCode,
+  isMysqlConfigured,
 } from "../services/quickbooksTokenStore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -80,6 +82,9 @@ export async function quickbooksConnect(req, res) {
   // otherwise they land on a different origin with no session and get logged out.
   const fkUserId = req.query.fk_user_id || req.query.fkUserId || "";
   const returnUrl = req.query.return_url || "";
+  if (!String(fkUserId).trim()) {
+    return redirectQuickBooksError(res, returnUrl, "missing_user");
+  }
   const state = Buffer.from(
     JSON.stringify({ u: String(fkUserId), r: String(returnUrl), n: crypto.randomUUID() })
   ).toString("base64url");
@@ -87,13 +92,7 @@ export async function quickbooksConnect(req, res) {
   const client = getQuickBooksClient();
   try {
     const authUri = client.authorizeUri({
-      scope: [
-        "com.intuit.quickbooks.accounting",
-        "openid",
-        "profile",
-        "email",
-        "phone",
-      ],
+      scope: ["com.intuit.quickbooks.accounting"],
       state,
     });
     return res.redirect(authUri);
@@ -103,50 +102,79 @@ export async function quickbooksConnect(req, res) {
   }
 }
 
-export async function quickbooksCallback(req, res) {
-  if (!ensureEnv(["QB_CLIENT_ID", "QB_CLIENT_SECRET", "QB_REDIRECT_URI"], res, "QuickBooks")) return;
-
-  const client = getQuickBooksClient();
+function parseOAuthState(state) {
   try {
-    await client.createToken(req.url);
-    const token = client.getToken();
-    const realmId = token?.realmId || req.query.realmId;
-
-    // Recover fk_user_id + return origin from the OAuth state.
-    let fkUserId = "";
-    let returnUrl = "";
-    try {
-      const decoded = JSON.parse(
-        Buffer.from(req.query.state || "", "base64url").toString()
-      );
-      fkUserId = decoded.u || "";
-      returnUrl = decoded.r || "";
-    } catch { /* no/invalid state */ }
-
-    if (fkUserId && realmId) {
-      await saveQuickBooksToken({
-        fkUserId,
-        realmId,
-        accessToken: token.access_token,
-        refreshToken: token.refresh_token,
-        expiresIn: token.expires_in,
-        xRefreshExpiresIn: token.x_refresh_token_expires_in,
-      });
-    } else {
-      console.warn("QuickBooks callback missing fk_user_id or realmId — token not saved", { fkUserId, realmId });
-    }
-
-    const frontendUrl = resolveFrontendOrigin(returnUrl);
-    const redirectUrl = `${frontendUrl}/?quickbooks=connected&realmId=${encodeURIComponent(realmId || "")}`;
-    return res.redirect(redirectUrl);
-  } catch (err) {
-    console.error("QuickBooks callback error", err);
-    let returnUrl = "";
-    try {
-      returnUrl = JSON.parse(Buffer.from(req.query.state || "", "base64url").toString()).r || "";
-    } catch { /* ignore */ }
-    return res.redirect(`${resolveFrontendOrigin(returnUrl)}/?quickbooks=error`);
+    const decoded = JSON.parse(Buffer.from(state || "", "base64url").toString());
+    return {
+      fkUserId: String(decoded.u || "").trim(),
+      returnUrl: String(decoded.r || "").trim(),
+    };
+  } catch {
+    return { fkUserId: "", returnUrl: "" };
   }
+}
+
+function redirectQuickBooksError(res, returnUrl, reason) {
+  const params = new URLSearchParams({ quickbooks: "error" });
+  if (reason) params.set("reason", String(reason).slice(0, 48));
+  return res.redirect(`${resolveFrontendOrigin(returnUrl)}/?${params.toString()}`);
+}
+
+export async function quickbooksCallback(req, res) {
+  const { fkUserId, returnUrl } = parseOAuthState(req.query.state);
+
+  if (!process.env.QB_CLIENT_ID || !process.env.QB_CLIENT_SECRET || !process.env.QB_REDIRECT_URI) {
+    console.error("QuickBooks callback missing QB_CLIENT_ID / QB_CLIENT_SECRET / QB_REDIRECT_URI");
+    return redirectQuickBooksError(res, returnUrl, "config");
+  }
+
+  if (req.query.error) {
+    console.error("QuickBooks OAuth denied:", req.query.error, req.query.error_description || "");
+    return redirectQuickBooksError(res, returnUrl, String(req.query.error).slice(0, 40));
+  }
+
+  const code = req.query.code;
+  const realmId = req.query.realmId;
+  if (!code) return redirectQuickBooksError(res, returnUrl, "missing_code");
+  if (!fkUserId) {
+    console.error("QuickBooks callback missing fk_user_id in OAuth state");
+    return redirectQuickBooksError(res, returnUrl, "missing_user");
+  }
+  if (!realmId) return redirectQuickBooksError(res, returnUrl, "missing_company");
+
+  let token;
+  try {
+    token = await exchangeQuickBooksAuthorizationCode(code);
+  } catch (err) {
+    const body = err?.response?.data;
+    console.error("QuickBooks token exchange failed:", body || err.message);
+    const detail = String(body?.error_description || body?.error || err.message || "");
+    const reason = /redirect/i.test(detail) ? "redirect_uri" : "token_exchange";
+    return redirectQuickBooksError(res, returnUrl, reason);
+  }
+
+  try {
+    if (!isMysqlConfigured()) {
+      throw new Error("MySQL is not configured (DB_HOST, DB_USER, DB_NAME).");
+    }
+    await saveQuickBooksToken({
+      fkUserId,
+      realmId,
+      accessToken: token.access_token,
+      refreshToken: token.refresh_token,
+      expiresIn: token.expires_in,
+      xRefreshExpiresIn: token.x_refresh_token_expires_in,
+      tokenJson: token,
+    });
+  } catch (err) {
+    console.error("QuickBooks token save failed:", err.message);
+    return redirectQuickBooksError(res, returnUrl, "db_save");
+  }
+
+  const frontendUrl = resolveFrontendOrigin(returnUrl);
+  return res.redirect(
+    `${frontendUrl}/?quickbooks=connected&realmId=${encodeURIComponent(realmId)}`
+  );
 }
 
 // Return the origin to send the user back to after OAuth. Prefer the origin they
@@ -167,7 +195,7 @@ export async function quickbooksStatus(req, res) {
   try {
     const fkUserId = req.query.fk_user_id || req.query.fkUserId;
     if (!fkUserId) {
-      return res.status(200).json({ success: true, connected: false });
+      return res.status(200).json({ success: true, connected: false, linkedReceiptIds: [] });
     }
     const row = await getQuickBooksToken(fkUserId);
     const linkedReceiptIds = await getLinkedReceiptIds(fkUserId);
@@ -179,7 +207,7 @@ export async function quickbooksStatus(req, res) {
     });
   } catch (err) {
     console.error("QuickBooks status error", err);
-    return res.status(200).json({ success: true, connected: false });
+    return res.status(200).json({ success: true, connected: false, linkedReceiptIds: [] });
   }
 }
 

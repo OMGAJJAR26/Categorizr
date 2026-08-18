@@ -41,6 +41,18 @@ services:
       - key: QB_REDIRECT_URI
         sync: false           # e.g. https://categorizr-chatbot-staging.onrender.com/api/integrations/quickbooks/callback
 
+      # --- SiteGround MySQL (QuickBooks token persistence) ---
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "3306"
+      - key: DB_USER
+        sync: false
+      - key: DB_PASS
+        sync: false
+      - key: DB_NAME
+        sync: false
+
       # --- Xero ---
       - key: XERO_CLIENT_ID
         sync: false

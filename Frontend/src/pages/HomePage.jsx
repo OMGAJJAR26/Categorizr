@@ -191,7 +191,21 @@ const HomePage = () => {
       setQuickbooksConnected(true);
       window.history.replaceState({}, "", window.location.pathname);
     } else if (qb === "error") {
-      setToast({ isVisible: true, message: "QuickBooks connection failed. Please try again.", type: "error" });
+      const reason = params.get("reason");
+      const messages = {
+        missing_user: "QuickBooks could not identify your Categorizr account. Log in again, then reconnect.",
+        missing_code: "QuickBooks did not return an authorization code. Try connecting again.",
+        missing_company: "QuickBooks did not return a company id. Try connecting again.",
+        redirect_uri: "QuickBooks redirect URI does not match the server setting.",
+        token_exchange: "QuickBooks refused the connection. Check sandbox vs production and app credentials.",
+        db_save: "QuickBooks authorized, but the token could not be saved to MySQL. Check DB settings and the token table.",
+        config: "QuickBooks is missing server configuration.",
+      };
+      setToast({
+        isVisible: true,
+        message: messages[reason] || "QuickBooks connection failed. Please try again.",
+        type: "error",
+      });
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);

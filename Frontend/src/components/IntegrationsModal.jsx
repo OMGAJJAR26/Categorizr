@@ -107,6 +107,10 @@ const IntegrationsModal = ({ open, onClose }) => {
 
   const handleConnect = (provider) => {
     if (!provider.connectable) return;
+    if (provider.id === "quickbooks" && !getFkUserId()) {
+      setAlertMsg("Please log in again before connecting QuickBooks.");
+      return;
+    }
     const url = getConnectUrl(provider.id);
       if (url && url !== "#") {
       // For OAuth-based integrations (QuickBooks, Xero, FreshBooks), redirect
