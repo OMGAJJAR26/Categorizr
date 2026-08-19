@@ -718,13 +718,12 @@ export async function quickbooksUploadReceipt(req, res) {
         }
       }
       
-      // Build line items with Description
-      // Description goes at Line level, BEFORE DetailType (property order matters)
+      // ONE category line only. Extra tax/tip lines make QuickBooks show "--Split--"
+      // in the Expenses list instead of "Home" / "1a-2". Roll the full total onto
+      // the Categorizr expense category so that name appears in the list and on the form.
       const lineItems = [];
-      
-      // Main expense line — Amount = subtotal, category = matched/created Expense account.
       const mainLineItem = {
-        Amount: subtotalAmount > 0 ? subtotalAmount : finalAmount,
+        Amount: finalAmount,
       };
       if (lineItemDescription && lineItemDescription.trim()) {
         mainLineItem.Description = lineItemDescription.trim();
@@ -734,41 +733,6 @@ export async function quickbooksUploadReceipt(req, res) {
         AccountRef: { value: expenseAccountId },
       };
       lineItems.push(mainLineItem);
-
-      // Tax / tip stay as extra lines (amounts + descriptions) but use the SAME
-      // expense-category account so the Expenses list shows "1a-2" instead of "--Split--".
-      for (const tax of taxValues) {
-        const taxAmount = parseFloat(tax.tax_amount) || 0;
-        if (taxAmount === 0) continue;
-        const label = `${(tax.tax_name || "Tax").trim()} (${qbFormatRate(tax.tax_rate)}%)`;
-        lineItems.push({
-          Amount: taxAmount,
-          Description: label,
-          DetailType: "AccountBasedExpenseLineDetail",
-          AccountBasedExpenseLineDetail: { AccountRef: { value: expenseAccountId } },
-        });
-      }
-
-      if (tipAmount > 0) {
-        const tipPct = subtotalAmount > 0 ? Math.round((tipAmount / subtotalAmount) * 100) : 0;
-        lineItems.push({
-          Amount: tipAmount,
-          Description: `TIP (${tipPct}%)`,
-          DetailType: "AccountBasedExpenseLineDetail",
-          AccountBasedExpenseLineDetail: { AccountRef: { value: expenseAccountId } },
-        });
-      }
-      
-      // Ensure total matches sum of line items
-      const lineItemsTotal = lineItems.reduce((sum, item) => sum + (parseFloat(item.Amount) || 0), 0);
-      const taxTotal = taxValues.reduce((sum, t) => sum + (parseFloat(t.tax_amount) || 0), 0);
-      const expectedTotal = subtotalAmount + taxTotal + tipAmount;
-      
-      if (Math.abs(lineItemsTotal - expectedTotal) > 0.01) {
-        // Adjust main line item to match total
-        const adjustment = expectedTotal - (lineItemsTotal - (mainLineItem.Amount || 0));
-        mainLineItem.Amount = adjustment > 0 ? adjustment : subtotalAmount;
-      }
       
       // Extract card number for RefNo
       let refNo = null;
