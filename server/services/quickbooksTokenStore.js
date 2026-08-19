@@ -301,15 +301,97 @@ export async function getQuickBooksToken(fkUserId) {
 
 export async function deleteQuickBooksToken(fkUserId) {
   const userId = String(fkUserId || "").trim();
-  if (!userId) return;
-  const table = await resolveTokenTable();
-  const columns = await getTableColumns(table);
-  const userCol = pickColumn(columns, ["fk_user_id", "user_id", "fkUserId"]);
-  if (!userCol) return;
-  await getPool().execute(
-    `DELETE FROM \`${table}\` WHERE \`${userCol.name}\` = ?`,
-    [userId]
+  if (!userId) return { deleted: 0, revoked: false, realmId: null };
+
+  let stored = null;
+  if (isMysqlConfigured()) {
+    try {
+      stored = await getQuickBooksToken(userId);
+    } catch (err) {
+      console.warn("Could not load QuickBooks token before delete:", err.message);
+    }
+  }
+
+  let revoked = false;
+  const tokenToRevoke = stored?.refresh_token || stored?.access_token;
+  if (tokenToRevoke) {
+    revoked = await revokeIntuitToken(tokenToRevoke);
+  }
+
+  let deleted = 0;
+  if (isMysqlConfigured()) {
+    deleted = await deleteTokenRowsForUser(userId);
+  }
+
+  console.log(
+    `QuickBooks disconnect for user ${userId}: deleted ${deleted} row(s), intuit_revoked=${revoked}`
   );
+  return { deleted, revoked, realmId: stored?.realm_id || null };
+}
+
+async function revokeIntuitToken(token) {
+  const clientId = process.env.QB_CLIENT_ID;
+  const clientSecret = process.env.QB_CLIENT_SECRET;
+  if (!clientId || !clientSecret || !token) return false;
+  try {
+    await axios.post(
+      "https://developer.api.intuit.com/v2/oauth2/tokens/revoke",
+      { token },
+      {
+        auth: { username: clientId, password: clientSecret },
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        timeout: 10000,
+      }
+    );
+    return true;
+  } catch (err) {
+    console.warn("Intuit token revoke failed:", err.response?.data || err.message);
+    return false;
+  }
+}
+
+async function deleteTokenRowsForUser(userId) {
+  const tables = new Set();
+  for (const name of [preferredTokenTable(), DEFAULT_TOKEN_TABLE, ...FALLBACK_TOKEN_TABLES]) {
+    if (name) tables.add(name);
+  }
+  try {
+    tables.add(await resolveTokenTable());
+  } catch (err) {
+    console.warn("Could not resolve QuickBooks token table:", err.message);
+  }
+  try {
+    for (const name of await listQuickBooksTables()) {
+      if (String(name).toLowerCase() !== LINKED_RECEIPT_TABLE) tables.add(name);
+    }
+  } catch (err) {
+    console.warn("Could not list QuickBooks tables:", err.message);
+  }
+
+  let deleted = 0;
+  const ids = [userId];
+  if (/^\d+$/.test(userId)) ids.push(Number(userId));
+
+  for (const table of tables) {
+    try {
+      if (!(await tableExists(table))) continue;
+      const columns = await getTableColumns(table);
+      const userCol = pickColumn(columns, ["fk_user_id", "user_id", "fkUserId"]);
+      if (!userCol) continue;
+      const placeholders = ids.map(() => "?").join(", ");
+      const [result] = await getPool().execute(
+        `DELETE FROM \`${table}\` WHERE \`${userCol.name}\` IN (${placeholders})`,
+        ids
+      );
+      deleted += Number(result?.affectedRows || 0);
+      console.log(
+        `Deleted QuickBooks token for user ${userId} from ${table} (affected ${result?.affectedRows || 0})`
+      );
+    } catch (err) {
+      console.warn(`Failed deleting QuickBooks token from ${table}:`, err.message);
+    }
+  }
+  return deleted;
 }
 
 export async function exchangeQuickBooksAuthorizationCode(code) {

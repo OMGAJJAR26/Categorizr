@@ -1398,6 +1398,11 @@ const HomePage = () => {
           <IntegrationsModal
             open={showIntegrationsModal}
             onClose={() => setShowIntegrationsModal(false)}
+            onQuickBooksDisconnected={() => {
+              setQuickbooksConnected(false);
+              setQuickbooksRealmId(null);
+              setLinkedQuickbooksReceiptIds([]);
+            }}
           />
 
           {showCustomizedReport && (

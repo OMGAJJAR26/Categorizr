@@ -219,10 +219,17 @@ export async function quickbooksDisconnect(req, res) {
     if (!fkUserId) {
       return res.status(400).json({ success: false, error: "Missing fk_user_id" });
     }
-    await deleteQuickBooksToken(fkUserId);
+    const result = await deleteQuickBooksToken(fkUserId);
+    if (result?.realmId) {
+      quickbooksTokens.delete(String(result.realmId));
+    } else {
+      quickbooksTokens.clear();
+    }
+    saveQuickBooksTokens();
     return res.status(200).json({
       success: true,
       message: "QuickBooks disconnected successfully",
+      deleted: result?.deleted || 0,
     });
   } catch (err) {
     console.error("QuickBooks disconnect error", err);

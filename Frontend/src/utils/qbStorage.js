@@ -40,3 +40,5 @@ export const addQbLinkedReceipt = (receiptId, userId) => {
   if (receiptId == null || receiptId === "") return loadQbLinkedReceipts(userId);
   return saveQbLinkedReceipts([...loadQbLinkedReceipts(userId), String(receiptId)], userId);
 };
+
+export const clearQbLinkedReceipts = (userId) => saveQbLinkedReceipts([], userId);

@@ -26,6 +26,7 @@ router.get("/quickbooks/connect", quickbooksConnect);
 router.get("/quickbooks/callback", quickbooksCallback);
 router.get("/quickbooks/status", quickbooksStatus);
 router.delete("/quickbooks/disconnect", quickbooksDisconnect);
+router.post("/quickbooks/disconnect", quickbooksDisconnect);
 router.post("/quickbooks/receipts", quickbooksUploadReceipt);
 
 // Xero

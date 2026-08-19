@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { NODE_API_URL } from "../api/Axios";
 import SimpleAlertModal from "./SimpleAlertModal";
-import { getFkUserId } from "../utils/qbStorage";
+import { getFkUserId, clearQbLinkedReceipts } from "../utils/qbStorage";
 
 const SAGE_APP_URL = "https://www.sageone.com/";
 const XERO_APP_URL = "https://go.xero.com/";
@@ -57,7 +57,7 @@ const getConnectUrl = (id) => {
   }
 };
 
-const IntegrationsModal = ({ open, onClose }) => {
+const IntegrationsModal = ({ open, onClose, onQuickBooksDisconnected }) => {
   const [alertMsg, setAlertMsg] = useState(null);
   const [quickbooksConnected, setQuickbooksConnected] = useState(false);
   const [quickbooksRealmId, setQuickbooksRealmId] = useState(null);
@@ -146,13 +146,14 @@ const IntegrationsModal = ({ open, onClose }) => {
     setQuickbooksLoading(true);
     try {
       const url = `${NODE_API_URL}/api/integrations/quickbooks/disconnect?fk_user_id=${encodeURIComponent(getFkUserId())}`;
-      const res = await fetch(url, { method: "DELETE" });
+      const res = await fetch(url, { method: "POST" });
       const data = await res.json();
       
       if (data.success) {
         setQuickbooksConnected(false);
         setQuickbooksRealmId(null);
-        // Optionally show a toast notification
+        clearQbLinkedReceipts();
+        onQuickBooksDisconnected?.();
       } else {
         setAlertMsg(data.error || "Failed to disconnect QuickBooks");
       }
