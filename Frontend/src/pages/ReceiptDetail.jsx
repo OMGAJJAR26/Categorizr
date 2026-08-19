@@ -273,6 +273,8 @@ const ReceiptDetail = ({
     isVisible: false,
     message: "",
     type: "success",
+    actionUrl: null,
+    actionLabel: null,
   });
 
   // Dropdown states
@@ -3713,7 +3715,15 @@ useEffect(() => {
         } else if (data.note) {
           message += ` ${data.note}`;
         }
-        setToast({ isVisible: true, message: message, type: "success" });
+        setToast({
+          isVisible: true,
+          message,
+          type: "success",
+          actionUrl: data.quickbooksUrl || null,
+          actionLabel: data.quickbooksUrl
+            ? "Open this expense in QuickBooks"
+            : null,
+        });
 
         // Update local state only (no API call) - refreshData will fetch fresh data
         if (latestRec.id != null) {
@@ -6649,6 +6659,9 @@ Thank you for using our receipt management system.
         message={toast.message}
         type={toast.type}
         isVisible={toast.isVisible}
+        actionUrl={toast.actionUrl}
+        actionLabel={toast.actionLabel}
+        duration={toast.actionUrl ? 0 : 3000}
         onClose={() => setToast((t) => ({ ...t, isVisible: false }))}
       />
 

@@ -273,6 +273,19 @@ const qbFault = (err) =>
   err?.message ||
   "unknown error";
 
+/** Deep-link to a Purchase in the QuickBooks UI (sandbox or production). */
+function qbPurchaseAppUrl({ purchaseId, realmId, paymentType }) {
+  const isProduction = (process.env.QB_ENVIRONMENT || "sandbox") === "production";
+  const host = isProduction
+    ? "https://app.qbo.intuit.com"
+    : "https://app.sandbox.qbo.intuit.com";
+  if (!purchaseId || !realmId) {
+    return `${host}/app/expenses`;
+  }
+  const txnPath = paymentType === "Check" ? "check" : "expense";
+  return `${host}/app/${txnPath}?txnId=${encodeURIComponent(purchaseId)}&companyId=${encodeURIComponent(realmId)}`;
+}
+
 // Find an Account by exact Name; create it with the given type if missing.
 // Returns the account Id, or null on failure.
 async function qbFindOrCreateAccount(baseUrl, rid, accessToken, name, accountType, accountSubType) {
@@ -537,6 +550,7 @@ export async function quickbooksUploadReceipt(req, res) {
 
     // Create a Purchase (Expense) transaction
     let purchaseId = null;
+    let qbPaymentType = "Cash";
     let finalAmount = 0.01; // Store for use in response messages
     try {
       let purchaseDate;
@@ -963,6 +977,7 @@ export async function quickbooksUploadReceipt(req, res) {
       const purchase = purchaseRes.data?.Purchase || purchaseRes.data?.QueryResponse?.Purchase?.[0];
       if (purchase?.Id) {
         purchaseId = purchase.Id;
+        qbPaymentType = finalPaymentType;
         console.log("Purchase created successfully with ID:", purchaseId, "SyncToken:", purchase.SyncToken);
         
         // Verify Purchase exists and check for attachments
@@ -1095,9 +1110,12 @@ export async function quickbooksUploadReceipt(req, res) {
       }
     }
 
-    const environment = (process.env.QB_ENVIRONMENT || "sandbox") === "production" ? "app" : "sandbox";
-    const quickbooksBaseUrl = `https://${environment}.qbo.intuit.com`;
     const displayAmount = (typeof finalAmount === "number" && !isNaN(finalAmount)) ? finalAmount.toFixed(2) : "0.00";
+    const quickbooksUrl = qbPurchaseAppUrl({
+      purchaseId,
+      realmId: rid,
+      paymentType: qbPaymentType,
+    });
 
     let warning;
     if (imageFiles.length > 0 && attachedCount === 0) {
@@ -1114,8 +1132,8 @@ export async function quickbooksUploadReceipt(req, res) {
       purchaseId,
       attachedCount,
       imageCount: imageFiles.length,
-      quickbooksUrl: `${quickbooksBaseUrl}/app/expenses`,
-      instructions: `To view the expense: Go to Expenses in QuickBooks and search for transaction #${purchaseId} or amount $${displayAmount}.`,
+      quickbooksUrl,
+      instructions: `Open the expense in QuickBooks to review transaction #${purchaseId} ($${displayAmount}).`,
       ...(warning && { warning }),
     });
   } catch (err) {

@@ -822,7 +822,7 @@ const HomePage = () => {
           message,
           type: "success",
           actionUrl: data.quickbooksUrl || null,
-          actionLabel: data.quickbooksUrl ? "Open QuickBooks Expenses" : null,
+          actionLabel: data.quickbooksUrl ? "Open this expense in QuickBooks" : null,
         });
         markQbLinked(receipt.id);
         refreshData();
@@ -1455,6 +1455,7 @@ const HomePage = () => {
             isVisible={toast.isVisible}
             actionUrl={toast.actionUrl}
             actionLabel={toast.actionLabel}
+            duration={toast.actionUrl ? 0 : 3000}
             onClose={() => setToast({ ...toast, isVisible: false })}
           />
 
