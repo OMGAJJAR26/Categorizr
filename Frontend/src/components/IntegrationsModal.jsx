@@ -5,7 +5,7 @@ import { getFkUserId } from "../utils/qbStorage";
 
 const SAGE_APP_URL = "https://www.sageone.com/";
 const XERO_APP_URL = "https://go.xero.com/";
-const QB_SANDBOX_OPEN_URL = "https://developer.intuit.com/app/developer/sandbox";
+const QB_SANDBOX_OPEN_URL = "https://app.sandbox.qbo.intuit.com/login?pagereq=expenses";
 const QB_PRODUCTION_OPEN_URL = "https://app.qbo.intuit.com/app/homepage";
 
 const providers = [

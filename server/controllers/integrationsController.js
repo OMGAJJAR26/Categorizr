@@ -204,7 +204,7 @@ export async function quickbooksStatus(req, res) {
       connected: !!row,
       realmId: row?.realm_id || undefined,
       environment: process.env.QB_ENVIRONMENT || "sandbox",
-      appUrl: qbOpenBooksUrl(),
+      appUrl: qbOpenBooksUrl(row?.realm_id),
       linkedReceiptIds,
     });
   } catch (err) {
@@ -275,10 +275,9 @@ const qbFault = (err) =>
   err?.message ||
   "unknown error";
 
-/** Deep-link to a Purchase in the QuickBooks UI.
- *  Do not use sandbox.qbo.intuit.com — it NXDOMAINs in some regions.
- *  app.sandbox.qbo.intuit.com/app/* 301s to that dead host, so sandbox
- *  "open books" goes through the Intuit Developer sandbox launcher.
+/** Open the QuickBooks company UI (books), not the Intuit Developer portal.
+ *  Use /login (not /app/...) so the first hop stays on app.sandbox.qbo.intuit.com.
+ *  sandbox.qbo.intuit.com NXDOMAINs for some users; production qbo has no sandbox company.
  */
 function isQbProduction() {
   return (process.env.QB_ENVIRONMENT || "sandbox") === "production";
@@ -290,17 +289,18 @@ function qbUiOrigin() {
     : "https://app.sandbox.qbo.intuit.com";
 }
 
-function qbOpenBooksUrl() {
-  if (isQbProduction()) return `${qbUiOrigin()}/app/homepage`;
-  return "https://developer.intuit.com/app/developer/sandbox";
+function qbOpenBooksUrl(realmId) {
+  const origin = qbUiOrigin();
+  const page = "expenses";
+  if (realmId) {
+    return `${origin}/login?deeplinkcompanyid=${encodeURIComponent(realmId)}&pagereq=${page}`;
+  }
+  return `${origin}/login?pagereq=${page}`;
 }
 
 function qbPurchaseAppUrl({ purchaseId, realmId, paymentType }) {
-  if (!isQbProduction()) {
-    return qbOpenBooksUrl();
-  }
   if (!purchaseId || !realmId) {
-    return qbOpenBooksUrl();
+    return qbOpenBooksUrl(realmId);
   }
   const txnPath = paymentType === "Check" ? "check" : "expense";
   const pageReq = encodeURIComponent(`${txnPath}?txnId=${purchaseId}`);
@@ -1154,12 +1154,8 @@ export async function quickbooksUploadReceipt(req, res) {
       attachedCount,
       imageCount: imageFiles.length,
       quickbooksUrl,
-      quickbooksUrlLabel: isQbProduction()
-        ? "Open this expense in QuickBooks"
-        : "Open your QuickBooks sandbox",
-      instructions: isQbProduction()
-        ? `Sign in to Intuit if asked, then review transaction #${purchaseId} ($${displayAmount}).`
-        : `Open the sandbox company, then search Expenses for #${purchaseId} ($${displayAmount}).`,
+      quickbooksUrlLabel: "Open this expense in QuickBooks",
+      instructions: `Sign in to Intuit if asked, then review transaction #${purchaseId} ($${displayAmount}).`,
       ...(warning && { warning }),
     });
   } catch (err) {
