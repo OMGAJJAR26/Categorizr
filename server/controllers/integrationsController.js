@@ -203,6 +203,8 @@ export async function quickbooksStatus(req, res) {
       success: true,
       connected: !!row,
       realmId: row?.realm_id || undefined,
+      environment: process.env.QB_ENVIRONMENT || "sandbox",
+      appUrl: qbOpenBooksUrl(),
       linkedReceiptIds,
     });
   } catch (err) {
@@ -273,22 +275,36 @@ const qbFault = (err) =>
   err?.message ||
   "unknown error";
 
-/** Deep-link to a Purchase in the QuickBooks UI (sandbox or production).
- *  Use /app/login + encoded pagereq so txnId survives Intuit sign-in.
- *  A bare /app/expense?txnId= URL drops txnId on the unauthenticated redirect
- *  (cookie becomes {"pagereq":"expense"}) and lands on a blank expense page.
+/** Deep-link to a Purchase in the QuickBooks UI.
+ *  Do not use sandbox.qbo.intuit.com — it NXDOMAINs in some regions.
+ *  app.sandbox.qbo.intuit.com/app/* 301s to that dead host, so sandbox
+ *  "open books" goes through the Intuit Developer sandbox launcher.
  */
+function isQbProduction() {
+  return (process.env.QB_ENVIRONMENT || "sandbox") === "production";
+}
+
+function qbUiOrigin() {
+  return isQbProduction()
+    ? "https://app.qbo.intuit.com"
+    : "https://app.sandbox.qbo.intuit.com";
+}
+
+function qbOpenBooksUrl() {
+  if (isQbProduction()) return `${qbUiOrigin()}/app/homepage`;
+  return "https://developer.intuit.com/app/developer/sandbox";
+}
+
 function qbPurchaseAppUrl({ purchaseId, realmId, paymentType }) {
-  const isProduction = (process.env.QB_ENVIRONMENT || "sandbox") === "production";
-  const host = isProduction
-    ? "https://qbo.intuit.com"
-    : "https://sandbox.qbo.intuit.com";
+  if (!isQbProduction()) {
+    return qbOpenBooksUrl();
+  }
   if (!purchaseId || !realmId) {
-    return `${host}/app/homepage`;
+    return qbOpenBooksUrl();
   }
   const txnPath = paymentType === "Check" ? "check" : "expense";
   const pageReq = encodeURIComponent(`${txnPath}?txnId=${purchaseId}`);
-  return `${host}/app/login?deeplinkcompanyid=${encodeURIComponent(realmId)}&pagereq=${pageReq}`;
+  return `${qbUiOrigin()}/login?deeplinkcompanyid=${encodeURIComponent(realmId)}&pagereq=${pageReq}`;
 }
 
 // Find an Account by exact Name; create it with the given type if missing.
@@ -1138,7 +1154,12 @@ export async function quickbooksUploadReceipt(req, res) {
       attachedCount,
       imageCount: imageFiles.length,
       quickbooksUrl,
-      instructions: `Sign in to Intuit if asked, then review transaction #${purchaseId} ($${displayAmount}).`,
+      quickbooksUrlLabel: isQbProduction()
+        ? "Open this expense in QuickBooks"
+        : "Open your QuickBooks sandbox",
+      instructions: isQbProduction()
+        ? `Sign in to Intuit if asked, then review transaction #${purchaseId} ($${displayAmount}).`
+        : `Open the sandbox company, then search Expenses for #${purchaseId} ($${displayAmount}).`,
       ...(warning && { warning }),
     });
   } catch (err) {

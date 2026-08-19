@@ -822,7 +822,7 @@ const HomePage = () => {
           message,
           type: "success",
           actionUrl: data.quickbooksUrl || null,
-          actionLabel: data.quickbooksUrl ? "Open this expense in QuickBooks" : null,
+          actionLabel: data.quickbooksUrlLabel || (data.quickbooksUrl ? "Open this expense in QuickBooks" : null),
         });
         markQbLinked(receipt.id);
         refreshData();

@@ -3720,9 +3720,9 @@ useEffect(() => {
           message,
           type: "success",
           actionUrl: data.quickbooksUrl || null,
-          actionLabel: data.quickbooksUrl
+          actionLabel: data.quickbooksUrlLabel || (data.quickbooksUrl
             ? "Open this expense in QuickBooks"
-            : null,
+            : null),
         });
 
         // Update local state only (no API call) - refreshData will fetch fresh data

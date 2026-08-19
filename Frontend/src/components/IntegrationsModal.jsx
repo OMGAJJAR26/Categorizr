@@ -3,9 +3,10 @@ import { NODE_API_URL } from "../api/Axios";
 import SimpleAlertModal from "./SimpleAlertModal";
 import { getFkUserId } from "../utils/qbStorage";
 
-const QB_APP_URL = "https://app.qbo.intuit.com/app/homepage";
 const SAGE_APP_URL = "https://www.sageone.com/";
 const XERO_APP_URL = "https://go.xero.com/";
+const QB_SANDBOX_OPEN_URL = "https://developer.intuit.com/app/developer/sandbox";
+const QB_PRODUCTION_OPEN_URL = "https://app.qbo.intuit.com/app/homepage";
 
 const providers = [
   {
@@ -60,6 +61,7 @@ const IntegrationsModal = ({ open, onClose }) => {
   const [alertMsg, setAlertMsg] = useState(null);
   const [quickbooksConnected, setQuickbooksConnected] = useState(false);
   const [quickbooksRealmId, setQuickbooksRealmId] = useState(null);
+  const [quickbooksAppUrl, setQuickbooksAppUrl] = useState(QB_SANDBOX_OPEN_URL);
   const [quickbooksLoading, setQuickbooksLoading] = useState(false);
   const [xeroConnected, setXeroConnected] = useState(false);
   const [xeroLoading, setXeroLoading] = useState(false);
@@ -74,6 +76,10 @@ const IntegrationsModal = ({ open, onClose }) => {
         if (data.success && data.connected) {
           setQuickbooksConnected(true);
           setQuickbooksRealmId(data.realmId || null);
+          setQuickbooksAppUrl(
+            data.appUrl ||
+              (data.environment === "production" ? QB_PRODUCTION_OPEN_URL : QB_SANDBOX_OPEN_URL)
+          );
         } else {
           setQuickbooksConnected(false);
           setQuickbooksRealmId(null);
@@ -125,7 +131,7 @@ const IntegrationsModal = ({ open, onClose }) => {
   };
 
   const handleOpenQuickBooks = () => {
-    window.open(QB_APP_URL, "_blank", "noopener,noreferrer");
+    window.open(quickbooksAppUrl || QB_SANDBOX_OPEN_URL, "_blank", "noopener,noreferrer");
   };
 
   const handleOpenXero = () => {
