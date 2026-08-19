@@ -279,8 +279,9 @@ async function qbFindOrCreateAccount(baseUrl, rid, accessToken, name, accountTyp
   const trimmed = (name || "").toString().trim();
   if (!trimmed) return null;
   const auth = { Authorization: `Bearer ${accessToken}`, Accept: "application/json" };
+  const escaped = trimmed.replace(/'/g, "\\'");
   try {
-    const q = `SELECT * FROM Account WHERE Name = '${trimmed.replace(/'/g, "\\'")}' MAXRESULTS 1`;
+    const q = `SELECT * FROM Account WHERE Name = '${escaped}' MAXRESULTS 1`;
     const url = `${baseUrl}/v3/company/${rid}/query?query=${encodeURIComponent(q)}`;
     const res = await axios.get(url, { headers: auth });
     const found = res.data?.QueryResponse?.Account?.[0];
@@ -288,19 +289,33 @@ async function qbFindOrCreateAccount(baseUrl, rid, accessToken, name, accountTyp
   } catch (err) {
     console.warn(`Account query failed for "${trimmed}":`, qbFault(err));
   }
-  try {
-    const body = { Name: trimmed, AccountType: accountType };
-    if (accountSubType) body.AccountSubType = accountSubType;
+  const createOnce = async (body) => {
     const res = await axios.post(`${baseUrl}/v3/company/${rid}/account`, body, {
       headers: { ...auth, "Content-Type": "application/json" },
     });
-    const created = res.data?.Account;
+    return res.data?.Account;
+  };
+  try {
+    const body = { Name: trimmed, AccountType: accountType };
+    if (accountSubType) body.AccountSubType = accountSubType;
+    const created = await createOnce(body);
     if (created?.Id) {
       console.log(`✓ Created account "${trimmed}" (${accountType}/${accountSubType || "-"}) id ${created.Id}`);
       return created.Id;
     }
   } catch (err) {
     console.warn(`Account create failed for "${trimmed}":`, qbFault(err));
+    if (accountSubType) {
+      try {
+        const created = await createOnce({ Name: trimmed, AccountType: accountType });
+        if (created?.Id) {
+          console.log(`✓ Created account "${trimmed}" (${accountType}/no-subtype) id ${created.Id}`);
+          return created.Id;
+        }
+      } catch (retryErr) {
+        console.warn(`Account create retry failed for "${trimmed}":`, qbFault(retryErr));
+      }
+    }
   }
   return null;
 }
@@ -455,77 +470,23 @@ export async function quickbooksUploadReceipt(req, res) {
     ).filter(Boolean);
     console.log(`Loaded ${imageFiles.length}/${imageSources.length} receipt image(s) for attachment`);
 
-    // Get Expense account for Purchase line item - try to match expense_type first
+    // Get Expense account for Purchase line item — exact name = Categorizr expense category.
+    // Do not substring-match (e.g. "1a-2" must not match an account named "a" or "1").
     let expenseAccountId = null;
-    try {
-      // First, try to find an expense account that matches expense_type (e.g., "Electronics")
-      if (expense_type && expense_type.trim() && expense_type !== "0") {
-        const accountName = expense_type.trim();
-        
-        // Query all expense accounts to find a match (exact or partial)
-        const allAccountsQueryUrl = `${baseUrl}/v3/company/${rid}/query?query=SELECT * FROM Account WHERE AccountType='Expense'`;
-        try {
-          const accountRes = await axios.get(allAccountsQueryUrl, {
-            headers: {
-              Authorization: `Bearer ${token.access_token}`,
-              Accept: "application/json",
-            },
-          });
-          const allAccounts = accountRes.data?.QueryResponse?.Account || [];
-          
-          // Try exact match first
-          let matchedAccount = allAccounts.find(acc => 
-            acc.Name && acc.Name.trim().toLowerCase() === accountName.toLowerCase()
-          );
-          
-          // If no exact match, try partial match (e.g., "Electronics" matches "Electronics:Equipment")
-          if (!matchedAccount) {
-            matchedAccount = allAccounts.find(acc => 
-              acc.Name && (
-                acc.Name.toLowerCase().includes(accountName.toLowerCase()) ||
-                accountName.toLowerCase().includes(acc.Name.toLowerCase())
-              )
-            );
-          }
-          
-          if (matchedAccount) {
-            expenseAccountId = matchedAccount.Id;
-            console.log(`✓ Found matching expense account for "${accountName}":`, matchedAccount.Name, "ID:", matchedAccount.Id);
-          } else {
-            // Create a new expense account with the expense_type name
-            try {
-              const createAccountUrl = `${baseUrl}/v3/company/${rid}/account`;
-              // Account Type "Expenses" + Detail Type "Other Business Expenses"
-              // (AccountSubType "OtherBusinessExpenses") — matches the detail type
-              // the client wants for auto-created Categorizr expense categories.
-              const accountData = {
-                Name: accountName,
-                AccountType: "Expense",
-                AccountSubType: "OtherBusinessExpenses",
-              };
-              const createAccountRes = await axios.post(createAccountUrl, accountData, {
-                headers: {
-                  Authorization: `Bearer ${token.access_token}`,
-                  "Content-Type": "application/json",
-                  Accept: "application/json",
-                },
-              });
-              const newAccount = createAccountRes.data?.Account;
-              if (newAccount?.Id) {
-                expenseAccountId = newAccount.Id;
-                console.log(`✓ Created new expense account "${accountName}":`, newAccount.Name, "ID:", newAccount.Id);
-              }
-            } catch (createErr) {
-              console.warn(`Could not create expense account "${accountName}":`, createErr.message);
-            }
-          }
-        } catch (err) {
-          console.warn(`Could not query expense accounts:`, err.message);
-        }
+    const categoryName = (expense_type || "").toString().trim();
+    if (categoryName && categoryName !== "0") {
+      expenseAccountId = await qbFindOrCreateAccount(
+        baseUrl, rid, token.access_token, categoryName, "Expense", "OtherBusinessExpenses"
+      );
+      if (expenseAccountId) {
+        console.log(`✓ Expense category account "${categoryName}" id ${expenseAccountId}`);
+      } else {
+        console.warn(`Could not find or create expense account "${categoryName}"`);
       }
-      
-      // If no matching account found, get the first available expense account
-      if (!expenseAccountId) {
+    }
+
+    if (!expenseAccountId) {
+      try {
         const accountQueryUrl = `${baseUrl}/v3/company/${rid}/query?query=SELECT * FROM Account WHERE AccountType='Expense' MAXRESULTS 1`;
         const accountRes = await axios.get(accountQueryUrl, {
           headers: {
@@ -538,9 +499,9 @@ export async function quickbooksUploadReceipt(req, res) {
           expenseAccountId = accounts[0].Id;
           console.log(`Using default expense account:`, accounts[0].Name, "ID:", accounts[0].Id);
         }
+      } catch (err) {
+        console.warn("Could not fetch Expense account:", err.message);
       }
-    } catch (err) {
-      console.warn("Could not fetch Expense account:", err.message);
     }
 
     // Get Bank account for Purchase (top-level AccountRef) - required for Cash/Check/CreditCard payment types
@@ -774,37 +735,27 @@ export async function quickbooksUploadReceipt(req, res) {
       };
       lineItems.push(mainLineItem);
 
-      // Each tax → its own expense line. The category account is matched by name or
-      // created as Account Type "Other Expense" / Detail Type "Other Miscellaneous
-      // Expense". Both the category name and the Description read "NAME (rate%)"
-      // (e.g. "HST (13%)"), so there are two references to the tax type.
+      // Tax / tip stay as extra lines (amounts + descriptions) but use the SAME
+      // expense-category account so the Expenses list shows "1a-2" instead of "--Split--".
       for (const tax of taxValues) {
         const taxAmount = parseFloat(tax.tax_amount) || 0;
         if (taxAmount === 0) continue;
         const label = `${(tax.tax_name || "Tax").trim()} (${qbFormatRate(tax.tax_rate)}%)`;
-        const taxAccountId = await qbFindOrCreateAccount(
-          baseUrl, rid, token.access_token, label, "Other Expense", "OtherMiscellaneousExpense"
-        );
         lineItems.push({
           Amount: taxAmount,
           Description: label,
           DetailType: "AccountBasedExpenseLineDetail",
-          AccountBasedExpenseLineDetail: { AccountRef: { value: taxAccountId || expenseAccountId } },
+          AccountBasedExpenseLineDetail: { AccountRef: { value: expenseAccountId } },
         });
       }
 
-      // Tip → category account always named "TIP" (Other Expense / Other Misc Expense),
-      // Description = "TIP (x%)" using the Categorizr tip percentage (tip ÷ subtotal).
       if (tipAmount > 0) {
         const tipPct = subtotalAmount > 0 ? Math.round((tipAmount / subtotalAmount) * 100) : 0;
-        const tipAccountId = await qbFindOrCreateAccount(
-          baseUrl, rid, token.access_token, "TIP", "Other Expense", "OtherMiscellaneousExpense"
-        );
         lineItems.push({
           Amount: tipAmount,
           Description: `TIP (${tipPct}%)`,
           DetailType: "AccountBasedExpenseLineDetail",
-          AccountBasedExpenseLineDetail: { AccountRef: { value: tipAccountId || expenseAccountId } },
+          AccountBasedExpenseLineDetail: { AccountRef: { value: expenseAccountId } },
         });
       }
       
@@ -933,9 +884,13 @@ export async function quickbooksUploadReceipt(req, res) {
         purchaseData.DocNumber = `Cat - ${`${receiptId}`.trim()}`.slice(0, 21);
       }
 
-      // Memo → the Categorizr "Notes" only (not the full receipt breakdown).
-      if (notes && notes.toString().trim() && notes !== "0") {
-        purchaseData.Memo = notes.toString().trim();
+      // Memo on a QBO Purchase is PrivateNote (Memo is ignored by the API).
+      const notesText = notes && notes.toString().trim() && notes.toString().trim() !== "0"
+        ? notes.toString().trim()
+        : "";
+      if (notesText) {
+        purchaseData.PrivateNote = notesText;
+        purchaseData.Memo = notesText;
       }
       
       console.log("Purchase data prepared:", {
@@ -947,6 +902,7 @@ export async function quickbooksUploadReceipt(req, res) {
         TxnDate: purchaseData.TxnDate,
         TotalAmt: purchaseData.TotalAmt,
         Memo: purchaseData.Memo || "Not set",
+        PrivateNote: purchaseData.PrivateNote || "Not set",
         LineCount: purchaseData.Line.length,
         LineItems: purchaseData.Line.map(l => ({ 
           Description: l.Description, 
@@ -964,6 +920,7 @@ export async function quickbooksUploadReceipt(req, res) {
       console.log("- TxnDate:", purchaseData.TxnDate);
       console.log("- TotalAmt:", purchaseData.TotalAmt);
       console.log("- Memo:", purchaseData.Memo || "not set");
+      console.log("- PrivateNote:", purchaseData.PrivateNote || "not set");
       console.log("- EntityRef:", JSON.stringify(purchaseData.EntityRef || "not set"));
       console.log("- Line count:", purchaseData.Line.length);
       purchaseData.Line.forEach((line, idx) => {

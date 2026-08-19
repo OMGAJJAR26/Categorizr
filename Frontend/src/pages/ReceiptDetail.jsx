@@ -3579,7 +3579,7 @@ useEffect(() => {
     try {
       const token = localStorage.getItem("token");
       // Use the latest receipt data (including any saved changes)
-      const latestRec = { ...editedReceipt, ...selectedReceipt };
+      const latestRec = { ...selectedReceipt, ...editedReceipt };
       const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/receipts`, {
         method: "POST",
         headers: {
