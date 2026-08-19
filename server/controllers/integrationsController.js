@@ -273,17 +273,22 @@ const qbFault = (err) =>
   err?.message ||
   "unknown error";
 
-/** Deep-link to a Purchase in the QuickBooks UI (sandbox or production). */
+/** Deep-link to a Purchase in the QuickBooks UI (sandbox or production).
+ *  Use /app/login + encoded pagereq so txnId survives Intuit sign-in.
+ *  A bare /app/expense?txnId= URL drops txnId on the unauthenticated redirect
+ *  (cookie becomes {"pagereq":"expense"}) and lands on a blank expense page.
+ */
 function qbPurchaseAppUrl({ purchaseId, realmId, paymentType }) {
   const isProduction = (process.env.QB_ENVIRONMENT || "sandbox") === "production";
   const host = isProduction
-    ? "https://app.qbo.intuit.com"
-    : "https://app.sandbox.qbo.intuit.com";
+    ? "https://qbo.intuit.com"
+    : "https://sandbox.qbo.intuit.com";
   if (!purchaseId || !realmId) {
-    return `${host}/app/expenses`;
+    return `${host}/app/homepage`;
   }
   const txnPath = paymentType === "Check" ? "check" : "expense";
-  return `${host}/app/${txnPath}?txnId=${encodeURIComponent(purchaseId)}&companyId=${encodeURIComponent(realmId)}`;
+  const pageReq = encodeURIComponent(`${txnPath}?txnId=${purchaseId}`);
+  return `${host}/app/login?deeplinkcompanyid=${encodeURIComponent(realmId)}&pagereq=${pageReq}`;
 }
 
 // Find an Account by exact Name; create it with the given type if missing.
@@ -1133,7 +1138,7 @@ export async function quickbooksUploadReceipt(req, res) {
       attachedCount,
       imageCount: imageFiles.length,
       quickbooksUrl,
-      instructions: `Open the expense in QuickBooks to review transaction #${purchaseId} ($${displayAmount}).`,
+      instructions: `Sign in to Intuit if asked, then review transaction #${purchaseId} ($${displayAmount}).`,
       ...(warning && { warning }),
     });
   } catch (err) {
