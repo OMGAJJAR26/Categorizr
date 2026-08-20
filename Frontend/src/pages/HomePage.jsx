@@ -1024,16 +1024,22 @@ const HomePage = () => {
       
       if (isSuccess) {
         let message = data.message || "Receipt linked to QuickBooks successfully!";
-        if (data.instructions) message += ` ${data.instructions}`;
         if (data.warning) message += ` ${data.warning}`;
         else if (data.note) message += ` ${data.note}`;
+
+        // Prefer a "Verify in QuickBooks" link that reads the created expense back
+        // from QuickBooks (works even when the QBO sandbox UI won't open); fall back
+        // to the QuickBooks deep link if there's no purchase id.
+        const verifyUrl = data.purchaseId
+          ? `${NODE_API_URL}/api/integrations/quickbooks/expense?fk_user_id=${encodeURIComponent(localStorage.getItem("fk_user_id") || "")}&purchaseId=${encodeURIComponent(data.purchaseId)}`
+          : null;
 
         setToast({
           isVisible: true,
           message,
           type: "success",
-          actionUrl: data.quickbooksUrl || null,
-          actionLabel: data.quickbooksUrl ? "Open QuickBooks Expenses" : null,
+          actionUrl: verifyUrl || data.quickbooksUrl || null,
+          actionLabel: verifyUrl ? "Verify in QuickBooks" : (data.quickbooksUrl ? "Open QuickBooks Expenses" : null),
         });
         markQbLinked(receipt.id);
         refreshData();
