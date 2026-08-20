@@ -296,22 +296,20 @@ function qbUiOrigin() {
     : "https://app.sandbox.qbo.intuit.com";
 }
 
-function qbOpenBooksUrl(realmId) {
-  const origin = qbUiOrigin();
-  const page = "expenses";
-  if (realmId) {
-    return `${origin}/login?deeplinkcompanyid=${encodeURIComponent(realmId)}&pagereq=${page}`;
-  }
-  return `${origin}/login?pagereq=${page}`;
+// Standard QuickBooks Online deep links. QBO opens these in the browser's
+// currently-active company, so the user must have the connected company selected.
+// (The older /login?deeplinkcompanyid=…&pagereq=… form does not route and shows
+// an "unable to reach / untitled" page.)
+function qbOpenBooksUrl() {
+  return `${qbUiOrigin()}/app/expenses`;
 }
 
-function qbPurchaseAppUrl({ purchaseId, realmId, paymentType }) {
-  if (!purchaseId || !realmId) {
-    return qbOpenBooksUrl(realmId);
+function qbPurchaseAppUrl({ purchaseId, paymentType }) {
+  if (!purchaseId) {
+    return qbOpenBooksUrl();
   }
   const txnPath = paymentType === "Check" ? "check" : "expense";
-  const pageReq = encodeURIComponent(`${txnPath}?txnId=${purchaseId}`);
-  return `${qbUiOrigin()}/login?deeplinkcompanyid=${encodeURIComponent(realmId)}&pagereq=${pageReq}`;
+  return `${qbUiOrigin()}/app/${txnPath}?txnId=${encodeURIComponent(purchaseId)}`;
 }
 
 // Find an Account by exact Name; create it with the given type if missing.
