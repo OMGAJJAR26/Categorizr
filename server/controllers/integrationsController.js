@@ -715,7 +715,14 @@ export async function quickbooksUploadReceipt(req, res) {
         });
       }
       
-      const tipAmount = parseFloat(tip) || 0;
+      // Tip may arrive in the `tip` field OR embedded in receipt_tax_values as a
+      // "Tip" entry — use whichever has a value so the Tip line is never dropped.
+      let tipAmount = parseFloat(tip) || 0;
+      if (!tipAmount) {
+        const tipEntry = (Array.isArray(receipt_tax_values) ? receipt_tax_values : [])
+          .find((t) => /tip/i.test((t.tax_name || "")));
+        if (tipEntry) tipAmount = parseFloat(tipEntry.tax_amount) || 0;
+      }
       const subtotalAmount = parseFloat(subtotal) || (finalAmount - totalTax - tipAmount);
       
       // Build comprehensive memo with ALL receipt details
@@ -774,8 +781,11 @@ export async function quickbooksUploadReceipt(req, res) {
       
       // Get tax codes for taxes (GST, PST, etc.) - TaxCodeRef goes inside AccountBasedExpenseLineDetail
       const taxCodes = new Map(); // Map tax name to TaxCode
-      const taxValues = Array.isArray(receipt_tax_values) ? receipt_tax_values.filter(t => 
-        t.tax_name && t.tax_name.toLowerCase() !== "tip" && parseFloat(t.tax_amount) > 0
+      // Include every non-tip tax with a non-zero amount — POSITIVE OR NEGATIVE
+      // (some receipts carry negative VAT/GST); only truly zero amounts are skipped.
+      const taxValues = Array.isArray(receipt_tax_values) ? receipt_tax_values.filter(t =>
+        t.tax_name && t.tax_name.toLowerCase() !== "tip" &&
+        !isNaN(parseFloat(t.tax_amount)) && parseFloat(t.tax_amount) !== 0
       ) : [];
       
       if (taxValues.length > 0) {
