@@ -830,12 +830,13 @@ export async function quickbooksUploadReceipt(req, res) {
         }
       }
       
-      // ONE category line only. Extra tax/tip lines make QuickBooks show "--Split--"
-      // in the Expenses list instead of "Home" / "1a-2". Roll the full total onto
-      // the Categorizr expense category so that name appears in the list and on the form.
+      // FULL mapping: expense category on the main line (= subtotal), then each tax on
+      // its own line (Other Expense / Other Miscellaneous Expense) and a Tip line.
+      // QuickBooks shows "--Split--" in the Expenses list, but every tax/tip is itemised
+      // on the expense form — per the client's spec.
       const lineItems = [];
       const mainLineItem = {
-        Amount: finalAmount,
+        Amount: subtotalAmount > 0 ? subtotalAmount : finalAmount,
       };
       if (lineItemDescription && lineItemDescription.trim()) {
         mainLineItem.Description = lineItemDescription.trim();
@@ -845,6 +846,37 @@ export async function quickbooksUploadReceipt(req, res) {
         AccountRef: { value: expenseAccountId },
       };
       lineItems.push(mainLineItem);
+
+      // Each tax → its own line. Category account matched/created as Other Expense /
+      // Other Miscellaneous Expense; category name + Description both read "NAME (rate%)".
+      for (const tax of taxValues) {
+        const taxAmount = parseFloat(tax.tax_amount) || 0;
+        if (taxAmount === 0) continue;
+        const label = `${(tax.tax_name || "Tax").trim()} (${qbFormatRate(tax.tax_rate)}%)`;
+        const taxAccountId = await qbFindOrCreateAccount(
+          baseUrl, rid, token.access_token, label, "Other Expense", "OtherMiscellaneousExpense"
+        );
+        lineItems.push({
+          Amount: taxAmount,
+          Description: label,
+          DetailType: "AccountBasedExpenseLineDetail",
+          AccountBasedExpenseLineDetail: { AccountRef: { value: taxAccountId || expenseAccountId } },
+        });
+      }
+
+      // Tip → category account "TIP" (Other Expense), Description "TIP (x%)".
+      if (tipAmount > 0) {
+        const tipPct = subtotalAmount > 0 ? Math.round((tipAmount / subtotalAmount) * 100) : 0;
+        const tipAccountId = await qbFindOrCreateAccount(
+          baseUrl, rid, token.access_token, "TIP", "Other Expense", "OtherMiscellaneousExpense"
+        );
+        lineItems.push({
+          Amount: tipAmount,
+          Description: `TIP (${tipPct}%)`,
+          DetailType: "AccountBasedExpenseLineDetail",
+          AccountBasedExpenseLineDetail: { AccountRef: { value: tipAccountId || expenseAccountId } },
+        });
+      }
       
       // Extract card number for RefNo
       let refNo = null;
@@ -908,7 +940,8 @@ export async function quickbooksUploadReceipt(req, res) {
       let vendorId = null;
       if (storeName && storeName.trim()) {
         try {
-          const vendorQueryUrl = `${baseUrl}/v3/company/${rid}/query?query=SELECT * FROM Vendor WHERE DisplayName='${encodeURIComponent(storeName.trim())}' MAXRESULTS 1`;
+          const vq = `SELECT * FROM Vendor WHERE DisplayName = '${storeName.trim().replace(/'/g, "\\'")}' MAXRESULTS 1`;
+          const vendorQueryUrl = `${baseUrl}/v3/company/${rid}/query?query=${encodeURIComponent(vq)}`;
           const vendorRes = await axios.get(vendorQueryUrl, {
             headers: {
               Authorization: `Bearer ${token.access_token}`,
