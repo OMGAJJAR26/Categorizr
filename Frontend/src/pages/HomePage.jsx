@@ -1027,9 +1027,9 @@ const HomePage = () => {
         if (data.warning) message += ` ${data.warning}`;
         else if (data.note) message += ` ${data.note}`;
 
-        // Prefer a "Verify in QuickBooks" link that reads the created expense back
-        // from QuickBooks (works even when the QBO sandbox UI won't open); fall back
-        // to the QuickBooks deep link if there's no purchase id.
+        // Primary action: open the created expense in QuickBooks Online.
+        // Secondary: a data-verify link that reads the expense back from QuickBooks
+        // (reliable even if the QBO sandbox UI won't load in the browser).
         const verifyUrl = data.purchaseId
           ? `${NODE_API_URL}/api/integrations/quickbooks/expense?fk_user_id=${encodeURIComponent(localStorage.getItem("fk_user_id") || "")}&purchaseId=${encodeURIComponent(data.purchaseId)}`
           : null;
@@ -1038,8 +1038,10 @@ const HomePage = () => {
           isVisible: true,
           message,
           type: "success",
-          actionUrl: verifyUrl || data.quickbooksUrl || null,
-          actionLabel: verifyUrl ? "Verify in QuickBooks" : (data.quickbooksUrl ? "Open QuickBooks Expenses" : null),
+          actionUrl: data.quickbooksUrl || verifyUrl || null,
+          actionLabel: data.quickbooksUrl ? "Open in QuickBooks" : (verifyUrl ? "Verify in QuickBooks" : null),
+          actionUrl2: data.quickbooksUrl ? verifyUrl : null,
+          actionLabel2: data.quickbooksUrl && verifyUrl ? "Verify data" : null,
         });
         markQbLinked(receipt.id);
         refreshData();
@@ -1621,6 +1623,8 @@ const HomePage = () => {
             isVisible={toast.isVisible}
             actionUrl={toast.actionUrl}
             actionLabel={toast.actionLabel}
+            actionUrl2={toast.actionUrl2}
+            actionLabel2={toast.actionLabel2}
             onClose={() => setToast({ ...toast, isVisible: false })}
           />
 

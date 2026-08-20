@@ -4200,8 +4200,8 @@ useEffect(() => {
         } else if (data.note) {
           message += ` ${data.note}`;
         }
-        // "Verify in QuickBooks" — reads the created expense back from QuickBooks
-        // (works even when the QBO sandbox UI won't open in the browser).
+        // Primary: open the expense in QuickBooks Online. Secondary: read the
+        // expense back from QuickBooks (reliable even if the QBO UI won't load).
         const verifyUrl = data.purchaseId
           ? `${NODE_API_URL}/api/integrations/quickbooks/expense?fk_user_id=${encodeURIComponent(localStorage.getItem("fk_user_id") || "")}&purchaseId=${encodeURIComponent(data.purchaseId)}`
           : null;
@@ -4209,8 +4209,10 @@ useEffect(() => {
           isVisible: true,
           message: message,
           type: "success",
-          actionUrl: verifyUrl || data.quickbooksUrl || null,
-          actionLabel: verifyUrl ? "Verify in QuickBooks" : (data.quickbooksUrl ? "Open QuickBooks Expenses" : null),
+          actionUrl: data.quickbooksUrl || verifyUrl || null,
+          actionLabel: data.quickbooksUrl ? "Open in QuickBooks" : (verifyUrl ? "Verify in QuickBooks" : null),
+          actionUrl2: data.quickbooksUrl ? verifyUrl : null,
+          actionLabel2: data.quickbooksUrl && verifyUrl ? "Verify data" : null,
         });
 
         // Update local state only (no API call) - refreshData will fetch fresh data
@@ -7396,6 +7398,8 @@ Thank you for using our receipt management system.
         isVisible={toast.isVisible}
         actionUrl={toast.actionUrl}
         actionLabel={toast.actionLabel}
+        actionUrl2={toast.actionUrl2}
+        actionLabel2={toast.actionLabel2}
         onClose={() => setToast((t) => ({ ...t, isVisible: false }))}
       />
 

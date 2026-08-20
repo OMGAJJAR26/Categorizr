@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CheckCircle, XCircle, AlertCircle, X } from "lucide-react";
 
-const Toast = ({ message, type = "success", isVisible, onClose, duration = 3000, actionUrl, actionLabel }) => {
+const Toast = ({ message, type = "success", isVisible, onClose, duration = 3000, actionUrl, actionLabel, actionUrl2, actionLabel2 }) => {
   useEffect(() => {
     if (isVisible && duration > 0) {
       const timer = setTimeout(() => {
@@ -46,16 +46,31 @@ const Toast = ({ message, type = "success", isVisible, onClose, duration = 3000,
           {icons[type]}
           <div className="flex flex-col gap-1">
             <span className={`font-medium text-sm ${textColors[type]}`}>{message}</span>
-            {actionUrl && actionLabel && (
-              <a
-                href={actionUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`text-xs underline font-semibold ${textColors[type]} hover:opacity-80`}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {actionLabel}
-              </a>
+            {((actionUrl && actionLabel) || (actionUrl2 && actionLabel2)) && (
+              <div className="flex items-center gap-3">
+                {actionUrl && actionLabel && (
+                  <a
+                    href={actionUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`text-xs underline font-semibold ${textColors[type]} hover:opacity-80`}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {actionLabel}
+                  </a>
+                )}
+                {actionUrl2 && actionLabel2 && (
+                  <a
+                    href={actionUrl2}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`text-xs underline font-semibold ${textColors[type]} hover:opacity-80`}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {actionLabel2}
+                  </a>
+                )}
+              </div>
             )}
           </div>
           <button
