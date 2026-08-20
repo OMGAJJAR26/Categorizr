@@ -876,7 +876,11 @@ export async function quickbooksUploadReceipt(req, res) {
 
       // Tip → category account "TIP" (Other Expense), Description "TIP (x%)".
       if (tipAmount > 0) {
-        const tipPct = subtotalAmount > 0 ? Math.round((tipAmount / subtotalAmount) * 100) : 0;
+        // Tip % is tip ÷ subtotal; fall back to the receipt total when the derived
+        // subtotal isn't usable (e.g. odd data where tip exceeds the total), so a
+        // real tip never shows as 0%.
+        const tipBase = subtotalAmount > 0 ? subtotalAmount : Math.abs(parseFloat(finalAmount)) || 0;
+        const tipPct = tipBase > 0 ? Math.round((tipAmount / tipBase) * 100) : 0;
         const tipAccountId = await qbFindOrCreateAccount(
           baseUrl, rid, token.access_token, "TIP", "Other Expense", "OtherMiscellaneousExpense"
         );
