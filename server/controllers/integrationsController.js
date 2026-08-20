@@ -237,6 +237,78 @@ export async function quickbooksDisconnect(req, res) {
   }
 }
 
+// Read a created expense back from QuickBooks so it can be verified WITHOUT
+// opening the QBO sandbox UI. GET /quickbooks/expense?fk_user_id=..&purchaseId=..
+export async function quickbooksGetExpense(req, res) {
+  try {
+    const fkUserId = req.query.fk_user_id || req.query.fkUserId;
+    const purchaseId = req.query.purchaseId || req.query.txnId;
+    if (!fkUserId || !purchaseId) {
+      return res.status(400).json({ success: false, error: "Missing fk_user_id or purchaseId" });
+    }
+    const valid = await getValidQuickBooksToken(fkUserId);
+    if (!valid?.accessToken) {
+      return res.status(400).json({ success: false, error: "QuickBooks not connected." });
+    }
+    const rid = valid.realmId;
+    const baseUrl = isQbProduction()
+      ? "https://quickbooks.api.intuit.com"
+      : "https://sandbox-quickbooks.api.intuit.com";
+    const headers = { Authorization: `Bearer ${valid.accessToken}`, Accept: "application/json" };
+
+    const purchaseRes = await axios.get(
+      `${baseUrl}/v3/company/${rid}/purchase/${encodeURIComponent(purchaseId)}?minorversion=69`,
+      { headers }
+    );
+    const p = purchaseRes.data?.Purchase;
+    if (!p) return res.status(404).json({ success: false, error: "Purchase not found in QuickBooks." });
+
+    let attachments = [];
+    try {
+      const q = `SELECT * FROM Attachable WHERE AttachableRef.EntityRef.value = '${purchaseId}'`;
+      const attRes = await axios.get(
+        `${baseUrl}/v3/company/${rid}/query?query=${encodeURIComponent(q)}`,
+        { headers }
+      );
+      attachments = (attRes.data?.QueryResponse?.Attachable || []).map((a) => ({
+        id: a.Id, fileName: a.FileName, size: a.Size,
+      }));
+    } catch { /* ignore */ }
+
+    const lines = (p.Line || [])
+      .filter((l) => l.DetailType === "AccountBasedExpenseLineDetail")
+      .map((l) => ({
+        amount: l.Amount,
+        description: l.Description || "",
+        account:
+          l.AccountBasedExpenseLineDetail?.AccountRef?.name ||
+          l.AccountBasedExpenseLineDetail?.AccountRef?.value,
+      }));
+
+    return res.status(200).json({
+      success: true,
+      realmId: rid,
+      purchaseId: p.Id,
+      docNumber: p.DocNumber || null,
+      txnDate: p.TxnDate,
+      total: p.TotalAmt,
+      paymentType: p.PaymentType,
+      payee: p.EntityRef?.name || p.EntityRef?.value || null,
+      paymentAccount: p.AccountRef?.name || p.AccountRef?.value || null,
+      paymentMethod: p.PaymentMethodRef?.name || p.PaymentMethodRef?.value || null,
+      memo: p.PrivateNote || null,
+      lines,
+      attachments,
+    });
+  } catch (err) {
+    console.error("QuickBooks getExpense error", err?.response?.data || err.message);
+    return res.status(500).json({
+      success: false,
+      error: err?.response?.data?.Fault?.Error?.[0]?.Message || err.message,
+    });
+  }
+}
+
 async function getQuickBooksTokenForRealm(realmId) {
   let rid = realmId;
   if (!rid) {

@@ -5,6 +5,7 @@ import {
   quickbooksStatus,
   quickbooksDisconnect,
   quickbooksUploadReceipt,
+  quickbooksGetExpense,
   xeroConnect,
   xeroCallback,
   xeroUploadReceipt,
@@ -28,6 +29,7 @@ router.get("/quickbooks/status", quickbooksStatus);
 router.delete("/quickbooks/disconnect", quickbooksDisconnect);
 router.post("/quickbooks/disconnect", quickbooksDisconnect);
 router.post("/quickbooks/receipts", quickbooksUploadReceipt);
+router.get("/quickbooks/expense", quickbooksGetExpense);
 
 // Xero
 router.get("/xero/connect", xeroConnect);
