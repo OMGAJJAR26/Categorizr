@@ -14,6 +14,8 @@ import {
   getValidQuickBooksToken,
   getLinkedReceiptIds,
   addLinkedReceipt,
+  getLinkedPurchaseId,
+  removeLinkedReceipt,
   exchangeQuickBooksAuthorizationCode,
   isMysqlConfigured,
 } from "../services/quickbooksTokenStore.js";
@@ -306,6 +308,67 @@ export async function quickbooksGetExpense(req, res) {
       success: false,
       error: err?.response?.data?.Fault?.Error?.[0]?.Message || err.message,
     });
+  }
+}
+
+// Delete the QuickBooks expense linked to a Categorizr receipt, then clear the
+// link. POST /quickbooks/expense/delete  { fk_user_id, receiptId }
+export async function quickbooksDeleteExpense(req, res) {
+  try {
+    const fkUserId = req.body?.fk_user_id || req.body?.fkUserId || req.query.fk_user_id;
+    const receiptId = req.body?.receiptId || req.query.receiptId;
+    if (!fkUserId || !receiptId) {
+      return res.status(400).json({ success: false, error: "Missing fk_user_id or receiptId" });
+    }
+    const purchaseId = await getLinkedPurchaseId(fkUserId, receiptId);
+    if (!purchaseId) {
+      return res.status(200).json({ success: true, deleted: false, message: "No linked QuickBooks expense." });
+    }
+    const valid = await getValidQuickBooksToken(fkUserId);
+    if (!valid?.accessToken) {
+      return res.status(400).json({ success: false, error: "QuickBooks not connected." });
+    }
+    const rid = valid.realmId;
+    const baseUrl = isQbProduction()
+      ? "https://quickbooks.api.intuit.com"
+      : "https://sandbox-quickbooks.api.intuit.com";
+    const headers = {
+      Authorization: `Bearer ${valid.accessToken}`,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    };
+
+    let syncToken = null;
+    try {
+      const g = await axios.get(
+        `${baseUrl}/v3/company/${rid}/purchase/${encodeURIComponent(purchaseId)}?minorversion=69`,
+        { headers }
+      );
+      syncToken = g.data?.Purchase?.SyncToken;
+    } catch {
+      // Already gone in QuickBooks → just clear our link.
+      await removeLinkedReceipt(fkUserId, receiptId);
+      return res.status(200).json({ success: true, deleted: true, message: "Expense already removed in QuickBooks; link cleared." });
+    }
+
+    try {
+      await axios.post(
+        `${baseUrl}/v3/company/${rid}/purchase?operation=delete&minorversion=69`,
+        { Id: purchaseId, SyncToken: syncToken },
+        { headers }
+      );
+    } catch (err) {
+      return res.status(500).json({
+        success: false,
+        error: err?.response?.data?.Fault?.Error?.[0]?.Message || err.message,
+      });
+    }
+
+    await removeLinkedReceipt(fkUserId, receiptId);
+    return res.status(200).json({ success: true, deleted: true, purchaseId, message: `Deleted QuickBooks expense ${purchaseId}.` });
+  } catch (err) {
+    console.error("QuickBooks delete expense error", err);
+    return res.status(500).json({ success: false, error: err.message });
   }
 }
 
@@ -648,6 +711,7 @@ export async function quickbooksUploadReceipt(req, res) {
 
     // Create a Purchase (Expense) transaction
     let purchaseId = null;
+    let wasUpdate = false;
     let qbPaymentType = "Cash";
     let finalAmount = 0.01; // Store for use in response messages
     try {
@@ -1055,8 +1119,31 @@ export async function quickbooksUploadReceipt(req, res) {
         });
       });
       
-      console.log("Creating Purchase:", JSON.stringify(purchaseData, null, 2));
-      
+      // If this receipt is already linked to a QuickBooks expense, UPDATE that
+      // expense in place (adds Id + SyncToken) instead of creating a duplicate.
+      const existingPurchaseId = await getLinkedPurchaseId(fkUserId, receiptId);
+      if (existingPurchaseId) {
+        try {
+          const existingRes = await axios.get(
+            `${baseUrl}/v3/company/${rid}/purchase/${encodeURIComponent(existingPurchaseId)}?minorversion=69`,
+            { headers: { Authorization: `Bearer ${token.access_token}`, Accept: "application/json" } }
+          );
+          const existing = existingRes.data?.Purchase;
+          if (existing?.Id && existing?.SyncToken != null) {
+            purchaseData.Id = existing.Id;
+            purchaseData.SyncToken = existing.SyncToken;
+            purchaseData.sparse = false;
+            wasUpdate = true;
+            console.log(`Updating existing QuickBooks Purchase ${existing.Id} (SyncToken ${existing.SyncToken})`);
+          }
+        } catch (err) {
+          // Expense was deleted in QB / not found → fall through and create a new one.
+          console.warn(`Linked Purchase ${existingPurchaseId} not found; will create new.`, err.response?.status || err.message);
+        }
+      }
+
+      console.log(purchaseData.Id ? "Updating Purchase:" : "Creating Purchase:", JSON.stringify(purchaseData, null, 2));
+
       // Log detailed error information if request fails
       const postPurchase = (body) =>
         axios.post(purchaseUrl, body, {
@@ -1209,8 +1296,10 @@ export async function quickbooksUploadReceipt(req, res) {
     }
 
     // Attach EVERY receipt image to the Purchase (QuickBooks Attachable).
+    // On UPDATE, skip re-attaching — the image is already on the expense and
+    // re-uploading would pile up duplicate attachments.
     let attachedCount = 0;
-    for (let i = 0; i < imageFiles.length; i++) {
+    for (let i = 0; !wasUpdate && i < imageFiles.length; i++) {
       const img = imageFiles[i];
       try {
         const cleanFileName = img.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -1271,10 +1360,13 @@ export async function quickbooksUploadReceipt(req, res) {
 
     return res.status(200).json({
       success: true,
-      message: attachedCount > 0
-        ? `Receipt linked to QuickBooks successfully! Purchase ID: ${purchaseId}`
-        : `Expense created in QuickBooks! Purchase ID: ${purchaseId}`,
+      message: wasUpdate
+        ? `QuickBooks expense updated! Purchase ID: ${purchaseId}`
+        : (attachedCount > 0
+            ? `Receipt linked to QuickBooks successfully! Purchase ID: ${purchaseId}`
+            : `Expense created in QuickBooks! Purchase ID: ${purchaseId}`),
       purchaseId,
+      updated: wasUpdate,
       attachedCount,
       imageCount: imageFiles.length,
       quickbooksUrl,

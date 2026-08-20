@@ -541,6 +541,42 @@ export async function addLinkedReceipt(fkUserId, receiptId, purchaseId) {
   return getLinkedReceiptIds(userId);
 }
 
+// Return the QuickBooks purchase_id a receipt is already linked to, or null.
+export async function getLinkedPurchaseId(fkUserId, receiptId) {
+  const userId = String(fkUserId || "").trim();
+  const receipt = String(receiptId || "").trim();
+  if (!userId || !receipt) return null;
+  try {
+    await ensureLinkedReceiptTable();
+    const [rows] = await getPool().execute(
+      `SELECT purchase_id FROM ${LINKED_RECEIPT_TABLE}
+        WHERE fk_user_id = ? AND fk_receipt_id = ? LIMIT 1`,
+      [userId, receipt]
+    );
+    const pid = rows?.[0]?.purchase_id;
+    return pid ? String(pid) : null;
+  } catch (err) {
+    console.warn("QuickBooks linked purchase lookup failed:", err.message);
+    return null;
+  }
+}
+
+// Remove the link row for a receipt (used after deleting the QB expense).
+export async function removeLinkedReceipt(fkUserId, receiptId) {
+  const userId = String(fkUserId || "").trim();
+  const receipt = String(receiptId || "").trim();
+  if (!userId || !receipt) return;
+  try {
+    await ensureLinkedReceiptTable();
+    await getPool().execute(
+      `DELETE FROM ${LINKED_RECEIPT_TABLE} WHERE fk_user_id = ? AND fk_receipt_id = ?`,
+      [userId, receipt]
+    );
+  } catch (err) {
+    console.warn("QuickBooks remove linked receipt failed:", err.message);
+  }
+}
+
 export default {
   isMysqlConfigured,
   saveQuickBooksToken,
@@ -550,4 +586,6 @@ export default {
   exchangeQuickBooksAuthorizationCode,
   getLinkedReceiptIds,
   addLinkedReceipt,
+  getLinkedPurchaseId,
+  removeLinkedReceipt,
 };
