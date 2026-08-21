@@ -3266,6 +3266,14 @@ useEffect(() => {
           ...prev,
           ...updatedData,
         }));
+        // If this receipt is linked to QuickBooks, offer to push the edits to the
+        // existing QuickBooks expense (updates in place — no duplicate).
+        if (
+          selectedReceipt?.quickbooksLinked &&
+          window.confirm("This receipt is linked to QuickBooks. Update it in QuickBooks too?")
+        ) {
+          await handleLinkToQuickBooks({ allowNoImage: true });
+        }
         // Sync with server in the background (no spinner) so changes persist after reload
         silentRefreshData?.(1500);
         // Notify parent to show toast, then close
@@ -3283,6 +3291,24 @@ useEffect(() => {
   const handleDelete = async () => {
     setIsDeleting(true);
     try {
+      // If linked to QuickBooks, offer to delete the QB expense too.
+      if (
+        selectedReceipt?.quickbooksLinked &&
+        window.confirm("This receipt is linked to QuickBooks. Also delete the expense from QuickBooks?")
+      ) {
+        try {
+          await fetch(`${NODE_API_URL}/api/integrations/quickbooks/expense/delete`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              fk_user_id: localStorage.getItem("fk_user_id") || "",
+              receiptId: selectedReceipt.id,
+            }),
+          });
+        } catch (e) {
+          console.error("QuickBooks expense delete failed:", e);
+        }
+      }
       const success = await deleteReceipt(selectedReceipt.id);
       if (success) {
         setShowDeleteConfirmation(false);
@@ -3530,10 +3556,11 @@ useEffect(() => {
     return success;
   };
 
-  const handleLinkToQuickBooks = async () => {
+  const handleLinkToQuickBooks = async ({ allowNoImage = false } = {}) => {
     const rec = { ...editedReceipt, ...selectedReceipt };
     const imageUrl = rec.receipt_image || rec.emailAttachment;
-    if (!imageUrl || imageUrl === "0") {
+    // Updating an already-linked expense (allowNoImage) doesn't require an image.
+    if (!allowNoImage && (!imageUrl || imageUrl === "0")) {
       setToast({
         isVisible: true,
         message: "No receipt image to link.",
