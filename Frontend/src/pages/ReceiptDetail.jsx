@@ -3158,8 +3158,11 @@ useEffect(() => {
       const tipAmount = parseFloat(editedReceipt.tip) || 0;
       const subtotal = parseFloat(editedReceipt.subtotal) || 0;
       const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
+      // Enrich first so a stored tip line linked by fk_tax_id (whose raw tax_name
+      // may be empty or "Tax" after a round-trip) is still recognised — this reuses
+      // its id and prevents a duplicate/orphaned "Tip" row.
       const existingTipLine = findTipLineInReceiptTaxValues(
-        selectedReceipt.receipt_tax_values,
+        enrichReceiptTaxValues(selectedReceipt.receipt_tax_values, taxData, selectedReceipt),
       );
       let receiptTaxValuesPayload = filterNonTipReceiptTaxValues(
         editedReceipt.receipt_tax_values,
@@ -3451,8 +3454,11 @@ useEffect(() => {
     const tipAmount = parseFloat(editedReceipt.tip) || 0;
     const subtotal = parseFloat(editedReceipt.subtotal) || 0;
     const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
+    // Enrich first so a stored tip line linked by fk_tax_id (whose raw tax_name
+    // may be empty or "Tax" after a round-trip) is still recognised — this reuses
+    // its id and prevents a duplicate/orphaned "Tip" row.
     const existingTipLine = findTipLineInReceiptTaxValues(
-      selectedReceipt.receipt_tax_values,
+      enrichReceiptTaxValues(selectedReceipt.receipt_tax_values, taxData, selectedReceipt),
     );
     let receiptTaxValuesPayload = filterNonTipReceiptTaxValues(
       editedReceipt.receipt_tax_values,
