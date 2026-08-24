@@ -5,7 +5,10 @@ import { getFkUserId, clearQbLinkedReceipts } from "../utils/qbStorage";
 
 const SAGE_APP_URL = "https://www.sageone.com/";
 const XERO_APP_URL = "https://go.xero.com/";
-const QB_SANDBOX_OPEN_URL = "https://app.sandbox.qbo.intuit.com/login?pagereq=expenses";
+// Canonical "open QuickBooks" landing for each environment. /app/homepage always
+// resolves to the user's active company (or Intuit login), unlike deep paths that
+// need company context and can show a blank/"unable to reach" page.
+const QB_SANDBOX_OPEN_URL = "https://app.sandbox.qbo.intuit.com/app/homepage";
 const QB_PRODUCTION_OPEN_URL = "https://app.qbo.intuit.com/app/homepage";
 
 const providers = [
@@ -131,7 +134,22 @@ const IntegrationsModal = ({ open, onClose, onQuickBooksDisconnected }) => {
   };
 
   const handleOpenQuickBooks = () => {
-    window.open(quickbooksAppUrl || QB_SANDBOX_OPEN_URL, "_blank", "noopener,noreferrer");
+    const url = quickbooksAppUrl || QB_SANDBOX_OPEN_URL;
+    // Anchor-click opens a new tab more reliably than window.open (which some
+    // popup blockers suppress even inside a click handler). Fall back to
+    // navigating the current tab if the new tab is blocked outright.
+    try {
+      const a = document.createElement("a");
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch {
+      const win = window.open(url, "_blank", "noopener,noreferrer");
+      if (!win) window.location.href = url;
+    }
   };
 
   const handleOpenXero = () => {
@@ -175,9 +193,23 @@ const IntegrationsModal = ({ open, onClose, onQuickBooksDisconnected }) => {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full px-2 py-2 text-2xl leading-none text-gray-600 hover:bg-gray-200 w-auto"
+            className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full transition-colors"
+            style={{ backgroundColor: "#000000" }}
+            aria-label="Close"
           >
-            ‹
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#FFFFFF"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
           </button>
           <h2 className="text-2xl font-semibold text-slate-900">Integrations</h2>
         </div>

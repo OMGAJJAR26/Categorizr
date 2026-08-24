@@ -436,7 +436,10 @@ function qbUiOrigin() {
 // (The older /login?deeplinkcompanyid=…&pagereq=… form does not route and shows
 // an "unable to reach / untitled" page.)
 function qbOpenBooksUrl() {
-  return `${qbUiOrigin()}/app/expenses`;
+  // /app/homepage always resolves to the user's active company (or Intuit login);
+  // /app/expenses can render blank without company context. Used for the generic
+  // "Open QuickBooks" button (specific expense deep links use qbPurchaseAppUrl).
+  return `${qbUiOrigin()}/app/homepage`;
 }
 
 function qbPurchaseAppUrl({ purchaseId, paymentType }) {
@@ -787,7 +790,19 @@ export async function quickbooksUploadReceipt(req, res) {
           .find((t) => /tip/i.test((t.tax_name || "")));
         if (tipEntry) tipAmount = parseFloat(tipEntry.tax_amount) || 0;
       }
-      const subtotalAmount = parseFloat(subtotal) || (finalAmount - totalTax - tipAmount);
+      // The QuickBooks expense total is the SUM of its line amounts (QuickBooks
+      // derives TotalAmt from the lines). So main line + taxes + tip must equal the
+      // receipt total. Trust the passed-in subtotal ONLY when it's consistent with
+      // that; otherwise derive it (total − taxes − tip). This prevents a subtotal
+      // that already includes the tip from inflating the total — e.g. a $400 receipt
+      // posting as $440 because the $40 tip was added on top of a $400 "subtotal".
+      const passedSubtotal = parseFloat(subtotal);
+      const derivedSubtotal = finalAmount - totalTax - tipAmount;
+      const subtotalAmount =
+        Number.isFinite(passedSubtotal) &&
+        Math.abs(passedSubtotal + totalTax + tipAmount - finalAmount) < 0.01
+          ? passedSubtotal
+          : derivedSubtotal;
       
       // Build comprehensive memo with ALL receipt details
       // This will be the primary place for description since Line.Description is not supported

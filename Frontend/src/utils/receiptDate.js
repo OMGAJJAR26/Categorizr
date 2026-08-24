@@ -190,7 +190,21 @@ export function calendarUnixToMobileUnix(
   createDateUnix = 0,
   hints = {},
 ) {
-  // Use product_date as create_date so stale create_date never shifts the day
+  // A value that is already a clean calendar day — UTC midnight (what
+  // resolveReceiptCalendarUnix returns on load) or UTC noon (what the date
+  // picker and API writes produce) — is a resolved calendar date. Just
+  // re-anchor it to UTC noon of that same UTC day. Re-running the mobile
+  // heuristics on such a value (with the day used as its own create_date)
+  // trips the "evening-before in the Americas" branch and subtracts a day on
+  // EVERY edit for users in timezones behind UTC — a cumulative -1/day drift.
+  const ts = parseReceiptUnix(productDateUnix);
+  if (ts >= 1000000 && (ts % 86400 === 0 || ts % 86400 === UTC_NOON_OFFSET_SEC)) {
+    const d = new Date(ts * 1000);
+    return utcNoonUnixFromParts(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  }
+  // Genuinely raw timestamps (e.g. first sync from mobile with a time component)
+  // still get the full calendar-day resolution. Use product_date as create_date
+  // so a stale create_date never shifts the day.
   const resolved = resolveReceiptCalendarUnix(
     productDateUnix,
     productDateUnix || createDateUnix,
