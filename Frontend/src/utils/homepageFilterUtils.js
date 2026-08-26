@@ -11,7 +11,8 @@ import { normalizeMerchantKey } from "./merchantListUtils";
 export const buildHomepageFilterMerchantsWithImages = (
   baseMerchantsWithImages,
   receipts,
-  apiMerchants
+  apiMerchants,
+  isHidden
 ) => {
   const existing = new Set(
     (baseMerchantsWithImages || [])
@@ -27,6 +28,7 @@ export const buildHomepageFilterMerchantsWithImages = (
   (receipts || []).filter(isNetworkReceivedReceipt).forEach((r) => {
     const name = (r.storeName || "").trim();
     if (!name) return;
+    if (typeof isHidden === "function" && isHidden(name)) return;
     const key = normalizeMerchantKey(name);
     if (existing.has(key)) return;
     extras.push({ name, image: r.store_image || "" });

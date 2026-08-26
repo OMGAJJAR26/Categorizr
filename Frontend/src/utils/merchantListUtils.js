@@ -84,3 +84,35 @@ export const getApiStoreMetaIds = (apiList) =>
       .map((m) => String(m?.fk_store_meta_id ?? "").trim())
       .filter((id) => id && id !== "0")
   );
+
+/** Client-side starter merchants shown until the user deletes them. */
+export const DEFAULT_MERCHANTS_WITH_LOGOS = [
+  { name: "Costco", image: "https://logo.clearbit.com/costco.com" },
+  { name: "Home Depot", image: "https://logo.clearbit.com/homedepot.com" },
+  { name: "Lowe's", image: "https://logo.clearbit.com/lowes.com" },
+  { name: "Miscellaneous", image: "/miscellaneous-logo.png" },
+  { name: "Nordstrom", image: "https://logo.clearbit.com/nordstrom.com" },
+  { name: "Target", image: "https://logo.clearbit.com/target.com" },
+  { name: "Walmart", image: "https://logo.clearbit.com/walmart.com" },
+];
+
+const DEFAULT_MERCHANT_KEYS = new Set(
+  DEFAULT_MERCHANTS_WITH_LOGOS.map((m) => normalizeMerchantKey(m.name)).filter(Boolean)
+);
+
+export const isDefaultMerchantName = (name) =>
+  DEFAULT_MERCHANT_KEYS.has(normalizeMerchantKey(name));
+
+/**
+ * API stores unhide matching hidden names, except starter merchants the user
+ * deleted. Those must stay hidden across login even if the store list still
+ * contains them (or they are re-injected client-side).
+ */
+export const reconcileHiddenMerchantsWithApi = (hiddenNames, apiStoreNames) => {
+  const apiKeys = new Set(
+    (apiStoreNames || []).map((n) => normalizeMerchantKey(n)).filter(Boolean)
+  );
+  return [...new Set((hiddenNames || []).map((n) => String(n ?? "").trim()).filter(Boolean))].filter(
+    (hidden) => isDefaultMerchantName(hidden) || !apiKeys.has(normalizeMerchantKey(hidden))
+  );
+};

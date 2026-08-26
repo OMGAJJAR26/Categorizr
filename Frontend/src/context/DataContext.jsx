@@ -16,7 +16,19 @@ import {
   resolveReceiptMediaFieldsForApi,
   receiptMediaStorageKey,
 } from "../utils/mediaUrlUtils";
-import { isMerchantSupersededByApi, unescapeMerchantName } from "../utils/merchantListUtils";
+import {
+  DEFAULT_MERCHANTS_WITH_LOGOS,
+  isMerchantSupersededByApi,
+  reconcileHiddenMerchantsWithApi,
+  unescapeMerchantName,
+} from "../utils/merchantListUtils";
+import {
+  addHiddenMerchantName,
+  getStoredUserId,
+  loadHiddenMerchantNames,
+  removeHiddenMerchantName,
+  saveHiddenMerchantNames,
+} from "../utils/hiddenMerchantsStorage";
 import { isNetworkReceivedReceipt } from "../utils/networkReceiptUtils";
 import {
   buildHomepageFilterMerchantsWithImages,
@@ -57,15 +69,6 @@ const _senderReceiptFetchCache = new Map();
 const onlyDigits = (s) => (s ?? "").toString().replace(/\D/g, "");
 // DEFAULT_PAYMENT_METHODS removed — payment methods now come exclusively
 // from the getPaymentMethodv1 API (apiPaymentMethods) and from receipts.
-const DEFAULT_MERCHANTS_WITH_LOGOS = [
-  { name: "Costco", image: "https://logo.clearbit.com/costco.com" },
-  { name: "Home Depot", image: "https://logo.clearbit.com/homedepot.com" },
-  { name: "Lowe's", image: "https://logo.clearbit.com/lowes.com" },
-  { name: "Miscellaneous", image: "/miscellaneous-logo.png" },
-  { name: "Nordstrom", image: "https://logo.clearbit.com/nordstrom.com" },
-  { name: "Target", image: "https://logo.clearbit.com/target.com" },
-  { name: "Walmart", image: "https://logo.clearbit.com/walmart.com" },
-];
 
 // Build a deduplicated list of payment methods from a receipts array.
 // Prefers "issuerName *last4" format, falls back to paymentType.
@@ -270,7 +273,11 @@ export const DataProvider = ({ children }) => {
 
   // ── Hidden receipt-derived items — stored as arrays in localStorage, used as Sets internally ──
   const [hiddenMerchants, setHiddenMerchants] = useState(() => {
-    try { return new Set(JSON.parse(localStorage.getItem("cat_hidden_merchants") || "[]")); } catch { return new Set(); }
+    try {
+      return new Set(loadHiddenMerchantNames(getStoredUserId()));
+    } catch {
+      return new Set();
+    }
   });
   const [hiddenCategories, setHiddenCategories] = useState(() => {
     try { return new Set(JSON.parse(localStorage.getItem("cat_hidden_categories") || "[]")); } catch { return new Set(); }
@@ -440,15 +447,16 @@ export const DataProvider = ({ children }) => {
         setApiMerchants(merchants);
         // Server-backed stores must stay visible in Manage Merchants even if the name
         // was previously added to cat_hidden_merchants via receipt/default cleanup.
+        // Deleted starter merchants (Home Depot, Costco, …) stay hidden so login
+        // cannot resurrect them if the store list still contains the name.
         setHiddenMerchants((prev) => {
-          const normalizeKey = (value) =>
-            String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
-          const apiKeys = new Set(
-            merchants.map((m) => normalizeKey(m.store_name)).filter(Boolean)
+          const nextList = reconcileHiddenMerchantsWithApi(
+            [...prev],
+            merchants.map((m) => m.store_name)
           );
-          const next = new Set([...prev].filter((h) => !apiKeys.has(normalizeKey(h))));
-          if (next.size === prev.size) return prev;
-          localStorage.setItem("cat_hidden_merchants", JSON.stringify([...next]));
+          const next = new Set(nextList);
+          if (next.size === prev.size && [...prev].every((h) => next.has(h))) return prev;
+          saveHiddenMerchantNames(getStoredUserId(), [...next]);
           return next;
         });
         purgeCustomMerchantsMatchingApi(merchants);
@@ -479,6 +487,8 @@ export const DataProvider = ({ children }) => {
         console.log("%c[Merchants] addApiMerchant response:", "color:#22c55e;font-weight:bold", data);
         // Re-fetch so we always have the server-assigned store id before any edit.
         const freshList = await fetchApiMerchants();
+        // Explicit add brings a previously deleted starter merchant (e.g. Home Depot) back.
+        setHiddenMerchants((prev) => removeHiddenMerchantName(getStoredUserId(), prev, name));
         const created =
           freshList.find(
             (m) =>
@@ -1160,6 +1170,9 @@ export const DataProvider = ({ children }) => {
       // userFetchedRef persists across renders so it works correctly inside the
       // memoized fetchData callback (avoids stale closure on the user state).
       let fk_user_id = localStorage.getItem("fk_user_id");
+      if (fk_user_id) {
+        setHiddenMerchants(new Set(loadHiddenMerchantNames(fk_user_id)));
+      }
       if (!userFetchedRef.current) {
         const userRes = await fetch(`${BASE_URL}/user/getuserdetails`, {
           method: "POST",
@@ -1176,6 +1189,9 @@ export const DataProvider = ({ children }) => {
         fk_user_id = userData?.id;
         if (fk_user_id) localStorage.setItem("fk_user_id", fk_user_id);
         userFetchedRef.current = true;
+        if (fk_user_id) {
+          setHiddenMerchants(new Set(loadHiddenMerchantNames(fk_user_id)));
+        }
       }
 
       // Fire all independent requests in parallel so the receipt list appears as
@@ -1238,6 +1254,16 @@ export const DataProvider = ({ children }) => {
             : [];
           console.log("%c[fetchData] Merchants from API:", "color:#6366f1;font-weight:bold", apiMerchantsData);
           setApiMerchants(apiMerchantsData);
+          setHiddenMerchants((prev) => {
+            const nextList = reconcileHiddenMerchantsWithApi(
+              [...prev],
+              apiMerchantsData.map((m) => m.store_name)
+            );
+            const next = new Set(nextList);
+            if (next.size === prev.size && [...prev].every((h) => next.has(h))) return prev;
+            saveHiddenMerchantNames(getStoredUserId(), [...next]);
+            return next;
+          });
           purgeCustomMerchantsMatchingApi(apiMerchantsData);
         }
       } catch (apiStoreErr) {
@@ -1972,6 +1998,8 @@ setMerchantsWithImages(
   const refreshDataAfterAuth = useCallback(async () => {
     userFetchedRef.current = false;
     setUser(null);
+    const uid = getStoredUserId();
+    if (uid) setHiddenMerchants(new Set(loadHiddenMerchantNames(uid)));
     await fetchData();
   }, [fetchData]);
 
@@ -3388,11 +3416,7 @@ setMerchantsWithImages(
   const hideMerchant = useCallback((name) => {
     const trimmed = (name || "").toString().trim();
     if (!trimmed) return;
-    setHiddenMerchants((prev) => {
-      const next = new Set([...prev, trimmed]);
-      localStorage.setItem("cat_hidden_merchants", JSON.stringify([...next]));
-      return next;
-    });
+    setHiddenMerchants((prev) => addHiddenMerchantName(getStoredUserId(), prev, trimmed));
   }, []);
 
   // Hide default merchant labels superseded by renamed API stores (e.g. Target → Targetttt).
@@ -3404,11 +3428,7 @@ setMerchantsWithImages(
     });
   }, [apiMerchants, hideMerchant]);
   const unhideMerchant = useCallback((name) => {
-    setHiddenMerchants((prev) => {
-      const next = new Set([...prev].filter((m) => m !== name));
-      localStorage.setItem("cat_hidden_merchants", JSON.stringify([...next]));
-      return next;
-    });
+    setHiddenMerchants((prev) => removeHiddenMerchantName(getStoredUserId(), prev, name));
   }, []);
   const hideCategory = useCallback((name) => {
     setHiddenCategories((prev) => {
@@ -3527,7 +3547,12 @@ setMerchantsWithImages(
     ...visibleReceiptMerchWImg,
     // API merchants are the source of truth (before local custom list)
     ...apiMerchants
-      .filter((m) => m.store_name && !_miLower.has((m.store_name || "").toLowerCase()))
+      .filter(
+        (m) =>
+          m.store_name &&
+          !_miLower.has((m.store_name || "").toLowerCase()) &&
+          !isMerchantHidden(m.store_name)
+      )
       .map((m) => ({ name: m.store_name, image: m.store_image_url || "" })),
     ...customMerchants
       .filter(
@@ -3599,7 +3624,8 @@ setMerchantsWithImages(
   const homepageFilterMerchantsWithImages = buildHomepageFilterMerchantsWithImages(
     mergedMerchantsWithImages,
     receipts,
-    apiMerchants
+    apiMerchants,
+    isMerchantHidden
   );
   const homepageFilterExpenseCategories = buildHomepageFilterExpenseCategories(
     mergedExpenseCategories,

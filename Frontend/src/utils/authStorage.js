@@ -8,11 +8,15 @@
 // - cat_locally_forwarded    : receipts this device forwarded (keeps the badge)
 // - cat_seen_forwards_<uid>  : forwarded receipts already notified to the user
 // - cat_synced_forwards_<uid>: forwarded receipts whose data was already synced
+// - cat_hidden_merchants_<uid>: default/custom merchants this user deleted
+//   (must survive logout — otherwise Home Depot etc. are re-injected on login)
 const PRESERVED_LOCALSTORAGE_PREFIXES = [
   "cat_locally_forwarded",
   "cat_seen_forwards_",
   "cat_synced_forwards_",
+  "cat_hidden_merchants_",
 ];
+export { PRESERVED_LOCALSTORAGE_PREFIXES };
 
 /**
  * Clear localStorage on logout / session-expiry WITHOUT resetting the durable

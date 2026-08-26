@@ -10,6 +10,7 @@ import {
   taxRatesDiffer,
 } from "../utils/taxTypeUtils";
 import {
+  DEFAULT_MERCHANTS_WITH_LOGOS,
   findRenamedApiMerchant,
   isMerchantSupersededByApi,
   normalizeMerchantKey,
@@ -168,15 +169,6 @@ const DEFAULT_PAYMENT_CARD_MAP = {
   "Visa": "Visa",
   "Cash": "Cash",
 };
-const SETTINGS_DEFAULT_MERCHANTS_WITH_LOGOS = [
-  { name: "Costco", image: "https://logo.clearbit.com/costco.com" },
-  { name: "Home Depot", image: "https://logo.clearbit.com/homedepot.com" },
-  { name: "Lowe's", image: "https://logo.clearbit.com/lowes.com" },
-  { name: "Miscellaneous", image: "/miscellaneous-logo.png" },
-  { name: "Nordstrom", image: "https://logo.clearbit.com/nordstrom.com" },
-  { name: "Target", image: "https://logo.clearbit.com/target.com" },
-  { name: "Walmart", image: "https://logo.clearbit.com/walmart.com" },
-];
 
 /* ─── Shared styles ────────────────────────────────────── */
 const inputCls = "w-full bg-white/95 border border-slate-200 text-slate-900 text-sm rounded-xl px-4 py-2.5 placeholder-slate-400 shadow-sm focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all";
@@ -2201,11 +2193,7 @@ const isBlockedTaxRateInput = (val) => {
         if (!deleteMerchantResult?.ok) throw new Error(deleteMerchantResult?.error || "Failed to delete merchant");
       }
       deleteCustomMerchant(item.name);
-      if (item.isReceiptItem) {
-        hideMerchant(item.key);
-      } else if (item.isDefaultItem) {
-        hideMerchant(item.name);
-      }
+      hideMerchant(item.key || item.name);
       setIsDeleteSyncing(true);
       await Promise.all([refreshData(), fetchApiMerchants()]);
       toast("success", "Merchant Deleted");
@@ -2767,7 +2755,12 @@ const isBlockedTaxRateInput = (val) => {
       const rKeys = new Set(rItems.map(m => normalizeMerchantKey(m.name)));
       // API merchants are the source of truth (GET /userstore/getStorev1)
       const apiItems = (apiMerchants || [])
-        .filter(m => m.store_name && !rKeys.has(normalizeMerchantKey(m.store_name)))
+        .filter(
+          (m) =>
+            m.store_name &&
+            !rKeys.has(normalizeMerchantKey(m.store_name)) &&
+            !isMerchantHidden(m.store_name)
+        )
         .map(m => {
           const apiId = m?.id ?? m?.store_id ?? m?.fk_store_id ?? null;
           return {
@@ -2785,7 +2778,7 @@ const isBlockedTaxRateInput = (val) => {
         .map(m => ({ key: m, name: m, logo: merchLogos[m] || null, isReceiptItem: false, isApiItem: false }));
       const allWithApi = [...rItems, ...apiItems, ...cItems];
       const existingAfterApi = new Set(allWithApi.map((m) => normalizeMerchantKey(m.name)));
-      const defaultItems = SETTINGS_DEFAULT_MERCHANTS_WITH_LOGOS
+      const defaultItems = DEFAULT_MERCHANTS_WITH_LOGOS
         .filter(
           (m) =>
             m.name &&
