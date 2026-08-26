@@ -259,6 +259,14 @@ export const DataProvider = ({ children }) => {
   const [hiddenMerchants, setHiddenMerchants] = useState(() => {
     try { return new Set(JSON.parse(localStorage.getItem("cat_hidden_merchants") || "[]")); } catch { return new Set(); }
   });
+  // ── Explicitly DELETED merchants (tombstones) — a stronger signal than "hidden".
+  // Unlike hidden, these are never un-hidden by fetchApiMerchants and are excluded
+  // even from the API-backed list, so a user-deleted merchant (e.g. a default like
+  // "Home Depot", or a server record the backend delete didn't remove) never comes
+  // back on the next login. Cleared when the same name is re-added. ──
+  const [deletedMerchants, setDeletedMerchants] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("cat_deleted_merchants") || "[]")); } catch { return new Set(); }
+  });
   const [hiddenCategories, setHiddenCategories] = useState(() => {
     try { return new Set(JSON.parse(localStorage.getItem("cat_hidden_categories") || "[]")); } catch { return new Set(); }
   });
@@ -446,6 +454,7 @@ export const DataProvider = ({ children }) => {
   const addApiMerchant = async (name, logoUrl = "") => {
     const token = localStorage.getItem("token");
     if (!token || !name.trim()) return { ok: false, data: null, error: "Missing token or merchant name" };
+    untombstoneMerchant(name.trim()); // re-adding clears any prior deletion tombstone
     const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
     const payload = { store_name: escapeSqlApostrophe(name.trim()), store_image_url: logoUrl || "", fk_user_id };
     console.log("%c[Merchants] POST /userstore/addStorev1 →", "color:#22c55e;font-weight:bold", payload);
@@ -2537,6 +2546,7 @@ setMerchantsWithImages(
   const addCustomMerchant = useCallback((name) => {
     const trimmed = (name || "").trim();
     if (!trimmed) return;
+    untombstoneMerchant(trimmed); // re-adding clears any prior deletion tombstone
     setCustomMerchants((prev) => {
       if (prev.some((m) => m.toLowerCase() === trimmed.toLowerCase())) return prev;
       const next = [...prev, trimmed];
@@ -2698,16 +2708,54 @@ setMerchantsWithImages(
   const normalizeHiddenKey = (value) =>
     String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
 
+  const isMerchantDeleted = useCallback(
+    (name) => {
+      const key = normalizeHiddenKey(name);
+      if (!key) return false;
+      for (const del of deletedMerchants) {
+        if (normalizeHiddenKey(del) === key) return true;
+      }
+      return false;
+    },
+    [deletedMerchants]
+  );
+
+  // Tombstone a merchant on explicit delete so it never comes back (defaults,
+  // receipts, or a server record the backend delete didn't remove).
+  const tombstoneMerchant = useCallback((name) => {
+    const trimmed = (name || "").toString().trim();
+    if (!trimmed) return;
+    setDeletedMerchants((prev) => {
+      const next = new Set([...prev, trimmed]);
+      localStorage.setItem("cat_deleted_merchants", JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+
+  // Clear the tombstone when the same name is re-added, so re-adding works.
+  const untombstoneMerchant = useCallback((name) => {
+    const key = normalizeHiddenKey(name);
+    if (!key) return;
+    setDeletedMerchants((prev) => {
+      const next = new Set([...prev].filter((d) => normalizeHiddenKey(d) !== key));
+      if (next.size === prev.size) return prev;
+      localStorage.setItem("cat_deleted_merchants", JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+
   const isMerchantHidden = useCallback(
     (name) => {
       const key = normalizeHiddenKey(name);
       if (!key) return false;
+      // A tombstoned (explicitly deleted) merchant is always treated as hidden.
+      if (isMerchantDeleted(name)) return true;
       for (const hidden of hiddenMerchants) {
         if (normalizeHiddenKey(hidden) === key) return true;
       }
       return false;
     },
-    [hiddenMerchants]
+    [hiddenMerchants, isMerchantDeleted]
   );
 
   const isCategoryHidden = useCallback(
@@ -2781,9 +2829,15 @@ setMerchantsWithImages(
   ]);
   const mergedMerchantsWithImages = [
     ...visibleReceiptMerchWImg,
-    // API merchants are the source of truth (before local custom list)
+    // API merchants are the source of truth (before local custom list), except
+    // ones the user explicitly deleted (tombstoned) — those must stay gone.
     ...apiMerchants
-      .filter((m) => m.store_name && !_miLower.has((m.store_name || "").toLowerCase()))
+      .filter(
+        (m) =>
+          m.store_name &&
+          !_miLower.has((m.store_name || "").toLowerCase()) &&
+          !isMerchantDeleted(m.store_name)
+      )
       .map((m) => ({ name: m.store_name, image: m.store_image_url || "" })),
     ...customMerchants
       .filter(
@@ -2959,6 +3013,9 @@ setMerchantsWithImages(
         hideMerchant,
         unhideMerchant,
         isMerchantHidden,
+        isMerchantDeleted,
+        tombstoneMerchant,
+        untombstoneMerchant,
         hiddenCategories,
         hideCategory,
         unhideCategory,

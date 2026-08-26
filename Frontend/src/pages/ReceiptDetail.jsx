@@ -217,6 +217,7 @@ const ReceiptDetail = ({
     editCustomMerchant,
     deleteCustomMerchant,
     hideMerchant,
+    tombstoneMerchant,
     addApiMerchant,
     saveMerchLogo,
     apiMerchants,
@@ -2593,6 +2594,8 @@ useEffect(() => {
         handleFieldChange("store_image", "");
       }
       hideMerchant(merchant.name);
+      // Tombstone so a default/receipt/server copy can't resurrect it on reload.
+      tombstoneMerchant(merchant.name);
       await Promise.all([fetchApiMerchants(), silentRefreshData(0)]);
       setToast({ isVisible: true, message: "Merchant deleted successfully!", type: "success" });
     } catch (err) {
