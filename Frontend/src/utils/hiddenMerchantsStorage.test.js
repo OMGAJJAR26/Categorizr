@@ -4,6 +4,7 @@ import { PRESERVED_LOCALSTORAGE_PREFIXES } from "./authStorage.js";
 import {
   DEFAULT_MERCHANTS_WITH_LOGOS,
   isDefaultMerchantName,
+  isOrphanedDefaultMerchant,
   reconcileHiddenMerchantsWithApi,
 } from "./merchantListUtils.js";
 import {
@@ -154,5 +155,21 @@ describe("hidden default merchants survive logout", () => {
   it("save/load round-trips unique trimmed names", () => {
     saveHiddenMerchantNames("42", [" Home Depot ", "Home Depot", "Target"], storage);
     assert.deepEqual(loadHiddenMerchantNames("42", storage), ["Home Depot", "Target"]);
+  });
+
+  it("does not treat getStorev1 stores as orphaned after Home Depot is deleted", () => {
+    const apiStores = [
+      { store_name: "Costco" },
+      { store_name: "Nordstrom" },
+      { store_name: "Lowe's" },
+      { store_name: "Miscellaneous" },
+      { store_name: "Walmart" },
+      { store_name: "Targetttt" },
+    ];
+    assert.equal(isOrphanedDefaultMerchant("Home Depot", apiStores), true);
+    assert.equal(isOrphanedDefaultMerchant("Target", apiStores), true);
+    assert.equal(isOrphanedDefaultMerchant("Walmart", apiStores), false);
+    assert.equal(isOrphanedDefaultMerchant("Costco", apiStores), false);
+    assert.equal(isOrphanedDefaultMerchant("Iwatch", apiStores), false);
   });
 });

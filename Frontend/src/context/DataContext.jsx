@@ -19,6 +19,7 @@ import {
 import {
   DEFAULT_MERCHANTS_WITH_LOGOS,
   isMerchantSupersededByApi,
+  isOrphanedDefaultMerchant,
   reconcileHiddenMerchantsWithApi,
   unescapeMerchantName,
 } from "../utils/merchantListUtils";
@@ -1570,7 +1571,10 @@ export const DataProvider = ({ children }) => {
             ...receiptsWithIntegrations
               .filter((r) => !isNetworkReceivedReceipt(r))
               .map((r) => r.storeName)
-              .filter(Boolean),
+              .filter(
+                (name) =>
+                  name && !isOrphanedDefaultMerchant(name, apiMerchantsData)
+              ),
             ...apiMerchantsData.map((m) => m.store_name).filter(Boolean),
           ])
         ).sort((a, b) =>
@@ -1617,6 +1621,8 @@ export const DataProvider = ({ children }) => {
         const name = r.storeName?.toString().trim();
         const rawImage = r.store_image?.toString().trim();
         if (!name || name === "0") return;
+        // Deleted starter stores (Home Depot, etc.) must not reappear from old receipts.
+        if (isOrphanedDefaultMerchant(name, apiMerchantsData)) return;
         const key = name.toLowerCase().trim();
         const cleanImg = cleanMerchantImage(rawImage);
         if (!merchantsWithImagesMap.has(key)) {
@@ -3507,30 +3513,22 @@ setMerchantsWithImages(
 
   // Dropdown-ready: receipt-derived (minus hidden) + custom (minus hidden duplicates)
   const _rmLower = new Set(receiptMerchantsRaw.map((m) => (m || "").toLowerCase()));
-  const _rmCustomLower = new Set([
-    ..._rmLower,
-    ...customMerchants.map((m) => (m || "").toLowerCase()),
-  ]);
   const mergedMerchants = [
     ...receiptMerchantsRaw.filter(
-      (m) => !isMerchantHidden(m) && !isMerchantSupersededByApi(m, apiMerchants)
+      (m) =>
+        !isMerchantHidden(m) &&
+        !isMerchantSupersededByApi(m, apiMerchants) &&
+        !isOrphanedDefaultMerchant(m, apiMerchants)
     ),
     ...customMerchants.filter((m) => !isMerchantHidden(m) && !_rmLower.has(m.toLowerCase())),
-    ...DEFAULT_MERCHANTS_WITH_LOGOS
-      .map((m) => m.name)
-      .filter(
-        (m) =>
-          m &&
-          !isMerchantHidden(m) &&
-          !_rmCustomLower.has((m || "").toLowerCase()) &&
-          !isMerchantSupersededByApi(m, apiMerchants)
-      ),
   ].sort((a, b) =>
     (a || "").toString().toLowerCase().localeCompare((b || "").toString().toLowerCase())
   );
   const visibleReceiptMerchWImg = receiptMerchWImgRaw.filter(
     (m) =>
-      !isMerchantHidden(m.name) && !isMerchantSupersededByApi(m.name, apiMerchants)
+      !isMerchantHidden(m.name) &&
+      !isMerchantSupersededByApi(m.name, apiMerchants) &&
+      !isOrphanedDefaultMerchant(m.name, apiMerchants)
   );
   const _miLower = new Set(
     visibleReceiptMerchWImg.map((m) => (m.name || "").toLowerCase())
@@ -3538,11 +3536,6 @@ setMerchantsWithImages(
   const _miApiLower = new Set(
     (apiMerchants || []).map((m) => (m?.store_name || "").trim().toLowerCase()).filter(Boolean)
   );
-  const _miCustomLower = new Set([
-    ..._miLower,
-    ..._miApiLower,
-    ...customMerchants.map((m) => (m || "").toLowerCase()),
-  ]);
   const mergedMerchantsWithImages = [
     ...visibleReceiptMerchWImg,
     // API merchants are the source of truth (before local custom list)
@@ -3550,8 +3543,7 @@ setMerchantsWithImages(
       .filter(
         (m) =>
           m.store_name &&
-          !_miLower.has((m.store_name || "").toLowerCase()) &&
-          !isMerchantHidden(m.store_name)
+          !_miLower.has((m.store_name || "").toLowerCase())
       )
       .map((m) => ({ name: m.store_name, image: m.store_image_url || "" })),
     ...customMerchants
@@ -3563,13 +3555,6 @@ setMerchantsWithImages(
           !isMerchantSupersededByApi(m, apiMerchants)
       )
       .map((m) => ({ name: m, image: "" })),
-    ...DEFAULT_MERCHANTS_WITH_LOGOS.filter(
-      (m) =>
-        m.name &&
-        !isMerchantHidden(m.name) &&
-        !_miCustomLower.has((m.name || "").toLowerCase()) &&
-        !isMerchantSupersededByApi(m.name, apiMerchants)
-    ),
   ].sort((a, b) =>
     (a?.name || "").toString().toLowerCase().localeCompare((b?.name || "").toString().toLowerCase())
   );

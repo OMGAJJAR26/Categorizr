@@ -10,9 +10,9 @@ import {
   taxRatesDiffer,
 } from "../utils/taxTypeUtils";
 import {
-  DEFAULT_MERCHANTS_WITH_LOGOS,
   findRenamedApiMerchant,
   isMerchantSupersededByApi,
+  isOrphanedDefaultMerchant,
   normalizeMerchantKey,
 } from "../utils/merchantListUtils";
 import { AnimatePresence, motion } from "framer-motion";
@@ -526,7 +526,13 @@ const ManageModal = ({ type, onClose }) => {
   };
 
   const buildReceiptItems = () => {
-    if (type === "merchants")  return receiptMerchWImgRaw.filter(m => !isMerchantHidden(m.name)).map(m => ({ key: m.name, name: m.name, logo: m.image || null }));
+    if (type === "merchants")  return receiptMerchWImgRaw
+      .filter(
+        (m) =>
+          !isMerchantHidden(m.name) &&
+          !isOrphanedDefaultMerchant(m.name, apiMerchants)
+      )
+      .map((m) => ({ key: m.name, name: m.name, logo: m.image || null }));
     if (type === "categories") return receiptCategoriesRaw.filter(c => !hiddenCategories.has(c)).map(c => ({ key: c, name: c, logo: null }));
     if (type === "payments") {
       if (PAYMENT_METHODS_API_ONLY) return [];
@@ -544,7 +550,9 @@ const ManageModal = ({ type, onClose }) => {
   const buildCustomItems = () => {
     if (type === "merchants") {
       const customItems = customMerchants
-        .filter(m => !isMerchantHidden(m))
+        .filter(
+          (m) => !isMerchantHidden(m) && !isOrphanedDefaultMerchant(m, apiMerchants)
+        )
         .map(m => ({ key: m, name: m, logo: null }));
       const existingNames = new Set([
         ...receiptMerchWImgRaw.map((m) => normalizeMatchKey(m?.name)),
@@ -2740,61 +2748,56 @@ const isBlockedTaxRateInput = (val) => {
   // Build unified list (receipt-derived + custom + API, no dupes, no "Custom" label)
   const buildAllItems = () => {
     if (type === "merchants") {
-      const rItems = receiptMerchWImgRaw
-        .filter(
-          (m) =>
-            !isMerchantHidden(m.name) &&
-            !isMerchantSupersededByApi(m.name, apiMerchants)
-        )
-        .map(m => ({
-          key: m.name, name: m.name,
-          logo: merchLogos[m.name] || m.image || null,
-          isReceiptItem: true,
-          isApiItem: false,
-        }));
-      const rKeys = new Set(rItems.map(m => normalizeMerchantKey(m.name)));
-      // API merchants are the source of truth (GET /userstore/getStorev1)
+      // Manage Merchants lists exactly GET /userstore/getStorev1.
+      // Deleted starter stores (Home Depot, etc.) stay gone because they are
+      // not re-injected from a hardcoded default list or leftover receipts.
       const apiItems = (apiMerchants || [])
-        .filter(
-          (m) =>
-            m.store_name &&
-            !rKeys.has(normalizeMerchantKey(m.store_name)) &&
-            !isMerchantHidden(m.store_name)
-        )
-        .map(m => {
+        .filter((m) => m.store_name)
+        .map((m) => {
           const apiId = m?.id ?? m?.store_id ?? m?.fk_store_id ?? null;
           return {
             key: `api_${apiId ?? m.store_name}`,
             name: m.store_name,
-            logo: m.store_image_url || null,
+            logo: merchLogos[m.store_name] || m.store_image_url || null,
             isReceiptItem: false,
             apiId,
             isApiItem: true,
           };
         });
       const apiNameKeys = new Set(apiItems.map((m) => normalizeMerchantKey(m.name)));
-      const cItems = customMerchants
-        .filter(m => !rKeys.has(normalizeMerchantKey(m)) && !apiNameKeys.has(normalizeMerchantKey(m)) && !isMerchantHidden(m))
-        .map(m => ({ key: m, name: m, logo: merchLogos[m] || null, isReceiptItem: false, isApiItem: false }));
-      const allWithApi = [...rItems, ...apiItems, ...cItems];
-      const existingAfterApi = new Set(allWithApi.map((m) => normalizeMerchantKey(m.name)));
-      const defaultItems = DEFAULT_MERCHANTS_WITH_LOGOS
+      const rItems = receiptMerchWImgRaw
         .filter(
           (m) =>
             m.name &&
-            !existingAfterApi.has(normalizeMerchantKey(m.name)) &&
+            !apiNameKeys.has(normalizeMerchantKey(m.name)) &&
             !isMerchantHidden(m.name) &&
-            !isMerchantSupersededByApi(m.name, apiMerchants)
+            !isMerchantSupersededByApi(m.name, apiMerchants) &&
+            !isOrphanedDefaultMerchant(m.name, apiMerchants)
         )
         .map((m) => ({
-          key: `default_${m.name}`,
+          key: m.name,
           name: m.name,
-          logo: m.image || null,
+          logo: merchLogos[m.name] || m.image || null,
+          isReceiptItem: true,
+          isApiItem: false,
+        }));
+      const rKeys = new Set(rItems.map((m) => normalizeMerchantKey(m.name)));
+      const cItems = customMerchants
+        .filter(
+          (m) =>
+            !rKeys.has(normalizeMerchantKey(m)) &&
+            !apiNameKeys.has(normalizeMerchantKey(m)) &&
+            !isMerchantHidden(m) &&
+            !isOrphanedDefaultMerchant(m, apiMerchants)
+        )
+        .map((m) => ({
+          key: m,
+          name: m,
+          logo: merchLogos[m] || null,
           isReceiptItem: false,
           isApiItem: false,
-          isDefaultItem: true,
         }));
-      return [...allWithApi, ...defaultItems];
+      return [...apiItems, ...rItems, ...cItems];
     }
     if (type === "categories") {
       // API expense categories are the source of truth (GET /userexpensecategory/getExpenseCategoryv1)

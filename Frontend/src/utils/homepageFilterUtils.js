@@ -6,7 +6,7 @@ import {
   normalizePaymentMatchKey,
 } from "./paymentMethodUtils";
 import { isNetworkReceivedReceipt } from "./networkReceiptUtils";
-import { normalizeMerchantKey } from "./merchantListUtils";
+import { normalizeMerchantKey, isOrphanedDefaultMerchant } from "./merchantListUtils";
 
 export const buildHomepageFilterMerchantsWithImages = (
   baseMerchantsWithImages,
@@ -29,6 +29,7 @@ export const buildHomepageFilterMerchantsWithImages = (
     const name = (r.storeName || "").trim();
     if (!name) return;
     if (typeof isHidden === "function" && isHidden(name)) return;
+    if (isOrphanedDefaultMerchant(name, apiMerchants)) return;
     const key = normalizeMerchantKey(name);
     if (existing.has(key)) return;
     extras.push({ name, image: r.store_image || "" });

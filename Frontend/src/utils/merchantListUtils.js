@@ -103,6 +103,13 @@ const DEFAULT_MERCHANT_KEYS = new Set(
 export const isDefaultMerchantName = (name) =>
   DEFAULT_MERCHANT_KEYS.has(normalizeMerchantKey(name));
 
+/** True when a starter name is not in getStorev1 (user deleted it — do not re-inject). */
+export const isOrphanedDefaultMerchant = (name, apiList) => {
+  if (!isDefaultMerchantName(name)) return false;
+  const key = normalizeMerchantKey(name);
+  return !(apiList || []).some((m) => normalizeMerchantKey(m?.store_name) === key);
+};
+
 /**
  * API stores unhide matching hidden names, except starter merchants the user
  * deleted. Those must stay hidden across login even if the store list still
