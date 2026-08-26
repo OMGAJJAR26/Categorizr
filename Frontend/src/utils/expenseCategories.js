@@ -154,6 +154,50 @@ export function getExpenseCategoryRecordId(item) {
   return null;
 }
 
+/** Resolve expense category label from a receipt row (web + mobile + forwarded payloads). */
+export function getReceiptExpenseType(receipt, apiExpenseCategories = []) {
+  if (!receipt) return "";
+
+  const directCandidates = [
+    receipt.expense_type,
+    receipt.expenseType,
+    receipt.expense_category,
+    receipt.expenseCategory,
+    receipt.expense_category_name,
+    receipt.expenseCategoryName,
+  ];
+  for (const candidate of directCandidates) {
+    const trimmed = (candidate ?? "").toString().trim();
+    if (trimmed && trimmed !== "0") return trimmed;
+  }
+
+  const nested =
+    receipt.expense_category ??
+    receipt.expenseCategory ??
+    receipt.user_expense_category ??
+    receipt.userExpenseCategory ??
+    null;
+  if (nested && typeof nested === "object") {
+    const nestedName = getExpenseCategoryRecordName(nested);
+    if (nestedName) return nestedName;
+  }
+
+  const catId =
+    receipt.fk_expense_category_id ??
+    receipt.fkExpenseCategoryId ??
+    receipt.expense_category_id ??
+    receipt.expenseCategoryId;
+  if (catId != null && catId !== "" && catId !== "0" && catId !== 0) {
+    const match = (apiExpenseCategories || []).find(
+      (c) => String(getExpenseCategoryRecordId(c)) === String(catId)
+    );
+    const name = getExpenseCategoryRecordName(match);
+    if (name) return name;
+  }
+
+  return "";
+}
+
 /** Normalize add/get expense category API records to a stable shape for Settings lists. */
 export function normalizeExpenseCategoryApiItem(item, fallbackName = "") {
   const expense_category_name =

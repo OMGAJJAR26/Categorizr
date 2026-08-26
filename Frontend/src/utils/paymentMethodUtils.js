@@ -119,22 +119,60 @@ export const CARD_TYPE_INT_TO_BRAND = {
   8: "Other",
 };
 
-/** API enum for default_payment_category: "0" = none, "1" = Personal, "2" = Business */
+/** API enum for default_payment_category: "0" = Personal, "1" = Business, "2" = None
+ *  (matches the backend / mobile app). "None" means no default expense type. */
 export const paymentCategoryToApiEnum = (value) => {
   const v = String(value ?? "").trim().toLowerCase();
-  if (v === "2" || v === "business") return "2";
-  if (v === "1" || v === "personal") return "1";
-  return "0";
+  if (v === "0" || v === "personal") return "0";
+  if (v === "1" || v === "business") return "1";
+  // Blank / "2" / "none" → no default.
+  return "2";
 };
 
 export const paymentCategoryFromApiEnum = (value) => {
   const v = String(value ?? "").trim();
-  if (v === "0" || v === "") return "";
-  if (v === "1") return "Personal";
-  if (v === "2") return "Business";
+  if (v === "0") return "Personal";
+  if (v === "1") return "Business";
+  if (v === "2" || v === "") return "";
   const lower = v.toLowerCase();
   if (lower === "personal") return "Personal";
   if (lower === "business") return "Business";
+  return "";
+};
+
+/** LocalStorage map (payment display string → "Personal"/"Business") override. */
+const readPayExpenseTypeMap = () => {
+  try {
+    return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}");
+  } catch {
+    return {};
+  }
+};
+
+/**
+ * The default expense TYPE ("Personal" | "Business" | "") configured for a payment
+ * method. Checks the local override map first, then the API record's
+ * default_payment_category. `paymentDisplay` is the label like "Visa *1234".
+ */
+export const getPaymentDefaultExpenseType = (paymentDisplay, apiPaymentMethods = []) => {
+  const name = (paymentDisplay || "").toString().trim();
+  if (!name) return "";
+  const map = readPayExpenseTypeMap();
+  if (map[name]) return paymentCategoryFromApiEnum(map[name]);
+  const apiMatch = (apiPaymentMethods || []).find((m) =>
+    apiPaymentMethodMatchesLabel(m, name)
+  );
+  return paymentCategoryFromApiEnum(apiMatch?.default_payment_category);
+};
+
+/**
+ * Convert a "Personal"/"Business" expense type to the receipt_category value used on
+ * receipts ("0" = Personal, "1" = Business). Returns "" when there is no default.
+ */
+export const expenseTypeToReceiptCategory = (expenseType) => {
+  const v = (expenseType || "").toString().trim().toLowerCase();
+  if (v === "business" || v === "1") return "1";
+  if (v === "personal" || v === "0") return "0";
   return "";
 };
 
@@ -161,6 +199,16 @@ export const isPlaceholderCardNumber = (cn) => {
   const v = (cn ?? "").toString().trim();
   return !v || v === "-" || v === "0";
 };
+
+/** Normalize payment field from API/local — treats 0, -, and empty as no value. */
+export const normalizePaymentField = (value) => {
+  const s = (value ?? "").toString().trim();
+  if (!s || s === "0" || s === "-" || s === "0*0" || /^0\*\d*$/.test(s)) return "";
+  return s;
+};
+
+/** API sentinel for clearing payment on updateReceiptv1 (empty string is ignored by server). */
+export const CLEAR_PAYMENT_API_VALUE = "0";
 
 export const getLast4FromPaymentApiRecord = (m) => {
   const cn = (m?.card_number || "").toString().trim();
@@ -334,6 +382,40 @@ export const mergePaymentMethodLabels = ({
   return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
 };
 
+/**
+ * Dedupe API payment-method RECORDS by their normalized display name.
+ *
+ * Surfaces that render records (e.g. the Settings list) need one row per card even when
+ * the backend stored the same card twice — e.g. card_number "*7777" and "7777", which both
+ * resolve to the same display name "Bnak 7 *7777". The dropdowns/Filter already collapse
+ * these (they dedupe by display name), so this makes Settings consistent with them.
+ *
+ * Keeps the FIRST record for each name (same record the dropdowns match first) and records
+ * the ids of the duplicates it dropped, so a single delete can remove every stored copy.
+ * Returns [{ record, name, apiId, duplicateIds }].
+ */
+export const dedupeApiPaymentMethodRecords = (
+  apiPaymentMethods = [],
+  { isHidden = () => false } = {}
+) => {
+  const byName = new Map();
+  (apiPaymentMethods || []).forEach((m) => {
+    if (!isPaymentApiRecord(m)) return;
+    const name = getApiPaymentMethodDisplayName(m);
+    if (!name || isHidden(name)) return;
+    const key = normalizePaymentMatchKey(name);
+    if (!key) return;
+    const id = m?.id ?? m?.payment_method_id ?? m?.fk_payment_method_id ?? null;
+    const existing = byName.get(key);
+    if (!existing) {
+      byName.set(key, { record: m, name, apiId: id, duplicateIds: [] });
+    } else if (id != null && String(id) !== String(existing.apiId)) {
+      existing.duplicateIds.push(id);
+    }
+  });
+  return Array.from(byName.values());
+};
+
 /** brand|last4 signature for duplicate detection (matches iOS / Settings). */
 export const getPaymentSignature = (paymentName, fallbackCardType = "", payCardMap = {}) => {
   const { last4 } = parsePaymentDisplay(paymentName);
@@ -385,4 +467,42 @@ export const getApiPaymentMethodCacheKey = (m) => {
   const cn = (m.card_number || "").toString().trim();
   if (!isPlaceholderCardNumber(cn)) return cn.toLowerCase();
   return `type:${cardType || "unknown"}`;
+};
+
+/** Field updates that fully clear payment method on a receipt (all API/local aliases). */
+export const getClearPaymentMethodUpdates = () => ({
+  paymentType: "",
+  payment_type: "",
+  card_issuer_name: "",
+  cardIssuerName: "",
+  last_4_digit_card: "",
+  last4DigitCard: "",
+  paymentBrand: "",
+  payment_method_name: "",
+  payment_logo_url: "",
+  paymentLogoUrl: "",
+});
+
+/** Values the receipt API expects when clearing payment on update (not add). */
+export const getClearPaymentMethodApiPayload = () => ({
+  paymentType: CLEAR_PAYMENT_API_VALUE,
+  card_issuer_name: CLEAR_PAYMENT_API_VALUE,
+  last_4_digit_card: CLEAR_PAYMENT_API_VALUE,
+});
+
+/** Keep snake_case and camelCase payment fields in sync after reads/updates. */
+export const syncReceiptPaymentFieldAliases = (receipt) => {
+  if (!receipt || typeof receipt !== "object") return receipt;
+  const paymentType = normalizePaymentField(receipt.paymentType ?? receipt.payment_type);
+  const cardIssuerName = normalizePaymentField(receipt.card_issuer_name ?? receipt.cardIssuerName);
+  const last4 = normalizePaymentField(receipt.last_4_digit_card ?? receipt.last4DigitCard);
+  return {
+    ...receipt,
+    paymentType,
+    payment_type: paymentType,
+    card_issuer_name: cardIssuerName,
+    cardIssuerName,
+    last_4_digit_card: last4,
+    last4DigitCard: last4,
+  };
 };

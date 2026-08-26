@@ -1,6 +1,20 @@
-/** Normalize merchant names for case-insensitive comparison. */
+/**
+ * Undo SQL apostrophe escaping the backend stored literally (Longo''s → Longo's).
+ * The write path escapes apostrophes for the query (' → ''); when that escaped form
+ * gets persisted verbatim it reads back doubled, splitting one store into "Longo''s",
+ * "Longo's", "Longos". Use for the display name so lists show it correctly.
+ */
+export const unescapeMerchantName = (value) =>
+  String(value || "").replace(/''/g, "'");
+
+/**
+ * Normalize merchant names for case-insensitive comparison / dedupe.
+ * Undoes the SQL '' artifact and folds curly apostrophes to straight so the same store
+ * never appears as multiple rows in one list but a single row in another.
+ */
 export const normalizeMerchantKey = (value) =>
-  String(value || "")
+  unescapeMerchantName(value)
+    .replace(/[‘’]/g, "'")
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase();
@@ -70,3 +84,42 @@ export const getApiStoreMetaIds = (apiList) =>
       .map((m) => String(m?.fk_store_meta_id ?? "").trim())
       .filter((id) => id && id !== "0")
   );
+
+/** Client-side starter merchants shown until the user deletes them. */
+export const DEFAULT_MERCHANTS_WITH_LOGOS = [
+  { name: "Costco", image: "https://logo.clearbit.com/costco.com" },
+  { name: "Home Depot", image: "https://logo.clearbit.com/homedepot.com" },
+  { name: "Lowe's", image: "https://logo.clearbit.com/lowes.com" },
+  { name: "Miscellaneous", image: "/miscellaneous-logo.png" },
+  { name: "Nordstrom", image: "https://logo.clearbit.com/nordstrom.com" },
+  { name: "Target", image: "https://logo.clearbit.com/target.com" },
+  { name: "Walmart", image: "https://logo.clearbit.com/walmart.com" },
+];
+
+const DEFAULT_MERCHANT_KEYS = new Set(
+  DEFAULT_MERCHANTS_WITH_LOGOS.map((m) => normalizeMerchantKey(m.name)).filter(Boolean)
+);
+
+export const isDefaultMerchantName = (name) =>
+  DEFAULT_MERCHANT_KEYS.has(normalizeMerchantKey(name));
+
+/** True when a starter name is not in getStorev1 (user deleted it — do not re-inject). */
+export const isOrphanedDefaultMerchant = (name, apiList) => {
+  if (!isDefaultMerchantName(name)) return false;
+  const key = normalizeMerchantKey(name);
+  return !(apiList || []).some((m) => normalizeMerchantKey(m?.store_name) === key);
+};
+
+/**
+ * API stores unhide matching hidden names, except starter merchants the user
+ * deleted. Those must stay hidden across login even if the store list still
+ * contains them (or they are re-injected client-side).
+ */
+export const reconcileHiddenMerchantsWithApi = (hiddenNames, apiStoreNames) => {
+  const apiKeys = new Set(
+    (apiStoreNames || []).map((n) => normalizeMerchantKey(n)).filter(Boolean)
+  );
+  return [...new Set((hiddenNames || []).map((n) => String(n ?? "").trim()).filter(Boolean))].filter(
+    (hidden) => isDefaultMerchantName(hidden) || !apiKeys.has(normalizeMerchantKey(hidden))
+  );
+};

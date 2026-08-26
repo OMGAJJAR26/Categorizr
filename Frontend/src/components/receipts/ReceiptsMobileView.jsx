@@ -3,6 +3,7 @@ import { Trash2, Link2, Loader2 } from "lucide-react";
 import MerchantAvatar from "../MerchantAvatar";
 import SimpleAlertModal from "../SimpleAlertModal";
 import { formatReceiptDate } from "../../utils/receiptDate";
+import { isNewForwardedReceipt } from "../../hooks/useReceiptGrouping";
 import RowSelectCheckbox from "./RowSelectCheckbox";
 
 const ReceiptsMobileView = ({
@@ -62,12 +63,19 @@ const ReceiptsMobileView = ({
   // Determine if receipt is unread for other text elements
   const isUnread = receipt.status === "0";
 
+  const isNewForwarded = isNewForwardedReceipt(receipt);
+
   return (
     <>
-    <div className={`md:hidden flex flex-col gap-3 border rounded-2xl p-4 bg-white shadow-sm ${isToBeVerified ? 'border-amber-400 border-2 bg-amber-50/30' : isUnread ? 'border-blue-500 border-2' : 'border-gray-200'}`}>
+    <div className={`md:hidden flex flex-col gap-3 border rounded-2xl p-4 bg-white shadow-sm ${isToBeVerified ? 'border-amber-400 border-2 bg-amber-50/30' : isNewForwarded ? 'border-blue-500 border-2 bg-blue-50/30' : isUnread ? 'border-blue-500 border-2' : 'border-gray-200'}`}>
       {isToBeVerified && (
         <span className="self-start bg-amber-50 text-amber-600 text-xs font-bold px-2 py-1 rounded-full border border-amber-400 uppercase tracking-wide">
           To Be Verified
+        </span>
+      )}
+      {isNewForwarded && (
+        <span className="self-start bg-blue-50 text-blue-600 text-xs font-bold px-2 py-1 rounded-full border border-blue-400 uppercase tracking-wide">
+          New
         </span>
       )}
       <div className={`flex justify-between items-center ${isUnread ? 'text-gray-400' : 'text-gray-800'}`}>
@@ -123,7 +131,11 @@ const ReceiptsMobileView = ({
         {(() => {
           const paymentDisplay = getPaymentDisplay(receipt);
           const hasPayment = paymentDisplay && paymentDisplay !== "-" && paymentDisplay !== "—";
-          if (!hasPayment) return null;
+          if (!hasPayment) {
+            return (
+              <div className="col-span-2 text-gray-500 font-medium">-</div>
+            );
+          }
           const logo = getPaymentLogo(receipt);
           return (
             <div className="col-span-2 flex items-center gap-2">

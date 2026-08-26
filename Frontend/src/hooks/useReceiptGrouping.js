@@ -3,32 +3,49 @@ import { filterReceipts } from "../utils/receiptFilters";
 import { sortReceipts, sortYears } from "../utils/receiptSorting";
 
 /**
- * A receipt is "to be verified" (Draft / eReceipt) when it was forwarded via
- * email to the app (fk_incoming_email_id is set) and has not yet been verified.
- *
- * "Received" receipts forwarded within the Categorizr Network have
- * fk_forward_from_receipt_id > 0 — those are NOT drafts; they go in the
- * regular list with a blue "Received" badge.
- *
- * Rules:
- *  - is_draft === "1"  → always a draft
- *  - fk_incoming_email_id non-null/non-zero AND is_verify === "0" → eReceipt to verify
+ * Receipts that belong in the amber "Draft / To Be Verified" section.
+ * Mirrors the isDraft condition in ReceiptDetail.jsx exactly:
+ *   1. iOS/Android manually-drafted receipts (is_draft === "1")
+ *   2. Email-received eReceipts (fk_incoming_email_id set, NOT a network-forward)
+ *      that haven't been saved yet (is_verify !== "1")
  */
 const isToBeVerified = (r) => {
+  if (!r) return false;
   if (r.is_draft === "1") return true;
   const hasEmailId =
-    r.fk_incoming_email_id &&
+    r.fk_incoming_email_id != null &&
     r.fk_incoming_email_id !== "0" &&
     r.fk_incoming_email_id !== 0 &&
     r.fk_incoming_email_id !== null;
-  // Explicitly exclude "Received" network receipts (fk_forward_from_receipt_id set)
   const isNetworkReceived =
-    r.fk_forward_from_receipt_id &&
+    r.fk_forward_from_receipt_id != null &&
     r.fk_forward_from_receipt_id !== "0" &&
     r.fk_forward_from_receipt_id !== 0;
-  if (isNetworkReceived) return false;
-  return hasEmailId && r.is_verify === "0";
+  return hasEmailId && !isNetworkReceived && String(r?.is_verify ?? "0") !== "1";
 };
+
+/**
+ * Network-forwarded receipts (sent from another Categorizr user via the app)
+ * that haven't been opened yet. Goes in the REGULAR section with a blue "New" highlight.
+ * Email-received receipts (fk_incoming_email_id) are drafts — they use isToBeVerified instead.
+ */
+export const isNewForwardedReceipt = (r) => {
+  if (!r || r.is_draft === "1" || r.is_verify !== "0") return false;
+  // Respect the cross-device read state. The mobile app marks a received receipt as
+  // read by setting status="1" (it does NOT touch is_verify — only the WebApp's own
+  // open handler sets is_verify="1"). Without this check a receipt already opened on
+  // Android (status="1", is_verify="0") would light up "New" again on the WebApp.
+  if (String(r.status) === "1") return false;
+  // Only network-forwarded receipts get the blue "New" badge.
+  // Email-received eReceipts belong in Draft Mode, not here.
+  const isNetworkReceived =
+    r.fk_forward_from_receipt_id != null &&
+    String(r.fk_forward_from_receipt_id) !== "0";
+  return isNetworkReceived;
+};
+
+/** @deprecated Use isNewForwardedReceipt instead */
+export const isNewForwardedEmailReceipt = isNewForwardedReceipt;
 
 export const useReceiptGrouping = (receipts, filters, sortConfig, searchTerm) => {
   // Split ALL receipts into draft vs regular BEFORE applying user filters.
@@ -44,8 +61,10 @@ export const useReceiptGrouping = (receipts, filters, sortConfig, searchTerm) =>
     });
     // Sort draft receipts newest first
     draft.sort((a, b) => Number(b.product_date || 0) - Number(a.product_date || 0));
-    return { draftReceipts: draft, regularReceipts: regular };
-  }, [receipts]);
+    // Apply the same filters to drafts so they respect active filter selections
+    const filteredDraft = filterReceipts(draft, filters, searchTerm);
+    return { draftReceipts: filteredDraft, regularReceipts: regular };
+  }, [receipts, filters, searchTerm]);
 
   const filteredReceipts = useMemo(() => {
     return filterReceipts(regularReceipts, filters, searchTerm);
@@ -64,7 +83,7 @@ export const useReceiptGrouping = (receipts, filters, sortConfig, searchTerm) =>
     const groupedByYear = sortedReceipts.reduce((acc, receipt) => {
       const year = receipt.product_date
         ? new Date(Number(receipt.product_date) * 1000).getUTCFullYear()
-        : "Unknown";
+        : "No Date";
       if (!acc[year]) acc[year] = [];
       acc[year].push(receipt);
       return acc;

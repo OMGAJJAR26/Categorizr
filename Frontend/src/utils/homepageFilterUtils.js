@@ -1,24 +1,26 @@
 import { getPaymentDisplayFromReceipt } from "../hooks/usePaymentDisplay";
-import { getExpenseCategoryRecordName } from "./expenseCategories";
+import { getExpenseCategoryRecordName, getReceiptExpenseType } from "./expenseCategories";
 import {
   getApiPaymentMethodDisplayName,
   normalizePaymentListLabel,
   normalizePaymentMatchKey,
 } from "./paymentMethodUtils";
 import { isNetworkReceivedReceipt } from "./networkReceiptUtils";
+import { normalizeMerchantKey, isOrphanedDefaultMerchant } from "./merchantListUtils";
 
 export const buildHomepageFilterMerchantsWithImages = (
   baseMerchantsWithImages,
   receipts,
-  apiMerchants
+  apiMerchants,
+  isHidden
 ) => {
   const existing = new Set(
     (baseMerchantsWithImages || [])
-      .map((m) => (m?.name || "").trim().toLowerCase())
+      .map((m) => normalizeMerchantKey(m?.name))
       .filter(Boolean)
   );
   (apiMerchants || []).forEach((m) => {
-    const n = (m?.store_name || "").trim().toLowerCase();
+    const n = normalizeMerchantKey(m?.store_name);
     if (n) existing.add(n);
   });
 
@@ -26,7 +28,9 @@ export const buildHomepageFilterMerchantsWithImages = (
   (receipts || []).filter(isNetworkReceivedReceipt).forEach((r) => {
     const name = (r.storeName || "").trim();
     if (!name) return;
-    const key = name.toLowerCase();
+    if (typeof isHidden === "function" && isHidden(name)) return;
+    if (isOrphanedDefaultMerchant(name, apiMerchants)) return;
+    const key = normalizeMerchantKey(name);
     if (existing.has(key)) return;
     extras.push({ name, image: r.store_image || "" });
     existing.add(key);
@@ -52,7 +56,7 @@ export const buildHomepageFilterExpenseCategories = (
 
   const extras = [];
   (receipts || []).filter(isNetworkReceivedReceipt).forEach((r) => {
-    const cat = (r.expense_type || "").trim();
+    const cat = getReceiptExpenseType(r, apiExpenseCategories).trim();
     if (!cat) return;
     const key = cat.toLowerCase();
     if (existing.has(key)) return;

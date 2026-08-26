@@ -1,0 +1,397 @@
+/* =============================================================================
+   DARK MODE – global overrides
+   Applied when <html class="dark"> is set by ThemeContext.
+   Uses higher specificity (.dark .class) to win over Tailwind utilities.
+   ============================================================================= */
+
+/* ── Base ───────────────────────────────────────────────────────────────────── */
+html.dark,
+html.dark body,
+html.dark #root {
+  background-color: #0f172a;
+  color: #f1f5f9;
+  color-scheme: dark;
+}
+
+/* ── Scrollbars ─────────────────────────────────────────────────────────────── */
+html.dark ::-webkit-scrollbar { width: 8px; height: 8px; }
+html.dark ::-webkit-scrollbar-track { background: #1e293b; }
+html.dark ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+html.dark ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+/* ── Background overrides ───────────────────────────────────────────────────── */
+.dark .bg-white           { background-color: #1e293b; }
+.dark .bg-gray-50         { background-color: #0f172a; }
+.dark .bg-gray-100        { background-color: #1e293b; }
+.dark .bg-gray-200        { background-color: #334155; }
+.dark .bg-gray-300        { background-color: #475569; }
+.dark .bg-slate-50        { background-color: #0f172a; }
+.dark .bg-slate-100       { background-color: #1e293b; }
+.dark .bg-slate-200       { background-color: #334155; }
+.dark .bg-slate-300       { background-color: #475569; }
+.dark .bg-zinc-50         { background-color: #0f172a; }
+.dark .bg-zinc-100        { background-color: #1e293b; }
+.dark .bg-neutral-50      { background-color: #0f172a; }
+.dark .bg-neutral-100     { background-color: #1e293b; }
+
+/* Status backgrounds */
+.dark .bg-blue-50         { background-color: #0c1a2e; }
+.dark .bg-blue-100        { background-color: #172554; }
+.dark .bg-indigo-50       { background-color: #0d1130; }
+.dark .bg-indigo-100      { background-color: #1e1b4b; }
+.dark .bg-green-50        { background-color: #052e16; }
+.dark .bg-green-100       { background-color: #14532d; }
+.dark .bg-emerald-50      { background-color: #022c22; }
+.dark .bg-emerald-100     { background-color: #064e3b; }
+.dark .bg-teal-50         { background-color: #042f2e; }
+.dark .bg-teal-100        { background-color: #134e4a; }
+.dark .bg-red-50          { background-color: #2d0f0f; }
+.dark .bg-red-100         { background-color: #450a0a; }
+.dark .bg-rose-50         { background-color: #1f0a12; }
+.dark .bg-rose-100        { background-color: #4c0519; }
+.dark .bg-yellow-50       { background-color: #1c1400; }
+.dark .bg-yellow-100      { background-color: #2d2000; }
+.dark .bg-amber-50        { background-color: #1c1100; }
+.dark .bg-amber-100       { background-color: #2d1f00; }
+.dark .bg-orange-50       { background-color: #1c0d00; }
+.dark .bg-orange-100      { background-color: #2d1700; }
+.dark .bg-purple-50       { background-color: #150f2e; }
+.dark .bg-purple-100      { background-color: #1e1548; }
+.dark .bg-pink-50         { background-color: #1a0a12; }
+.dark .bg-pink-100        { background-color: #2d1020; }
+.dark .bg-sky-50          { background-color: #0c1a2e; }
+.dark .bg-sky-100         { background-color: #0c2a4a; }
+.dark .bg-cyan-50         { background-color: #042f2e; }
+.dark .bg-cyan-100        { background-color: #083344; }
+
+/* ── Hover background overrides ─────────────────────────────────────────────── */
+.dark .hover\:bg-white:hover          { background-color: #334155; }
+.dark .hover\:bg-gray-50:hover        { background-color: #1e293b; }
+.dark .hover\:bg-gray-100:hover       { background-color: #334155; }
+.dark .hover\:bg-gray-200:hover       { background-color: #475569; }
+.dark .hover\:bg-slate-50:hover       { background-color: #1e293b; }
+.dark .hover\:bg-slate-100:hover      { background-color: #334155; }
+.dark .hover\:bg-blue-50:hover        { background-color: #1e3a5f; }
+.dark .hover\:bg-red-50:hover         { background-color: #3f1515; }
+.dark .hover\:bg-green-50:hover       { background-color: #0a2e1a; }
+.dark .hover\:bg-amber-50:hover       { background-color: #2d2000; }
+
+/* ── Text overrides ─────────────────────────────────────────────────────────── */
+.dark .text-black         { color: #f1f5f9; }
+.dark .text-gray-950      { color: #f1f5f9; }
+.dark .text-gray-900      { color: #f1f5f9; }
+.dark .text-gray-800      { color: #e2e8f0; }
+.dark .text-gray-700      { color: #cbd5e1; }
+.dark .text-gray-600      { color: #94a3b8; }
+.dark .text-gray-500      { color: #64748b; }
+.dark .text-gray-400      { color: #475569; }
+.dark .text-slate-950     { color: #f1f5f9; }
+.dark .text-slate-900     { color: #f1f5f9; }
+.dark .text-slate-800     { color: #e2e8f0; }
+.dark .text-slate-700     { color: #cbd5e1; }
+.dark .text-slate-600     { color: #94a3b8; }
+.dark .text-slate-500     { color: #64748b; }
+.dark .text-zinc-900      { color: #f1f5f9; }
+.dark .text-zinc-800      { color: #e2e8f0; }
+.dark .text-zinc-700      { color: #cbd5e1; }
+.dark .text-neutral-900   { color: #f1f5f9; }
+.dark .text-neutral-800   { color: #e2e8f0; }
+.dark .text-neutral-700   { color: #cbd5e1; }
+
+/* Status text — lighten for dark backgrounds */
+.dark .text-blue-900      { color: #93c5fd; }
+.dark .text-blue-800      { color: #93c5fd; }
+.dark .text-blue-700      { color: #60a5fa; }
+.dark .text-blue-600      { color: #60a5fa; }
+.dark .text-indigo-900    { color: #a5b4fc; }
+.dark .text-indigo-800    { color: #a5b4fc; }
+.dark .text-indigo-700    { color: #818cf8; }
+.dark .text-green-900     { color: #86efac; }
+.dark .text-green-800     { color: #86efac; }
+.dark .text-green-700     { color: #4ade80; }
+.dark .text-emerald-900   { color: #6ee7b7; }
+.dark .text-emerald-800   { color: #6ee7b7; }
+.dark .text-emerald-700   { color: #34d399; }
+.dark .text-red-900       { color: #fca5a5; }
+.dark .text-red-800       { color: #fca5a5; }
+.dark .text-red-700       { color: #f87171; }
+.dark .text-yellow-900    { color: #fde68a; }
+.dark .text-yellow-800    { color: #fde68a; }
+.dark .text-yellow-700    { color: #fcd34d; }
+.dark .text-amber-900     { color: #fcd34d; }
+.dark .text-amber-800     { color: #fcd34d; }
+.dark .text-amber-700     { color: #fbbf24; }
+.dark .text-amber-600     { color: #f59e0b; }
+.dark .text-orange-900    { color: #fdba74; }
+.dark .text-orange-800    { color: #fdba74; }
+.dark .text-orange-700    { color: #fb923c; }
+.dark .text-purple-900    { color: #c4b5fd; }
+.dark .text-purple-800    { color: #c4b5fd; }
+.dark .text-purple-700    { color: #a78bfa; }
+.dark .text-pink-900      { color: #f9a8d4; }
+.dark .text-pink-800      { color: #f9a8d4; }
+.dark .text-pink-700      { color: #f472b6; }
+.dark .text-sky-900       { color: #7dd3fc; }
+.dark .text-sky-800       { color: #7dd3fc; }
+.dark .text-sky-700       { color: #38bdf8; }
+.dark .text-teal-900      { color: #5eead4; }
+.dark .text-teal-800      { color: #5eead4; }
+.dark .text-teal-700      { color: #2dd4bf; }
+.dark .text-cyan-900      { color: #67e8f9; }
+.dark .text-cyan-800      { color: #67e8f9; }
+.dark .text-cyan-700      { color: #22d3ee; }
+
+/* ── Hover text overrides ───────────────────────────────────────────────────── */
+.dark .hover\:text-gray-900:hover   { color: #f1f5f9; }
+.dark .hover\:text-gray-800:hover   { color: #e2e8f0; }
+.dark .hover\:text-gray-700:hover   { color: #cbd5e1; }
+.dark .hover\:text-gray-600:hover   { color: #94a3b8; }
+.dark .hover\:text-slate-900:hover  { color: #f1f5f9; }
+.dark .hover\:text-slate-800:hover  { color: #e2e8f0; }
+
+/* ── Border overrides ───────────────────────────────────────────────────────── */
+.dark .border-gray-100    { border-color: #1e293b; }
+.dark .border-gray-200    { border-color: #334155; }
+.dark .border-gray-300    { border-color: #475569; }
+.dark .border-gray-400    { border-color: #64748b; }
+.dark .border-slate-100   { border-color: #1e293b; }
+.dark .border-slate-200   { border-color: #334155; }
+.dark .border-slate-300   { border-color: #475569; }
+.dark .border-zinc-100    { border-color: #1e293b; }
+.dark .border-zinc-200    { border-color: #334155; }
+.dark .border-zinc-300    { border-color: #475569; }
+.dark .border-neutral-200 { border-color: #334155; }
+.dark .border-neutral-300 { border-color: #475569; }
+.dark .border-blue-100    { border-color: #1e3a5f; }
+.dark .border-blue-200    { border-color: #1e40af; }
+.dark .border-green-100   { border-color: #14532d; }
+.dark .border-green-200   { border-color: #166534; }
+.dark .border-red-100     { border-color: #7f1d1d; }
+.dark .border-red-200     { border-color: #991b1b; }
+.dark .border-amber-100   { border-color: #78350f; }
+.dark .border-amber-200   { border-color: #92400e; }
+.dark .border-yellow-100  { border-color: #713f12; }
+.dark .border-yellow-200  { border-color: #854d0e; }
+.dark .border-purple-100  { border-color: #3b0764; }
+.dark .border-purple-200  { border-color: #4c1d95; }
+
+/* ── Divide color overrides ─────────────────────────────────────────────────── */
+.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: #1e293b; }
+.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: #334155; }
+.dark .divide-gray-300 > :not([hidden]) ~ :not([hidden]) { border-color: #475569; }
+.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) { border-color: #334155; }
+
+/* ── Ring color overrides ───────────────────────────────────────────────────── */
+.dark .ring-gray-200  { --tw-ring-color: #334155; }
+.dark .ring-gray-300  { --tw-ring-color: #475569; }
+.dark .ring-slate-200 { --tw-ring-color: #334155; }
+
+/* ── Form elements ──────────────────────────────────────────────────────────── */
+.dark input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]):not([type="reset"]),
+.dark textarea,
+.dark select {
+  background-color: #1e293b;
+  color: #f1f5f9;
+  border-color: #334155;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #475569;
+}
+
+.dark input:focus:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+.dark textarea:focus,
+.dark select:focus {
+  border-color: #3b82f6;
+  outline-color: #3b82f6;
+}
+
+.dark select option {
+  background-color: #1e293b;
+  color: #f1f5f9;
+}
+
+.dark input[type="checkbox"],
+.dark input[type="radio"] {
+  accent-color: #3b82f6;
+  border-color: #475569;
+}
+
+/* Date/time inputs */
+.dark input[type="date"],
+.dark input[type="time"],
+.dark input[type="datetime-local"],
+.dark input[type="month"],
+.dark input[type="week"] {
+  background-color: #1e293b;
+  color: #f1f5f9;
+  border-color: #334155;
+  color-scheme: dark;
+}
+
+/* ── Shadows ────────────────────────────────────────────────────────────────── */
+.dark .shadow-sm  { box-shadow: 0 1px 2px 0 rgba(0,0,0,0.4); }
+.dark .shadow     { box-shadow: 0 1px 3px 0 rgba(0,0,0,0.5), 0 1px 2px -1px rgba(0,0,0,0.5); }
+.dark .shadow-md  { box-shadow: 0 4px 6px -1px rgba(0,0,0,0.5), 0 2px 4px -2px rgba(0,0,0,0.5); }
+.dark .shadow-lg  { box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5), 0 4px 6px -4px rgba(0,0,0,0.5); }
+.dark .shadow-xl  { box-shadow: 0 20px 25px -5px rgba(0,0,0,0.6), 0 8px 10px -6px rgba(0,0,0,0.6); }
+.dark .shadow-2xl { box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7); }
+
+/* ── Custom CSS classes used in the app ─────────────────────────────────────── */
+
+/* Legacy form container */
+.dark .form-container {
+  background: #1e293b;
+  box-shadow: 0 0 10px rgba(0,0,0,0.5);
+}
+
+/* Tailwind opacity bg-white/X patterns common in modals */
+.dark .bg-black\/50  { background-color: rgba(0,0,0,0.7); }
+.dark .bg-black\/40  { background-color: rgba(0,0,0,0.65); }
+.dark .bg-black\/30  { background-color: rgba(0,0,0,0.55); }
+
+/* Toast notifications — keep light background, darken it */
+.dark .bg-green-50.border-green-200  { background-color: #052e16; border-color: #166534; }
+.dark .bg-red-50.border-red-200      { background-color: #2d0f0f; border-color: #991b1b; }
+.dark .bg-yellow-50.border-yellow-200 { background-color: #1c1400; border-color: #854d0e; }
+.dark .bg-blue-50.border-blue-200    { background-color: #0c1a2e; border-color: #1e40af; }
+
+/* ── Tailwind focus-within & focus-visible ───────────────────────────────────── */
+.dark .focus\:ring-gray-200:focus { --tw-ring-color: #334155; }
+.dark .focus\:border-gray-300:focus { border-color: #475569; }
+
+/* ── Specific patterns in the app ───────────────────────────────────────────── */
+
+/* Rounded card-like elements */
+.dark .rounded-xl.bg-white,
+.dark .rounded-2xl.bg-white,
+.dark .rounded-3xl.bg-white,
+.dark .rounded-lg.bg-white {
+  background-color: #1e293b;
+}
+
+/* Table rows */
+.dark tr.bg-white { background-color: #1e293b; }
+.dark tr:nth-child(even) { background-color: #0f172a; }
+.dark tbody tr:hover { background-color: #334155 !important; }
+
+/* Sticky/fixed bars */
+.dark .sticky.bg-white { background-color: #1e293b; }
+
+/* ── HomePage.css custom classes ─────────────────────────────────────────────── */
+.dark .home-page {
+  --hp-bg: #0f172a;
+  --hp-card-bg: #1e293b;
+  --hp-card-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+  --hp-card-border: 1px solid rgba(148, 163, 184, 0.12);
+  --hp-accent: #3b82f6;
+  --hp-accent-soft: rgba(59, 130, 246, 0.15);
+  --hp-accent-glow: rgba(59, 130, 246, 0.35);
+  --hp-bar-bg: #1e293b;
+  --hp-bar-border: 1px solid rgba(148, 163, 184, 0.1);
+  --hp-year-bg: #1e293b;
+  --hp-year-text: #e2e8f0;
+  --hp-input-bg: #0f172a;
+  --hp-input-border: 1px solid #334155;
+  --hp-btn-primary: #3b82f6;
+  --hp-btn-primary-hover: #60a5fa;
+  --hp-text-primary: #f1f5f9;
+  --hp-text-muted: #94a3b8;
+  --hp-text-subtle: #64748b;
+  --hp-divider: rgba(148, 163, 184, 0.1);
+}
+
+.dark .home-table-header   { background: #1e293b; color: #94a3b8; }
+.dark .home-sticky-bar-desktop .home-section-title { color: #f1f5f9; }
+.dark .home-sticky-bar-mobile .home-section-title  { color: #f1f5f9; }
+.dark .home-search-input   { color: #f1f5f9; background: #0f172a; }
+.dark .home-integrations-btn { background: #1e293b; border-color: #334155; color: #60a5fa; }
+.dark .home-year-total     { color: #60a5fa; }
+.dark .home-empty-state    { color: #64748b; }
+
+/* ── Backdrop/overlay ───────────────────────────────────────────────────────── */
+.dark .backdrop-blur-sm { backdrop-filter: blur(4px); }
+
+/* ── Disabled state overrides ───────────────────────────────────────────────── */
+.dark .disabled\:bg-gray-100:disabled,
+.dark .disabled\:bg-gray-200:disabled { background-color: #334155; }
+.dark .disabled\:text-gray-400:disabled { color: #64748b; }
+.dark .disabled\:bg-blue-300:disabled  { background-color: #1e40af; opacity: 0.6; }
+
+/* ── Placeholder text ───────────────────────────────────────────────────────── */
+.dark .placeholder\:text-gray-400::placeholder { color: #475569; }
+.dark .placeholder\:text-gray-500::placeholder { color: #334155; }
+.dark .placeholder\:text-slate-400::placeholder { color: #475569; }
+
+/* ── Focus ring / outline ───────────────────────────────────────────────────── */
+.dark .focus\:ring-blue-500:focus   { --tw-ring-color: #3b82f6; }
+.dark .focus\:ring-gray-300:focus   { --tw-ring-color: #475569; }
+.dark .focus\:border-blue-500:focus { border-color: #3b82f6; }
+
+/* ── App.css class overrides ─────────────────────────────────────────────────── */
+/* The App.css rule `.receipt-detail-modal .sticky { background: white; }` would
+   win over Tailwind's bg-white override because it uses a more specific selector.
+   Counter it explicitly here. */
+.dark .receipt-detail-modal .sticky {
+  background: #1e293b !important;
+  border-bottom-color: #334155;
+}
+
+/* ── ReceiptDetail modal backdrop ───────────────────────────────────────────── */
+/* bg-white/30 used as modal backdrop overlay — convert to dark semi-transparent */
+.dark .bg-white\/30 {
+  background-color: rgba(0, 0, 0, 0.4);
+}
+.dark .bg-white\/50 {
+  background-color: rgba(15, 23, 42, 0.7);
+}
+.dark .bg-white\/55 {
+  background-color: rgba(15, 23, 42, 0.7);
+}
+.dark .bg-white\/60 {
+  background-color: rgba(15, 23, 42, 0.75);
+}
+.dark .bg-white\/80 {
+  background-color: rgba(30, 41, 59, 0.9);
+}
+.dark .bg-white\/90 {
+  background-color: rgba(30, 41, 59, 0.95);
+}
+
+/* ── Gradient overrides for non-accent, non-hero gradients ──────────────────── */
+.dark .from-gray-50  { --tw-gradient-from: #0f172a; }
+.dark .from-gray-100 { --tw-gradient-from: #1e293b; }
+.dark .to-gray-50    { --tw-gradient-to:   #0f172a; }
+.dark .to-gray-100   { --tw-gradient-to:   #1e293b; }
+.dark .to-white      { --tw-gradient-to:   #1e293b; }
+.dark .via-white     { --tw-gradient-via:  #1e293b; }
+.dark .from-white    { --tw-gradient-from: #1e293b; }
+.dark .from-slate-50 { --tw-gradient-from: #0f172a; }
+.dark .to-slate-50   { --tw-gradient-to:   #0f172a; }
+
+/* ── Chat panel ─────────────────────────────────────────────────────────────── */
+.dark .bg-blue-600  { }  /* keep blue-600 for buttons — intentional accent */
+.dark .bg-blue-700  { }  /* keep blue-700 for buttons — intentional accent */
+
+/* ── Print styles — exclude dark mode from print ────────────────────────────── */
+@media print {
+  html.dark,
+  html.dark body,
+  html.dark #root,
+  html.dark * {
+    background-color: initial !important;
+    color: initial !important;
+    border-color: initial !important;
+  }
+}
+
+/* ── Smooth theme transitions ───────────────────────────────────────────────── */
+/* Applied only during the 300ms window when the theme class is being toggled.
+   The ThemeContext adds/removes .theme-switching on <html> via JS. */
+html.theme-switching,
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after {
+  transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease !important;
+}

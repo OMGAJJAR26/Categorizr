@@ -5,6 +5,7 @@ import {
   parseExpenseCategoryApiResponse,
   getExpenseCategoryNamesFromApi,
   getExpenseCategoryRecordName,
+  getReceiptExpenseType,
   buildExpenseCategoryOptions,
   normalizeExpenseCategoryApiItem,
   normalizeExpenseCategoryApiList,
@@ -15,7 +16,20 @@ import {
   resolveReceiptMediaFieldsForApi,
   receiptMediaStorageKey,
 } from "../utils/mediaUrlUtils";
-import { isMerchantSupersededByApi } from "../utils/merchantListUtils";
+import {
+  DEFAULT_MERCHANTS_WITH_LOGOS,
+  isMerchantSupersededByApi,
+  isOrphanedDefaultMerchant,
+  reconcileHiddenMerchantsWithApi,
+  unescapeMerchantName,
+} from "../utils/merchantListUtils";
+import {
+  addHiddenMerchantName,
+  getStoredUserId,
+  loadHiddenMerchantNames,
+  removeHiddenMerchantName,
+  saveHiddenMerchantNames,
+} from "../utils/hiddenMerchantsStorage";
 import { isNetworkReceivedReceipt } from "../utils/networkReceiptUtils";
 import {
   buildHomepageFilterMerchantsWithImages,
@@ -27,33 +41,36 @@ import {
   cardTypeIntToBrand,
   getApiPaymentMethodCacheKey,
   getApiPaymentMethodDisplayName,
+  getApiPaymentMethodSignature,
   getLast4FromPaymentApiRecord,
+  inferCardTypeFromPayment,
   isPaymentApiRecord,
   mergePaymentMethodLabels,
   normalizeApiPaymentMethodInput,
+  normalizePaymentField,
+  paymentCategoryToApiEnum,
   paymentMethodPayloadToQuery,
+  syncReceiptPaymentFieldAliases,
+  CLEAR_PAYMENT_API_VALUE,
 } from "../utils/paymentMethodUtils";
 import {
   parseReceiptUnix,
   resolveReceiptCalendarUnix,
   calendarUnixToMobileUnix,
+  productDateUnixToApiUnix,
+  NO_DATE_SENTINEL_UNIX,
 } from "../utils/receiptDate";
 import { loadQbLinkedReceipts, saveQbLinkedReceipts, addQbLinkedReceipt } from "../utils/qbStorage";
+import { normalizeUserResponse } from "../utils/userUtils";
 
 const DataContext = createContext();
 const BASE_URL = "/api";
+// Deduplication cache for cross-account sender-receipt fetches (keyed by sender user ID).
+// Module-level so parallel syncForwardedReceiptData calls share in-flight promises.
+const _senderReceiptFetchCache = new Map();
 const onlyDigits = (s) => (s ?? "").toString().replace(/\D/g, "");
 // DEFAULT_PAYMENT_METHODS removed — payment methods now come exclusively
 // from the getPaymentMethodv1 API (apiPaymentMethods) and from receipts.
-const DEFAULT_MERCHANTS_WITH_LOGOS = [
-  { name: "Costco", image: "https://logo.clearbit.com/costco.com" },
-  { name: "Home Depot", image: "https://logo.clearbit.com/homedepot.com" },
-  { name: "Lowe's", image: "https://logo.clearbit.com/lowes.com" },
-  { name: "Miscellaneous", image: "/miscellaneous-logo.png" },
-  { name: "Nordstrom", image: "https://logo.clearbit.com/nordstrom.com" },
-  { name: "Target", image: "https://logo.clearbit.com/target.com" },
-  { name: "Walmart", image: "https://logo.clearbit.com/walmart.com" },
-];
 
 // Build a deduplicated list of payment methods from a receipts array.
 // Prefers "issuerName *last4" format, falls back to paymentType.
@@ -216,6 +233,7 @@ export const DataProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   // Ref used by fetchData to skip the loading spinner for background (silent) refreshes.
   const silentRefreshRef = useRef(false);
+  const userFetchedRef = useRef(false);
   const mediaHealInFlightRef = useRef(false);
   // Map of signature → { lastAttemptTs: number, failCount: number }
   // We allow re-healing the same contamination pattern after 60 s so new uploads
@@ -257,7 +275,11 @@ export const DataProvider = ({ children }) => {
 
   // ── Hidden receipt-derived items — stored as arrays in localStorage, used as Sets internally ──
   const [hiddenMerchants, setHiddenMerchants] = useState(() => {
-    try { return new Set(JSON.parse(localStorage.getItem("cat_hidden_merchants") || "[]")); } catch { return new Set(); }
+    try {
+      return new Set(loadHiddenMerchantNames(getStoredUserId()));
+    } catch {
+      return new Set();
+    }
   });
   // ── Explicitly DELETED merchants (tombstones) — a stronger signal than "hidden".
   // Unlike hidden, these are never un-hidden by fetchApiMerchants and are excluded
@@ -424,20 +446,27 @@ export const DataProvider = ({ children }) => {
       });
       if (res.ok) {
         const data = await res.json();
-        const merchants = Array.isArray(data) ? data.filter(m => m.store_name) : [];
+        // Undo the SQL '' apostrophe artifact on read so every consumer (Filter, Settings,
+        // receipt cards) shows and dedupes the same clean name (Longo''s → Longo's).
+        const merchants = Array.isArray(data)
+          ? data
+              .filter((m) => m.store_name)
+              .map((m) => ({ ...m, store_name: unescapeMerchantName(m.store_name) }))
+          : [];
         console.log("%c[Merchants] fetchApiMerchants response:", "color:#6366f1;font-weight:bold", merchants);
         setApiMerchants(merchants);
         // Server-backed stores must stay visible in Manage Merchants even if the name
         // was previously added to cat_hidden_merchants via receipt/default cleanup.
+        // Deleted starter merchants (Home Depot, Costco, …) stay hidden so login
+        // cannot resurrect them if the store list still contains the name.
         setHiddenMerchants((prev) => {
-          const normalizeKey = (value) =>
-            String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
-          const apiKeys = new Set(
-            merchants.map((m) => normalizeKey(m.store_name)).filter(Boolean)
+          const nextList = reconcileHiddenMerchantsWithApi(
+            [...prev],
+            merchants.map((m) => m.store_name)
           );
-          const next = new Set([...prev].filter((h) => !apiKeys.has(normalizeKey(h))));
-          if (next.size === prev.size) return prev;
-          localStorage.setItem("cat_hidden_merchants", JSON.stringify([...next]));
+          const next = new Set(nextList);
+          if (next.size === prev.size && [...prev].every((h) => next.has(h))) return prev;
+          saveHiddenMerchantNames(getStoredUserId(), [...next]);
           return next;
         });
         purgeCustomMerchantsMatchingApi(merchants);
@@ -469,6 +498,8 @@ export const DataProvider = ({ children }) => {
         console.log("%c[Merchants] addApiMerchant response:", "color:#22c55e;font-weight:bold", data);
         // Re-fetch so we always have the server-assigned store id before any edit.
         const freshList = await fetchApiMerchants();
+        // Explicit add brings a previously deleted starter merchant (e.g. Home Depot) back.
+        setHiddenMerchants((prev) => removeHiddenMerchantName(getStoredUserId(), prev, name));
         const created =
           freshList.find(
             (m) =>
@@ -759,28 +790,84 @@ export const DataProvider = ({ children }) => {
       { id, fk_user_id, ...normalized },
       escapeSqlApostrophe
     );
-    const updatePayQuery = paymentMethodPayloadToQuery(payload);
-    console.log("%c[PaymentMethods] POST /userpaymentmethod/updatePaymentMethodv1 →", "color:#f59e0b;font-weight:bold", payload);
-    try {
-      const res = await fetch(`${BASE_URL}/userpaymentmethod/updatePaymentMethodv1?${updatePayQuery}`, {
+
+    // The API returns HTTP 200 even on a rejected update: success carries the record
+    // (a card_number), while a failure carries only { code, message }. Detect real
+    // outcomes instead of trusting res.ok — otherwise a change (e.g. default expense
+    // type) looks saved in-session but never persists, and reverts after logout.
+    const postUpdate = async () => {
+      const q = paymentMethodPayloadToQuery(payload);
+      const res = await fetch(`${BASE_URL}/userpaymentmethod/updatePaymentMethodv1?${q}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accesstoken: token, Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload),
       });
-      if (res.ok) {
-        const data = await res.json();
-        console.log("%c[PaymentMethods] updateApiPaymentMethod response:", "color:#f59e0b;font-weight:bold", data);
-        const entity =
-          data && typeof data === "object" ? data : { ...payload };
+      let data = null;
+      try { data = await res.json(); } catch { /* non-JSON */ }
+      const succeeded =
+        res.ok &&
+        data &&
+        typeof data === "object" &&
+        data.card_number != null &&
+        !/duplicate/i.test(data.message || "");
+      const isDuplicate =
+        !succeeded && !!data && /duplicate/i.test(data.message || "");
+      return { res, data, succeeded, isDuplicate };
+    };
+
+    console.log("%c[PaymentMethods] POST /userpaymentmethod/updatePaymentMethodv1 →", "color:#f59e0b;font-weight:bold", payload);
+    try {
+      let result = await postUpdate();
+      console.log("%c[PaymentMethods] updateApiPaymentMethod response:", "color:#f59e0b;font-weight:bold", result.data);
+
+      // "Duplicate entry with card number and type not allowed": the same card is stored
+      // as more than one record (e.g. "*5555" and "5555"), so updating one collides with
+      // its twin. Delete the redundant duplicate(s) and retry so the edit actually saves.
+      if (result.isDuplicate) {
+        const targetSig = getApiPaymentMethodSignature({
+          card_number: payload.card_number,
+          card_type: payload.card_type,
+          card_issuer_name: payload.card_issuer_name,
+        });
+        const conflicts = (apiPaymentMethods || []).filter((m) => {
+          const mid = m?.id ?? m?.payment_method_id;
+          if (mid == null || String(mid) === String(id)) return false;
+          const sig = getApiPaymentMethodSignature(m);
+          return sig && targetSig && sig === targetSig;
+        });
+        for (const c of conflicts) {
+          await deleteApiPaymentMethod(c.id ?? c.payment_method_id, c.card_number);
+        }
+        if (conflicts.length > 0) {
+          result = await postUpdate();
+          console.log("%c[PaymentMethods] retried after removing duplicate(s):", "color:#f59e0b;font-weight:bold", result.data);
+        }
+      }
+
+      if (result.succeeded) {
+        const entity = result.data;
         setApiPaymentMethods((prev) =>
-          prev.map((m) => (String(m.id ?? "") === String(id) ? { ...m, ...entity, id } : m))
+          prev.map((m) =>
+            String(m.id ?? "") === String(id)
+              ? {
+                  ...m,
+                  ...entity,
+                  id,
+                  // The update always persists default_payment_category (it is part of every
+                  // payload), but the server response may not echo it — keep the in-memory
+                  // record in sync with what we just wrote so edit modals prefill the correct
+                  // category without needing a page reload.
+                  default_payment_category: payload.default_payment_category,
+                }
+              : m
+          )
         );
         _cachePaymentId(getApiPaymentMethodCacheKey(entity), id);
         return { ok: true, data: entity, error: null };
-      } else {
-        console.warn("[PaymentMethods] updateApiPaymentMethod failed, status:", res.status);
-        return { ok: false, data: null, error: `Failed with status ${res.status}` };
       }
+      const errMsg = result.data?.message || `Failed with status ${result.res.status}`;
+      console.warn("[PaymentMethods] updateApiPaymentMethod failed:", errMsg);
+      return { ok: false, data: null, error: errMsg };
     } catch (e) {
       console.error("[PaymentMethods] updateApiPaymentMethod error", e);
       return { ok: false, data: null, error: e.message || "Failed to update payment method" };
@@ -955,8 +1042,8 @@ export const DataProvider = ({ children }) => {
           // response whose name field failed isValidExpenseCategory validation, such as
           // returning "0" or a numeric code).  Construct directly from the user's input.
           { id: getEntityId(data) ?? null, fk_user_id, expense_category_name: name.trim() };
+        const catName = (entity?.expense_category_name || "").toString().trim();
         setApiExpenseCategories((prev) => {
-          const catName = (entity?.expense_category_name || "").toString().trim();
           if (!catName) return prev; // nothing to add
           const key = catName.toLowerCase();
           const existingIdx = prev.findIndex(
@@ -968,6 +1055,23 @@ export const DataProvider = ({ children }) => {
           next[existingIdx] = { ...next[existingIdx], ...entity };
           return next;
         });
+        if (catName) {
+          // Un-hide in case this category was previously deleted/hidden — ensures it
+          // appears immediately in Settings and AddReceiptModal without waiting for fetchData.
+          setHiddenCategories((prev) => {
+            const key = catName.toLowerCase();
+            const next = new Set([...prev].filter((h) => (h || "").trim().toLowerCase() !== key));
+            if (next.size !== prev.size) {
+              localStorage.setItem("cat_hidden_categories", JSON.stringify([...next]));
+            }
+            return next;
+          });
+          // Surface immediately in expenseCategories so dropdowns show it without waiting for fetchData.
+          setExpenseCategories((prev) => {
+            const key = catName.toLowerCase();
+            return prev.some((c) => (c || "").toLowerCase() === key) ? prev : [...prev, catName];
+          });
+        }
         return { ok: true, data: entity, error: null };
       }
       return { ok: false, data: null, error: `Failed with status ${res.status}` };
@@ -1073,51 +1177,64 @@ export const DataProvider = ({ children }) => {
       if (!silentRefreshRef.current) setLoading(true);
       setError(null);
 
-      // Fetch user
-      const userRes = await fetch(`${BASE_URL}/user/getuserdetails`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accesstoken: token,
-        },
-      });
-      if (!userRes.ok) throw new Error("Failed to fetch user data");
-      const userData = await userRes.json();
-      setUser(userData);
-      const fk_user_id = userData?.id;
-      // Persist user ID so tax payloads and other API calls can use it
-      if (fk_user_id) localStorage.setItem("fk_user_id", fk_user_id);
-
-      // Fetch receipts
-      const receiptRes = await fetch(
-        `${BASE_URL}/user/getreceiptfromdatev1?fk_user_id=${fk_user_id}&date_time_stamp=${date_time_stamp}`,
-        {
-          method: "GET",
+      // Fetch user only on first load — user data doesn't change during a session.
+      // userFetchedRef persists across renders so it works correctly inside the
+      // memoized fetchData callback (avoids stale closure on the user state).
+      let fk_user_id = localStorage.getItem("fk_user_id");
+      if (fk_user_id) {
+        setHiddenMerchants(new Set(loadHiddenMerchantNames(fk_user_id)));
+      }
+      if (!userFetchedRef.current) {
+        const userRes = await fetch(`${BASE_URL}/user/getuserdetails`, {
+          method: "POST",
           headers: {
             "Content-Type": "application/json",
             Accesstoken: token,
           },
+        });
+        if (!userRes.ok) throw new Error("Failed to fetch user data");
+        const userJson = await userRes.json();
+        const userData = normalizeUserResponse(userJson);
+        if (!userData) throw new Error("Invalid user data response");
+        setUser(userData);
+        fk_user_id = userData?.id;
+        if (fk_user_id) localStorage.setItem("fk_user_id", fk_user_id);
+        userFetchedRef.current = true;
+        if (fk_user_id) {
+          setHiddenMerchants(new Set(loadHiddenMerchantNames(fk_user_id)));
         }
-      );
+      }
+
+      // Fire all independent requests in parallel so the receipt list appears as
+      // fast as the slowest single response, not the sum of all responses.
+      const [receiptRes, taxResRaw, apiStoreResRaw, apiPayResRaw, apiCatResRaw] = await Promise.all([
+        fetch(
+          `${BASE_URL}/user/getreceiptfromdatev1?fk_user_id=${fk_user_id}&date_time_stamp=${date_time_stamp}`,
+          { method: "GET", headers: { "Content-Type": "application/json", Accesstoken: token } }
+        ),
+        fetch(`${BASE_URL}/tax/getTax?date_time_stamp=${Date.now()}`, {
+          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
+        }).catch(() => null),
+        fetch(`${BASE_URL}/userstore/getStorev1`, {
+          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
+        }).catch(() => null),
+        fetch(`${BASE_URL}/userpaymentmethod/getPaymentMethodv1`, {
+          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
+        }).catch(() => null),
+        fetch(`${BASE_URL}/userexpensecategory/getExpenseCategoryv1`, {
+          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
+        }).catch(() => null),
+      ]);
+
       if (!receiptRes.ok) throw new Error("Failed to fetch receipts");
       const receiptData = await receiptRes.json();
       console.log("%c[Receipts] getreceiptfromdatev1 response (all receipts):", "color:#06b6d4;font-weight:bold", receiptData);
-      
-      // Fetch taxes from API (needed to enrich receipt_tax_values)
-      // Do this in parallel with receipt processing to avoid blocking
+
+      // Parse tax response
       let taxDataArray = [];
       try {
-        const dateTimeStamp = Date.now();
-        const taxRes = await fetch(`${BASE_URL}/tax/getTax?date_time_stamp=${dateTimeStamp}`, {
-          headers: {
-            // Use both header styles so the API works regardless of how the
-            // backend authenticates (Accesstoken for PHP, Bearer for Node.js)
-            Accesstoken: token,
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        if (taxRes.ok) {
-          const taxes = await taxRes.json();
+        if (taxResRaw?.ok) {
+          const taxes = await taxResRaw.json();
           taxDataArray = Array.isArray(taxes) ? taxes : [];
           // Merge with existing taxData to avoid losing recently-added taxes that the API
           // might not yet return (e.g. due to server-side caching or propagation delay).
@@ -1130,8 +1247,86 @@ export const DataProvider = ({ children }) => {
         }
       } catch (taxErr) {
         console.error("Error fetching taxes:", taxErr);
-        // Continue without tax data - receipts will still work
         taxDataArray = [];
+      }
+
+      // Parse merchants response
+      let apiMerchantsData = [];
+      try {
+        console.log("%c[fetchData] GET /userstore/getStorev1", "color:#6366f1;font-weight:bold");
+        if (apiStoreResRaw?.ok) {
+          const apiStoreJson = await apiStoreResRaw.json();
+          // Undo the SQL '' apostrophe artifact on read (Longo''s → Longo's) so every
+          // consumer shows and dedupes the same clean name. Mirrors fetchApiMerchants.
+          apiMerchantsData = Array.isArray(apiStoreJson)
+            ? apiStoreJson
+                .filter((m) => m.store_name)
+                .map((m) => ({ ...m, store_name: unescapeMerchantName(m.store_name) }))
+            : [];
+          console.log("%c[fetchData] Merchants from API:", "color:#6366f1;font-weight:bold", apiMerchantsData);
+          setApiMerchants(apiMerchantsData);
+          setHiddenMerchants((prev) => {
+            const nextList = reconcileHiddenMerchantsWithApi(
+              [...prev],
+              apiMerchantsData.map((m) => m.store_name)
+            );
+            const next = new Set(nextList);
+            if (next.size === prev.size && [...prev].every((h) => next.has(h))) return prev;
+            saveHiddenMerchantNames(getStoredUserId(), [...next]);
+            return next;
+          });
+          purgeCustomMerchantsMatchingApi(apiMerchantsData);
+        }
+      } catch (apiStoreErr) {
+        console.error("[fetchData] fetchApiMerchants error", apiStoreErr);
+      }
+
+      // Parse payment methods response
+      let apiPaymentMethodsData = [];
+      try {
+        console.log("%c[fetchData] GET /userpaymentmethod/getPaymentMethodv1", "color:#8b5cf6;font-weight:bold");
+        if (apiPayResRaw?.ok) {
+          const apiPayJson = await apiPayResRaw.json();
+          const allPayItems = Array.isArray(apiPayJson) ? apiPayJson : [];
+          apiPaymentMethodsData = allPayItems.filter(isPaymentApiRecord);
+          console.log("%c[fetchData] Payment methods from API (raw all):", "color:#8b5cf6;font-weight:bold", allPayItems);
+          console.log("%c[fetchData] Payment methods filtered (non-merchant):", "color:#8b5cf6;font-weight:bold", apiPaymentMethodsData);
+          setApiPaymentMethods(apiPaymentMethodsData);
+        }
+      } catch (apiPayErr) {
+        console.error("[fetchData] fetchApiPaymentMethods error", apiPayErr);
+      }
+
+      // Parse expense categories response
+      let apiExpenseCategoriesData = [];
+      try {
+        if (apiCatResRaw?.ok) {
+          const apiCatJson = await apiCatResRaw.json();
+          apiExpenseCategoriesData = normalizeExpenseCategoryApiList(
+            parseExpenseCategoryApiResponse(apiCatJson)
+          );
+          setApiExpenseCategories(apiExpenseCategoriesData);
+          if (apiExpenseCategoriesData.length > 0) {
+            const apiNameKeys = new Set(
+              apiExpenseCategoriesData
+                .map((c) => (c.expense_category_name || "").toString().trim().toLowerCase())
+                .filter(Boolean)
+            );
+            setHiddenCategories((prev) => {
+              const next = new Set(
+                [...prev].filter(
+                  (hidden) => !apiNameKeys.has(String(hidden || "").trim().toLowerCase())
+                )
+              );
+              if (next.size !== prev.size) {
+                localStorage.setItem("cat_hidden_categories", JSON.stringify([...next]));
+              }
+              return next;
+            });
+          }
+        }
+      } catch (apiCatErr) {
+        console.error("fetchApiExpenseCategories in fetchData error", apiCatErr);
       }
 
       // Build formatted receipts with subtotal, paymentDisplay, badgeStatus, read status,
@@ -1154,14 +1349,25 @@ export const DataProvider = ({ children }) => {
 
               // Treat timestamps < 1,000,000 as invalid (too close to 1970-01-01)
               if (normalisedProductDate === 0 || normalisedProductDate < 1000000) {
-                if (createDate >= 1000000) {
+                // Fall back to create_date (the day it arrived ≈ "today") ONLY for an
+                // unverified eReceipt/draft whose scanner never found a date. A regular
+                // or already-saved receipt with no date stays undated ("No Date"), so a
+                // user who clears the date isn't silently handed the create date back.
+                const hasEmailId =
+                  r.fk_incoming_email_id != null &&
+                  r.fk_incoming_email_id !== "" &&
+                  String(r.fk_incoming_email_id) !== "0";
+                const isUnverifiedDraft =
+                  (r.is_draft === "1" || r.is_draft === 1 || hasEmailId) &&
+                  String(r.is_verify ?? "0") !== "1";
+                if (isUnverifiedDraft && createDate >= 1000000) {
                   normalisedProductDate = createDate;
                 } else {
                   normalisedProductDate = 0;
                 }
               }
 
-              normalisedProductDate = resolveReceiptCalendarUnix(
+              const _resolvedDay = resolveReceiptCalendarUnix(
                 normalisedProductDate,
                 createDate,
                 {
@@ -1169,6 +1375,14 @@ export const DataProvider = ({ children }) => {
                   fk_incoming_email_id: r.fk_incoming_email_id,
                 },
               );
+              // Store the resolved calendar day as UTC NOON (not midnight). resolveReceiptCalendarUnix
+              // is then idempotent when the value is re-resolved for display: a UTC-noon value
+              // short-circuits and returns the same day, so it is never shifted back a day by the
+              // create_date "created early-morning → prior day" heuristic — which only applies to raw
+              // UTC-midnight timestamps and otherwise reverts an edit made to the receipt's own
+              // create-date day (e.g. setting the date to Jul 2 on a receipt created Jul 2 06:37).
+              // 0 ("No Date") passes through unchanged.
+              normalisedProductDate = productDateUnixToApiUnix(_resolvedDay);
 
               return {
                 ...r,
@@ -1255,9 +1469,9 @@ export const DataProvider = ({ children }) => {
             .map((r) => {
               // Normalize ALL fields from API (support both snake_case and camelCase
               // so Android-created accounts sync correctly to the web Desktop version)
-              let paymentType = r.paymentType ?? r.payment_type ?? "";
-              const cardIssuerName = r.card_issuer_name ?? r.cardIssuerName ?? "";
-              const last4DigitCard = r.last_4_digit_card ?? r.last4DigitCard ?? "";
+              let paymentType = normalizePaymentField(r.paymentType ?? r.payment_type);
+              const cardIssuerName = normalizePaymentField(r.card_issuer_name ?? r.cardIssuerName);
+              const last4DigitCard = normalizePaymentField(r.last_4_digit_card ?? r.last4DigitCard);
               // Normalize merchant / category / tax fields – Android/iOS may use snake_case or camelCase
               const storeName = r.storeName ?? r.store_name ?? "";
               // Strip any localhost proxy URL saved during local dev so receipt cards
@@ -1269,7 +1483,7 @@ export const DataProvider = ({ children }) => {
                 ? (() => { try { return decodeURIComponent(_rawStoreImage.slice(_siIdx + _storeImageMarker.length)); } catch { return _rawStoreImage; } })()
                 : _rawStoreImage;
               const storeImage = /localhost|127\.0\.0\.1/i.test(_storeImageUnproxied) ? "" : _storeImageUnproxied;
-              const expenseType = r.expense_type ?? r.expenseType ?? "";
+              const expenseType = getReceiptExpenseType(r, apiExpenseCategoriesData);
               const productName = r.product_name ?? r.productName ?? "";
               // iOS sends purchase_price (snake_case); web sends purchasePrice (camelCase)
               const purchasePrice = r.purchasePrice ?? r.purchase_price ?? "";
@@ -1285,7 +1499,7 @@ export const DataProvider = ({ children }) => {
               // The getPaymentLogo function will extract the card type from paymentType for logo detection
               // Don't modify paymentType here - it needs to contain the card type for logos to work
 
-              const normalized = {
+              const normalized = syncReceiptPaymentFieldAliases({
                 ...r,
                 // Overwrite with normalised values so downstream code can use
                 // a single field name regardless of API variant (web vs Android/iOS)
@@ -1312,7 +1526,8 @@ export const DataProvider = ({ children }) => {
                 ),
                 receipt_forwarded: String(r.receipt_forwarded ?? "0"),
                 originalUsername: r.originalUsername ?? r.original_username ?? null,
-              };
+                payment_logo_url: r.payment_logo_url ?? r.paymentLogoUrl ?? "",
+              });
               const paymentDisplay = formatPaymentDisplayFromReceipt(normalized);
               const badgeStatus = getReceiptBadgeStatus(normalized);
               // Add status field: default to "0" (unread) if not present
@@ -1353,43 +1568,6 @@ export const DataProvider = ({ children }) => {
       }
 
 
-      // Fetch API merchants from /userstore/getStorev1
-      let apiMerchantsData = [];
-      try {
-        console.log("%c[fetchData] GET /userstore/getStorev1", "color:#6366f1;font-weight:bold");
-        const apiStoreRes = await fetch(`${BASE_URL}/userstore/getStorev1`, {
-          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
-        });
-        if (apiStoreRes.ok) {
-          const apiStoreJson = await apiStoreRes.json();
-          apiMerchantsData = Array.isArray(apiStoreJson) ? apiStoreJson.filter(m => m.store_name) : [];
-          console.log("%c[fetchData] Merchants from API:", "color:#6366f1;font-weight:bold", apiMerchantsData);
-          setApiMerchants(apiMerchantsData);
-          purgeCustomMerchantsMatchingApi(apiMerchantsData);
-        }
-      } catch (apiStoreErr) {
-        console.error("[fetchData] fetchApiMerchants error", apiStoreErr);
-      }
-
-      // Fetch API payment methods from /userpaymentmethod/getPaymentMethodv1
-      let apiPaymentMethodsData = [];
-      try {
-        console.log("%c[fetchData] GET /userpaymentmethod/getPaymentMethodv1", "color:#8b5cf6;font-weight:bold");
-        const apiPayRes = await fetch(`${BASE_URL}/userpaymentmethod/getPaymentMethodv1`, {
-          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
-        });
-        if (apiPayRes.ok) {
-          const apiPayJson = await apiPayRes.json();
-          const allPayItems = Array.isArray(apiPayJson) ? apiPayJson : [];
-          apiPaymentMethodsData = allPayItems.filter(isPaymentApiRecord);
-          console.log("%c[fetchData] Payment methods from API (raw all):", "color:#8b5cf6;font-weight:bold", allPayItems);
-          console.log("%c[fetchData] Payment methods filtered (non-merchant):", "color:#8b5cf6;font-weight:bold", apiPaymentMethodsData);
-          setApiPaymentMethods(apiPaymentMethodsData);
-        }
-      } catch (apiPayErr) {
-        console.error("[fetchData] fetchApiPaymentMethods error", apiPayErr);
-      }
-
       setMerchants(
         Array.from(
           new Set([
@@ -1397,7 +1575,10 @@ export const DataProvider = ({ children }) => {
             ...receiptsWithIntegrations
               .filter((r) => !isNetworkReceivedReceipt(r))
               .map((r) => r.storeName)
-              .filter(Boolean),
+              .filter(
+                (name) =>
+                  name && !isOrphanedDefaultMerchant(name, apiMerchantsData)
+              ),
             ...apiMerchantsData.map((m) => m.store_name).filter(Boolean),
           ])
         ).sort((a, b) =>
@@ -1444,6 +1625,8 @@ export const DataProvider = ({ children }) => {
         const name = r.storeName?.toString().trim();
         const rawImage = r.store_image?.toString().trim();
         if (!name || name === "0") return;
+        // Deleted starter stores (Home Depot, etc.) must not reappear from old receipts.
+        if (isOrphanedDefaultMerchant(name, apiMerchantsData)) return;
         const key = name.toLowerCase().trim();
         const cleanImg = cleanMerchantImage(rawImage);
         if (!merchantsWithImagesMap.has(key)) {
@@ -1549,6 +1732,13 @@ setMerchantsWithImages(
       });
 
       receiptsWithIntegrations = receiptsWithIntegrations.map(r => {
+        // Received forwarded receipts carry the SENDER's payment method — do not
+        // overwrite it with the recipient's own card that happens to share the same last4.
+        const forwardFromId = String(r.fk_forward_from_receipt_id ?? r.fkForwardFromReceiptId ?? "0").trim();
+        if (forwardFromId && forwardFromId !== "0") {
+          return syncReceiptPaymentFieldAliases(r);
+        }
+
         const issuer  = (r.card_issuer_name  || r.cardIssuerName  || "").toString().trim();
         const last4   = (r.last_4_digit_card  || r.last4DigitCard  || "").toString().trim();
         const type    = (r.paymentType        || r.payment_type    || "").toString().trim();
@@ -1604,7 +1794,7 @@ setMerchantsWithImages(
             enriched.payment_logo_url = matchedRec.icon_image;
           }
 
-          return enriched;
+          return syncReceiptPaymentFieldAliases(enriched);
         }
 
         // No API record found — fall back to logo-only enrichment via display key
@@ -1617,17 +1807,51 @@ setMerchantsWithImages(
               return pKey === rKey || (p.card_number || "").trim().toLowerCase() === last4;
             });
           if (logoByIssuerLast4) {
-            return { ...r, payment_logo_url: logoByIssuerLast4.icon_image };
+            return syncReceiptPaymentFieldAliases({
+              ...r,
+              payment_logo_url: logoByIssuerLast4.icon_image,
+            });
           }
         }
 
-        return r;
+        return syncReceiptPaymentFieldAliases(r);
       });
 
       // Update receipts with enriched data (payment fields + logos + tax) and
       // build the payment methods list from the NOW-enriched receipts so renamed
       // payment methods show the updated name, not the stale one.
-      setReceipts(receiptsWithIntegrations);
+      // Merge: preserve receipt_forwarded="1" from in-memory state (same-session flicker)
+      // and from localStorage (survives refresh and logout/login, like iOS Core Data).
+      // Once the backend starts returning "1" for a receipt, the localStorage entry is
+      // cleaned up automatically.
+      setReceipts(prevReceipts => {
+        const prevMap = new Map(prevReceipts.map(r => [String(r.id), r]));
+        let locallyForwarded;
+        try {
+          locallyForwarded = new Set(JSON.parse(localStorage.getItem("cat_locally_forwarded") || "[]"));
+        } catch {
+          locallyForwarded = new Set();
+        }
+        const needsLocalWrite = locallyForwarded.size > 0;
+        const result = receiptsWithIntegrations.map(r => {
+          const rId = String(r.id);
+          const prev = prevMap.get(rId);
+          const shouldBeForwarded =
+            (prev?.receipt_forwarded === "1") || locallyForwarded.has(rId);
+          if (shouldBeForwarded && r.receipt_forwarded !== "1") {
+            const merged = { ...r, receipt_forwarded: "1" };
+            return { ...merged, badgeStatus: getReceiptBadgeStatus(merged) };
+          }
+          if (r.receipt_forwarded === "1" && locallyForwarded.has(rId)) {
+            locallyForwarded.delete(rId);
+          }
+          return r;
+        });
+        if (needsLocalWrite) {
+          try { localStorage.setItem("cat_locally_forwarded", JSON.stringify([...locallyForwarded])); } catch {}
+        }
+        return result;
+      });
       // Heal runs on EVERY fetchData call (including silentRefreshData) so that
       // each new upload that re-contaminates older receipts is fixed promptly.
       // The function itself rate-limits per-signature (60 s cooldown, 5 retries).
@@ -1642,52 +1866,117 @@ setMerchantsWithImages(
         )
       );
 
+      // ── Backfill payment methods from NORMAL receipts into the API ────────────
+      // Payment lists (Settings/Filter/Add) are API-only (PAYMENT_METHODS_API_ONLY),
+      // so a valid card entered/imported on a normal receipt would otherwise only
+      // ever appear inside that one receipt's edit dropdown — never in Settings,
+      // Filter, or Add Receipt. Ensure any receipt-carried card with a real 4-digit
+      // last4 exists as a manageable API record. Network-forwarded receipts are
+      // skipped here (syncForwardedReceiptData already reconciles those, with extra
+      // forwarded-specific correction). Idempotent: methods already in the API are
+      // skipped, and once created they load from the API on the next fetch so they
+      // are never re-created. Requires a 4-digit last4 (the uniqueness key per the
+      // app spec) so OCR noise without a card number never becomes a payment method.
+      try {
+        const createdSigs = new Set();
+        const usedPlaceholderIds = new Set();
+        const pmTasks = [];
+        for (const receipt of receiptsWithIntegrations) {
+          if (isNetworkReceivedReceipt(receipt)) continue;
+          const pmLast4 = (receipt.last_4_digit_card || receipt.last4DigitCard || "")
+            .replace(/\D/g, "")
+            .slice(-4);
+          if (pmLast4.length !== 4) continue;
+          const issuerStr = (receipt.card_issuer_name || receipt.cardIssuerName || "")
+            .replace(/\s*\*\d+/g, "")
+            .trim();
+          const payTypeStr = (receipt.paymentType || receipt.payment_type || "")
+            .replace(/\s*\*\d+/g, "")
+            .trim();
+          if (`${issuerStr} ${payTypeStr}`.toLowerCase().includes("cash")) continue;
+          const brandFromIssuer = inferCardTypeFromPayment(issuerStr);
+          const resolvedBrand =
+            brandFromIssuer !== "Other"
+              ? brandFromIssuer
+              : inferCardTypeFromPayment(payTypeStr) || "Other";
+          const pmIssuer = issuerStr || payTypeStr;
+          const pmSig = `${pmIssuer.toLowerCase()}|${pmLast4}`;
+          if (createdSigs.has(pmSig)) continue;
+          const existingPm = (apiPaymentMethodsData || []).find((pm) => {
+            const eLast4 = getLast4FromPaymentApiRecord(pm);
+            const eIssuer = (pm.card_issuer_name || "").trim().toLowerCase();
+            if (`${eIssuer}|${eLast4}` === pmSig) return true;
+            if (!eIssuer && eLast4 === pmLast4) {
+              const eBrand = cardTypeIntToBrand(parseInt(pm.card_type ?? "", 10));
+              if (eBrand && eBrand !== "Other" && eBrand.toLowerCase() === resolvedBrand.toLowerCase())
+                return true;
+            }
+            return false;
+          });
+          if (existingPm) continue;
+          const pmInput =
+            resolvedBrand !== "Other" ? { ...receipt, cardTypeBrand: resolvedBrand } : receipt;
+          const pmLogoUrl =
+            receipt.payment_logo_url || receipt.paymentDisplay?.logoUrl || "";
+
+          // Upgrade a stale brand-only placeholder record (same card brand, no last4,
+          // no custom issuer) with this receipt's last4 instead of leaving a digit-less
+          // duplicate. This is why an OCR-created "MasterCard *7836" could show as a bare
+          // "MasterCard" (no 4 digits): a legacy placeholder record had card_number "-".
+          // Only applies when the receipt itself is a bare-brand card (no custom issuer),
+          // so a "Chase *7836" receipt never overwrites a generic "Visa" placeholder.
+          const receiptHasCustomIssuer =
+            !!issuerStr && issuerStr.toLowerCase() !== resolvedBrand.toLowerCase();
+          if (resolvedBrand !== "Other" && !receiptHasCustomIssuer) {
+            const placeholderPm = (apiPaymentMethodsData || []).find((pm) => {
+              const pid = pm?.id;
+              if (pid == null || String(pid) === "" || String(pid) === "0") return false;
+              if (usedPlaceholderIds.has(String(pid))) return false;
+              if (getLast4FromPaymentApiRecord(pm)) return false; // already has a last4
+              const eBrand = cardTypeIntToBrand(parseInt(pm.card_type ?? "", 10));
+              if (!eBrand || eBrand === "Other") return false;
+              if (eBrand.toLowerCase() !== resolvedBrand.toLowerCase()) return false;
+              const eIssuer = (pm.card_issuer_name || "").trim();
+              // Only a bare brand-only record (no custom issuer, or issuer repeats brand)
+              return !eIssuer || eIssuer.toLowerCase() === eBrand.toLowerCase();
+            });
+            if (placeholderPm) {
+              createdSigs.add(pmSig);
+              usedPlaceholderIds.add(String(placeholderPm.id));
+              pmTasks.push(
+                updateApiPaymentMethod(
+                  placeholderPm.id,
+                  pmInput,
+                  pmLogoUrl,
+                  receipt.expense_type || ""
+                )
+              );
+              continue;
+            }
+          }
+
+          createdSigs.add(pmSig);
+          pmTasks.push(addApiPaymentMethod(pmInput, pmLogoUrl, receipt.expense_type || ""));
+        }
+        if (pmTasks.length > 0) {
+          Promise.allSettled(pmTasks).then(() => {
+            fetchApiPaymentMethods();
+          });
+        }
+      } catch (pmBackfillErr) {
+        console.error("[fetchData] payment method backfill error", pmBackfillErr);
+      }
+
       setExpenseType([
         ...new Set(
           receiptsWithIntegrations.map((r) => String(r.receipt_category))
         ),
       ]);
 
-      // Fetch API expense categories and merge with receipt-derived categories
-      let apiExpenseCategoriesData = [];
-      try {
-        const apiCatRes = await fetch(`${BASE_URL}/userexpensecategory/getExpenseCategoryv1`, {
-          headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
-        });
-        if (apiCatRes.ok) {
-          const apiCatJson = await apiCatRes.json();
-          apiExpenseCategoriesData = normalizeExpenseCategoryApiList(
-            parseExpenseCategoryApiResponse(apiCatJson)
-          );
-          setApiExpenseCategories(apiExpenseCategoriesData);
-          if (apiExpenseCategoriesData.length > 0) {
-            const apiNameKeys = new Set(
-              apiExpenseCategoriesData
-                .map((c) => (c.expense_category_name || "").toString().trim().toLowerCase())
-                .filter(Boolean)
-            );
-            setHiddenCategories((prev) => {
-              const next = new Set(
-                [...prev].filter(
-                  (hidden) => !apiNameKeys.has(String(hidden || "").trim().toLowerCase())
-                )
-              );
-              if (next.size !== prev.size) {
-                localStorage.setItem("cat_hidden_categories", JSON.stringify([...next]));
-              }
-              return next;
-            });
-          }
-        }
-      } catch (apiCatErr) {
-        console.error("fetchApiExpenseCategories in fetchData error", apiCatErr);
-      }
-
       const receiptDerivedCategories = [
         ...new Set(
           receiptsWithIntegrations
-            .filter((r) => !isNetworkReceivedReceipt(r))
-            .map((r) => (r.expense_type ?? "").toString().trim())
+            .map((r) => getReceiptExpenseType(r, apiExpenseCategoriesData).trim())
             .filter(Boolean)
         ),
       ];
@@ -1715,18 +2004,57 @@ setMerchantsWithImages(
     await fetchData();
   }, [fetchData]);
 
-  useEffect(() => {
+  // After login/signup: always re-fetch user profile (userFetchedRef may be stale).
+  const refreshDataAfterAuth = useCallback(async () => {
+    userFetchedRef.current = false;
+    setUser(null);
+    const uid = getStoredUserId();
+    if (uid) setHiddenMerchants(new Set(loadHiddenMerchantNames(uid)));
+    await fetchData();
+  }, [fetchData]);
+
+  const markRecoveryEmailVerified = useCallback(() => {
+    setUser((prev) =>
+      prev
+        ? { ...prev, is_recovery_email_verified: 1, isRecoveryEmailVerified: true }
+        : prev
+    );
+  }, []);
+
+  // Persist profile fields (name + recovery / duplicate-eReceipt emails) to the backend
+  // and reflect them in the in-memory user so the UI updates without a reload.
+  const updateUserProfile = useCallback(async (fields) => {
     const token = localStorage.getItem("token");
-    // Only fetch data if token exists
-    if (token) {
-      fetchData(); // fetchData already calls fetchTaxes internally
-      fetchApiExpenseCategories();
-    } else {
-      setLoading(false);
+    if (!token) return { ok: false, error: "Not authenticated" };
+    // Only send provided fields; the backend keeps unspecified ones intact.
+    const payload = {};
+    if (fields.firstName !== undefined) payload.firstName = fields.firstName ?? "";
+    if (fields.lastName !== undefined) payload.lastName = fields.lastName ?? "";
+    if (fields.recoveryEmail !== undefined) payload.recoveryEmail = fields.recoveryEmail ?? "";
+    if (fields.duplicate_eReciept_email !== undefined)
+      payload.duplicate_eReciept_email = fields.duplicate_eReciept_email ?? "";
+    try {
+      const qs = new URLSearchParams(payload).toString();
+      const res = await fetch(`${BASE_URL}/user/updateuser?${qs}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accesstoken: token },
+        body: JSON.stringify(payload),
+      });
+      const text = await res.text().catch(() => "");
+      let data = {};
+      try { data = JSON.parse(text); } catch { /* non-JSON */ }
+      if (!res.ok) return { ok: false, error: data?.message || text || "Update failed" };
+      // Merge the returned/updated fields into the user context.
+      const normalized = normalizeUserResponse(data) || {};
+      setUser((prev) => ({ ...(prev || {}), ...normalized, ...payload }));
+      return { ok: true, user: data };
+    } catch (err) {
+      return { ok: false, error: err?.message || "Update failed" };
     }
-  }, [fetchData, fetchApiExpenseCategories]);
+  }, []);
 
   const clearAllData = () => {
+    userFetchedRef.current = false;
     setUser(null);
     setReceipts([]);
     setMerchants(["Miscellaneous"]);
@@ -1756,6 +2084,23 @@ setMerchantsWithImages(
     setHiddenPaymentMethods(new Set());
     // Note: Don't clear taxes here - they should persist
   };
+
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    // Only fetch data if token exists
+    // fetchData now fetches all APIs in parallel (receipts, taxes, merchants, PMs, categories)
+    if (token) {
+      fetchData();
+    } else {
+      setLoading(false);
+    }
+  }, [fetchData]);
+
+  useEffect(() => {
+    const onSessionExpired = () => clearAllData();
+    window.addEventListener("cat:session-expired", onSessionExpired);
+    return () => window.removeEventListener("cat:session-expired", onSessionExpired);
+  }, []);
 
   // Add updateReceiptStatus function
   const updateReceiptStatus = async (receiptId, newStatus) => {
@@ -1970,8 +2315,10 @@ setMerchantsWithImages(
     const deletedReceipts = receipts.filter((r) => deletedSet.has(String(r.id)));
     const remaining = receipts.filter((r) => !deletedSet.has(String(r.id)));
 
+    // Single state update — removes every deleted receipt at once (race-free).
     setReceipts(remaining);
 
+    // Prune merchants / categories / payment methods that no receipt references anymore.
     deletedReceipts.forEach((deletedReceipt) => {
       const merchantName = (deletedReceipt.storeName || deletedReceipt.store_name || "").toString().trim();
       if (merchantName && merchantName.toLowerCase() !== "miscellaneous") {
@@ -2045,14 +2392,16 @@ setMerchantsWithImages(
   };
 
   const buildReceiptUpdatePayloadFromRow = (receipt) => {
-    const rawPaymentType = (receipt.paymentType ?? "").toString().trim();
+    const rawPaymentType = normalizePaymentField(receipt.paymentType ?? receipt.payment_type);
     const normalizedPaymentType = rawPaymentType.replace(/\s*\*\d{3,4}/g, "").trim();
-    const rawLast4 = (receipt.last_4_digit_card ?? "").toString().trim();
+    const rawIssuerName = normalizePaymentField(receipt.card_issuer_name ?? receipt.cardIssuerName);
+    const rawLast4 = normalizePaymentField(receipt.last_4_digit_card ?? receipt.last4DigitCard);
     const inferredLast4 = (() => {
       if (!rawPaymentType.includes("*")) return "";
       const matches = [...rawPaymentType.matchAll(/\*(\d{3,4})/g)];
       return matches.length > 0 ? matches[matches.length - 1][1] : "";
     })();
+    const hasPayment = !!(normalizedPaymentType || rawIssuerName || rawLast4 || inferredLast4);
 
     return {
       id: parseInt(receipt.id),
@@ -2063,9 +2412,9 @@ setMerchantsWithImages(
       total_amount: (receipt.total_amount ?? receipt.purchasePrice ?? "0").toString(),
       payment_category_type: parseInt(receipt.payment_category_type ?? 0) || 0,
       status: parseInt(receipt.status ?? 0) || 0,
-      paymentType: normalizedPaymentType,
-      last_4_digit_card: rawLast4 || inferredLast4 || "",
-      card_issuer_name: receipt.card_issuer_name ?? "",
+      paymentType: hasPayment ? normalizedPaymentType : CLEAR_PAYMENT_API_VALUE,
+      last_4_digit_card: hasPayment ? (rawLast4 || inferredLast4 || "") : CLEAR_PAYMENT_API_VALUE,
+      card_issuer_name: hasPayment ? rawIssuerName : CLEAR_PAYMENT_API_VALUE,
       fk_original_receipt_id: receipt.fk_original_receipt_id ?? "0",
       fk_forward_from_receipt_id: receipt.fk_forward_from_receipt_id ?? "0",
       receipt_category: parseInt(receipt.receipt_category ?? 0) || 0,
@@ -2079,10 +2428,71 @@ setMerchantsWithImages(
       is_draft: parseInt(receipt.is_draft ?? 0) || 0,
       is_verify: parseInt(receipt.is_verify ?? 0) || 0,
       create_date: receipt.create_date ?? "",
-      receipt_tax_values: Array.isArray(receipt.receipt_tax_values)
-        ? receipt.receipt_tax_values
-        : [],
+      // Preserve real taxes: if this row carries none, restore the freshest fetched
+      // tax lines so a full-row update never deletes iOS-forwarded taxes.
+      receipt_tax_values:
+        Array.isArray(receipt.receipt_tax_values) && receipt.receipt_tax_values.length > 0
+          ? receipt.receipt_tax_values
+          : (resolveFreshestReceiptTaxValues(receipt.id) ||
+             (Array.isArray(receipt.receipt_tax_values) ? receipt.receipt_tax_values : [])),
     };
+  };
+
+  // Resolve the freshest, non-empty tax lines for a receipt from the most recent fetch.
+  // Forwarded-receipt backfill updates hit updateReceiptv1, which replaces the whole row,
+  // so we must always send the real (iOS-forwarded) taxes — never an empty array that
+  // would delete them. Returns null when no non-empty tax lines are known yet.
+  const resolveFreshestReceiptTaxValues = (receiptId) => {
+    const fresh = (lastRawReceiptsRef.current || []).find(
+      (r) => String(r.id) === String(receiptId)
+    );
+    if (Array.isArray(fresh?.receipt_tax_values) && fresh.receipt_tax_values.length > 0) {
+      return fresh.receipt_tax_values;
+    }
+    return null;
+  };
+
+  // Remap a sender's original tax lines onto the recipient's receipt so a backfill update
+  // can restore taxes the recipient copy hasn't received yet (keeps them "as in iOS").
+  const remapTaxValuesToRecipient = (taxLines, recipientReceiptId) => {
+    const recipientUserId = parseInt(localStorage.getItem("fk_user_id")) || 0;
+    return (taxLines || [])
+      .filter((t) => (t?.tax_name || "").trim() && !/^tip$/i.test((t.tax_name || "").trim()))
+      .map((t) => ({
+        id: 0,
+        fk_user_id: recipientUserId,
+        fk_receipt_id: parseInt(recipientReceiptId) || 0,
+        fk_tax_id: parseInt(t.fk_tax_id) || 0,
+        tax_name: t.tax_name || "",
+        tax_rate: (t.tax_rate ?? "0").toString(),
+        tax_amount: (parseFloat(t.tax_amount) || 0).toString(),
+        created: 0,
+        updated: 0,
+      }));
+  };
+
+  const markReceiptAsForwarded = async (receiptId) => {
+    const token = localStorage.getItem("token");
+    if (!token || !receiptId) return;
+    const existingReceipt = receipts.find(r => String(r.id) === String(receiptId));
+    if (!existingReceipt) return;
+    const payload = buildReceiptUpdatePayloadFromRow({
+      ...existingReceipt,
+      receipt_forwarded: "1",
+    });
+    await postReceiptUpdatePayload(payload, token);
+    // Persist locally so badge survives refresh and logout/login
+    // (equivalent to iOS Core Data — backend doesn't update the source receipt)
+    try {
+      const set = new Set(JSON.parse(localStorage.getItem("cat_locally_forwarded") || "[]"));
+      set.add(String(receiptId));
+      localStorage.setItem("cat_locally_forwarded", JSON.stringify([...set]));
+    } catch { /* quota */ }
+    setReceipts(prev => prev.map(r => {
+      if (String(r.id) !== String(receiptId)) return r;
+      const updated = { ...r, receipt_forwarded: "1" };
+      return { ...updated, badgeStatus: getReceiptBadgeStatus(updated) };
+    }));
   };
 
   /**
@@ -2286,7 +2696,7 @@ setMerchantsWithImages(
           if (value === null || value === undefined || value === "") {
             // For empty strings, check if we should preserve existing value
             // Some fields like notes can be empty, so we need to be careful
-            if (field === "notes" || field === "expense_type" || field === "product_name" || field === "storeName" || field === "card_issuer_name") {
+            if (field === "notes" || field === "expense_type" || field === "product_name" || field === "storeName" || field === "card_issuer_name" || field === "paymentType" || field === "last_4_digit_card") {
               // These fields can legitimately be empty, so use empty string if provided
               return value === "" ? "" : (existingReceipt?.[field] ?? defaultValue);
             }
@@ -2310,6 +2720,15 @@ setMerchantsWithImages(
         return matches.length > 0 ? matches[matches.length - 1][1] : "";
       })();
 
+      // Server ignores empty strings on update — must send "0" to clear payment fields.
+      const clearingPayment =
+        apiUpdates.hasOwnProperty("paymentType") &&
+        apiUpdates.paymentType === "" &&
+        apiUpdates.hasOwnProperty("card_issuer_name") &&
+        apiUpdates.card_issuer_name === "" &&
+        apiUpdates.hasOwnProperty("last_4_digit_card") &&
+        apiUpdates.last_4_digit_card === "";
+
       // Never persist uploadmediaV1 cross-receipt contamination: each receipt may
       // only store media URLs it owns after global dedupe (newest receipt wins).
       const receiptsForMediaResolve = receipts.map((r) =>
@@ -2323,7 +2742,19 @@ setMerchantsWithImages(
 
       // Build the update payload matching API model
       // Only update fields that are provided, preserve existing values for others
-      const updatePayload = {
+      const updatePayload = clearingPayment
+        ? buildReceiptUpdatePayloadFromRow({
+            ...existingReceipt,
+            ...apiUpdates,
+            paymentType: "",
+            payment_type: "",
+            card_issuer_name: "",
+            last_4_digit_card: "",
+            payment_logo_url: "",
+            emailAttachment: apiMediaFields.emailAttachment,
+            receipt_image: apiMediaFields.receipt_image,
+          })
+        : {
         id: parseInt(receiptId),
         storeName: getValue("storeName", ""),
         product_name: getValue("product_name", ""),
@@ -2356,6 +2787,7 @@ setMerchantsWithImages(
         fk_forward_from_receipt_id: getValue("fk_forward_from_receipt_id", "0"),
         fk_forward_from_user_id: getValue("fk_forward_from_user_id", "0"),
         originalUsername: getValue("originalUsername") ?? getValue("original_username") ?? existingReceipt?.originalUsername ?? null,
+        payment_logo_url: getValue("payment_logo_url") ?? getValue("paymentLogoUrl") ?? existingReceipt?.payment_logo_url ?? "",
         // Preserve receipt_category - only update if explicitly provided
         receipt_category: (() => {
           const val = getValue("receipt_category");
@@ -2432,8 +2864,29 @@ setMerchantsWithImages(
           return parseInt(val) || 0;
         })(),
         create_date: getValue("create_date", ""),
-        receipt_tax_values: getValue("receipt_tax_values", []),
+        // Never wipe taxes on a partial update (e.g. only is_verify). If the caller
+        // did not pass tax lines and the in-state copy has none yet (common right
+        // after an iOS forward), fall back to the freshest fetched tax values.
+        receipt_tax_values: (() => {
+          const candidate = getValue("receipt_tax_values", []);
+          if (Array.isArray(candidate) && candidate.length > 0) return candidate;
+          return resolveFreshestReceiptTaxValues(receiptId) || (Array.isArray(candidate) ? candidate : []);
+        })(),
       };
+
+      // Explicit date clear → "No Date". The user cleared the date when product_date is
+      // present in the update but empty/0. The backend treats 0/""/null as "no change"
+      // (keeps the old date), so we persist a tiny sentinel (< 1,000,000) instead; both
+      // web and mobile render it as "No Date" and the fetch normaliser collapses it to 0.
+      // Applied here so it covers BOTH payload branches (clear-payment row build + inline).
+      if (Object.prototype.hasOwnProperty.call(apiUpdates, "product_date")) {
+        const rawPd = apiUpdates["product_date"];
+        const rawPdStr =
+          rawPd === null || rawPd === undefined ? "" : String(rawPd).trim();
+        if (rawPdStr === "" || rawPdStr === "0") {
+          updatePayload.product_date = NO_DATE_SENTINEL_UNIX;
+        }
+      }
 
       // Try multiple possible endpoints
       const editEndpoints = [
@@ -2482,10 +2935,18 @@ setMerchantsWithImages(
           updates.last_4_digit_card !== undefined;
         const updatedReceipts = prevReceipts.map(receipt => {
           if (!receiptMatchesId(receipt)) return receipt;
-          const merged = { ...receipt, ...updates };
+          const merged = syncReceiptPaymentFieldAliases({ ...receipt, ...updates });
           if (paymentFieldsChanged) {
+            const cleared =
+              (updates.paymentType === "" || merged.paymentType === "") &&
+              !(merged.card_issuer_name || "").toString().trim() &&
+              !(merged.last_4_digit_card || "").toString().trim();
             merged.payment_logo_url = "";
             merged.paymentLogoUrl = "";
+            if (cleared) {
+              merged.paymentBrand = "";
+              merged.payment_method_name = "";
+            }
           }
           if (updates.receipt_forwarded !== undefined) {
             merged.badgeStatus = getReceiptBadgeStatus(merged);
@@ -2494,7 +2955,7 @@ setMerchantsWithImages(
         });
 
         // Also update payment methods list if paymentType changed
-        if (updates.paymentType) {
+        if (updates.paymentType !== undefined) {
           setTimeout(() => {
             setPaymentMethods(buildPaymentMethods(updatedReceipts));
           }, 0);
@@ -2583,6 +3044,349 @@ setMerchantsWithImages(
     } catch (e) { console.error("saveMerchLogo error", e); }
   }, []);
 
+  // When a forwarded receipt arrives, auto-add any merchant, payment method,
+  // expense category, or tax type that doesn't yet exist in the recipient's account.
+  const syncForwardedReceiptData = useCallback(async (receipt) => {
+    if (!receipt) return;
+    const tasks = [];
+
+    // Merchant + logo
+    const storeName = (receipt.storeName || receipt.store_name || "").trim();
+    const storeImage = receipt.store_image || receipt.storeImage || "";
+    if (storeName) {
+      const existingMerchant = (apiMerchants || []).find(
+        (m) => (m.store_name || "").toLowerCase() === storeName.toLowerCase()
+      );
+      if (!existingMerchant) {
+        let logoToUse = storeImage;
+        if (!logoToUse) {
+          // Sender used a local app asset (no URL) — try prefix-match against known merchants.
+          // e.g. "Target - iOS" starts with "Target" → use Target's logo.
+          const storeNameLower = storeName.toLowerCase();
+          const partialApi = (apiMerchants || []).find(
+            (m) => m.store_image_url && storeNameLower.startsWith((m.store_name || "").toLowerCase())
+          );
+          if (partialApi) {
+            logoToUse = partialApi.store_image_url;
+          } else {
+            const partialDef = DEFAULT_MERCHANTS_WITH_LOGOS.find(
+              (d) => d.image && storeNameLower.startsWith((d.name || "").toLowerCase())
+            );
+            if (partialDef) logoToUse = partialDef.image;
+          }
+        }
+        tasks.push(addApiMerchant(storeName, logoToUse));
+        if (logoToUse) {
+          saveMerchLogo(storeName, logoToUse);
+          // Patch store_image on the in-memory receipt so the card re-renders immediately
+          // with the resolved logo instead of waiting for the next full data fetch.
+          if (receipt.id) {
+            setReceipts((prev) =>
+              prev.map((r) =>
+                String(r.id) === String(receipt.id) && !r.store_image
+                  ? { ...r, store_image: logoToUse }
+                  : r
+              )
+            );
+            tasks.push(
+              (async () => {
+                const token = localStorage.getItem("token");
+                if (!token) return;
+                // Full-row update: updateReceiptv1 replaces the whole row, so a minimal
+                // {id, store_image} patch would delete taxes and every other field.
+                const payload = buildReceiptUpdatePayloadFromRow({
+                  ...receipt,
+                  store_image: logoToUse,
+                });
+                await postReceiptUpdatePayload(payload, token);
+              })()
+            );
+          }
+        }
+      } else if (storeImage && !existingMerchant.store_image_url) {
+        tasks.push(updateApiMerchant(existingMerchant.id, storeName, storeImage));
+        saveMerchLogo(storeName, storeImage);
+      } else if (existingMerchant.store_image_url) {
+        // WebApp already has a canonical logo for this merchant.
+        // Patch the forwarded receipt to use it so the receipt card shows
+        // the WebApp logo instead of the sender's logo.
+        const canonicalLogo = existingMerchant.store_image_url;
+        saveMerchLogo(storeName, canonicalLogo);
+        if (receipt.id && storeImage && storeImage !== canonicalLogo) {
+          tasks.push(
+            (async () => {
+              const token = localStorage.getItem("token");
+              if (!token) return;
+              // Full-row update so this logo patch never wipes taxes/other fields.
+              const payload = buildReceiptUpdatePayloadFromRow({
+                ...receipt,
+                store_image: canonicalLogo,
+              });
+              await postReceiptUpdatePayload(payload, token);
+            })()
+          );
+        }
+      }
+    }
+
+    // Payment method — direct comparison so non-standard card types (e.g. "Coffee") work too
+    const pmLast4 = (receipt.last_4_digit_card || "").replace(/\D/g, "").slice(-4);
+    const pmIssuer = (receipt.card_issuer_name || "").trim()
+      || (receipt.paymentType || "").replace(/\s*\*\d+/g, "").trim();
+    if (pmLast4 || pmIssuer) {
+      const pmSig = `${pmIssuer.toLowerCase()}|${pmLast4}`;
+
+      // Resolve brand early — needed for both the alreadyHave check and logo/type resolution.
+      // When the issuer is a custom name (e.g. "Nokia"), infer brand from paymentType
+      // ("Discover") so card_type and logo are set correctly on Account B.
+      const issuerStr = (receipt.card_issuer_name || "").replace(/\s*\*\d+/g, "").trim();
+      const payTypeStr = (receipt.paymentType || "").replace(/\s*\*\d+/g, "").trim();
+      const brandFromIssuer = inferCardTypeFromPayment(issuerStr);
+      const resolvedBrand = brandFromIssuer !== "Other"
+        ? brandFromIssuer
+        : (inferCardTypeFromPayment(payTypeStr) || "Other");
+
+      const existingPm = (apiPaymentMethods || []).find((pm) => {
+        // API PM objects use card_number (not last_4_digit_card) for the last4 field
+        const eLast4 = getLast4FromPaymentApiRecord(pm);
+        const eIssuer = (pm.card_issuer_name || "").trim().toLowerCase();
+        if (`${eIssuer}|${eLast4}` === pmSig) return true;
+        // Brand-only PMs (Cash, Visa, etc.) are stored with card_issuer_name="" because
+        // storedCardIssuerName returns "" when the issuer name equals the brand.
+        // Fall back to card_type integer match so Cash (type 7) never duplicates.
+        if (!eIssuer && eLast4 === pmLast4) {
+          const eBrand = cardTypeIntToBrand(parseInt(pm.card_type ?? "", 10));
+          if (eBrand && eBrand !== "Other" && eBrand.toLowerCase() === resolvedBrand.toLowerCase()) return true;
+        }
+        return false;
+      });
+      const alreadyHave = !!existingPm;
+
+      // Prefer explicit logo from the forwarded receipt; fall back to the standard
+      // logo for the detected card type so custom PMs (e.g. "HeadPhoneSONY") at
+      // minimum store the generic credit-card icon instead of an empty string.
+      const PM_LOGO_MAP = {
+        Visa: "/payment-logos/Visa.png",
+        MasterCard: "/payment-logos/MasterCard.png",
+        PayPal: "/payment-logos/PayPal.png",
+        "American Express": "/payment-logos/AmericanExpress.webp",
+        Discover: "/payment-logos/discover.png",
+        "Diners Club": "/payment-logos/DinersClub.png",
+        Cash: "/payment-logos/Cash.jpg",
+        "Debit Card": "/payment-logos/DebitCard.webp",
+        Other: "/payment-logos/Creditdebitcardicon.jpg",
+      };
+      // If the receipt carries an explicit logo URL that matches a known brand,
+      // use that brand — it is more authoritative than text inference for custom-named
+      // cards (e.g. "Yashphone *2222" with a Discover logo → brand = Discover, not "Other")
+      const pmRawLogoUrl = receipt.payment_logo_url || receipt.paymentDisplay?.logoUrl || "";
+      const brandFromLogo = pmRawLogoUrl
+        ? (Object.entries(PM_LOGO_MAP).find(
+            ([, v]) => v.toLowerCase() === pmRawLogoUrl.toLowerCase()
+          )?.[0] || null)
+        : null;
+      const finalBrand = brandFromLogo || resolvedBrand;
+      const pmLogoUrl = pmRawLogoUrl || PM_LOGO_MAP[finalBrand] || PM_LOGO_MAP.Other;
+      // Inject resolved brand as cardTypeBrand so normalizeApiPaymentMethodInput sets
+      // the correct card_type integer (e.g. Discover=4) instead of defaulting to Other=8.
+      const pmInput = finalBrand !== "Other"
+        ? { ...receipt, cardTypeBrand: finalBrand }
+        : receipt;
+      // Carry the sender's payment-method default (Business/Personal) so the received
+      // card is not created with "None". The forward stores it in payment_category_type
+      // ("0" Personal, "1" Business, "2"/"" None) — NOT in expense_type (a category name
+      // like "1a", which would resolve to None).
+      const forwardedPmDefault = receipt.payment_category_type ?? "";
+      const forwardedPmDefaultEnum = paymentCategoryToApiEnum(forwardedPmDefault);
+      if (!alreadyHave) {
+        tasks.push(addApiPaymentMethod(pmInput, pmLogoUrl, forwardedPmDefault));
+      } else if (existingPm?.id) {
+        const logoNeedsUpdate = !!brandFromLogo && existingPm.icon_image !== pmLogoUrl;
+        // Backfill the default category when the received card is still "None" but the
+        // forward carries a real Business/Personal default. Guarded to only-when-None so a
+        // default the receiver set themselves is never clobbered.
+        const existingDefaultEnum = paymentCategoryToApiEnum(existingPm.default_payment_category);
+        const defaultNeedsUpdate =
+          (forwardedPmDefaultEnum === "0" || forwardedPmDefaultEnum === "1") &&
+          existingDefaultEnum === "2";
+        if (logoNeedsUpdate || defaultNeedsUpdate) {
+          // The receipt carries an authoritative logo URL that differs from what is stored —
+          // update the existing PM so Settings/Filter show the correct logo going forward.
+          const logoForUpdate = logoNeedsUpdate ? pmLogoUrl : (existingPm.icon_image || pmLogoUrl);
+          const defaultForUpdate = defaultNeedsUpdate
+            ? forwardedPmDefault
+            : (existingPm.default_payment_category ?? "");
+          tasks.push(updateApiPaymentMethod(existingPm.id, pmInput, logoForUpdate, defaultForUpdate));
+        }
+      }
+    }
+
+    // Expense category
+    const expenseType = getReceiptExpenseType(receipt, apiExpenseCategories).trim();
+    if (expenseType) {
+      const catExists = (apiExpenseCategories || []).some(
+        (c) => (c.expense_category_name || "").toLowerCase() === expenseType.toLowerCase()
+      );
+      if (!catExists) tasks.push(addApiExpenseCategory(expenseType));
+      // Patch in-memory receipt when API row is missing expense_type (common on forwards)
+      const currentType = (receipt.expense_type || "").trim();
+      if (receipt.id && currentType.toLowerCase() !== expenseType.toLowerCase()) {
+        setReceipts((prev) =>
+          prev.map((r) =>
+            String(r.id) === String(receipt.id) ? { ...r, expense_type: expenseType } : r
+          )
+        );
+        tasks.push(
+          (async () => {
+            const token = localStorage.getItem("token");
+            if (!token) return;
+            // Keep the forwarded receipt's real taxes (never wipe them via this update).
+            const freshTax = resolveFreshestReceiptTaxValues(receipt.id);
+            const payload = buildReceiptUpdatePayloadFromRow({
+              ...receipt,
+              expense_type: expenseType,
+              ...(freshTax ? { receipt_tax_values: freshTax } : {}),
+            });
+            await postReceiptUpdatePayload(payload, token);
+          })()
+        );
+      }
+    }
+
+    // For network-forwarded receipts: fetch sender's original to fix missing expense_type
+    // and/or payment method (backend overwrites payment with recipient's own card by last4).
+    // Runs for ALL received forwards (not just ones missing expense_type) so that old receipts
+    // with backend-corrupted payment data are also corrected.
+    // fk_forward_from_receipt_id = sender's user ID; fk_original_receipt_id = source receipt ID.
+    if (receipt.id) {
+      const senderUserId = String(
+        receipt.fk_forward_from_receipt_id ?? receipt.fkForwardFromReceiptId ?? "0"
+      );
+      const originalReceiptId = String(
+        receipt.fk_original_receipt_id ?? receipt.fkOriginalReceiptId ?? "0"
+      );
+      if (senderUserId !== "0" && originalReceiptId !== "0") {
+        tasks.push(
+          (async () => {
+            try {
+              const token = localStorage.getItem("token");
+              if (!token) return;
+              // Reuse any in-flight fetch for the same sender (deduplicate parallel calls)
+              let fetchPromise = _senderReceiptFetchCache.get(senderUserId);
+              if (!fetchPromise) {
+                fetchPromise = fetch(
+                  `${BASE_URL}/user/getreceiptfromdatev1?fk_user_id=${senderUserId}&date_time_stamp=0`,
+                  { headers: { "Content-Type": "application/json", Accesstoken: token } }
+                )
+                  .then((r) => (r.ok ? r.json() : []))
+                  .then((d) => (Array.isArray(d) ? d : []))
+                  .catch(() => []);
+                _senderReceiptFetchCache.set(senderUserId, fetchPromise);
+                // Evict after 30 s so stale data doesn't linger across multiple syncs
+                setTimeout(() => _senderReceiptFetchCache.delete(senderUserId), 30000);
+              }
+              const senderReceipts = await fetchPromise;
+              const orig = senderReceipts.find(
+                (r) => String(r.id) === originalReceiptId
+              );
+              if (!orig) return;
+
+              const fetchedType = (orig.expense_type || "").trim();
+              const currentExpenseType = (receipt.expense_type || "").trim();
+              const needsExpensePatch =
+                fetchedType && fetchedType.toLowerCase() !== currentExpenseType.toLowerCase();
+
+              // The backend overwrites the forwarded receipt's payment method with
+              // the recipient's own card matched by last4. Detect and correct this.
+              const origPayBase = (orig.paymentType || "")
+                .replace(/\s*\*\d+/g, "").trim();
+              const curPayBase = (receipt.paymentType || "")
+                .replace(/\s*\*\d+/g, "").trim();
+              const paymentMismatch =
+                origPayBase &&
+                curPayBase &&
+                origPayBase.toLowerCase() !== curPayBase.toLowerCase();
+
+              if (!needsExpensePatch && !paymentMismatch) return;
+
+              const statePatch = {};
+              const serverPatch = { ...receipt };
+              if (needsExpensePatch) {
+                statePatch.expense_type = fetchedType;
+                serverPatch.expense_type = fetchedType;
+              }
+              if (paymentMismatch) {
+                statePatch.paymentType = orig.paymentType || origPayBase;
+                statePatch.card_issuer_name = (orig.card_issuer_name || "").trim();
+                statePatch.last_4_digit_card = (orig.last_4_digit_card || "").trim();
+                serverPatch.paymentType = orig.paymentType || origPayBase;
+                serverPatch.card_issuer_name = (orig.card_issuer_name || "").trim();
+                serverPatch.last_4_digit_card = (orig.last_4_digit_card || "").trim();
+              }
+
+              // Update in-memory receipt
+              setReceipts((prev) =>
+                prev.map((r) =>
+                  String(r.id) === String(receipt.id)
+                    ? { ...r, ...statePatch }
+                    : r
+                )
+              );
+
+              // Add expense category to user's list if new
+              if (needsExpensePatch) {
+                const catExists2 = (apiExpenseCategories || []).some(
+                  (c) =>
+                    (c.expense_category_name || "").toLowerCase() ===
+                    fetchedType.toLowerCase()
+                );
+                if (!catExists2) addApiExpenseCategory(fetchedType);
+              }
+
+              // Preserve the receipt's real taxes so this update never wipes them.
+              // Prefer the freshest fetched copy; if the recipient copy hasn't received
+              // its tax lines yet, restore them from the sender's original (iOS source).
+              const freshTax = resolveFreshestReceiptTaxValues(receipt.id);
+              if (freshTax) {
+                serverPatch.receipt_tax_values = freshTax;
+              } else if (
+                Array.isArray(orig?.receipt_tax_values) &&
+                orig.receipt_tax_values.length > 0 &&
+                !(Array.isArray(receipt.receipt_tax_values) && receipt.receipt_tax_values.length > 0)
+              ) {
+                serverPatch.receipt_tax_values = remapTaxValuesToRecipient(
+                  orig.receipt_tax_values,
+                  receipt.id
+                );
+              }
+
+              // Persist all patches to server in one call
+              const payload = buildReceiptUpdatePayloadFromRow(serverPatch);
+              await postReceiptUpdatePayload(payload, token);
+            } catch { /* ignore */ }
+          })()
+        );
+      }
+    }
+
+    // Tax types (skip Tip lines)
+    for (const tv of (receipt.receipt_tax_values || [])) {
+      const taxName = (tv.tax_name || "").trim();
+      if (!taxName || /^tip$/i.test(taxName)) continue;
+      const taxExists = (taxData || []).some(
+        (t) => (t.tax_name || "").toLowerCase() === taxName.toLowerCase()
+      );
+      if (!taxExists) {
+        const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
+        tasks.push(addTax({ tax_name: taxName, tax_rate: tv.tax_rate || "0", fk_user_id }));
+      }
+    }
+
+    if (tasks.length > 0) await Promise.allSettled(tasks);
+  }, [apiMerchants, apiPaymentMethods, apiExpenseCategories, taxData,
+      addApiMerchant, updateApiMerchant, saveMerchLogo,
+      addApiPaymentMethod, addApiExpenseCategory, addTax]);
+
   // ── Custom Category CRUD ──
   const addCustomCategory = useCallback((name) => {
     const trimmed = (name || "").trim();
@@ -2654,11 +3458,7 @@ setMerchantsWithImages(
   const hideMerchant = useCallback((name) => {
     const trimmed = (name || "").toString().trim();
     if (!trimmed) return;
-    setHiddenMerchants((prev) => {
-      const next = new Set([...prev, trimmed]);
-      localStorage.setItem("cat_hidden_merchants", JSON.stringify([...next]));
-      return next;
-    });
+    setHiddenMerchants((prev) => addHiddenMerchantName(getStoredUserId(), prev, trimmed));
   }, []);
 
   // Hide default merchant labels superseded by renamed API stores (e.g. Target → Targetttt).
@@ -2670,11 +3470,7 @@ setMerchantsWithImages(
     });
   }, [apiMerchants, hideMerchant]);
   const unhideMerchant = useCallback((name) => {
-    setHiddenMerchants((prev) => {
-      const next = new Set([...prev].filter((m) => m !== name));
-      localStorage.setItem("cat_hidden_merchants", JSON.stringify([...next]));
-      return next;
-    });
+    setHiddenMerchants((prev) => removeHiddenMerchantName(getStoredUserId(), prev, name));
   }, []);
   const hideCategory = useCallback((name) => {
     setHiddenCategories((prev) => {
@@ -2791,30 +3587,22 @@ setMerchantsWithImages(
 
   // Dropdown-ready: receipt-derived (minus hidden) + custom (minus hidden duplicates)
   const _rmLower = new Set(receiptMerchantsRaw.map((m) => (m || "").toLowerCase()));
-  const _rmCustomLower = new Set([
-    ..._rmLower,
-    ...customMerchants.map((m) => (m || "").toLowerCase()),
-  ]);
   const mergedMerchants = [
     ...receiptMerchantsRaw.filter(
-      (m) => !isMerchantHidden(m) && !isMerchantSupersededByApi(m, apiMerchants)
+      (m) =>
+        !isMerchantHidden(m) &&
+        !isMerchantSupersededByApi(m, apiMerchants) &&
+        !isOrphanedDefaultMerchant(m, apiMerchants)
     ),
     ...customMerchants.filter((m) => !isMerchantHidden(m) && !_rmLower.has(m.toLowerCase())),
-    ...DEFAULT_MERCHANTS_WITH_LOGOS
-      .map((m) => m.name)
-      .filter(
-        (m) =>
-          m &&
-          !isMerchantHidden(m) &&
-          !_rmCustomLower.has((m || "").toLowerCase()) &&
-          !isMerchantSupersededByApi(m, apiMerchants)
-      ),
   ].sort((a, b) =>
     (a || "").toString().toLowerCase().localeCompare((b || "").toString().toLowerCase())
   );
   const visibleReceiptMerchWImg = receiptMerchWImgRaw.filter(
     (m) =>
-      !isMerchantHidden(m.name) && !isMerchantSupersededByApi(m.name, apiMerchants)
+      !isMerchantHidden(m.name) &&
+      !isMerchantSupersededByApi(m.name, apiMerchants) &&
+      !isOrphanedDefaultMerchant(m.name, apiMerchants)
   );
   const _miLower = new Set(
     visibleReceiptMerchWImg.map((m) => (m.name || "").toLowerCase())
@@ -2822,11 +3610,6 @@ setMerchantsWithImages(
   const _miApiLower = new Set(
     (apiMerchants || []).map((m) => (m?.store_name || "").trim().toLowerCase()).filter(Boolean)
   );
-  const _miCustomLower = new Set([
-    ..._miLower,
-    ..._miApiLower,
-    ...customMerchants.map((m) => (m || "").toLowerCase()),
-  ]);
   const mergedMerchantsWithImages = [
     ...visibleReceiptMerchWImg,
     // API merchants are the source of truth (before local custom list), except
@@ -2835,8 +3618,7 @@ setMerchantsWithImages(
       .filter(
         (m) =>
           m.store_name &&
-          !_miLower.has((m.store_name || "").toLowerCase()) &&
-          !isMerchantDeleted(m.store_name)
+          !_miLower.has((m.store_name || "").toLowerCase())
       )
       .map((m) => ({ name: m.store_name, image: m.store_image_url || "" })),
     ...customMerchants
@@ -2848,13 +3630,6 @@ setMerchantsWithImages(
           !isMerchantSupersededByApi(m, apiMerchants)
       )
       .map((m) => ({ name: m, image: "" })),
-    ...DEFAULT_MERCHANTS_WITH_LOGOS.filter(
-      (m) =>
-        m.name &&
-        !isMerchantHidden(m.name) &&
-        !_miCustomLower.has((m.name || "").toLowerCase()) &&
-        !isMerchantSupersededByApi(m.name, apiMerchants)
-    ),
   ].sort((a, b) =>
     (a?.name || "").toString().toLowerCase().localeCompare((b?.name || "").toString().toLowerCase())
   );
@@ -2909,7 +3684,8 @@ setMerchantsWithImages(
   const homepageFilterMerchantsWithImages = buildHomepageFilterMerchantsWithImages(
     mergedMerchantsWithImages,
     receipts,
-    apiMerchants
+    apiMerchants,
+    isMerchantHidden
   );
   const homepageFilterExpenseCategories = buildHomepageFilterExpenseCategories(
     mergedExpenseCategories,
@@ -2955,7 +3731,10 @@ setMerchantsWithImages(
         loading,
         error,
         refreshData: fetchData,
+        refreshDataAfterAuth,
         silentRefreshData,
+        markRecoveryEmailVerified,
+        updateUserProfile,
         calculateSubtotal,
         setDataContent,
         clearDataContent,
@@ -2967,7 +3746,9 @@ setMerchantsWithImages(
         deleteReceipt,
         bulkDeleteReceipts,
         updateReceipt,
+        markReceiptAsForwarded,
         repairReceiptMediaOnServer,
+        syncForwardedReceiptData,
         addExpenseCategory,
         // Tax management functions
         fetchTaxes,

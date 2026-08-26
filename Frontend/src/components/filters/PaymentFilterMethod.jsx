@@ -219,10 +219,10 @@ const PaymentFilterMethod = ({ onClose, onApply, initialSelected = [] }) => {
       }
     }
 
-    // Priority 4: If it looks like a card number pattern (e.g., "Something *1234") and we haven't matched a network, show bank logo
-    // Only show bank logo if paymentType doesn't contain a known network
+    // Priority 4: If it looks like a card number pattern (e.g., "Something *1234") and we haven't matched a network,
+    // show the generic credit card icon — not MasterCard, since the network is unknown for custom-named cards
     if (!hasKnownNetwork && /\*\d{3,4}$/.test(paymentType.trim())) {
-      return logoMap.bank;
+      return logoMap.other;
     }
 
     // Default to credit card icon for unknown types

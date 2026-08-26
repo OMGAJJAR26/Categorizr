@@ -1,23 +1,41 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { formatTaxRate, taxTypeDedupKey, taxTypesMatch } from "../../utils/receiptFormatters";
+import { formatTaxRate, taxTypeDedupKey, taxTypesMatch, getSplitReceiptValidationMessage, getDuplicateReceiptValidationMessage } from "../../utils/receiptFormatters";
 import {
   parseDateInputToUnix,
   todayLocalCalendarUnix,
+  NO_DATE_SENTINEL_UNIX,
 } from "../../utils/receiptDate";
+
+/**
+ * Resolve the product_date to save from the Add-Receipt form.
+ *  • Empty field  → the user explicitly cleared it → "No Date" sentinel. (The form
+ *    always pre-fills today or the scanner's date, so an empty field is a deliberate
+ *    clear, never a missing scan.)
+ *  • Valid date   → that date.
+ *  • Unparseable  → today (defensive fallback; e.g. a corrupt value).
+ */
+const resolveAddReceiptProductDate = (rawValue) => {
+  const raw = (rawValue ?? "").toString().trim();
+  if (raw === "") return NO_DATE_SENTINEL_UNIX; // user cleared → No Date
+  const parsed = parseDateInputToUnix(raw);
+  if (!parsed || parsed < 1000000) return todayLocalCalendarUnix();
+  return parsed;
+};
 import { containsEmoji, stripEmoji } from "../../utils/emojiUtils";
 import SimpleAlertModal from "../SimpleAlertModal";
-import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus, MoreHorizontal, Minus, ChevronLeft, ChevronRight, Pencil, Camera, PenLine, AlertCircle } from "lucide-react";
+import { X, Upload, FileText, Image, Trash2, ChevronDown, Plus, MoreHorizontal, Minus, ChevronLeft, ChevronRight, Pencil, Camera, PenLine, AlertCircle, RotateCcw, Check } from "lucide-react";
 import ReceiptAnnotator from "./ReceiptAnnotator";
 import { motion, AnimatePresence } from "framer-motion";
 import { useData } from "../../context/DataContext";
 import Toast from "../Toast";
-import { getPaymentDisplayFromReceipt, usePaymentDisplay } from "../../hooks/usePaymentDisplay";
+import { getPaymentDisplayFromReceipt, getPaymentInputLogo, getReceiptsMatchingPaymentMethod, usePaymentDisplay } from "../../hooks/usePaymentDisplay";
 import {
   apiPaymentMethodMatchesLabel,
   buildPaymentMethodStorageString,
   cardTypeIntToBrand,
   getApiPaymentMethodDisplayName,
   getApiPaymentMethodSignature,
+  getClearPaymentMethodUpdates,
   getLast4FromPaymentApiRecord,
   getPaymentMethodListLabel,
   getPaymentSignature,
@@ -27,6 +45,8 @@ import {
   normalizePaymentMatchKey,
   parsePaymentDisplay,
   paymentCategoryFromApiEnum,
+  getPaymentDefaultExpenseType,
+  expenseTypeToReceiptCategory,
   readPayCardTypeMap,
   storedCardIssuerName,
 } from "../../utils/paymentMethodUtils";
@@ -45,6 +65,7 @@ import {
   filterNonTipReceiptTaxValues,
   findTipLineInReceiptTaxValues,
   getReceiptsUsingTax,
+  resolveOcrDetectedTaxes,
 } from "../../utils/taxTypeUtils";
 import {
   splitMediaField,
@@ -85,28 +106,6 @@ import warrantedDeselect from "../../assets/receipttags/warrantied_deselect.png"
 import warrantedSelect from "../../assets/receipttags/warrantied_select.png";
 import lockedImg from "../../assets/receipttags/locked.png";
 import unlockedImg from "../../assets/receipttags/unlocked.png";
-
-/**
- * Duplicate flow: required fields in order (date → merchant → total).
- * Returns the first user-facing error message, or null if valid.
- */
-function getDuplicateReceiptValidationMessage(formData) {
-  if (formData?.product_date == null || String(formData.product_date).trim() === "") {
-    return "Please select date";
-  }
-  if (formData?.storeName == null || String(formData.storeName).trim() === "") {
-    return "Please select merchant";
-  }
-  const rawTotal = formData?.purchasePrice;
-  if (rawTotal == null || String(rawTotal).trim() === "") {
-    return "Please enter total";
-  }
-  const total = parseFloat(String(rawTotal).trim());
-  if (!Number.isFinite(total) || total === 0) {
-    return "Please enter total";
-  }
-  return null;
-}
 
 /** Describe Purchase (`product_name`): default to "Duplicate" when blank, otherwise append " (1)". */
 function withDuplicateDefaultProductName(formData) {
@@ -185,6 +184,7 @@ const AddReceiptModal = ({ onClose, onReceiptAdded, initialData = null, onDuplic
 
  // Add Merchant modal state
 const [showAddMerchantModal, setShowAddMerchantModal] = useState(false);
+const [isSavingMerchant, setIsSavingMerchant] = useState(false);
 const [newMerchantName, setNewMerchantName] = useState("");
 const [newMerchantLogo, setNewMerchantLogo] = useState("");
 const [isFetchingLogos, setIsFetchingLogos] = useState(false);
@@ -228,6 +228,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const [splits, setSplits] = useState([]);
   const [isSavingSplits, setIsSavingSplits] = useState(false);
   const [splitErrors, setSplitErrors] = useState({}); // { [split._id]: { amount: "msg", ... } }
+  const [actionPrereqError, setActionPrereqError] = useState(null); // split / duplicate prerequisite banner
 
   // Form fields state
   const [formData, setFormData] = useState({
@@ -476,7 +477,15 @@ const [localMerchants, setLocalMerchants] = useState([]);
       resetReceiptMediaState();
       return;
     }
-    if (initialData.formData)        setFormData(initialData.formData);
+    if (initialData.formData) {
+      // Mark tax lines that already have stored amounts as manually overridden so
+      // they are not wiped when the user later changes price, subtotal, or tip.
+      const taxWithManual = (initialData.formData.receipt_tax_values || []).map((t) => ({
+        ...t,
+        _isManual: parseFloat(t.tax_amount) > 0,
+      }));
+      setFormData({ ...initialData.formData, receipt_tax_values: taxWithManual });
+    }
     if (initialData.tags)            setTags(initialData.tags);
     if (initialData.uploadedMediaUrls) setUploadedMediaUrls(initialData.uploadedMediaUrls);
     if (initialData.uploadedImageUrl)  setUploadedImageUrl(initialData.uploadedImageUrl);
@@ -798,6 +807,62 @@ const [localMerchants, setLocalMerchants] = useState([]);
     return urls;
   }, [repairReceiptMediaOnServer]);
 
+  // Match mobile: persist a chosen merchant logo on Categorizr storage so it shows
+  // everywhere (server, mobile, web) indefinitely. External image-search URLs expire,
+  // and many full-size source URLs (logo.wine, fbsbx, yorkdale…) aren't fetchable via
+  // the proxy, while the gstatic thumbnail reliably is. So try each candidate URL in
+  // order (full URL first for quality, thumbnail as the reliable fallback) and upload
+  // the first that yields a real image. Falls back to the original URL if none upload.
+  const materializeMerchantLogo = useCallback(
+    async (...candidateUrls) => {
+      const candidates = candidateUrls
+        .map((u) => (u || "").toString().trim())
+        .filter(Boolean);
+      const firstUrl = candidates[0] || "";
+      if (!firstUrl) return "";
+      // If any candidate is already Categorizr-hosted, keep it as-is.
+      const hosted = candidates.find((u) =>
+        /categorizr-images-production|storage\.googleapis\.com/i.test(u),
+      );
+      if (hosted) return hosted;
+
+      const fetchImageBlob = async (u) => {
+        try {
+          const proxied = u.includes("/api/imageproxy?url=")
+            ? u
+            : `/api/imageproxy?url=${encodeURIComponent(u)}`;
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 12000);
+          const resp = await fetch(proxied, { signal: ctrl.signal });
+          clearTimeout(timer);
+          if (!resp.ok) return null;
+          const blob = await resp.blob();
+          if (!blob || blob.size === 0 || !/^image\//i.test(blob.type || "")) return null;
+          return blob;
+        } catch {
+          return null;
+        }
+      };
+
+      for (const u of candidates) {
+        const blob = await fetchImageBlob(u);
+        if (!blob) continue;
+        try {
+          const ext = ((blob.type.split("/")[1] || "png").split("+")[0]);
+          const file = new File([blob], `merchant-logo-${Date.now()}.${ext}`, {
+            type: blob.type,
+          });
+          const uploaded = await uploadFilesToMedia([file]);
+          if (Array.isArray(uploaded) && uploaded[0]) return uploaded[0];
+        } catch {
+          /* try next candidate */
+        }
+      }
+      return firstUrl;
+    },
+    [uploadFilesToMedia],
+  );
+
   const collectAddReceiptMediaUrlsForSave = useCallback(() => {
     const urls = [];
     const pushUnique = (candidate) => {
@@ -1094,19 +1159,66 @@ const [localMerchants, setLocalMerchants] = useState([]);
     return subtotal > 0 ? subtotal.toFixed(2) : "0.00";
   };
 
+  // Subtotal when some taxes are manually locked.
+  // Formula: (total - tip - sum(manual amounts)) / (1 + sum(non-manual rates)/100)
+  const calculateSubtotalWithManualOverrides = (total, taxValues, tip) => {
+    const totalNum = parseFloat(total) || 0;
+    const tipNum = parseFloat(tip) || 0;
+    const manualSum = (taxValues || []).reduce(
+      (sum, t) => (t._isManual ? sum + (parseFloat(t.tax_amount) || 0) : sum),
+      0,
+    );
+    const nonManualRateSum = (taxValues || []).reduce((sum, t) => {
+      if (t._isManual) return sum;
+      return sum + (parseFloat(t.tax_rate) || 0) / 100;
+    }, 0);
+    const denominator = 1 + nonManualRateSum;
+    const subtotal = denominator > 0 ? (totalNum - tipNum - manualSum) / denominator : 0;
+    // Allow a negative subtotal (shown in red) when the tip/manual taxes exceed the
+    // total — e.g. after removing the total while a tip is present.
+    const s = subtotal.toFixed(2);
+    return s === "-0.00" ? "0.00" : s;
+  };
+
+  // Recalculate only non-manual tax lines; manual lines are returned unchanged.
+  const applyTaxRecalc = (taxValues, subtotal) => {
+    const subtotalNum = parseFloat(subtotal) || 0;
+    const userId = parseInt(localStorage.getItem("fk_user_id")) || 0;
+    return (taxValues || []).map((t) => {
+      const base = { ...t, id: t.id || 0, fk_user_id: t.fk_user_id || userId, fk_tax_id: t.fk_tax_id || 0, created: t.created || 0, updated: t.updated || 0 };
+      if (t._isManual) return base;
+      const rate = parseFloat(t.tax_rate) || 0;
+      // Allow a negative amount when the subtotal is negative (tip exceeds total).
+      const calculatedAmount =
+        rate > 0 ? ((subtotalNum * rate) / 100).toFixed(2) : "0.00";
+      return { ...base, tax_amount: calculatedAmount };
+    });
+  };
+
   const sanitizeMoneyInput = (raw) => {
     if (raw === null || raw === undefined) return "";
-    const cleaned = String(raw).replace(/[^0-9.]/g, "");
+    const str = String(raw);
+    // Preserve a leading minus so the +/- sign toggle can produce negative amounts.
+    const isNeg = str.trim().startsWith("-");
+    const cleaned = str.replace(/[^0-9.]/g, "");
     if (!cleaned) return "";
     const [intPartRaw = "", decRaw = ""] = cleaned.split(".");
     const intPart = intPartRaw.replace(/^0+(?=\d)/, "") || (intPartRaw ? "0" : "");
     const decPart = (decRaw || "").slice(0, 2);
-    return cleaned.includes(".") ? `${intPart || "0"}.${decPart}` : intPart;
+    const body = cleaned.includes(".") ? `${intPart || "0"}.${decPart}` : intPart;
+    return isNeg && parseFloat(body) !== 0 ? `-${body}` : body;
   };
   /** Block non-numeric keys from monetary inputs at the keyboard level. */
   const preventInvalidMoneyKey = (e) => {
     if (e.ctrlKey || e.metaKey) return; // allow Ctrl+C, Ctrl+V, Ctrl+A, etc.
-    const allowed = ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab", "Enter", "Home", "End"];
+    // Enter/Return commits the field just like tapping out with the mouse (blur):
+    // it triggers onBlur, which formats the value to two decimals.
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.currentTarget.blur();
+      return;
+    }
+    const allowed = ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab", "Home", "End"];
     if (allowed.includes(e.key)) return;
     if (/^\d$/.test(e.key)) return; // digits 0-9
     if (e.key === ".") return;       // decimal point
@@ -1124,6 +1236,13 @@ const [localMerchants, setLocalMerchants] = useState([]);
     const t = setTimeout(() => setError(null), 3500);
     return () => clearTimeout(t);
   }, [error]);
+
+  // Auto-dismiss split/duplicate prerequisite banner after 3.5 s
+  useEffect(() => {
+    if (!actionPrereqError) return;
+    const t = setTimeout(() => setActionPrereqError(null), 3500);
+    return () => clearTimeout(t);
+  }, [actionPrereqError]);
 
   // ── Merchant-category intelligence ──────────────────────────────────────────
   // Scans existing receipts to find the most-recently-used expense category for
@@ -1164,6 +1283,12 @@ const handleFieldChange = (field, value) => {
   }
   // Clear error banner when user changes the merchant field
   if (field === "storeName" && error) setError(null);
+  if (
+    ["product_date", "storeName", "expense_type", "purchasePrice"].includes(field) &&
+    actionPrereqError
+  ) {
+    setActionPrereqError(null);
+  }
   setFormData((prev) => {
     const newData = { ...prev, [field]: value };
 
@@ -1177,13 +1302,13 @@ const handleFieldChange = (field, value) => {
       newData.paymentLogoUrl = "";
     }
 
-    // When subtotal changes, recalculate tax amounts based on rates and update total
+    // When subtotal changes, recalculate non-manual tax amounts and update total
     if (field === "subtotal") {
       const subtotal = parseFloat(value) || 0;
 
-      // Recalculate tax amounts based on subtotal and tax rates
       if (newData.receipt_tax_values.length > 0) {
         newData.receipt_tax_values = newData.receipt_tax_values.map((t) => {
+          if (t._isManual) return t;
           const rate = parseFloat(t.tax_rate) || 0;
           const calculatedAmount =
             subtotal > 0 && rate > 0
@@ -1201,72 +1326,37 @@ const handleFieldChange = (field, value) => {
       );
     }
 
-    // When total changes, recalculate subtotal and tax amounts
+    // When total changes, recompute via the combined model: all auto taxes share ONE
+    // subtotal derived from the combined rate; manual lines stay locked.
     if (field === "purchasePrice") {
       const totalNum = parseFloat(value) || 0;
       const tipNum = parseFloat(newData.tip) || 0;
-
-      // Calculate subtotal from total using tax rates (not amounts)
-      // This avoids circular dependency since tax amounts aren't set yet
-      const subtotalFromTotal = calculateSubtotalFromRates(
-        value,
-        newData.receipt_tax_values,
-        newData.tip,
-      );
-      const subtotalNum = parseFloat(subtotalFromTotal) || 0;
-      newData.subtotal = subtotalFromTotal;
-
-      // Recalculate tax amounts based on new subtotal so amounts update immediately
-      if (newData.receipt_tax_values.length > 0 && subtotalNum > 0) {
-        newData.receipt_tax_values = newData.receipt_tax_values.map((t) => {
-          const rate = parseFloat(t.tax_rate) || 0;
-          const calculatedAmount =
-            rate > 0 ? ((subtotalNum * rate) / 100).toFixed(2) : "0.00";
-          return { ...t, tax_amount: calculatedAmount };
-        });
-
-        // Verify: Total should equal Subtotal + Taxes + Tip
-        const recalculatedTotal = calculateTotal(
-          subtotalFromTotal,
-          newData.receipt_tax_values,
-          newData.tip,
-        );
-        console.log("=== Total Changed Calculation ===");
-        console.log("Input Total:", value);
-        console.log("Calculated Subtotal:", subtotalFromTotal);
-        console.log("Tax Values:", newData.receipt_tax_values);
-        console.log("Tip:", newData.tip);
-        console.log("Recalculated Total:", recalculatedTotal);
-      } else if (newData.receipt_tax_values.length === 0) {
-        // No taxes, so subtotal = total - tip
-        const subtotalNoTax = (totalNum - tipNum).toFixed(2);
-        newData.subtotal = subtotalNoTax;
-      }
-    }
-
-    // When tip changes, KEEP TOTAL FIXED and recalculate subtotal
-    if (field === "tip") {
-      const totalNum = parseFloat(newData.purchasePrice) || 0;
-      const tipNum = parseFloat(value) || 0;
-      
-      // Calculate subtotal from total using tax rates (including new tip)
-      const subtotalFromTotal = calculateSubtotalFromRates(
+      const subtotal = calculateSubtotalWithManualOverrides(
         totalNum,
         newData.receipt_tax_values,
         tipNum,
       );
-      const subtotalNum = parseFloat(subtotalFromTotal) || 0;
-      newData.subtotal = subtotalFromTotal;
+      newData.receipt_tax_values = applyTaxRecalc(
+        newData.receipt_tax_values,
+        subtotal,
+      );
+      newData.subtotal = subtotal;
+    }
 
-      // Recalculate tax amounts based on new subtotal
-      if (newData.receipt_tax_values.length > 0 && subtotalNum > 0) {
-        newData.receipt_tax_values = newData.receipt_tax_values.map((t) => {
-          const rate = parseFloat(t.tax_rate) || 0;
-          const calculatedAmount =
-            rate > 0 ? ((subtotalNum * rate) / 100).toFixed(2) : "0.00";
-          return { ...t, tax_amount: calculatedAmount };
-        });
-      }
+    // When tip changes, KEEP TOTAL FIXED and recompute the same combined way.
+    if (field === "tip") {
+      const totalNum = parseFloat(newData.purchasePrice) || 0;
+      const tipNum = parseFloat(value) || 0;
+      const subtotal = calculateSubtotalWithManualOverrides(
+        totalNum,
+        newData.receipt_tax_values,
+        tipNum,
+      );
+      newData.receipt_tax_values = applyTaxRecalc(
+        newData.receipt_tax_values,
+        subtotal,
+      );
+      newData.subtotal = subtotal;
 
       // Keep purchasePrice (total) unchanged
       newData.purchasePrice = prev.purchasePrice;
@@ -1330,59 +1420,44 @@ const handleFieldChange = (field, value) => {
         }
         return;
       }
-      // Use current total and tip to compute subtotal, then tax amounts
+      // Use current total and tip to compute the new line; existing lines stay frozen.
       const totalNum = parseFloat(formData.purchasePrice) || 0;
       const tipNum = parseFloat(formData.tip) || 0;
 
-      // IMPORTANT: When adding a tax from taxData, ensure fk_tax_id is set to the tax definition ID
-      // This links the receipt tax to the tax definition in the tax table
+      // Combined-tax model: all auto (non-manual) taxes share ONE subtotal derived from
+      // the COMBINED rate, so any set of taxes with the same total rate yields the same
+      // subtotal (5%+8% == 13%). subtotal = (total − tip − Σmanual) / (1 + Σauto rates);
+      // each auto tax = subtotal × rate. Manual lines stay locked.
+      const userId = parseInt(localStorage.getItem("fk_user_id")) || 0;
       const taxToAdd = {
         ...tax,
-        tax_amount: "0.00",
+        tax_amount: "0.00", // recomputed by applyTaxRecalc below
         // Set fk_tax_id to the tax definition ID (from taxData)
         fk_tax_id: tax.id && tax.id > 0 ? tax.id : tax.fk_tax_id || 0,
         // Ensure id is 0 for new receipt tax entries (will be set by backend)
         id: 0,
+        fk_user_id: tax.fk_user_id || userId,
+        created: tax.created || 0,
+        updated: tax.updated || 0,
+        // Auto (not manually overridden) — the "Auto" revert control keys off this.
+        _isManual: false,
       };
 
       // Sort alphabetically so tax fields always render in A→Z order
       const newTaxValues = [...formData.receipt_tax_values, taxToAdd]
         .sort((a, b) => (a.tax_name || "").localeCompare(b.tax_name || ""));
 
-      // Recompute subtotal from total using tax rates (not amounts)
-      const subtotalFromTotal = calculateSubtotalFromRates(
+      const subtotalFromTotal = calculateSubtotalWithManualOverrides(
         totalNum,
         newTaxValues,
         tipNum,
       );
-      const subtotalNum = parseFloat(subtotalFromTotal) || 0;
+      const recalculatedTaxes = applyTaxRecalc(newTaxValues, subtotalFromTotal);
 
-      // Recompute each tax amount based on new subtotal
-      // Ensure all required fields are present for saving
-      const recalculatedTaxes = newTaxValues.map((t) => {
-        const rate = parseFloat(t.tax_rate) || 0;
-        const calculatedAmount =
-          subtotalNum > 0 && rate > 0
-            ? ((subtotalNum * rate) / 100).toFixed(2)
-            : "0.00";
-        return {
-          ...t,
-          tax_amount: calculatedAmount,
-          // Ensure required fields exist (for saving to backend)
-          id: t.id || 0,
-          fk_user_id:
-            t.fk_user_id || parseInt(localStorage.getItem("fk_user_id")) || 0,
-          // IMPORTANT: Preserve fk_tax_id (tax definition ID) - don't override it
-          // t.id is the receipt_tax_value id (0 for new entries), not the tax definition id
-          fk_tax_id: t.fk_tax_id || 0,
-          created: t.created || 0,
-          updated: t.updated || 0,
-        };
-      });
-
-      console.log("Subtotal from total:", subtotalFromTotal);
-      console.log("Recalculated taxes:", recalculatedTaxes);
-
+      // Adding re-sorts lines alphabetically, so existing per-index display
+      // overrides may now map to a different row. Clear them so the freshly
+      // computed amounts render.
+      setCurrencyInputs((prev) => ({ ...prev, tax0: "", tax1: "" }));
       setFormData((prev) => ({
         ...prev,
         receipt_tax_values: recalculatedTaxes,
@@ -1390,8 +1465,6 @@ const handleFieldChange = (field, value) => {
         // Keep purchasePrice (total) unchanged
         purchasePrice: prev.purchasePrice,
       }));
-
-      console.log("Tax added successfully without changing total");
     } else {
       console.log("Tax already exists, skipping");
     }
@@ -1401,46 +1474,21 @@ const handleFieldChange = (field, value) => {
 
   // Remove tax type and keep total fixed; recalc subtotal and remaining taxes
   const removeTaxType = (index) => {
+    // Rows are re-indexed after removal, so any per-index display override would now
+    // point at the wrong line. Clear them and let the recomputed amounts render.
+    setCurrencyInputs((prev) => ({ ...prev, tax0: "", tax1: "" }));
     setFormData((prev) => {
-      const newTaxValues = prev.receipt_tax_values.filter(
-        (_, i) => i !== index,
-      );
-
+      const newTaxValues = prev.receipt_tax_values.filter((_, i) => i !== index);
       const totalNum = parseFloat(prev.purchasePrice) || 0;
       const tipNum = parseFloat(prev.tip) || 0;
-      const subtotalFromTotal = calculateSubtotalFromRates(
-        totalNum,
-        newTaxValues,
-        tipNum,
-      );
-      const subtotalNum = parseFloat(subtotalFromTotal) || 0;
-
-      const recalculatedTaxes = newTaxValues.map((t) => {
-        const rate = parseFloat(t.tax_rate) || 0;
-        const calculatedAmount =
-          subtotalNum > 0 && rate > 0
-            ? ((subtotalNum * rate) / 100).toFixed(2)
-            : "0.00";
-        return {
-          ...t,
-          tax_amount: calculatedAmount,
-          // Ensure required fields exist (for saving to backend)
-          id: t.id || 0,
-          fk_user_id:
-            t.fk_user_id || parseInt(localStorage.getItem("fk_user_id")) || 0,
-          // IMPORTANT: Preserve fk_tax_id (tax definition ID) - don't override it
-          // t.id is the receipt_tax_value id (0 for new entries), not the tax definition id
-          fk_tax_id: t.fk_tax_id || 0,
-          created: t.created || 0,
-          updated: t.updated || 0,
-        };
-      });
-
+      // Combined model: the remaining auto taxes re-share the subtotal; manual lines stay.
+      const subtotal = calculateSubtotalWithManualOverrides(totalNum, newTaxValues, tipNum);
+      const recalculatedTaxes = applyTaxRecalc(newTaxValues, subtotal);
       return {
         ...prev,
         receipt_tax_values: recalculatedTaxes,
-        subtotal: subtotalFromTotal,
-        purchasePrice: prev.purchasePrice, // keep total fixed
+        subtotal,
+        purchasePrice: prev.purchasePrice,
       };
     });
   };
@@ -1799,50 +1847,148 @@ const handleFieldChange = (field, value) => {
     setError(null);
   };
 
-  // Update tax amount and keep total fixed; recalc subtotal and taxes
+  // Editing ONE tax (typing an amount, or the +/- toggle) changes only that line and
+  // the subtotal. The TOTAL stays fixed and every OTHER tax line is left untouched.
   const updateTaxAmount = (index, amount) => {
     setFormData((prev) => {
+      // Only the edited line changes (marked manual); all other lines stay as-is.
       const newTaxValues = prev.receipt_tax_values.map((t, i) =>
-        i === index ? { ...t, tax_amount: amount } : t,
+        i === index ? { ...t, tax_amount: amount, _isManual: true } : t,
       );
-
-      const totalNum = parseFloat(prev.purchasePrice) || 0;
-      const tipNum = parseFloat(prev.tip) || 0;
-      const subtotalFromTotal = calculateSubtotalFromRates(
-        totalNum,
-        newTaxValues,
-        tipNum,
+      const total = parseFloat(prev.purchasePrice) || 0;
+      const tip = parseFloat(prev.tip) || 0;
+      // Subtotal absorbs the change so the other taxes never move.
+      const taxSum = newTaxValues.reduce(
+        (s, t) => s + (parseFloat(t.tax_amount) || 0),
+        0,
       );
-      const subtotalNum = parseFloat(subtotalFromTotal) || 0;
+      const subtotal = (total - taxSum - tip).toFixed(2);
+      return {
+        ...prev,
+        receipt_tax_values: newTaxValues,
+        subtotal,
+        purchasePrice: prev.purchasePrice,
+      };
+    });
+  };
 
-      const recalculatedTaxes = newTaxValues.map((t) => {
-        const rate = parseFloat(t.tax_rate) || 0;
-        const calculatedAmount =
-          subtotalNum > 0 && rate > 0
-            ? ((subtotalNum * rate) / 100).toFixed(2)
-            : "0.00";
-        return {
-          ...t,
-          tax_amount: calculatedAmount,
-          // Ensure required fields exist (for saving to backend)
-          id: t.id || 0,
-          fk_user_id:
-            t.fk_user_id || parseInt(localStorage.getItem("fk_user_id")) || 0,
-          // IMPORTANT: Preserve fk_tax_id (tax definition ID) - don't override it
-          // t.id is the receipt_tax_value id (0 for new entries), not the tax definition id
-          fk_tax_id: t.fk_tax_id || 0,
-          created: t.created || 0,
-          updated: t.updated || 0,
-        };
-      });
-
+  // Revert ONE tax line back to auto (formulaic). It rejoins the shared subtotal, so
+  // all auto taxes recompute from the combined rate; manual lines stay locked.
+  const resetTaxAmount = (index) => {
+    // Drop any frozen display strings so the reverted (auto) amounts show.
+    setCurrencyInputs((prev) => ({ ...prev, tax0: "", tax1: "" }));
+    setFormData((prev) => {
+      const total = parseFloat(prev.purchasePrice) || 0;
+      const tip = parseFloat(prev.tip) || 0;
+      const newTaxValues = prev.receipt_tax_values.map((t, i) =>
+        i === index ? { ...t, _isManual: false } : t,
+      );
+      const subtotal = calculateSubtotalWithManualOverrides(total, newTaxValues, tip);
+      const recalculatedTaxes = applyTaxRecalc(newTaxValues, subtotal);
       return {
         ...prev,
         receipt_tax_values: recalculatedTaxes,
-        subtotal: subtotalFromTotal,
-        purchasePrice: prev.purchasePrice, // keep total fixed
+        subtotal,
+        purchasePrice: prev.purchasePrice,
       };
     });
+  };
+
+  // Save an OCR-detected tax type (new to the account) into the user's tax types.
+  // This is the "confirm before saving account-wide" step — the tax is already applied on
+  // the receipt; this button persists it so it's reusable and stops being flagged as new.
+  const [savingOcrTaxIdx, setSavingOcrTaxIdx] = useState(null);
+  const saveOcrTaxToAccount = async (index) => {
+    const tax = formData.receipt_tax_values?.[index];
+    if (!tax || !tax._ocrNew || savingOcrTaxIdx != null) return;
+    setSavingOcrTaxIdx(index);
+    try {
+      const fk_user_id = localStorage.getItem("fk_user_id") || "";
+      const saved = await addTax({
+        tax_name: tax.tax_name,
+        tax_rate: String(tax.tax_rate ?? "0"),
+        tax_number: "", // backend requires the field (empty is accepted)
+        fk_user_id,
+        is_default_tax: 0,
+      });
+      const newId = saved?.id ?? saved?.data?.id ?? saved?.tax?.id ?? 0;
+      // The API returns HTTP 200 even on a soft failure (e.g. {code:"002"} with no id).
+      // Only clear the "new" flag when a real tax record came back, so the user can retry.
+      if (!newId) {
+        console.warn("[OCR tax] not saved to account:", saved);
+        return;
+      }
+      setFormData((prev) => {
+        const arr = [...(prev.receipt_tax_values || [])];
+        if (arr[index]) {
+          arr[index] = {
+            ...arr[index],
+            _ocrNew: false,
+            fk_tax_id: newId,
+          };
+        }
+        return { ...prev, receipt_tax_values: arr };
+      });
+    } catch (e) {
+      console.error("Failed to save OCR-detected tax type", e);
+    } finally {
+      setSavingOcrTaxIdx(null);
+    }
+  };
+
+  // Small note under a tax line: "From receipt" for a scanner-detected tax type (with a
+  // "Save to my tax types" button when it's new to the account), or "Tax amount found on
+  // receipt" for the default-tax amount case.
+  const ocrTaxNote = (index) => {
+    const tax = formData.receipt_tax_values?.[index];
+    if (!tax) return null;
+    const isDetected = !!tax._ocrDetected;
+    const isFoundAmount = !isDetected && tax._ocrFound && tax._isManual;
+    if (!isDetected && !isFoundAmount) return null;
+    return (
+      <div className="mt-1 text-xs text-left flex items-center gap-2 flex-wrap">
+        <span className="text-blue-600">
+          {isDetected ? "From receipt" : "Tax amount found on receipt"}
+        </span>
+        {tax._ocrNew && (
+          <button
+            type="button"
+            onClick={() => saveOcrTaxToAccount(index)}
+            disabled={savingOcrTaxIdx === index}
+            className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors disabled:opacity-50"
+          >
+            <Plus size={11} />
+            {savingOcrTaxIdx === index ? "Saving…" : "Save to my tax types"}
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  // ── +/- sign toggle for currency fields (Total, Tip, Tax — not read-only Subtotal) ──
+  const toggleTotalSign = () => {
+    const cur = parseFloat(formData.purchasePrice) || 0;
+    if (cur === 0) return;
+    const neg = -cur;
+    setCurrencyInput("total", formatCurrencyDisplay(neg));
+    handleFieldChange("purchasePrice", neg.toString());
+  };
+  const toggleTipSign = () => {
+    const cur = parseFloat(formData.tip) || 0;
+    if (cur === 0) return;
+    const neg = -cur;
+    setCurrencyInput("tip", formatCurrencyDisplay(neg));
+    handleFieldChange("tip", neg.toString());
+  };
+  const toggleTaxSignAdd = (index, currentAmount) => {
+    const cur = parseFloat(currentAmount ?? 0) || 0;
+    if (cur === 0) return;
+    const neg = -cur;
+    // Clear any display override so the field tracks the underlying (now-signed)
+    // tax_amount. Keeping a frozen string here is what left stale "-$X" values on
+    // screen after the amount was later recomputed by add/remove/reset.
+    setCurrencyInput(index === 0 ? "tax0" : "tax1", "");
+    updateTaxAmount(index, neg.toString());
   };
 
   const handleUpload = async () => {
@@ -1961,7 +2107,20 @@ const handleFieldChange = (field, value) => {
         setDetectedMerchantLogo(parsedReceiptData.merchantLogo);
       }
 
-      const cleanPaymentType = parsedReceiptData?.paymentMethod || "";
+      // Payment method from OCR. Protocol: OCR only auto-fills a payment method — and
+      // therefore only ever auto-creates a "new" one — when BOTH a card type AND a
+      // 4-digit number are detected. The parser returns e.g. "MasterCard *7836" when it
+      // finds the last 4, or just "MasterCard" when it can't. A card type with no 4
+      // digits is dropped, because a new payment method can't exist without a 4-digit
+      // number (defaults are the only digit-less methods, and those aren't OCR-created).
+      const ocrPaymentMethod = parsedReceiptData?.paymentMethod || "";
+      const ocrLast4Match = ocrPaymentMethod.match(/\*(\d{3,4})\b/);
+      const ocrHasLast4 = !!(
+        ocrLast4Match &&
+        ocrLast4Match[1] &&
+        ocrLast4Match[1] !== "0000"
+      );
+      const cleanPaymentType = ocrHasLast4 ? ocrPaymentMethod : "";
 
       const cleanNumericValue = (value) => {
         if (!value) return "";
@@ -1974,25 +2133,113 @@ const handleFieldChange = (field, value) => {
       const ocrCategory = cleanTextValue(parsedReceiptData?.category || "");
       const autoCategory = ocrCategory || getMerchantDefaultCategory(merchantName);
 
+      // ── Default tax auto-population from OCR ────────────────────────────────
+      // Populate the user's default tax type(s) for the OCR total. If OCR also found
+      // a tax amount that matches what the default tax rate would calculate for that
+      // total, trust it and lock it in as a manual (confirmed) amount. Otherwise
+      // auto-calculate the tax by its rate and IGNORE the OCR tax amount — it's
+      // inconsistent with the tax type (e.g. GST 5% on a $113 total is $5.38, so an
+      // OCR-read $10.00 is discarded in favour of the rate calculation).
+      const ocrTotalNum =
+        parseFloat(parsedReceiptData?.total ?? parsedReceiptData?.subtotal) || 0;
+      const ocrTaxNum = parseFloat(parsedReceiptData?.taxAmount);
+      const baseTaxLines = defaultTaxIds
+        .map((id) => {
+          const taxType = taxData?.find((t) => t.id === id);
+          if (!taxType) return null;
+          return {
+            fk_tax_id: taxType.id,
+            tax_name: taxType.tax_name,
+            tax_rate: taxType.tax_rate,
+            tax_amount: "",
+            _isManual: false,
+          };
+        })
+        .filter(Boolean);
+      const ocrTaxSubtotal = calculateSubtotalWithManualOverrides(
+        ocrTotalNum,
+        baseTaxLines,
+        0,
+      );
+      const formulaicTaxes = applyTaxRecalc(baseTaxLines, ocrTaxSubtotal);
+      const formulaicCombined = formulaicTaxes.reduce(
+        (sum, t) => sum + (parseFloat(t.tax_amount) || 0),
+        0,
+      );
+      // Tax types the scanner read off the receipt (e.g. "HST 13% $1.03") take priority
+      // over the account default — they are the receipt's real taxes. Entries not already
+      // in the account are flagged (_ocrNew) so the UI can offer to save them.
+      const detectedTaxLines = resolveOcrDetectedTaxes(
+        parsedReceiptData?.detectedTaxes,
+        taxData,
+      );
+
+      // Behavior when the scan did NOT read named tax types (fall back to the default):
+      //  • No default tax type → never add the scanned tax (subtotal equals the total).
+      //  • Default tax set + scanned tax ≈ the rate calc → use the rate-calculated amount
+      //    (auto, no reload button — the scanned amount adds nothing new).
+      //  • Default tax set + scanned tax differs from the rate calc (single default tax)
+      //    → keep the scanned amount as a manual override so the reload button and the
+      //    "Tax amount found on receipt" hint appear; the subtotal recomputes as usual.
+      const hasOcrTax = !isNaN(ocrTaxNum) && ocrTaxNum > 0;
+      const ocrTaxMatchesDefault =
+        hasOcrTax &&
+        formulaicCombined > 0 &&
+        Math.abs(ocrTaxNum - formulaicCombined) <= 0.02;
+      let ocrTaxValues;
+      if (detectedTaxLines.length > 0) {
+        // The receipt's own named tax types win over the account default.
+        ocrTaxValues = detectedTaxLines;
+      } else if (baseTaxLines.length === 0) {
+        // No default tax type — the scanned tax amount is ignored entirely.
+        ocrTaxValues = [];
+      } else if (hasOcrTax && !ocrTaxMatchesDefault && formulaicTaxes.length === 1) {
+        // Scanned tax differs from the rate calc — trust the receipt amount as a manual
+        // value and flag it so the UI shows the reload button + found-on-receipt hint.
+        ocrTaxValues = [
+          {
+            ...formulaicTaxes[0],
+            tax_amount: ocrTaxNum.toFixed(2),
+            _isManual: true,
+            _ocrFound: true,
+          },
+        ];
+      } else {
+        // Scanned tax matches the rate calc, no scanned tax was found, or there are
+        // multiple default taxes (a single scanned amount can't be attributed) — use the
+        // rate-calculated amounts with no manual override.
+        ocrTaxValues = formulaicTaxes.map((t) => ({ ...t, _isManual: false }));
+      }
+      const ocrTaxSubtotalFinal =
+        ocrTaxValues.length > 0
+          ? calculateSubtotalWithManualOverrides(ocrTotalNum, ocrTaxValues, 0)
+          : cleanNumericValue(parsedReceiptData?.total || parsedReceiptData?.subtotal);
+
+      // If the OCR-detected payment method has a default expense type (Personal/
+      // Business), auto-select that type for the new receipt (matches mobile).
+      const ocrDefaultExpType = getPaymentDefaultExpenseType(
+        cleanPaymentType,
+        apiPaymentMethods
+      );
+      const ocrReceiptCategory = expenseTypeToReceiptCategory(ocrDefaultExpType);
+
       setFormData((prev) => ({
         ...prev,
         storeName: merchantName,
         expense_type: autoCategory,
+        ...(ocrReceiptCategory ? { receipt_category: ocrReceiptCategory } : {}),
         paymentType: cleanPaymentType,
         card_issuer_name: "",
-        last_4_digit_card: "",
+        // Populate the dedicated last4 field from the OCR-detected card so the
+        // payment dropdown's selected label and the Edit Payment Method modal show
+        // the 4 digits ("MasterCard *7836") instead of a bare brand ("MasterCard").
+        last_4_digit_card: ocrHasLast4 ? ocrLast4Match[1] : "",
         product_date: parsedDate,
-        subtotal: cleanNumericValue(parsedReceiptData?.subtotal),
+        subtotal: ocrTaxSubtotalFinal,
         purchasePrice: cleanNumericValue(parsedReceiptData?.total || parsedReceiptData?.subtotal),
         product_name: cleanTextValue(parsedReceiptData?.productName || ""),
         notes: "",
-        receipt_tax_values: defaultTaxIds.map(id => {
-          const taxType = taxData?.find(t => t.id === id);
-          if (taxType) {
-            return { fk_tax_id: taxType.id, tax_name: taxType.tax_name, tax_rate: taxType.tax_rate, tax_amount: "" };
-          }
-          return null;
-        }).filter(Boolean),
+        receipt_tax_values: ocrTaxValues,
         tip: cleanNumericValue(parsedReceiptData?.tip),
       }));
 
@@ -2165,14 +2412,10 @@ const handleFieldChange = (field, value) => {
         tags.warrantied ? "1" : "0",
       ].join(",");
 
-      // Build payload matching API model structure
-      // Validate date - ensure it's valid and not empty
-      let productDate = parseDateInputToUnix(formData.product_date);
-
-      // If date is still invalid, use today's local calendar date (not Date.now())
-      if (productDate === 0 || productDate < 1000000) {
-        productDate = todayLocalCalendarUnix();
-      }
+      // Build payload matching API model structure.
+      // A cleared date is saved as "No Date"; a valid date is kept; anything unparseable
+      // falls back to today. (See resolveAddReceiptProductDate.)
+      const productDate = resolveAddReceiptProductDate(formData.product_date);
 
       const purchasePrice = parseFloat(formData.purchasePrice) || 0;
       const tipAmount = parseFloat(formData.tip) || 0;
@@ -2664,6 +2907,47 @@ const handleFieldChange = (field, value) => {
         addExpenseCategory(formData.expense_type.trim());
       }
 
+      // Likewise ensure the receipt's payment method exists as a manageable API
+      // record right away so it shows in Settings and Filter immediately (not only
+      // after the next background refresh's backfill). Create only a genuinely new
+      // card with a valid 4-digit last4 that isn't already in the API.
+      if (last4 && /^\d{4}$/.test(last4) && !/cash/i.test(cardIssuerName || "")) {
+        const alreadyInApi = (apiPaymentMethods || []).some((m) => {
+          if (getLast4FromPaymentApiRecord(m) !== last4) return false;
+          const eIssuer = (m.card_issuer_name || "").trim().toLowerCase();
+          return eIssuer === (cardIssuerName || "").trim().toLowerCase();
+        });
+        if (!alreadyInApi) {
+          const brandFromIssuer = inferCardTypeFromPayment(cardIssuerName || "");
+          const resolvedBrand =
+            brandFromIssuer !== "Other"
+              ? brandFromIssuer
+              : inferCardTypeFromPayment(finalPaymentType || "") || "Other";
+          void addApiPaymentMethod(
+            { cardIssuerName, cardTypeBrand: resolvedBrand, last4 },
+            "",
+            formData.expense_type || ""
+          );
+        }
+      }
+
+      // Persist merchant logo to localStorage and the backend merchant record so
+      // the logo survives logout/login (not just the in-memory session).
+      if (storeImageToSave && formData.storeName?.trim()) {
+        const mName = formData.storeName.trim();
+        saveMerchLogo(mName, storeImageToSave);
+        const existingMerchant = (apiMerchants || []).find(
+          (m) => (m.store_name || "").toLowerCase() === mName.toLowerCase()
+        );
+        if (existingMerchant) {
+          if (!existingMerchant.store_image_url) {
+            updateApiMerchant(existingMerchant.id, existingMerchant.store_name, storeImageToSave).catch(() => {});
+          }
+        } else {
+          addApiMerchant(mName, storeImageToSave).catch(() => {});
+        }
+      }
+
       // Refresh data from backend to get the newly created/updated receipt with all fields
       // This ensures payment method logos and all other data are correctly loaded
       // The onReceiptAdded callback will trigger refreshData() in HomePage
@@ -2698,8 +2982,7 @@ const handleFieldChange = (field, value) => {
 
   /** Build a minimal receipt API payload from current form state */
   const buildQuickPayload = (overrideId = null) => {
-    let productDate = parseDateInputToUnix(formData.product_date);
-    if (!productDate) productDate = todayLocalCalendarUnix();
+    const productDate = resolveAddReceiptProductDate(formData.product_date);
 
     const receiptTag = [
       "0",
@@ -2791,7 +3074,8 @@ const handleFieldChange = (field, value) => {
   const handleDuplicateConfirm = async () => {
     const validationMsg = getDuplicateReceiptValidationMessage(formData);
     if (validationMsg) {
-      setAlertMsg(validationMsg);
+      setShowDuplicateConfirm(false);
+      setActionPrereqError(validationMsg);
       return;
     }
     setIsDuplicateSaving(true);
@@ -2830,7 +3114,7 @@ const handleFieldChange = (field, value) => {
         setUploadedReceiptData(prev => prev ? { ...prev, id: 0 } : null);
         setToast({
           isVisible: true,
-          message: "Your original receipt has been saved successfully. You are now viewing the duplicate receipt.",
+          message: "Your original receipt has been saved. You are now viewing your duplicate receipt.",
           type: "success",
         });
       }
@@ -2848,36 +3132,40 @@ const handleFieldChange = (field, value) => {
   const createSplit = (existingSplits = []) => {
     const mainTotal = parseFloat(formData.purchasePrice) || 0;
     const mainSubtotal = parseFloat(formData.subtotal) || mainTotal;
-    const mainTaxes = formData.receipt_tax_values || [];
+    const mainTip = parseFloat(formData.tip) || 0;
+    // Tip is tracked separately (formData.tip); never treat it as a tax line here.
+    const mainTaxes = filterNonTipReceiptTaxValues(formData.receipt_tax_values || []);
     const n = existingSplits.length + 1;
     const frac = mainSubtotal > 0 ? (1 / n) : 0;
     const splitSubtotal = parseFloat((mainSubtotal * frac).toFixed(2));
-    const splitTotal = parseFloat((mainTotal * frac).toFixed(2));
+    const splitTip = parseFloat((mainTip * frac).toFixed(2));
+    const splitTaxes = mainTaxes.map(t => ({
+      ...t,
+      tax_amount: parseFloat(((parseFloat(t.tax_rate) / 100) * splitSubtotal).toFixed(2)),
+    }));
+    const splitTaxSum = splitTaxes.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0);
+    // Total = Subtotal + Taxes + Tip (rebuilt from parts so it always reconciles).
+    const splitTotal = parseFloat((splitSubtotal + splitTaxSum + splitTip).toFixed(2));
     return {
       _id: Date.now() + Math.random(),
       receipt_category: formData.receipt_category || 0,
       expense_type: formData.expense_type || "",
       subtotal: splitSubtotal,
+      tip: splitTip,
       purchasePrice: splitTotal,
       product_name: "",
-      receipt_tax_values: mainTaxes.map(t => ({
-        ...t,
-        tax_amount: parseFloat(((parseFloat(t.tax_rate) / 100) * splitSubtotal).toFixed(2)),
-      })),
+      receipt_tax_values: splitTaxes,
     };
   };
 
   /** Open split screen - validates required fields first, starts empty (no auto-splits) */
   const handleOpenSplit = () => {
-    const missing = [];
-    if (!formData.storeName?.trim()) missing.push("Merchant Name");
-    if (!formData.paymentType?.trim() && !formData.card_issuer_name?.trim()) missing.push("Payment Method");
-    if (!formData.expense_type?.trim()) missing.push("Expense Category");
-    if (!parseFloat(formData.purchasePrice)) missing.push("Total Amount");
-    if (missing.length) {
-      setError(`Please fill in: ${missing.join(", ")} before splitting.`);
+    const msg = getSplitReceiptValidationMessage(formData);
+    if (msg) {
+      setActionPrereqError(msg);
       return;
     }
+    setActionPrereqError(null);
     setError(null);
     setSplits([]);           // user adds splits manually
     setSplitErrors({});
@@ -2896,7 +3184,7 @@ const handleFieldChange = (field, value) => {
    *
    *  Amounts are capped at the main receipt's values; an alert fires if exceeded. */
   const updateSplitField = (idx, field, value) => {
-    if (field === "subtotal" || field === "purchasePrice") {
+    if (field === "subtotal" || field === "purchasePrice" || field === "tip") {
       value = sanitizeMoneyInput(value);
     }
     if (field === "product_name") {
@@ -2904,6 +3192,7 @@ const handleFieldChange = (field, value) => {
     }
     const mainSubtotal = parseFloat(formData.subtotal) || parseFloat(formData.purchasePrice) || 0;
     const mainTotal    = parseFloat(formData.purchasePrice) || 0;
+    const mainTip      = parseFloat(formData.tip) || 0;
 
     // ── Max-amount guards ────────────────────────────────────────────────────
     if (field === "subtotal") {
@@ -2920,27 +3209,35 @@ const handleFieldChange = (field, value) => {
         return;
       }
     }
+    if (field === "tip") {
+      const tip = parseFloat(value) || 0;
+      if (mainTip > 0 && tip > mainTip) {
+        setAlertMsg(`Tip cannot exceed $${mainTip.toFixed(2)}`);
+        return;
+      }
+    }
 
     setSplits(prev => {
       const updated = [...prev];
       const split   = updated[idx];
 
       if (field === "purchasePrice") {
-        // ── Same as main form: total → subtotal → taxes ───────────────────
+        // ── Same as main form: total → subtotal → taxes (net of tip) ──────
+        // Subtotal is derived (read-only): subtotal = (total − tip) / (1 + Σrate/100)
         const totalNum = parseFloat(value) || 0;
+        const tipNum   = parseFloat(split.tip) || 0;
         if (totalNum > 0) {
-          // subtotal = total / (1 + Σ rate/100)
-          const rateSum    = (split.receipt_tax_values || []).reduce(
+          const rateSum = (split.receipt_tax_values || []).reduce(
             (s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0
           );
-          const sub = parseFloat((totalNum / (1 + rateSum)).toFixed(2));
+          const sub = parseFloat(((totalNum - tipNum) / (1 + rateSum)).toFixed(2));
           const taxes = (split.receipt_tax_values || []).map(t => ({
             ...t,
-            tax_amount: sub > 0
+            tax_amount: sub !== 0
               ? parseFloat(((parseFloat(t.tax_rate) / 100) * sub).toFixed(2))
               : "",
           }));
-          updated[idx] = { ...split, purchasePrice: value, subtotal: sub > 0 ? sub.toString() : "", receipt_tax_values: taxes };
+          updated[idx] = { ...split, purchasePrice: value, subtotal: sub !== 0 ? sub.toString() : "", receipt_tax_values: taxes };
         } else {
           // total cleared → clear subtotal and taxes too
           updated[idx] = {
@@ -2951,16 +3248,41 @@ const handleFieldChange = (field, value) => {
           };
         }
 
+      } else if (field === "tip") {
+        // ── Same as main form: changing tip KEEPS TOTAL FIXED and recomputes
+        //    subtotal + taxes from the shared base (total − tip). ───────────
+        const tipNum   = parseFloat(value) || 0;
+        const totalNum = parseFloat(split.purchasePrice) || 0;
+        const rateSum  = (split.receipt_tax_values || []).reduce(
+          (s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0
+        );
+        const sub = totalNum > 0
+          ? parseFloat(((totalNum - tipNum) / (1 + rateSum)).toFixed(2))
+          : 0;
+        const taxes = (split.receipt_tax_values || []).map(t => ({
+          ...t,
+          tax_amount: sub !== 0
+            ? parseFloat(((parseFloat(t.tax_rate) / 100) * sub).toFixed(2))
+            : "",
+        }));
+        updated[idx] = {
+          ...split,
+          tip: value,
+          subtotal: totalNum > 0 ? sub.toString() : "",
+          receipt_tax_values: taxes,
+        };
+
       } else if (field === "subtotal") {
-        // ── Same as main form: subtotal → taxes → total ───────────────────
+        // ── Same as main form: subtotal → taxes → total (adds tip) ────────
         const sub = parseFloat(value) || 0;
+        const tipNum = parseFloat(split.tip) || 0;
         const taxes = (split.receipt_tax_values || []).map(t => ({
           ...t,
           tax_amount: sub > 0
             ? parseFloat(((parseFloat(t.tax_rate) / 100) * sub).toFixed(2))
             : "",
         }));
-        const total = sub + taxes.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0);
+        const total = sub + taxes.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0) + tipNum;
         updated[idx] = {
           ...split,
           subtotal: value,
@@ -3043,8 +3365,7 @@ const handleFieldChange = (field, value) => {
     setError(null);
     try {
       const fkUserId = parseInt(localStorage.getItem("fk_user_id")) || 0;
-      let productDate = parseDateInputToUnix(formData.product_date);
-      if (!productDate) productDate = todayLocalCalendarUnix();
+      const productDate = resolveAddReceiptProductDate(formData.product_date);
       const receiptTag = ["0","0","0","0","0","0","0"].join(",");
       const { rawCount: splitMediaRawCount, combined: combinedImageUrls } =
         await resolveAddReceiptEmailAttachment();
@@ -3086,13 +3407,24 @@ const handleFieldChange = (field, value) => {
       // Save every user-defined split
       for (const split of splits) {
         const splitSubtotal = parseFloat(split.subtotal) || 0;
-        const taxValues = (split.receipt_tax_values || []).map(t => ({
+        const splitTip      = parseFloat(split.tip) || 0;
+        const taxValues = filterNonTipReceiptTaxValues(split.receipt_tax_values || []).map(t => ({
           id: 0, fk_user_id: fkUserId, fk_receipt_id: 0,
           fk_tax_id: parseInt(t.fk_tax_id) || 0,
           tax_name: t.tax_name || "", tax_rate: t.tax_rate || "0",
           tax_amount: (parseFloat(t.tax_amount) || 0).toString(),
           created: 0, updated: 0,
         }));
+        // Persist tip like the main receipt does — as a "Tip" tax line.
+        const splitTipLine = buildReceiptTipTaxEntry({
+          tipAmount: splitTip,
+          subtotal: splitSubtotal,
+          taxDefinitions: taxData,
+          existingTipLine: null,
+          fk_receipt_id: 0,
+          fk_user_id: fkUserId,
+        });
+        if (splitTipLine) taxValues.push(splitTipLine);
         const splitTotal = parseFloat(split.purchasePrice) ||
           parseFloat((splitSubtotal + taxValues.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0)).toFixed(2));
 
@@ -3116,10 +3448,16 @@ const handleFieldChange = (field, value) => {
       const remainder   = parseFloat((mainTotal - splitsTotal).toFixed(2));
 
       if (remainder > 0.009) {   // ignore sub-cent floating-point noise
-        // Back-calculate remainder subtotal using the main receipt's tax rates
-        const mainTaxRates = formData.receipt_tax_values || [];
+        // Leftover tip = main tip minus the tip already allocated across splits.
+        const mainTip       = parseFloat(formData.tip) || 0;
+        const splitsTipTotal = parseFloat(
+          splits.reduce((s, sp) => s + (parseFloat(sp.tip) || 0), 0).toFixed(2)
+        );
+        const remTip = parseFloat(Math.max(mainTip - splitsTipTotal, 0).toFixed(2));
+        // Back-calculate remainder subtotal (net of tip) using the main tax rates
+        const mainTaxRates = filterNonTipReceiptTaxValues(formData.receipt_tax_values || []);
         const rateSum      = mainTaxRates.reduce((s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0);
-        const remSubtotal  = parseFloat((remainder / (1 + rateSum)).toFixed(2));
+        const remSubtotal  = parseFloat(((remainder - remTip) / (1 + rateSum)).toFixed(2));
         const remTaxValues = mainTaxRates.map(t => ({
           id: 0, fk_user_id: fkUserId, fk_receipt_id: 0,
           fk_tax_id: parseInt(t.fk_tax_id) || 0,
@@ -3127,6 +3465,16 @@ const handleFieldChange = (field, value) => {
           tax_amount: parseFloat(((parseFloat(t.tax_rate) / 100) * remSubtotal).toFixed(2)).toString(),
           created: 0, updated: 0,
         }));
+        // Persist the leftover tip as a "Tip" tax line on the remainder receipt.
+        const remTipLine = buildReceiptTipTaxEntry({
+          tipAmount: remTip,
+          subtotal: remSubtotal,
+          taxDefinitions: taxData,
+          existingTipLine: null,
+          fk_receipt_id: 0,
+          fk_user_id: fkUserId,
+        });
+        if (remTipLine) remTaxValues.push(remTipLine);
 
         const remPayload = buildSplitPayload({
           total: remainder,
@@ -3134,7 +3482,8 @@ const handleFieldChange = (field, value) => {
           taxVals: remTaxValues,
           category: formData.receipt_category || 0,
           expenseType: formData.expense_type || "",
-          productName: "",
+          // Remainder is the leftover of the main receipt — keep its description.
+          productName: formData.product_name || "",
         });
         await postNewReceipt(remPayload);
         if (onReceiptAdded) onReceiptAdded(remPayload);
@@ -3199,8 +3548,14 @@ const handleFieldChange = (field, value) => {
     setEditMerchantError(null);
     const oldName = editingMerchant.name;
     const newName = editMerchantName.trim();
-    const newLogo = editMerchantLogo || editingMerchant.image || "";
+    const editOpt =
+      editSelectedLogoIndex !== null ? editLogoOptions[editSelectedLogoIndex] : null;
     try {
+      // Upload the chosen logo to Categorizr storage so it persists everywhere.
+      const newLogo = await materializeMerchantLogo(
+        editOpt?.storeUrl || editMerchantLogo || editingMerchant.image || "",
+        editOpt?.displayUrl || "",
+      );
       const affected = (receipts || []).filter(
         (r) => (r.storeName || r.store_name || "").toLowerCase() === oldName.toLowerCase()
       );
@@ -3611,14 +3966,19 @@ const handleSelectLogo = (index) => {
       return;
     }
 
-    // 3. Get selected logo (optional)
-    const selectedLogoUrl =
-      selectedLogoIndex !== null
-        ? logoOptions[selectedLogoIndex]?.storeUrl || ""
-        : newMerchantLogo || "";
+    // 3. Get selected logo (optional) and upload it to Categorizr storage so it
+    // persists everywhere (matches mobile), instead of saving an ephemeral URL.
+    const selectedOpt =
+      selectedLogoIndex !== null ? logoOptions[selectedLogoIndex] : null;
+    setIsSavingMerchant(true);
+    const selectedLogoUrl = await materializeMerchantLogo(
+      selectedOpt?.storeUrl || newMerchantLogo || "",
+      selectedOpt?.displayUrl || "",
+    );
 
     // 4. Persist to API (re-fetches list with server-assigned id)
     const addResult = await addApiMerchant(name, selectedLogoUrl);
+    setIsSavingMerchant(false);
     if (!addResult?.ok) {
       setError(addResult?.error || "Failed to add merchant");
       return;
@@ -3670,9 +4030,9 @@ const handleSelectLogo = (index) => {
     setNewPaymentCardType("");
     setNewCardIssuerName("");
     setNewLast4Digits("");
-    setNewPaymentCategoryType(
-      formData.receipt_category === "1" ? "Business" : "Personal",
-    );
+    // A new payment method starts with no default expense type ("Select Category Type"),
+    // not a pre-selected Business/Personal.
+    setNewPaymentCategoryType("");
     setShowAddPaymentModal(true);
     setShowPaymentDropdown(false);
   };
@@ -3692,34 +4052,6 @@ const handleSelectLogo = (index) => {
   // ── Payment method helpers (same logic as ReceiptDetail) ──────────────────
   const isCashPaymentMethod = (name) =>
     (name || "").toString().replace(/\s*\*\s*\d{3,4}\s*$/, "").trim().toLowerCase() === "cash";
-
-  const getReceiptsMatchingPaymentMethod = (methodName) => {
-    const { issuer: oldIssuer, last4: oldLast4 } = parsePaymentDisplay(methodName || "");
-    const targetKey = normalizePaymentMatchKey(methodName);
-    const exactByDisplay = (receipts || []).filter(
-      (r) => normalizePaymentMatchKey(getPaymentDisplayFromReceipt(r)) === targetKey
-    );
-    const exactIds = new Set(exactByDisplay.map((r) => r.id));
-    const additionalByFields = oldLast4
-      ? (receipts || []).filter((r) => {
-          if (exactIds.has(r.id)) return false;
-          const rLast4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
-          if (rLast4 !== oldLast4) return false;
-          const rIssuer = (r.card_issuer_name || r.cardIssuerName || "").toString().trim().toLowerCase();
-          const rTypeLower = (r.paymentType || r.payment_type || "")
-            .toString()
-            .replace(/\s*\*\d{3,4}$/, "")
-            .trim()
-            .toLowerCase();
-          const oldIssuerLower = (oldIssuer || "").toLowerCase();
-          return (
-            (oldIssuerLower && rIssuer === oldIssuerLower) ||
-            (oldIssuerLower && rTypeLower === oldIssuerLower)
-          );
-        })
-      : [];
-    return [...exactByDisplay, ...additionalByFields];
-  };
 
   const handleEditPaymentInDropdown = (method) => {
     if (isCashPaymentMethod(method)) return;
@@ -3741,7 +4073,12 @@ const handleSelectLogo = (index) => {
     setNewPaymentCategoryType(
       _pet[method] || paymentCategoryFromApiEnum(apiMatch?.default_payment_category) || ""
     );
-    setPayModalEditMode({ name: method, apiId });
+    // Capture the signature using the RESOLVED card type so the duplicate check can
+    // exclude the payment being edited. Inferring the brand from the display name
+    // fails for custom issuers (e.g. "Bnak 7 *7777" → "Other"), which made a payment
+    // flag itself as a duplicate (spurious red "Payment Method already exists").
+    const originalSig = getPaymentSignature(method, cardType, _pct);
+    setPayModalEditMode({ name: method, apiId, originalSig });
     setPayModalError(null);
     setShowAddPaymentModal(true);
     setShowPaymentDropdown(false);
@@ -3760,16 +4097,11 @@ const handleSelectLogo = (index) => {
     if (!method) return;
     setIsPayMethodSaving(true);
     try {
-      const matching = getReceiptsMatchingPaymentMethod(method);
+      const clearPayment = getClearPaymentMethodUpdates();
+      const matching = getReceiptsMatchingPaymentMethod(receipts || [], method);
       if (matching.length > 0) {
         await Promise.all(
-          matching.map((r) =>
-            updateReceipt(r.id, {
-              paymentType: "Cash",
-              card_issuer_name: "",
-              last_4_digit_card: "",
-            })
-          )
+          matching.map((r) => updateReceipt(r.id, clearPayment))
         );
       }
       const apiMatch = (apiPaymentMethods || []).find((p) =>
@@ -3780,11 +4112,8 @@ const handleSelectLogo = (index) => {
       hidePaymentMethod(method);
       deleteCustomPaymentMethod(method);
       await Promise.all([fetchApiPaymentMethods(), silentRefreshData(0)]);
-      const targetKey = normalizePaymentMatchKey(method);
-      if (normalizePaymentMatchKey(getPaymentDisplayFromReceipt(formData)) === targetKey) {
-        handleFieldChange("paymentType", "Cash");
-        handleFieldChange("card_issuer_name", "");
-        handleFieldChange("last_4_digit_card", "");
+      if (getReceiptsMatchingPaymentMethod([formData], method).length > 0) {
+        setFormData((prev) => ({ ...prev, ...getClearPaymentMethodUpdates() }));
       }
       setToast({ isVisible: true, message: "Payment Method Deleted", type: "success" });
     } catch (err) {
@@ -3962,11 +4291,13 @@ const handleSelectLogo = (index) => {
       // update to apiPaymentMethods. Fetching immediately can race with the server and overwrite
       // the new entry with a stale list, making the method invisible until next page load.
 
-      // For "Other" card type, store the full "Other *XXXX" string as paymentType so the dropdown
-      // can match it; for all other known brands, store just the brand name (standard data model).
-      const paymentTypeForForm = selectedCardTypeForLogo === "Other"
-        ? paymentMethodString
-        : (selectedCardTypeForLogo || paymentMethodString);
+      // Store the selected card brand as paymentType — INCLUDING "Other". Previously "Other"
+      // cards stored the issuer-based string (e.g. "jjj *3455"), which the logo resolver
+      // couldn't recognise as "Other", so it fell through to the bank/last4 fallback
+      // (LOGO_MAP.bank = the MasterCard icon). Storing "Other" gives the generic icon and
+      // matches what re-selecting the card produces. Issuer + last4 (stored separately)
+      // still drive the display label ("jjj *3455").
+      const paymentTypeForForm = selectedCardTypeForLogo || paymentMethodString;
       handleFieldChange("paymentType", paymentTypeForForm);
       handleFieldChange("card_issuer_name", storedIssuer);
       if (last4Final) handleFieldChange("last_4_digit_card", last4Final);
@@ -3994,31 +4325,53 @@ const handleSelectLogo = (index) => {
     );
   };
 
+  // Order dropdown options with the currently-selected one FIRST (injecting it if the
+  // derived list omits it — e.g. a forwarded/received receipt's value, whose checkmark
+  // would otherwise be missing), then the rest alphabetically. keyOf extracts the
+  // comparable string; injectFn builds the missing selected item.
+  const orderOptionsSelectedFirst = (list, selectedKey, keyOf, injectFn) => {
+    const selKey = (selectedKey || "").toString().trim().toLowerCase();
+    let sel = null;
+    const rest = [];
+    (list || []).forEach((item) => {
+      const k = (keyOf(item) || "").toString().trim().toLowerCase();
+      if (selKey && k === selKey && !sel) sel = item;
+      else rest.push(item);
+    });
+    rest.sort((a, b) =>
+      (keyOf(a) || "").toString().toLowerCase().localeCompare((keyOf(b) || "").toString().toLowerCase())
+    );
+    if (selKey && !sel && injectFn) sel = injectFn();
+    return sel ? [sel, ...rest] : rest;
+  };
+
   const filteredMerchants = (() => {
-    if (!isMerchantTyping && !formData.storeName) {
-      // Show all when dropdown opens and no value
-      return sortMerchantsAlpha(allMerchantsWithImages);
+    const searchTerm = (formData.storeName || "").toLowerCase().trim();
+    // Filter only while the user is actively typing a search.
+    if (isMerchantTyping && searchTerm) {
+      return sortMerchantsAlpha(
+        allMerchantsWithImages.filter((m) => m.name?.toLowerCase().includes(searchTerm)),
+      );
     }
-    if (!isMerchantTyping) {
-      // Show all when dropdown opens even if there's a value (from auto-detection)
-      return sortMerchantsAlpha(allMerchantsWithImages);
-    }
-    // Filter only when user is actively typing
-    const searchTerm = (formData.storeName || "").toLowerCase();
-    if (!searchTerm) {
-      return sortMerchantsAlpha(allMerchantsWithImages);
-    }
-    return sortMerchantsAlpha(allMerchantsWithImages.filter((m) =>
-      m.name?.toLowerCase().includes(searchTerm)
-    ));
+    // Opened (not searching) → selected merchant first, rest alphabetical.
+    const selected = (formData.storeName || "").toString().trim();
+    return orderOptionsSelectedFirst(
+      allMerchantsWithImages,
+      selected,
+      (m) => m?.name,
+      () => ({ name: selected, image: getMerchantImage(selected) || detectedMerchantLogo || "" }),
+    );
   })();
 
-  // Show all categories when not typing; filter only while user is actively typing
-  const filteredCategories = isCategoryTyping
-    ? allExpenseCategories.filter((c) =>
-        c.toLowerCase().includes((formData.expense_type || "").toLowerCase())
-      )
-    : allExpenseCategories;
+  // Selected category first; filter only while user is actively typing.
+  const filteredCategories = (() => {
+    const searchTerm = (formData.expense_type || "").toLowerCase().trim();
+    if (isCategoryTyping && searchTerm) {
+      return allExpenseCategories.filter((c) => c.toLowerCase().includes(searchTerm));
+    }
+    const selected = (formData.expense_type || "").toString().trim();
+    return orderOptionsSelectedFirst(allExpenseCategories, selected, (c) => c, () => selected);
+  })();
 
   // Payment card types are now defined in EditPaymentMethodModal (PAYMENT_CARD_TYPES)
 
@@ -4120,18 +4473,37 @@ const handleSelectLogo = (index) => {
     if (!draftSig) return "";
 
     const excludeApiId = payModalEditMode?.apiId;
-    const excludeSig = payModalEditMode?.name
-      ? getPaymentSignature(
-          payModalEditMode.name,
-          inferCardTypeFromPayment(payModalEditMode.name),
-          payCardMap
-        )
-      : "";
+    // Prefer the signature captured (from the resolved card type) when the edit opened;
+    // name-based inference fails for custom issuers and made a payment flag itself.
+    const excludeSig =
+      payModalEditMode?.originalSig ||
+      (payModalEditMode?.name
+        ? getPaymentSignature(
+            payModalEditMode.name,
+            inferCardTypeFromPayment(payModalEditMode.name),
+            payCardMap
+          )
+        : "");
+
+    // The card being edited may be stored as SEVERAL API records (e.g. the backend kept
+    // both "*5555" and "5555"). Derive the edited record's real signature so every copy of
+    // it is excluded — otherwise editing a card flags its own duplicate as "already exists".
+    const editedApiRecord =
+      excludeApiId != null
+        ? (apiPaymentMethods || []).find(
+            (p) => String(p.id ?? p.payment_method_id) === String(excludeApiId)
+          )
+        : null;
+    const editedSig =
+      (editedApiRecord && getApiPaymentMethodSignature(editedApiRecord)) ||
+      excludeSig ||
+      "";
 
     const duplicateInApi = (apiPaymentMethods || []).some((p) => {
       const pid = p.id ?? p.payment_method_id;
       if (excludeApiId != null && String(pid) === String(excludeApiId)) return false;
       const sig = getApiPaymentMethodSignature(p);
+      if (editedSig && sig === editedSig) return false; // another copy of the edited card
       return sig && sig === draftSig;
     });
     if (duplicateInApi) return "Payment Method already exists";
@@ -4144,7 +4516,7 @@ const handleSelectLogo = (index) => {
       const pmLast4 = (pm.last4DigitCard || "").toString().replace(/\D/g, "").slice(0, 4);
       if (!brand || pmLast4.length !== 4) return false;
       const sig = `${brand}|${pmLast4}`;
-      if (excludeSig && sig === excludeSig) return false;
+      if (editedSig && sig === editedSig) return false;
       return sig === draftSig;
     });
     if (duplicateInLocal) return "Payment Method already exists";
@@ -4159,7 +4531,7 @@ const handleSelectLogo = (index) => {
         .slice(-4);
       if (!brand || brand === "other" || rLast4.length !== 4) return false;
       const receiptSig = `${brand}|${rLast4}`;
-      if (excludeSig && receiptSig === excludeSig) return false;
+      if (editedSig && receiptSig === editedSig) return false;
       return receiptSig === draftSig;
     });
     if (duplicateInReceipts) return "Payment Method already exists";
@@ -4188,26 +4560,36 @@ const handleSelectLogo = (index) => {
       ...localPaymentMethodStrings,
     ];
     const deduplicated = deduplicatePaymentMethods(allMethodsCombined);
-
-    if (!isPaymentTyping && !formData.paymentType) {
-      // Show all when dropdown opens and no value
-      return deduplicated;
-    }
-    if (!isPaymentTyping) {
-      // Show all when dropdown opens even if there's a value (from auto-detection)
-      return deduplicated;
-    }
-    // Filter only when user is actively typing
     const searchTerm = (formData.paymentType || "").toLowerCase().trim();
-    if (!searchTerm) {
-      return deduplicated;
+
+    // Filter only while the user is actively typing a search.
+    if (isPaymentTyping && searchTerm) {
+      const matches = deduplicated.filter((p) => {
+        const pLower =
+          typeof p === "string" ? p.toLowerCase() : String(p).toLowerCase();
+        return pLower.includes(searchTerm) || searchTerm.includes(pLower);
+      });
+      return matches.length > 0 ? matches : deduplicated;
     }
-    const matches = deduplicated.filter((p) => {
-      const pLower =
-        typeof p === "string" ? p.toLowerCase() : String(p).toLowerCase();
-      return pLower.includes(searchTerm) || searchTerm.includes(pLower);
-    });
-    return matches.length > 0 ? matches : deduplicated;
+
+    // Opened (not searching) → selected payment first (injected if missing), rest alphabetical.
+    // Fall back to the last4 embedded in paymentType (e.g. "MasterCard *7836") so the
+    // selected label keeps its 4 digits even when last_4_digit_card isn't set yet.
+    const rawSelLast4 = (formData.last_4_digit_card || "").toString().replace(/\D/g, "");
+    const typeSelLast4 = ((formData.paymentType || "").toString().match(/\*(\d{3,4})\b/) || [])[1] || "";
+    const selLast4 = (rawSelLast4 || typeSelLast4).slice(-4);
+    const selIssuer = (formData.card_issuer_name || formData.paymentType || "")
+      .toString()
+      .replace(/\s*\*\d+/g, "")
+      .trim();
+    const selPay = selIssuer ? (selLast4 ? `${selIssuer} *${selLast4}` : selIssuer) : "";
+    const keyOf = (m) => (typeof m === "string" ? m : m?.paymentType || String(m));
+    return orderOptionsSelectedFirst(
+      deduplicated,
+      selPay,
+      keyOf,
+      selPay ? () => selPay : null,
+    );
   })();
 
   // Get image preview URL
@@ -4410,7 +4792,7 @@ const handleSelectLogo = (index) => {
                                 setShowOptionsMenu(false);
                                 const validationMsg = getDuplicateReceiptValidationMessage(formData);
                                 if (validationMsg) {
-                                  setAlertMsg(validationMsg);
+                                  setActionPrereqError(validationMsg);
                                   return;
                                 }
                                 setShowDuplicateConfirm(true);
@@ -4433,6 +4815,20 @@ const handleSelectLogo = (index) => {
                   )}
                 </div>
               </div>
+
+              {/* Split / duplicate prerequisite error banner */}
+              {actionPrereqError && (
+                <div className="flex items-center gap-2 bg-red-50 border-b border-red-300 px-4 py-2.5">
+                  <span className="text-red-700 text-sm font-medium flex-1">{actionPrereqError}</span>
+                  <button
+                    type="button"
+                    onClick={() => setActionPrereqError(null)}
+                    className="text-red-400 hover:text-red-600 text-lg leading-none flex-shrink-0"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
 
               {/* Top Error Banner */}
               {error && (
@@ -4487,6 +4883,8 @@ const handleSelectLogo = (index) => {
                         const split = splits[activeSplitIndex];
                         const mainSubtotal = parseFloat(formData.subtotal) || parseFloat(formData.purchasePrice) || 0;
                         const mainTotal    = parseFloat(formData.purchasePrice) || 0;
+                        const mainTip      = parseFloat(formData.tip) || 0;
+                        const hasTip       = mainTip > 0;
                         const fieldErr     = splitErrors[split._id] || {};
                         const hasAmountErr = !!fieldErr.amount;
                         return (
@@ -4523,30 +4921,24 @@ const handleSelectLogo = (index) => {
                               </select>
                             </div>
 
-                            {/* Subtotal */}
+                            {/* Subtotal (read-only, derived from Total − Tip) */}
                             <div>
                               <div className="flex items-center justify-between mb-1">
-                                <label className={`text-xs font-bold uppercase tracking-wide ${hasAmountErr ? "text-red-500" : "text-gray-500"}`}>
-                                  Subtotal *
+                                <label className="text-xs font-bold uppercase tracking-wide text-gray-500">
+                                  Subtotal
                                 </label>
                                 <span className="text-xs text-gray-400">Max: ${mainSubtotal.toFixed(2)}</span>
                               </div>
                               <div className="relative">
                                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
                                 <input
-                                  type="number"
-                                  className={`w-full text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800 border ${hasAmountErr ? "border-red-400 ring-1 ring-red-300" : "border-blue-400"}`}
-                                  value={split.subtotal ?? ""}
-                                  onChange={(e) => updateSplitField(activeSplitIndex, "subtotal", e.target.value)}
+                                  type="text"
+                                  readOnly
+                                  className={`w-full text-sm pl-6 pr-2 py-2 rounded-md bg-gray-50 border border-gray-200 cursor-not-allowed ${parseFloat(split.subtotal) < 0 ? "text-red-600 font-medium" : "text-gray-700"}`}
+                                  value={split.subtotal !== "" && split.subtotal != null ? parseFloat(split.subtotal).toFixed(2) : ""}
                                   placeholder="0.00"
-                                  min="0"
-                                  max={mainSubtotal}
-                                  step="0.01"
                                 />
                               </div>
-                              {hasAmountErr && (
-                                <p className="mt-1 text-xs text-red-500">{fieldErr.amount}</p>
-                              )}
                             </div>
 
                             {/* Tax fields */}
@@ -4583,6 +4975,33 @@ const handleSelectLogo = (index) => {
                                 </div>
                               );
                             })}
+
+                            {/* Tip — only when the original receipt has a tip */}
+                            {hasTip && (
+                              <div>
+                                <div className="flex items-center justify-between mb-1">
+                                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">
+                                    Tip{split.subtotal && parseFloat(split.subtotal) > 0
+                                      ? ` (${Math.round((parseFloat(split.tip || 0) / parseFloat(split.subtotal)) * 100)}%)`
+                                      : ""}
+                                  </label>
+                                  <span className="text-xs text-gray-400">Max: ${mainTip.toFixed(2)}</span>
+                                </div>
+                                <div className="relative">
+                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
+                                  <input
+                                    type="number"
+                                    className="w-full border border-blue-400 text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800"
+                                    value={split.tip ?? ""}
+                                    onChange={(e) => updateSplitField(activeSplitIndex, "tip", e.target.value)}
+                                    placeholder="0.00"
+                                    min="0"
+                                    max={mainTip}
+                                    step="0.01"
+                                  />
+                                </div>
+                              </div>
+                            )}
 
                             {/* Total */}
                             <div>
@@ -4641,12 +5060,18 @@ const handleSelectLogo = (index) => {
                               <span>${parseFloat(formData.subtotal).toFixed(2)}</span>
                             </div>
                           )}
-                          {(formData.receipt_tax_values || []).map((t, i) => (
+                          {filterNonTipReceiptTaxValues(formData.receipt_tax_values || []).map((t, i) => (
                             <div key={i} className="flex items-center justify-between text-xs text-gray-500">
                               <span>{t.tax_name} ({t.tax_rate}%)</span>
                               <span>${parseFloat(t.tax_amount || 0).toFixed(2)}</span>
                             </div>
                           ))}
+                          {parseFloat(formData.tip) > 0 && (
+                            <div className="flex items-center justify-between text-xs text-gray-500">
+                              <span>Tip</span>
+                              <span>${parseFloat(formData.tip).toFixed(2)}</span>
+                            </div>
+                          )}
                         </div>
 
                         {/* Splits list — or empty state */}
@@ -4694,12 +5119,18 @@ const handleSelectLogo = (index) => {
                                         <span>${parseFloat(split.subtotal).toFixed(2)}</span>
                                       </div>
                                     )}
-                                    {(split.receipt_tax_values || []).filter(t => parseFloat(t.tax_amount) > 0).map((t, ti) => (
+                                    {filterNonTipReceiptTaxValues(split.receipt_tax_values || []).filter(t => parseFloat(t.tax_amount) > 0).map((t, ti) => (
                                       <div key={ti} className="flex items-center justify-between text-xs text-gray-500">
                                         <span>{t.tax_name}</span>
                                         <span>${parseFloat(t.tax_amount).toFixed(2)}</span>
                                       </div>
                                     ))}
+                                    {parseFloat(split.tip) > 0 && (
+                                      <div className="flex items-center justify-between text-xs text-gray-500">
+                                        <span>Tip</span>
+                                        <span>${parseFloat(split.tip).toFixed(2)}</span>
+                                      </div>
+                                    )}
                                     {split.expense_type && (
                                       <p className="mt-1 text-xs text-gray-400">{split.expense_type}</p>
                                     )}
@@ -4916,7 +5347,18 @@ const handleSelectLogo = (index) => {
                   </div>
                 ) : (
                   /* Form Step - Same layout as ReceiptDetail */
-                  <form id="add-receipt-form" onSubmit={handleSaveReceipt}>
+                  <form
+                    id="add-receipt-form"
+                    onSubmit={handleSaveReceipt}
+                    onKeyDown={(e) => {
+                      // Enter/Return must never save the receipt. Allow it in textareas
+                      // (newlines); everywhere else block the implicit form submit. Money
+                      // fields still handle Enter themselves (blur → format).
+                      if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") {
+                        e.preventDefault();
+                      }
+                    }}
+                  >
                     {/* Duplicate mode banner */}
                     {isDuplicateMode && (
                       <div className="mx-3 sm:mx-6 mt-3 px-4 py-3 bg-blue-50 border border-blue-300 rounded-lg flex items-center gap-2 text-blue-700 text-sm font-medium">
@@ -5002,9 +5444,18 @@ const handleSelectLogo = (index) => {
           // Delay to allow click events on dropdown items
           setTimeout(() => {
             setIsMerchantTyping(false);
-            // Auto-fill expense category from merchant history if field is currently empty
             setFormData((prev) => {
-              if (prev.expense_type || !prev.storeName?.trim()) return prev;
+              // Removing/leaving the merchant empty defaults to "Miscellaneous" right
+              // away in the field (matches the Edit screen), not just on save.
+              if (!prev.storeName?.trim()) {
+                return {
+                  ...prev,
+                  storeName: "Miscellaneous",
+                  store_image: getMerchantImage("Miscellaneous") || "",
+                };
+              }
+              // Auto-fill expense category from merchant history if field is currently empty
+              if (prev.expense_type) return prev;
               const suggested = getMerchantDefaultCategory(prev.storeName);
               return suggested ? { ...prev, expense_type: suggested } : prev;
             });
@@ -5039,15 +5490,26 @@ const handleSelectLogo = (index) => {
               {filteredMerchants.length > 0 ? (
                 filteredMerchants.map((merchant, idx) => {
                   const isMisc = merchant.name.toLowerCase().trim() === "miscellaneous";
+                  const isSelected =
+                    !!merchant.name &&
+                    (formData.storeName || "").trim().toLowerCase() === merchant.name.trim().toLowerCase();
                   return (
                     <div
                       key={idx}
-                      className="group px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2"
+                      className={`group px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2 ${isSelected ? "bg-blue-50/70" : ""}`}
                     >
                       {/* Selectable area */}
                       <div
                         className="flex-1 flex items-center gap-2 cursor-pointer min-w-0"
                         onClick={() => {
+                          if (isSelected) {
+                            // Tapping the checked merchant unchecks it (clears the field).
+                            setDetectedMerchantLogo(null);
+                            setFormData((prev) => ({ ...prev, storeName: "" }));
+                            setIsMerchantTyping(false);
+                            setShowMerchantDropdown(false);
+                            return;
+                          }
                           if (merchant.name !== uploadedReceiptData?.storeName) {
                             setDetectedMerchantLogo(null);
                           }
@@ -5071,6 +5533,9 @@ const handleSelectLogo = (index) => {
                           className="w-5 h-5 mt-2 flex-shrink-0"
                         />
                         <span className="truncate">{merchant.name}</span>
+                        {isSelected && (
+                          <Check size={15} className="text-blue-600 flex-shrink-0" />
+                        )}
                       </div>
                       {/* Edit / Delete — hidden for Miscellaneous, visible on hover */}
                       {!isMisc && (
@@ -5148,19 +5613,27 @@ const handleSelectLogo = (index) => {
               <Plus size={16} className="text-blue-600" />
               <span className="font-medium text-blue-600">Add Expense Category</span>
             </div>
-            {filteredCategories.map((category, idx) => (
+            {filteredCategories.map((category, idx) => {
+              const isSelected =
+                !!category &&
+                (formData.expense_type || "").trim().toLowerCase() === category.trim().toLowerCase();
+              return (
               <div
                 key={idx}
-                className="px-3 py-2 hover:bg-blue-50 text-left flex items-center justify-between group"
+                className={`px-3 py-2 hover:bg-blue-50 text-left flex items-center justify-between group ${isSelected ? "bg-blue-50/70" : ""}`}
               >
                 <span
-                  className="flex-1 cursor-pointer text-sm"
+                  className="flex-1 cursor-pointer text-sm flex items-center gap-2"
                   onClick={() => {
-                    handleFieldChange("expense_type", category);
+                    // Tapping the checked category unchecks it (clears the field).
+                    handleFieldChange("expense_type", isSelected ? "" : category);
                     setShowCategoryDropdown(false);
                   }}
                 >
-                  {category}
+                  <span className="truncate">{category}</span>
+                  {isSelected && (
+                    <Check size={15} className="text-blue-600 flex-shrink-0" />
+                  )}
                 </span>
                 <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
                   <button
@@ -5181,7 +5654,8 @@ const handleSelectLogo = (index) => {
                   </button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
     </div>
@@ -5192,15 +5666,12 @@ const handleSelectLogo = (index) => {
     <label className="font-bold">Payment Method</label>
     <div className="relative w-full">
       {(() => {
-        // Use receipt object for logo detection
-        // IMPORTANT: paymentType should be the card type (e.g., "PayPal") for logo detection
-        // card_issuer_name is for display only (e.g., "Hello")
-        const receiptForLogo = {
-          paymentType: formData.paymentType, // Card type for logo (e.g., "PayPal", "Diners Club")
-          card_issuer_name: formData.card_issuer_name, // Custom name for display (e.g., "Hello")
+        const paymentFields = {
+          paymentType: formData.paymentType,
+          card_issuer_name: formData.card_issuer_name,
           last_4_digit_card: formData.last_4_digit_card,
         };
-        const logo = getPaymentLogo(receiptForLogo);
+        const logo = getPaymentInputLogo(paymentFields, getPaymentLogo);
         return logo ? (
           <img
             src={logo}
@@ -5214,19 +5685,7 @@ const handleSelectLogo = (index) => {
         ) : null;
       })()}
       <input
-        className={`${inputClass} ${
-          (() => {
-            const receiptForLogo = {
-              paymentType: formData.paymentType,
-              card_issuer_name: formData.card_issuer_name,
-              last_4_digit_card:
-                formData.last_4_digit_card,
-            };
-            return getPaymentLogo(receiptForLogo);
-          })()
-            ? "pl-8"
-            : ""
-        }`}
+        className={`${inputClass} pl-8`}
         value={(() => {
           const display = getPaymentDisplay({
             paymentType: formData.paymentType,
@@ -5414,13 +5873,31 @@ const handleSelectLogo = (index) => {
               );
 
               const isCashItem = isCashPaymentMethod(methodString);
+              const curLast4 = (formData.last_4_digit_card ?? "").toString().replace(/\D/g, "").slice(-4);
+              const curIssuer = (formData.card_issuer_name ?? "").toString().trim().toLowerCase();
+              const curType = (formData.paymentType ?? "").toString().replace(/\s*\*\d+/g, "").trim().toLowerCase();
+              const rowIssuer = (issuerName || "").trim().toLowerCase();
+              const isSelected =
+                (!!curType || !!curLast4) &&
+                (last4 ? curLast4 === last4 : true) &&
+                (rowIssuer ? curIssuer === rowIssuer || curType === rowIssuer : true);
               return (
                 <div
                   key={`payment-${methodString}-${idx}`}
-                  className="px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2"
+                  className={`px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2 ${isSelected ? "bg-blue-50/70" : ""}`}
                   style={{ cursor: "default" }}
                 >
                 <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }} onClick={() => {
+                    if (isSelected) {
+                      // Tapping the checked payment method unchecks it (clears the field).
+                      handleFieldChange("paymentType", "");
+                      handleFieldChange("card_issuer_name", "");
+                      handleFieldChange("last_4_digit_card", "");
+                      handleFieldChange("paymentBrand", "");
+                      setIsPaymentTyping(false);
+                      setShowPaymentDropdown(false);
+                      return;
+                    }
                     // Use the already extracted issuerName and last4 (they handle both localPaymentMethods and method strings correctly)
                     const cardIssuerName = issuerName;
                     const finalLast4 = last4;
@@ -5448,13 +5925,16 @@ const handleSelectLogo = (index) => {
                       const baseName = cardIssuerName.toLowerCase();
                       let cardType = cardIssuerName; // Default
 
-                      // 1. API card_type is authoritative (e.g. card_type=5 → "Diners Club")
+                      // 1. API card_type is authoritative (e.g. card_type=5 → "Diners Club",
+                      //    card_type=8 → "Other"). Trust it INCLUDING "Other" so a card the
+                      //    user saved as "Other" keeps the generic logo and isn't overridden
+                      //    by a matching receipt's stale scanned brand (e.g. "MasterCard").
                       const _apiRecForClick = (apiPaymentMethods || []).find(
                         (p) => apiPaymentMethodMatchesLabel(p, methodString)
                       );
                       const _brandFromApi = _apiRecForClick ? cardTypeIntToBrand(_apiRecForClick.card_type) : null;
 
-                      if (_brandFromApi && _brandFromApi !== "Other") {
+                      if (_brandFromApi) {
                         cardType = _brandFromApi;
                       } else if (baseName.includes("visa")) {
                         cardType = "Visa";
@@ -5529,14 +6009,15 @@ const handleSelectLogo = (index) => {
                       );
                     }
 
-                    // Auto-apply Personal/Business preference saved in Settings
-                    const _petMap = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
-                    const _storedExpType = _petMap[methodString] || _petMap[displayText];
-                    if (_storedExpType === "Business") {
-                      handleFieldChange("receipt_category", "1");
-                    } else if (_storedExpType === "Personal") {
-                      handleFieldChange("receipt_category", "0");
-                    }
+                    // Auto-apply the payment method's default expense type
+                    // (Personal/Business). Checks the Settings local override AND the API
+                    // record's default_payment_category (e.g. a default set on mobile), so
+                    // selecting a payment sets the Expense Type — matching Edit Receipt.
+                    const _defExpType =
+                      getPaymentDefaultExpenseType(methodString, apiPaymentMethods) ||
+                      getPaymentDefaultExpenseType(displayText, apiPaymentMethods);
+                    const _rc = expenseTypeToReceiptCategory(_defExpType);
+                    if (_rc) handleFieldChange("receipt_category", _rc);
 
                     setIsPaymentTyping(false);
                     setShowPaymentDropdown(false);
@@ -5587,7 +6068,10 @@ const handleSelectLogo = (index) => {
                       />
                     ) : null;
                   })()}
-                  <span style={{ flex: 1 }}>{displayText}</span>
+                  <span className="truncate" style={{ minWidth: 0 }}>{displayText}</span>
+                  {isSelected && (
+                    <Check size={15} className="text-blue-600 flex-shrink-0" />
+                  )}
                 </div>
                 {/* Edit / Delete icons — not shown for Cash */}
                 {!isCashItem && (
@@ -5652,6 +6136,25 @@ const handleSelectLogo = (index) => {
                             <div className="flex items-center gap-2">
                               <button
                                 type="button"
+                                onClick={() => toggleTaxSignAdd(0, formData.receipt_tax_values[0]?.tax_amount)}
+                                title="Toggle + / − sign"
+                                className="text-xs font-bold text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                              >
+                                +/−
+                              </button>
+                              {formData.receipt_tax_values[0]?._isManual && (
+                                <button
+                                  type="button"
+                                  onClick={() => resetTaxAmount(0)}
+                                  className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                                  title="Revert to auto-calculated amount"
+                                >
+                                  <RotateCcw size={11} />
+                                  Auto
+                                </button>
+                              )}
+                              <button
+                                type="button"
                                 onClick={() => removeTaxType(0)}
                                 className="text-red-600 hover:text-red-800 p-1"
                                 title="Remove tax type"
@@ -5687,6 +6190,7 @@ const handleSelectLogo = (index) => {
                               placeholder="$0.00"
                             />
                           </div>
+                          {ocrTaxNote(0)}
                         </div>
                         ) : null}
                             {showTaxDropdown === 1 && (
@@ -5749,6 +6253,25 @@ const handleSelectLogo = (index) => {
                             <div className="flex items-center gap-2">
                               <button
                                 type="button"
+                                onClick={() => toggleTaxSignAdd(1, formData.receipt_tax_values[1]?.tax_amount)}
+                                title="Toggle + / − sign"
+                                className="text-xs font-bold text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                              >
+                                +/−
+                              </button>
+                              {formData.receipt_tax_values[1]?._isManual && (
+                                <button
+                                  type="button"
+                                  onClick={() => resetTaxAmount(1)}
+                                  className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                                  title="Revert to auto-calculated amount"
+                                >
+                                  <RotateCcw size={11} />
+                                  Auto
+                                </button>
+                              )}
+                              <button
+                                type="button"
                                 onClick={() => removeTaxType(1)}
                                 className="text-red-600 hover:text-red-800 p-1"
                                 title="Remove tax type"
@@ -5784,6 +6307,7 @@ const handleSelectLogo = (index) => {
                               placeholder="$0.00"
                             />
                           </div>
+                          {ocrTaxNote(1)}
                         </div>
                         ) : null}
                             {showTaxDropdown === 2 && (
@@ -5856,6 +6380,14 @@ const handleSelectLogo = (index) => {
                               <div className="flex items-center gap-2">
                                 <button
                                   type="button"
+                                  onClick={toggleTipSign}
+                                  title="Toggle + / − sign"
+                                  className="text-xs font-bold text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                                >
+                                  +/−
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => {
                                     handleFieldChange("tip", "");
                                     setCurrencyInput("tip", "");
@@ -5871,7 +6403,8 @@ const handleSelectLogo = (index) => {
                               id="add-receipt-tip-input"
                               type="text"
                               inputMode="decimal"
-                              className={inputClass}
+                              autoComplete="off"
+                              className={`${inputClass} ${parseFloat(formData.tip) < 0 ? "text-red-600 font-medium" : ""}`}
                               value={
                                 currencyInputs.tip ||
                                 formatCurrencyDisplay(formData.tip)
@@ -5883,12 +6416,20 @@ const handleSelectLogo = (index) => {
                               onKeyDown={preventInvalidMoneyKey}
                               onChange={(e) => {
                                 const normalized = normalizeCurrencyInput(e.target.value);
+                                const num = parseCurrencyToNumber(normalized);
+                                // A tip MAY exceed the total (matches iOS). The taxes and
+                                // subtotal simply go negative via the shared base
+                                // (total − tip) — no cap, no warning.
+                                // Emptying the field keeps the tip at 0 (line stays visible);
+                                // only the trash icon removes the tip line.
                                 setCurrencyInput("tip", normalized);
-                                handleFieldChange("tip", parseCurrencyToNumber(normalized));
+                                handleFieldChange("tip", num === "" ? "0" : num);
                               }}
                               onBlur={() => {
                                 const num = parseFloat(formData.tip);
-                                handleFieldChange("tip", isNaN(num) ? "" : num.toFixed(2));
+                                // Cleared tip → "0.00" (stays as $0.00), never "" (which would
+                                // remove the line). Removal is only via the trash icon.
+                                handleFieldChange("tip", isNaN(num) ? "0.00" : num.toFixed(2));
                                 setCurrencyInput("tip", "");
                               }}
                               placeholder="$0.00"
@@ -5898,7 +6439,17 @@ const handleSelectLogo = (index) => {
 
                         {/* Total */}
                         <div className="mb-4 text-align-left">
-                          <label className="font-bold">TOTAL</label>
+                          <div className="flex items-center justify-between">
+                            <label className="font-bold">TOTAL</label>
+                            <button
+                              type="button"
+                              onClick={toggleTotalSign}
+                              title="Toggle + / − sign"
+                              className="text-xs font-bold text-blue-600 hover:text-blue-800 px-2 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                            >
+                              +/−
+                            </button>
+                          </div>
                           <input
                             type="text"
                             inputMode="decimal"
@@ -5914,8 +6465,21 @@ const handleSelectLogo = (index) => {
                             onKeyDown={preventInvalidMoneyKey}
                             onChange={(e) => {
                               const normalized = normalizeCurrencyInput(e.target.value);
-                              setCurrencyInput("total", normalized);
-                              handleFieldChange("purchasePrice", parseCurrencyToNumber(normalized));
+                              const num = parseCurrencyToNumber(normalized);
+                              // When the total is deleted, drop stale tax/tip overrides so those
+                              // inputs reflect the recalculated $0.00 instead of old amounts.
+                              if (num === "" || parseFloat(num) === 0) {
+                                setCurrencyInputs((prev) => ({
+                                  ...prev,
+                                  total: normalized,
+                                  tax0: "",
+                                  tax1: "",
+                                  tip: "",
+                                }));
+                              } else {
+                                setCurrencyInput("total", normalized);
+                              }
+                              handleFieldChange("purchasePrice", num);
                             }}
                             onBlur={() => {
                               const num = parseFloat(formData.purchasePrice);
@@ -5948,6 +6512,11 @@ const handleSelectLogo = (index) => {
                                 if (formData.tip !== "") {
                                   handleFieldChange("tip", "");
                                 } else {
+                                  const totalForTip = parseFloat(formData.purchasePrice) || 0;
+                                  if (totalForTip <= 0) {
+                                    setToast({ isVisible: true, message: "Add a Total before adding a tip.", type: "error" });
+                                    return;
+                                  }
                                   handleFieldChange("tip", "0");
                                   setTimeout(() => {
                                     document.getElementById("add-receipt-tip-input")?.focus();
@@ -5967,7 +6536,7 @@ const handleSelectLogo = (index) => {
                           {/* Row 3: Scrollable tax pills — selected first (A→Z), then unselected (A→Z) */}
                           <div
                             className="flex gap-2 overflow-x-auto pb-1"
-                            style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+                            style={{ scrollbarWidth: "none", msOverflowStyle: "none", overscrollBehaviorX: "contain" }}
                           >
                             {[...allTaxTypes]
                               .map((tax) => ({
@@ -6488,11 +7057,16 @@ const handleSelectLogo = (index) => {
                       <p className="text-sm font-medium text-gray-700 flex-shrink-0">Selected:</p>
                       <div className="p-2 border border-gray-300 rounded bg-white flex items-center justify-center min-w-[64px] min-h-[64px]">
                         <img
-                          src={editMerchantLogo}
+                          key={editLogoOptions[editSelectedLogoIndex]?.displayUrl || editMerchantLogo}
+                          src={editLogoOptions[editSelectedLogoIndex]?.displayUrl || editMerchantLogo}
                           alt="Selected merchant logo"
                           className="max-w-full max-h-16 w-auto h-auto object-contain"
                           style={{ imageRendering: "auto" }}
-                          onError={(e) => { e.target.style.display = "none"; }}
+                          onError={(e) => {
+                            const fallback = editLogoOptions[editSelectedLogoIndex]?.storeUrl || editMerchantLogo;
+                            if (fallback && e.target.src !== fallback) e.target.src = fallback;
+                            else e.target.style.display = "none";
+                          }}
                         />
                       </div>
                     </div>
@@ -6675,11 +7249,16 @@ const handleSelectLogo = (index) => {
                       <p className="text-sm font-medium text-gray-700 flex-shrink-0">Selected:</p>
                       <div className="p-2 border border-gray-300 rounded bg-white flex items-center justify-center min-w-[64px] min-h-[64px]">
                         <img
-                          src={newMerchantLogo}
+                          key={logoOptions[selectedLogoIndex]?.displayUrl || newMerchantLogo}
+                          src={logoOptions[selectedLogoIndex]?.displayUrl || newMerchantLogo}
                           alt="Selected merchant logo"
                           className="max-w-full max-h-16 w-auto h-auto object-contain"
                           style={{ imageRendering: "auto" }}
-                          onError={(e) => { e.target.style.display = "none"; }}
+                          onError={(e) => {
+                            const fallback = logoOptions[selectedLogoIndex]?.storeUrl || newMerchantLogo;
+                            if (fallback && e.target.src !== fallback) e.target.src = fallback;
+                            else e.target.style.display = "none";
+                          }}
                         />
                       </div>
                     </div>
@@ -6706,11 +7285,11 @@ const handleSelectLogo = (index) => {
                     type="button"
                     onClick={handleAddMerchant}
                     disabled={
-                      !newMerchantName || isFetchingLogos
+                      !newMerchantName || isFetchingLogos || isSavingMerchant
                     }
                     className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
-                    Add Merchant
+                    {isSavingMerchant ? "Adding..." : "Add Merchant"}
                   </button>
                 </div>
               </div>

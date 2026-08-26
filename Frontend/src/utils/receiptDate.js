@@ -8,6 +8,15 @@
 const ONE_DAY_MS = 86400000;
 const UTC_NOON_OFFSET_SEC = 43200; // 12:00:00 UTC — safe calendar-day anchor for all TZs
 
+/**
+ * Sentinel written when a receipt date is explicitly cleared ("No Date").
+ * The backend treats 0 / "" / null as "no change" (keeps the previous date), so an
+ * intentional clear is stored as a tiny non-zero value instead. Any product_date below
+ * 1,000,000 is treated as undated everywhere (resolveReceiptCalendarUnix / formatReceiptDate),
+ * and the fetch-time normaliser collapses it to 0 for a clean "No Date" receipt.
+ */
+export const NO_DATE_SENTINEL_UNIX = 1;
+
 /** Parse API unix seconds (handles ms by mistake). */
 export function parseReceiptUnix(value) {
   if (value === null || value === undefined || value === "") return 0;
@@ -97,22 +106,17 @@ export function resolveReceiptCalendarUnix(
 
     if (utcDay !== localDay) {
       if (utcDay - localDay === ONE_DAY_MS) return Math.floor(localDay / 1000);
-      if (localDay - utcDay === ONE_DAY_MS) return Math.floor(utcDay / 1000);
+      if (localDay - utcDay === ONE_DAY_MS) return Math.floor(localDay / 1000);
     }
     return Math.floor(utcDay / 1000);
   }
 
-  // --- UTC midnight (web date picker or mobile UTC-midnight bug) ---
+  // --- UTC midnight (web date picker or mobile UTC-midnight) ---
+  // Android stores the selected calendar date as UTC midnight — trust the UTC date.
   if (createTs >= 1000000) {
     const createUtcDay = utcCalendarDayMs(createTs);
-    const createLocalDay = localCalendarDayMs(createTs);
 
-    // Product UTC date is exactly one day after create's local calendar day
-    if (utcDay - createLocalDay === ONE_DAY_MS) {
-      return Math.floor(createLocalDay / 1000);
-    }
-
-    // Product one UTC day ahead of when the row was created
+    // Product one UTC day ahead of create (UTC vs UTC) — old mobile off-by-one
     if (utcDay - createUtcDay === ONE_DAY_MS) {
       return Math.floor(createUtcDay / 1000);
     }
@@ -127,16 +131,9 @@ export function resolveReceiptCalendarUnix(
     }
   }
 
-  // Draft / eReceipt with no create_date: mobile often stores UTC midnight +1 day
-  if (
-    createTs < 1000000 &&
-    isUtcDateOnlyUnix(ts) &&
-    receiptIsDraft(hints)
-  ) {
-    if (utcDay - localDay === ONE_DAY_MS) {
-      return Math.floor(localDay / 1000);
-    }
-    return Math.floor((utcDay - ONE_DAY_MS) / 1000);
+  // Draft / eReceipt with no create_date: trust the UTC date mobile stored.
+  if (createTs < 1000000 && isUtcDateOnlyUnix(ts) && receiptIsDraft(hints)) {
+    return Math.floor(utcDay / 1000);
   }
 
   return Math.floor(utcDay / 1000);

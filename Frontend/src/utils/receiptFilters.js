@@ -78,8 +78,17 @@ const matchesPrice = (receipt, priceFilter) => {
 const matchesDate = (receipt, dateRange) => {
   if (!dateRange || !receipt.product_date) return true;
 
+  const start = dateRange.startDate instanceof Date
+    ? dateRange.startDate
+    : new Date(dateRange.startDate);
+  const end = dateRange.endDate instanceof Date
+    ? dateRange.endDate
+    : new Date(dateRange.endDate);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return true;
+
   const productDate = new Date(Number(receipt.product_date) * 1000);
-  return productDate >= dateRange.startDate && productDate <= dateRange.endDate;
+  return productDate >= start && productDate <= end;
 };
 
 const matchesMerchants = (receipt, merchants) => {
@@ -99,9 +108,16 @@ const matchesMerchants = (receipt, merchants) => {
   return selectedNorms.includes(rNorm);
 };
 
+const normalizeCategoryKey = (value) =>
+  (value ?? "").toString().trim().toLowerCase();
+
 const matchesCategory = (receipt, categories) => {
   if (!categories || !categories.length) return true;
-  return categories.includes(receipt.expense_type);
+  const receiptCat = normalizeCategoryKey(receipt.expense_type);
+  if (!receiptCat) return false;
+  return categories.some(
+    (cat) => normalizeCategoryKey(cat) === receiptCat
+  );
 };
 
 const matchesReceiptCategory = (receipt, categories) => {
@@ -126,7 +142,7 @@ const matchesPaymentMethod = (receipt, paymentMethods) => {
   });
 };
 
-const matchesTaxTypes = (receipt, taxTypes) => {
+export const matchesTaxTypes = (receipt, taxTypes) => {
   if (!taxTypes || !taxTypes.length) return true;
 
   const taxLabels = Array.isArray(receipt?.receipt_tax_values)

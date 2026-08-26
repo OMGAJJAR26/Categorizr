@@ -13,6 +13,8 @@ import {
 import {
   findRenamedApiMerchant,
   isMerchantSupersededByApi,
+  isOrphanedDefaultMerchant,
+  normalizeMerchantKey,
 } from "../utils/merchantListUtils";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -72,10 +74,13 @@ import MyNetworkPanel from "../components/network/MyNetworkPanel";
 import { getPendingRequestCount } from "../api/networkApi";
 import { useNavigate } from "react-router-dom";
 import { useData } from "../context/DataContext";
-import { getPaymentDisplayFromReceipt } from "../hooks/usePaymentDisplay";
+import { getReceiptsMatchingPaymentMethod } from "../hooks/usePaymentDisplay";
 import {
   apiPaymentMethodMatchesLabel,
+  dedupeApiPaymentMethodRecords,
   getApiPaymentMethodDisplayName,
+  getApiPaymentMethodSignature,
+  getClearPaymentMethodUpdates,
   getLast4FromPaymentApiRecord,
   isCashPaymentVariant,
   isPaymentApiRecord,
@@ -122,21 +127,21 @@ const getPaymentLogo = (name) => {
   return null;
 };
 
-/** Resolve logo for an API payment-method record using card_type (authoritative)
- *  then icon_image, then keyword detection on the display name. */
+/** Resolve logo for an API payment-method record using icon_image (explicitly configured)
+ *  then card_type, then keyword detection on the display name. */
 const getApiPaymentMethodLogo = (p) => {
   if (!p) return null;
-  // card_type integer is authoritative (0=AmEx…5=DinersClub…8=Other)
-  const brand = cardTypeIntToBrand(p.card_type);
-  const brandLogo = brand ? getPaymentLogo(brand) : null;
-  if (brandLogo) return brandLogo;
-  // fall back to icon_image if it's a valid logo path / URL
+  // icon_image is the explicitly configured logo — use it when present
   const img = (p.icon_image || "").trim();
   if (img && (img.startsWith("/payment-logos/") || /^https?:\/\//.test(img) || img.startsWith("data:image"))) {
     return img;
   }
-  // last resort: keyword detection on display name
-  return getPaymentLogo(getApiPaymentMethodDisplayName(p));
+  // fall back to card_type integer brand logo
+  const brand = cardTypeIntToBrand(p.card_type);
+  const brandLogo = brand ? getPaymentLogo(brand) : null;
+  if (brandLogo) return brandLogo;
+  // keyword detection on display name, then generic icon as final fallback
+  return getPaymentLogo(getApiPaymentMethodDisplayName(p)) || (brand === "Other" ? creditDebitCardIcon : null);
 };
 
 const normalizePaymentDisplayKey = (value) => {
@@ -164,15 +169,6 @@ const DEFAULT_PAYMENT_CARD_MAP = {
   "Visa": "Visa",
   "Cash": "Cash",
 };
-const SETTINGS_DEFAULT_MERCHANTS_WITH_LOGOS = [
-  { name: "Costco", image: "https://logo.clearbit.com/costco.com" },
-  { name: "Home Depot", image: "https://logo.clearbit.com/homedepot.com" },
-  { name: "Lowe's", image: "https://logo.clearbit.com/lowes.com" },
-  { name: "Miscellaneous", image: "/miscellaneous-logo.png" },
-  { name: "Nordstrom", image: "https://logo.clearbit.com/nordstrom.com" },
-  { name: "Target", image: "https://logo.clearbit.com/target.com" },
-  { name: "Walmart", image: "https://logo.clearbit.com/walmart.com" },
-];
 
 /* ─── Shared styles ────────────────────────────────────── */
 const inputCls = "w-full bg-white/95 border border-slate-200 text-slate-900 text-sm rounded-xl px-4 py-2.5 placeholder-slate-400 shadow-sm focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all";
@@ -459,8 +455,21 @@ const ManageModal = ({ type, onClose }) => {
         const directApiId = item?.apiId ?? getApiPaymentId(
           (apiPaymentMethods || []).find(p => normalizeMatchKey(p?.card_number) === normalizeMatchKey(item.name))
         ) ?? null;
-        const result = await deleteApiPaymentMethod(directApiId, item.name);
-        if (!result?.ok) throw new Error(result?.error || "Failed to delete payment method");
+        // Delete this record AND any duplicate API records for the same card (e.g. the
+        // "*7777" and "7777" copies the backend stored), so the entry doesn't linger
+        // after a single delete.
+        const idsToDelete = [directApiId, ...(item?.duplicateIds || [])].filter(
+          (id) => id != null && String(id) !== ""
+        );
+        if (idsToDelete.length === 0) idsToDelete.push(directApiId);
+        let anyDeleted = false;
+        let lastErr = null;
+        for (const id of idsToDelete) {
+          const result = await deleteApiPaymentMethod(id, item.name);
+          if (result?.ok) anyDeleted = true;
+          else lastErr = result?.error;
+        }
+        if (!anyDeleted) throw new Error(lastErr || "Failed to delete payment method");
         hidePaymentMethod(item.key || item.name);
         deleteCustomPaymentMethod(item.key || item.name);
         await fetchApiPaymentMethods();
@@ -520,7 +529,13 @@ const ManageModal = ({ type, onClose }) => {
   };
 
   const buildReceiptItems = () => {
-    if (type === "merchants")  return receiptMerchWImgRaw.filter(m => !isMerchantHidden(m.name)).map(m => ({ key: m.name, name: m.name, logo: m.image || null }));
+    if (type === "merchants")  return receiptMerchWImgRaw
+      .filter(
+        (m) =>
+          !isMerchantHidden(m.name) &&
+          !isOrphanedDefaultMerchant(m.name, apiMerchants)
+      )
+      .map((m) => ({ key: m.name, name: m.name, logo: m.image || null }));
     if (type === "categories") return receiptCategoriesRaw.filter(c => !hiddenCategories.has(c)).map(c => ({ key: c, name: c, logo: null }));
     if (type === "payments") {
       if (PAYMENT_METHODS_API_ONLY) return [];
@@ -538,7 +553,9 @@ const ManageModal = ({ type, onClose }) => {
   const buildCustomItems = () => {
     if (type === "merchants") {
       const customItems = customMerchants
-        .filter(m => !isMerchantHidden(m))
+        .filter(
+          (m) => !isMerchantHidden(m) && !isOrphanedDefaultMerchant(m, apiMerchants)
+        )
         .map(m => ({ key: m, name: m, logo: null }));
       const existingNames = new Set([
         ...receiptMerchWImgRaw.map((m) => normalizeMatchKey(m?.name)),
@@ -564,20 +581,17 @@ const ManageModal = ({ type, onClose }) => {
     if (type === "categories") return customCategories.filter(c => !hiddenCategories.has(c)).map(c => ({ key: c, name: c, logo: null }));
     if (type === "payments") {
       if (PAYMENT_METHODS_API_ONLY) {
-        return (apiPaymentMethods || [])
-          .filter(isPaymentApiRecord)
-          .map((p, index) => {
-            const apiId = getApiPaymentId(p);
-            const cardName = getApiPaymentMethodDisplayName(p);
-            if (!cardName || hiddenPaymentMethods.has(cardName)) return null;
-            return {
-              key: apiId != null ? `api_${apiId}` : `api_idx_${index}`,
-              name: cardName,
-              logo: getApiPaymentMethodLogo(p),
-              apiId,
-            };
-          })
-          .filter(Boolean);
+        // Dedupe by display name so a card stored twice by the backend (e.g. card_number
+        // "*7777" and "7777") shows once — matching the Add/Edit dropdowns and Filter.
+        return dedupeApiPaymentMethodRecords(apiPaymentMethods, {
+          isHidden: (name) => hiddenPaymentMethods.has(name),
+        }).map(({ record, name, apiId, duplicateIds }, index) => ({
+          key: apiId != null ? `api_${apiId}` : `api_idx_${index}`,
+          name,
+          logo: getApiPaymentMethodLogo(record),
+          apiId,
+          duplicateIds,
+        }));
       }
       const customItems = customPaymentMethods
         .filter(p => !hiddenPaymentMethods.has(p))
@@ -842,8 +856,10 @@ const ManageModal = ({ type, onClose }) => {
 
 /* My Account panel — menu → sub-view */
 const MyAccountPanel = ({ user, onLogoutRequest }) => {
+  const { updateUserProfile } = useData();
   const [view, setView] = useState("menu"); // menu | editProfile | changePassword | deleteConfirm
   const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
 
   const [profile, setProfile] = useState({
     firstName: user?.firstName || "", lastName: user?.lastName || "",
@@ -868,9 +884,35 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
   const [showConfirm, setShowConfirm] = useState(false);
   const [passwordMsg, setPasswordMsg] = useState(null);
 
-  const handleProfileUpdate = (e) => {
+  const handleProfileUpdate = async (e) => {
     e.preventDefault();
-    setProfileMsg({ type: "success", text: "Profile updated successfully!" });
+    if (savingProfile) return;
+    const isEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((v || "").trim());
+    const recovery = (profile.recoveryEmail || "").trim();
+    const duplicate = (profile.sameAsRecovery ? profile.recoveryEmail : profile.receiptEmail || "").trim();
+    if (recovery && !isEmail(recovery)) {
+      setProfileMsg({ type: "error", text: "Please enter a valid recovery email." });
+      setTimeout(() => setProfileMsg(null), 3000);
+      return;
+    }
+    if (duplicate && !isEmail(duplicate)) {
+      setProfileMsg({ type: "error", text: "Please enter a valid duplicate eReceipt email." });
+      setTimeout(() => setProfileMsg(null), 3000);
+      return;
+    }
+    setSavingProfile(true);
+    const res = await updateUserProfile({
+      firstName: profile.firstName,
+      lastName: profile.lastName,
+      recoveryEmail: recovery,
+      duplicate_eReciept_email: duplicate,
+    });
+    setSavingProfile(false);
+    if (res?.ok) {
+      setProfileMsg({ type: "success", text: "Profile updated successfully!" });
+    } else {
+      setProfileMsg({ type: "error", text: res?.error || "Failed to update profile. Please try again." });
+    }
     setTimeout(() => setProfileMsg(null), 3000);
   };
 
@@ -967,7 +1009,7 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
               </motion.div>
             )}
           </AnimatePresence>
-          <button type="submit" className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl transition-all shadow-sm hover:shadow">Update</button>
+          <button type="submit" disabled={savingProfile} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold text-sm rounded-xl transition-all shadow-sm hover:shadow">{savingProfile ? "Updating…" : "Update"}</button>
         </form>
       )}
 
@@ -1738,8 +1780,6 @@ const ReceiptInfoInline = ({ type }) => {
     return base === "cash";
   };
 
-  const paymentDisplayForReceipt = (r) => getPaymentDisplayFromReceipt(r);
-
   const getReceiptsByMerchant = (name) =>
     (receipts || []).filter(
       (r) =>
@@ -1755,9 +1795,7 @@ const ReceiptInfoInline = ({ type }) => {
     );
 
   const getReceiptsByPaymentDisplay = (name) =>
-    (receipts || []).filter(
-      (r) => paymentDisplayForReceipt(r).toLowerCase() === (name || "").toLowerCase()
-    );
+    getReceiptsMatchingPaymentMethod(receipts || [], name || "");
 
   const toast = (t, text) => { setMsg({ type: t, text }); setTimeout(() => setMsg(null), 3000); };
   const TAX_NAME_MAX = 15;
@@ -1960,7 +1998,7 @@ const isBlockedTaxRateInput = (val) => {
             const iLast4 = (parsePaymentDisplay(i.name).last4 || "").trim();
             if (editedLast4 && iLast4 && editedLast4 === iLast4) return false;
           }
-          const sig = getPaymentSignature(i.name);
+          const sig = i.sig || getPaymentSignature(i.name);
           return sig && newSig && sig === newSig;
         });
         if (dupExists) return toast("error", "Payment Method already exists");
@@ -2054,7 +2092,7 @@ const isBlockedTaxRateInput = (val) => {
         // registrations). The user should be able to explicitly add any card even if it
         // appeared in a receipt — only check API/custom/default items.
         if (item.isReceiptItem) return false;
-        const sig = getPaymentSignature(item.name);
+        const sig = item.sig || getPaymentSignature(item.name);
         return sig && sig === nextSignature;
       });
       if (duplicateExists) return toast("error", "Payment Method already exists");
@@ -2167,11 +2205,7 @@ const isBlockedTaxRateInput = (val) => {
         if (!deleteMerchantResult?.ok) throw new Error(deleteMerchantResult?.error || "Failed to delete merchant");
       }
       deleteCustomMerchant(item.name);
-      if (item.isReceiptItem) {
-        hideMerchant(item.key);
-      } else if (item.isDefaultItem) {
-        hideMerchant(item.name);
-      }
+      hideMerchant(item.key || item.name);
       setIsDeleteSyncing(true);
       await Promise.all([refreshData(), fetchApiMerchants()]);
       toast("success", "Merchant Deleted");
@@ -2383,13 +2417,12 @@ const isBlockedTaxRateInput = (val) => {
       toast("error", "Cash payment method cannot be deleted");
       return;
     }
-    // Step 1 — set payment method to Cash on every matching receipt
+    // Step 1 — clear payment method on every matching receipt
+    const clearPayment = getClearPaymentMethodUpdates();
     const matching = getReceiptsByPaymentDisplay(item.name || "");
     if (matching.length > 0) {
       await Promise.all(
-        matching.map(r =>
-          updateReceipt(r.id, { paymentType: "Cash", card_issuer_name: "", last_4_digit_card: "" })
-        )
+        matching.map(r => updateReceipt(r.id, clearPayment))
       );
     }
     console.log("jdhhj step22")
@@ -2417,7 +2450,7 @@ const isBlockedTaxRateInput = (val) => {
     // ("api_28"), because customPaymentMethods is a plain string array keyed by name.
     hidePaymentMethod(item.name);
     deleteCustomPaymentMethod(item.name);
-    // Step 5 — refresh
+    // Step 5 — refresh from server (payment clear now persists via API "0" sentinels)
     setIsDeleteSyncing(true);
     await Promise.all([refreshData(), fetchApiPaymentMethods()]);
     toast("success", "Payment Method Deleted");
@@ -2477,7 +2510,7 @@ const isBlockedTaxRateInput = (val) => {
           const oLast4 = (parsePaymentDisplay(other.name).last4 || "").trim();
           if (editedLast4Inline && oLast4 && editedLast4Inline === oLast4) return false;
         }
-        const sig = getPaymentSignature(other.name);
+        const sig = other.sig || getPaymentSignature(other.name);
         return sig && sig === newSignature;
       });
       if (duplicatePayment) {
@@ -2719,56 +2752,56 @@ const isBlockedTaxRateInput = (val) => {
   // Build unified list (receipt-derived + custom + API, no dupes, no "Custom" label)
   const buildAllItems = () => {
     if (type === "merchants") {
-      const rItems = receiptMerchWImgRaw
-        .filter(
-          (m) =>
-            !isMerchantHidden(m.name) &&
-            !isMerchantSupersededByApi(m.name, apiMerchants)
-        )
-        .map(m => ({
-          key: m.name, name: m.name,
-          logo: merchLogos[m.name] || m.image || null,
-          isReceiptItem: true,
-          isApiItem: false,
-        }));
-      const rKeys = new Set(rItems.map(m => m.name.toLowerCase()));
-      // API merchants are the source of truth (GET /userstore/getStorev1)
+      // Manage Merchants lists exactly GET /userstore/getStorev1.
+      // Deleted starter stores (Home Depot, etc.) stay gone because they are
+      // not re-injected from a hardcoded default list or leftover receipts.
       const apiItems = (apiMerchants || [])
-        .filter(m => m.store_name && !rKeys.has((m.store_name || "").toLowerCase()))
-        .map(m => {
+        .filter((m) => m.store_name)
+        .map((m) => {
           const apiId = m?.id ?? m?.store_id ?? m?.fk_store_id ?? null;
           return {
             key: `api_${apiId ?? m.store_name}`,
             name: m.store_name,
-            logo: m.store_image_url || null,
+            logo: merchLogos[m.store_name] || m.store_image_url || null,
             isReceiptItem: false,
             apiId,
             isApiItem: true,
           };
         });
-      const apiNameKeys = new Set(apiItems.map((m) => m.name.toLowerCase()));
-      const cItems = customMerchants
-        .filter(m => !rKeys.has(m.toLowerCase()) && !apiNameKeys.has(m.toLowerCase()) && !isMerchantHidden(m))
-        .map(m => ({ key: m, name: m, logo: merchLogos[m] || null, isReceiptItem: false, isApiItem: false }));
-      const allWithApi = [...rItems, ...apiItems, ...cItems];
-      const existingAfterApi = new Set(allWithApi.map((m) => (m.name || "").toLowerCase()));
-      const defaultItems = SETTINGS_DEFAULT_MERCHANTS_WITH_LOGOS
+      const apiNameKeys = new Set(apiItems.map((m) => normalizeMerchantKey(m.name)));
+      const rItems = receiptMerchWImgRaw
         .filter(
           (m) =>
             m.name &&
-            !existingAfterApi.has((m.name || "").toLowerCase()) &&
+            !apiNameKeys.has(normalizeMerchantKey(m.name)) &&
             !isMerchantHidden(m.name) &&
-            !isMerchantSupersededByApi(m.name, apiMerchants)
+            !isMerchantSupersededByApi(m.name, apiMerchants) &&
+            !isOrphanedDefaultMerchant(m.name, apiMerchants)
         )
         .map((m) => ({
-          key: `default_${m.name}`,
+          key: m.name,
           name: m.name,
-          logo: m.image || null,
+          logo: merchLogos[m.name] || m.image || null,
+          isReceiptItem: true,
+          isApiItem: false,
+        }));
+      const rKeys = new Set(rItems.map((m) => normalizeMerchantKey(m.name)));
+      const cItems = customMerchants
+        .filter(
+          (m) =>
+            !rKeys.has(normalizeMerchantKey(m)) &&
+            !apiNameKeys.has(normalizeMerchantKey(m)) &&
+            !isMerchantHidden(m) &&
+            !isOrphanedDefaultMerchant(m, apiMerchants)
+        )
+        .map((m) => ({
+          key: m,
+          name: m,
+          logo: merchLogos[m] || null,
           isReceiptItem: false,
           isApiItem: false,
-          isDefaultItem: true,
         }));
-      return [...allWithApi, ...defaultItems];
+      return [...apiItems, ...rItems, ...cItems];
     }
     if (type === "categories") {
       // API expense categories are the source of truth (GET /userexpensecategory/getExpenseCategoryv1)
@@ -2816,28 +2849,34 @@ const isBlockedTaxRateInput = (val) => {
         const brandFromApiType = cardTypeIntToBrand(m?.card_type);
         if (brandFromApiType) {
           const ct = PAYMENT_CARD_TYPES.find((c) => c.name === brandFromApiType);
-          return ct ? ct.logo : getPayLogoResolved(displayName);
+          if (ct) return ct.logo;
+          // "Other" card type has no entry in PAYMENT_CARD_TYPES; use generic icon
+          if (brandFromApiType === "Other") return creditDebitCardIcon;
+          return getPayLogoResolved(displayName);
         }
-        return getPayLogoResolved(displayName);
+        return getPayLogoResolved(displayName) || creditDebitCardIcon;
       };
 
       if (PAYMENT_METHODS_API_ONLY) {
-        return (apiPaymentMethods || [])
-          .filter(isPaymentApiRecord)
-          .map((m, index) => {
-            const apiId = getApiEntityId(m);
-            const name = getApiPaymentMethodDisplayName(m);
-            if (!name || isPaymentMethodHidden(name)) return null;
-            return {
-              key: apiId != null ? `api_${apiId}` : `api_idx_${index}`,
-              name,
-              logo: resolvePaymentLogoFromApi(m, name),
-              isReceiptItem: false,
-              isApiItem: true,
-              apiId,
-            };
-          })
-          .filter(Boolean);
+        // Dedupe by display name (same card stored twice as "*7777"/"7777" shows once).
+        return dedupeApiPaymentMethodRecords(apiPaymentMethods, {
+          isHidden: (name) => isPaymentMethodHidden(name),
+        }).map(({ record, name, duplicateIds }, index) => {
+          const apiId = getApiEntityId(record);
+          return {
+            key: apiId != null ? `api_${apiId}` : `api_idx_${index}`,
+            name,
+            logo: resolvePaymentLogoFromApi(record, name),
+            isReceiptItem: false,
+            isApiItem: true,
+            apiId,
+            duplicateIds,
+            // Signature straight from the record's real card_type (not inferred from the
+            // display name or receipts), so duplicate detection works for issuers like
+            // "Din Bank"/"FL Bank 1" whose brand can't be guessed from the text.
+            sig: getApiPaymentMethodSignature(record),
+          };
+        });
       }
 
       const buildPaymentItemFromLabel = (label) => {
@@ -2855,6 +2894,7 @@ const isBlockedTaxRateInput = (val) => {
             isReceiptItem: false,
             isApiItem: true,
             apiId,
+            sig: getApiPaymentMethodSignature(apiRec),
           };
         }
         const isFromReceipt = (receiptPaymentsRaw || []).some(
@@ -2919,7 +2959,7 @@ const isBlockedTaxRateInput = (val) => {
                 return false;
               }
             }
-            const sig = getPaymentSignature(item.name);
+            const sig = item.sig || getPaymentSignature(item.name);
             return sig && sig === nextSignature;
           });
           return dupExists ? "Payment Method already exists" : "";

@@ -1,3 +1,6 @@
+@import "./dark-mode.css";
+@import "./index.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

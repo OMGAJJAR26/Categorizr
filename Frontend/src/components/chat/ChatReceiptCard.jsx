@@ -14,7 +14,10 @@ const ChatReceiptCard = ({ receipt, onClick }) => {
     const date = new Date(ts * 1000);
     // Check if date is valid
     if (isNaN(date.getTime())) return "—";
+    // product_date is anchored to UTC noon; render in UTC so the calendar day
+    // never shifts by the viewer's local timezone (matches the main receipt UI).
     return date.toLocaleDateString("en-US", {
+      timeZone: "UTC",
       month: "short",
       day: "numeric",
       year: "numeric",

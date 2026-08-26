@@ -15,6 +15,7 @@ const SessionManager = ({ children }) => {
       timeoutId = setTimeout(() => {
     
         clearAuthLocalStorage();
+        window.dispatchEvent(new CustomEvent("cat:session-expired"));
         navigate("/login");
       }, TIMEOUT);
     };

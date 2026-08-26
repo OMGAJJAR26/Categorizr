@@ -3,6 +3,21 @@ import html2pdf from "html2pdf.js";
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
 import SimpleAlertModal from "../SimpleAlertModal";
+import { collectReceiptMediaUrls } from "../../utils/mediaUrlUtils";
+import { getPaymentDisplay as getReportPaymentDisplay } from "../../utils/reportGenerators";
+import { matchesTaxTypes } from "../../utils/receiptFilters";
+
+// Format a receipt's product_date the same way the report tables do: UTC calendar day
+// (never one day earlier in timezones behind UTC), or "No Date" when undated.
+const formatCsvDate = (productDate) =>
+  productDate
+    ? new Date(Number(productDate) * 1000).toLocaleDateString("en-US", {
+        timeZone: "UTC",
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })
+    : "No Date";
 
 const ReportModals = ({
   showReportModal,
@@ -15,17 +30,32 @@ const ReportModals = ({
   generateTaxReport,
   generateSummaryReport,
   formatCurrencyFixed2,
-  onApplyTaxTypes
+  onApplyTaxTypes,
+  reportTaxTypes = [],
 }) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [alertMsg, setAlertMsg] = useState(null);
 
   if (!showReportModal) return null;
 
+  // Tax types for the TAX REPORT — chosen in the report's own popup (reportTaxTypes) or,
+  // when the user already narrowed the list via the homepage filter, filters.taxTypes.
+  // The report filters ITS OWN copy of the receipts by these, so selecting tax types for
+  // the report never filters the main receipt screen.
+  const taxReportTaxTypes =
+    reportTaxTypes && reportTaxTypes.length > 0
+      ? reportTaxTypes
+      : (filters?.taxTypes || []);
+  const taxReportReceipts =
+    taxReportTaxTypes.length > 0
+      ? (filteredReceipts || []).filter((r) => matchesTaxTypes(r, taxReportTaxTypes))
+      : (filteredReceipts || []);
+  const taxReportFilters = { ...filters, taxTypes: taxReportTaxTypes };
+
   // Helper function to generate CSV data
   const generateCSVData = () => {
     if (reportType === "tax") {
-      return filteredReceipts.map((receipt, index) => {
+      return taxReportReceipts.map((receipt, index) => {
         const taxValues = receipt.receipt_tax_values || [];
         const taxes = taxValues.filter(
           (tax) => !(tax.tax_name || "").toLowerCase().includes("tip")
@@ -67,23 +97,18 @@ const ReportModals = ({
 
         return {
           "#": String(index + 1).padStart(3, "0"),
-          Date: receipt.product_date
-            ? new Date(Number(receipt.product_date) * 1000).toLocaleDateString("en-US", {
-                day: "numeric",
-                month: "short",
-                year: "numeric",
-              })
-            : "—",
+          Date: formatCsvDate(receipt.product_date),
           Merchant: receipt.storeName || "Untitled",
           "Expense Type": receipt.receipt_category == 0 ? "Personal" : receipt.receipt_category == 1 ? "Business" : "—",
           Status: receipt.status === "0" ? "Unread" : receipt.status === "1" ? "Read" : "—",
-          "Payment Method": receipt.paymentType || "—",
+          "Payment Method": getReportPaymentDisplay(receipt),
           Category: receipt.expense_type || "—",
           Subtotal: formatCurrencyFixed2(subtotal),
           "Tax Types": taxTypesText || "—",
           "Tax Amount": taxAmountsText || "—",
           Tips: formatCurrencyFixed2(tipsAmount),
           Total: formatCurrencyFixed2(total),
+          "Receipt Image": collectReceiptMediaUrls(receipt).join(" ") || "—",
           Locked: locked,
           Tags: activeTags.join(", ") || "No tags",
         };
@@ -93,19 +118,14 @@ const ReportModals = ({
       return filteredReceipts.map((receipt, index) => {
         return {
           "#": String(index + 1).padStart(4, "0"),
-          Date: receipt.product_date
-            ? new Date(Number(receipt.product_date) * 1000).toLocaleDateString("en-US", {
-                day: "numeric",
-                month: "short",
-                year: "numeric",
-              })
-            : "—",
+          Date: formatCsvDate(receipt.product_date),
           Merchant: receipt.storeName || "Untitled",
           "Expense Type": receipt.receipt_category == 0 ? "Personal" : receipt.receipt_category == 1 ? "Business" : "—",
           Status: receipt.status === "0" ? "Unread" : receipt.status === "1" ? "Read" : "—",
           Category: receipt.expense_type || "—",
-          "Payment Method": receipt.paymentType || "—",
+          "Payment Method": getReportPaymentDisplay(receipt),
           Total: formatCurrencyFixed2(Number(receipt.purchasePrice) || 0),
+          "Receipt Image": collectReceiptMediaUrls(receipt).join(" ") || "—",
         };
       });
     }
@@ -151,12 +171,11 @@ const ReportModals = ({
       // Generate PDF
       let htmlContent = "";
       if (reportType === "tax") {
-        const taxTypesToUse = filters.taxTypes.length > 0 ? filters.taxTypes : [];
         htmlContent = generateTaxReport({
-          receipts: filteredReceipts,
-          selectedTaxes: taxTypesToUse,
+          receipts: taxReportReceipts,
+          selectedTaxes: taxReportTaxTypes,
           monthLabel: "",
-          filters,
+          filters: taxReportFilters,
           sortConfig,
           searchTerm,
           formatCurrencyFixed2,
@@ -215,20 +234,16 @@ const ReportModals = ({
       let fileName = "";
 
       if (reportType === "tax") {
-        const taxTypesToUse = filters.taxTypes.length > 0 
-          ? filters.taxTypes 
-          : [];
-        
         htmlContent = generateTaxReport({
-          receipts: filteredReceipts,
-          selectedTaxes: taxTypesToUse,
+          receipts: taxReportReceipts,
+          selectedTaxes: taxReportTaxTypes,
           monthLabel: "",
-          filters,
+          filters: taxReportFilters,
           sortConfig,
           searchTerm,
           formatCurrencyFixed2
         });
-        
+
         fileName = `tax-report-${new Date().toISOString().split("T")[0]}`;
       } else if (reportType === "summary") {
         htmlContent = generateSummaryReport({
@@ -322,7 +337,12 @@ const ReportModals = ({
                         rows.forEach((row, rowIndex) => {
                           const cols = row.querySelectorAll('th, td');
                           const rowData = Array.from(cols).map(col => {
-                            let text = col.textContent.trim();
+                            // For the receipt-image cell, export the real image URL(s)
+                            // (all of them, space-separated) instead of the word "View".
+                            const imgAnchor = col.querySelector('a[data-images]');
+                            let text = imgAnchor
+                              ? (imgAnchor.getAttribute('data-images') || '').split('|').filter(Boolean).join(' ')
+                              : col.textContent.trim();
                             // Escape quotes and wrap in quotes if contains comma or newline
                             if (text.includes(',') || text.includes('"') || text.includes('\\n')) {
                               text = '"' + text.replace(/"/g, '""') + '"';
@@ -342,6 +362,67 @@ const ReportModals = ({
                       link.click();
                       URL.revokeObjectURL(url);
                     }
+                  </script>
+
+                  <!-- Multi-image receipt viewer: opened by the "View" links. Shows all
+                       of a receipt's images with left/right navigation (arrows/keyboard). -->
+                  <div id="__imgViewer" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.9); z-index:9999; align-items:center; justify-content:center; flex-direction:column;">
+                    <div style="position:absolute; top:16px; right:20px;">
+                      <button onclick="window.__closeReceiptImages()" style="background:#fff; border:none; border-radius:4px; padding:6px 12px; cursor:pointer; font-weight:600;">Close</button>
+                    </div>
+                    <div id="__imgViewerCounter" style="color:#fff; margin-bottom:10px; font-family:Arial, sans-serif; font-size:14px;"></div>
+                    <div style="display:flex; align-items:center; gap:16px;">
+                      <button id="__imgPrev" onclick="window.__viewerStep(-1)" style="background:#fff; border:none; border-radius:50%; width:46px; height:46px; font-size:24px; cursor:pointer;">&#8249;</button>
+                      <div id="__imgViewerStage" style="width:80vw; height:80vh; display:flex; align-items:center; justify-content:center;"></div>
+                      <button id="__imgNext" onclick="window.__viewerStep(1)" style="background:#fff; border:none; border-radius:50%; width:46px; height:46px; font-size:24px; cursor:pointer;">&#8250;</button>
+                    </div>
+                  </div>
+                  <script>
+                    (function(){
+                      var imgs = [], idx = 0;
+                      function isPdf(u){ u = (u || '').toLowerCase().split('?')[0]; return u.indexOf('.pdf') !== -1; }
+                      function render(){
+                        var stage = document.getElementById('__imgViewerStage');
+                        var counter = document.getElementById('__imgViewerCounter');
+                        if(!stage) return;
+                        var u = imgs[idx];
+                        stage.innerHTML = '';
+                        var el;
+                        if(isPdf(u)){
+                          el = document.createElement('iframe');
+                          el.src = u; el.style.width = '80vw'; el.style.height = '80vh';
+                          el.style.border = 'none'; el.style.background = '#fff';
+                        } else {
+                          el = document.createElement('img');
+                          el.src = u; el.style.maxWidth = '80vw'; el.style.maxHeight = '80vh'; el.style.objectFit = 'contain';
+                        }
+                        stage.appendChild(el);
+                        if(counter) counter.textContent = (idx + 1) + ' / ' + imgs.length;
+                        var multi = imgs.length > 1 ? 'inline-block' : 'none';
+                        var p = document.getElementById('__imgPrev'); if(p) p.style.display = multi;
+                        var n = document.getElementById('__imgNext'); if(n) n.style.display = multi;
+                      }
+                      window.__openReceiptImages = function(e, a){
+                        if(e && e.preventDefault) e.preventDefault();
+                        var data = (a && a.getAttribute('data-images')) || '';
+                        imgs = data.split('|').filter(Boolean);
+                        if(!imgs.length) return true;
+                        idx = 0;
+                        var v = document.getElementById('__imgViewer');
+                        if(v) v.style.display = 'flex';
+                        render();
+                        return false;
+                      };
+                      window.__viewerStep = function(d){ if(!imgs.length) return; idx = (idx + d + imgs.length) % imgs.length; render(); };
+                      window.__closeReceiptImages = function(){ var v = document.getElementById('__imgViewer'); if(v) v.style.display = 'none'; imgs = []; };
+                      document.addEventListener('keydown', function(ev){
+                        var v = document.getElementById('__imgViewer');
+                        if(!v || v.style.display === 'none') return;
+                        if(ev.key === 'Escape') window.__closeReceiptImages();
+                        else if(ev.key === 'ArrowRight') window.__viewerStep(1);
+                        else if(ev.key === 'ArrowLeft') window.__viewerStep(-1);
+                      });
+                    })();
                   </script>
                 </body>
               </html>

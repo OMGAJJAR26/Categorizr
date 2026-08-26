@@ -309,11 +309,35 @@ export const searchUsersForNetwork = async (term) => {
   return { ok: true, data: filtered, error: null };
 };
 
+/** True when the other user has accepted the network invite (not just "sent"). */
+export const isAcceptedNetworkMember = (item) => {
+  if (!item) return false;
+  const status = String(item.status ?? item.Status ?? "").trim().toLowerCase();
+  if (["sent", "pending", "declined", "rejected", "invite"].includes(status)) {
+    return false;
+  }
+  if (["accepted", "connected", "in_network", "in-network", "active"].includes(status)) {
+    return true;
+  }
+  const user =
+    item.userinfo ||
+    item.fk_user_id_2_user ||
+    item.fk_user_id_1_user ||
+    item;
+  const nrs = Number(user?.networkRequestStatus ?? item?.networkRequestStatus);
+  if (nrs === 1 || nrs === 2) return false; // pending / request sent
+  if (nrs === 3) return true;
+  // No status on the row — getMyNetwork is expected to return accepted connections.
+  return true;
+};
+
 export const getMyNetwork = async () => {
   const result = await apiGet("/usernetwork/getMyNetwork");
   if (!result.ok) return result;
   const list = Array.isArray(result.data) ? result.data : [];
-  return { ok: true, data: list, error: null };
+  // getMyNetwork can include outstanding invites; only accepted users are "Connected".
+  const accepted = list.filter(isAcceptedNetworkMember);
+  return { ok: true, data: accepted, error: null };
 };
 
 export const getPendingRequests = async () => {

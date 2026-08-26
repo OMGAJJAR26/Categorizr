@@ -3,12 +3,13 @@ import { NODE_API_URL, proxyImageUrl, unproxyImageUrl } from "../api/Axios";
 import {
   encodeReceiptTags,
   formatTaxRate,
+  getSplitReceiptValidationMessage,
   parseReceiptTags,
   taxTypeDedupKey,
   taxTypesMatch,
   taxDefinitionMatchesReceiptLine,
 } from "../utils/receiptFormatters";
-import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine, AlertCircle,} from "lucide-react";
+import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine, AlertCircle, RotateCcw, Check,} from "lucide-react";
 import ReceiptAnnotator from "../components/receipts/ReceiptAnnotator";
 import PdfThumbnail from "../components/receipts/PdfThumbnail";
 import {
@@ -45,13 +46,14 @@ import Toast from "../components/Toast";
 import { useData } from "../context/DataContext";
 import { useCurrency } from "../context/CurrencyContext";
 import MerchantAvatar from "../components/MerchantAvatar";
-import { getPaymentDisplayFromReceipt, usePaymentDisplay } from "../hooks/usePaymentDisplay";
+import { getPaymentDisplayFromReceipt, getPaymentInputLogo, getReceiptsMatchingPaymentMethod, usePaymentDisplay } from "../hooks/usePaymentDisplay";
 import {
   apiPaymentMethodMatchesLabel,
   buildPaymentMethodStorageString,
   cardTypeIntToBrand,
   getApiPaymentMethodDisplayName,
   getApiPaymentMethodSignature,
+  getClearPaymentMethodUpdates,
   getLast4FromPaymentApiRecord,
   getPaymentSignature,
   inferCardTypeFromPayment,
@@ -60,12 +62,15 @@ import {
   normalizePaymentMatchKey,
   parsePaymentDisplay,
   paymentCategoryFromApiEnum,
+  getPaymentDefaultExpenseType,
+  expenseTypeToReceiptCategory,
   readPayCardTypeMap,
   storedCardIssuerName,
 } from "../utils/paymentMethodUtils";
 import EditPaymentMethodModal from "../components/receipts/EditPaymentMethodModal";
 import { parseTaxRateInput, createTaxRateKeyDownHandler } from "../utils/taxRateInput";
 import { useTaxRateLimitAlert } from "../hooks/useTaxRateLimitAlert";
+import { isNewForwardedReceipt } from "../hooks/useReceiptGrouping";
 import TaxRateChangeWarningModal from "../components/TaxRateChangeWarningModal";
 import {
   buildIncrementedTaxName,
@@ -89,7 +94,7 @@ import {
   formatReceiptDateLong,
   parseDateInputToUnix,
   productDateToInputValue,
-  todayLocalCalendarUnix,
+  NO_DATE_SENTINEL_UNIX,
 } from "../utils/receiptDate";
 
 // Default payment methods
@@ -238,6 +243,7 @@ const ReceiptDetail = ({
     deleteCustomPaymentMethod,
     hidePaymentMethod,
     repairReceiptMediaOnServer,
+    markReceiptAsForwarded,
   } = useData();
 
   const openingReceipt = findContextReceipt(receipts, receipt);
@@ -257,6 +263,9 @@ const ReceiptDetail = ({
   const containerRef = useRef(null);
   const dropdownRef = useRef();
   const scrollContentRef = useRef(null);
+  // Wraps only the editable fields/tags so "locked" can disable editing while leaving
+  // the receipt-image thumbnails interactive (viewing/enlarging stays allowed).
+  const editableContentRef = useRef(null);
   const currentSelectedIdRef = useRef(receipt?.id ?? null);
   const lastReportedIndexRef = useRef(null);
   const swipeGestureActiveRef = useRef(false);
@@ -372,10 +381,18 @@ const ReceiptDetail = ({
   const [isSavingSplits, setIsSavingSplits] = useState(false);
   const [splitErrors, setSplitErrors] = useState({});
   const [splitError, setSplitError] = useState(null);
+  const [splitPrereqError, setSplitPrereqError] = useState(null);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [showForwardModal, setShowForwardModal] = useState(false);
   const [alertMsg, setAlertMsg] = useState(null);
   const [showMaxDefaultTaxModal, setShowMaxDefaultTaxModal] = useState(false);
+
+  // Auto-dismiss split prerequisite banner after 3.5 s
+  useEffect(() => {
+    if (!splitPrereqError) return;
+    const t = setTimeout(() => setSplitPrereqError(null), 3500);
+    return () => clearTimeout(t);
+  }, [splitPrereqError]);
 
   // Refs for dropdowns
   const merchantInputRef = useRef(null);
@@ -594,39 +611,65 @@ const ReceiptDetail = ({
   // Keep total fixed: derive subtotal and per-tax amounts from rates.
   const recalculateReceiptTotalsFromFixedTotal = useCallback(
     (total, taxValues, tip) => {
-      const preserved = preserveStoredReceiptTaxTotals(total, taxValues, tip);
-      if (preserved) return preserved;
-
       const totalNum = parseFloat(total) || 0;
       const tipNum = parseFloat(tip) || 0;
-      const taxes = (taxValues || []).filter(
+      const nonTipTaxes = (taxValues || []).filter(
         (t) => !(t.tax_name || "").toLowerCase().includes("tip"),
       );
 
-      const totalRateSum = taxes.reduce(
-        (sum, t) => sum + resolveTaxRateForReceipt(t) / 100,
+      // Total is 0/empty with NO tip → zero the whole receipt (avoid stale amounts).
+      if (totalNum === 0 && tipNum === 0) {
+        return {
+          subtotal: 0,
+          receipt_tax_values: nonTipTaxes.map((t) => ({ ...t, tax_amount: 0 })),
+        };
+      }
+
+      // If all non-tip taxes have stored amounts AND none are manually locked,
+      // preserve all amounts and let subtotal absorb any total change. (Protects
+      // freshly-loaded / forwarded receipts from being wiped.)
+      // EXCEPTION: when the tip/taxes exceed the total, the subtotal would be negative.
+      // preserveStoredReceiptTaxTotals clamps it to 0 and keeps the taxes positive, which
+      // hides the overage. In that case fall through to the rate-based recompute below so
+      // the taxes and subtotal go negative (matches iOS: tip > total is allowed).
+      const nonTipStoredSum = nonTipTaxes.reduce(
+        (s, t) => s + (parseFloat(t.tax_amount) || 0),
         0,
       );
-      const subtotalNum =
-        taxes.length > 0 && totalRateSum > 0
-          ? (totalNum - tipNum) / (1 + totalRateSum)
-          : totalNum - tipNum;
-      const subtotal =
-        subtotalNum > 0 ? parseFloat(subtotalNum.toFixed(2)) : 0;
+      const wouldGoNegative = totalNum - nonTipStoredSum - tipNum < 0;
+      if (!wouldGoNegative) {
+        const preserved = preserveStoredReceiptTaxTotals(total, taxValues, tip);
+        if (preserved) return preserved;
+      }
 
-      const receipt_tax_values = taxes.map((t) => {
+      // Combined-tax model: ALL auto (non-manual) taxes share ONE subtotal derived from
+      // the COMBINED rate, so any tax set with the same total rate gives the same subtotal
+      // (5%+8% == 13%). subtotal = (total − tip − Σmanual) / (1 + Σauto rates); each auto
+      // tax = subtotal × rate. Manual lines keep their amount. Subtotal/taxes may go
+      // negative (red) when the tip/manual taxes exceed the total.
+      const manualSum = nonTipTaxes.reduce(
+        (s, t) => (t._isManual ? s + (parseFloat(t.tax_amount) || 0) : s),
+        0,
+      );
+      const autoRateSum = nonTipTaxes.reduce(
+        (s, t) => (t._isManual ? s : s + resolveTaxRateForReceipt(t) / 100),
+        0,
+      );
+      const denom = 1 + autoRateSum;
+      const subtotal = parseFloat(
+        (denom !== 0 ? (totalNum - tipNum - manualSum) / denom : 0).toFixed(2),
+      );
+      const receipt_tax_values = nonTipTaxes.map((t) => {
+        if (t._isManual) return { ...t, tax_amount: parseFloat(t.tax_amount) || 0 };
         const rate = resolveTaxRateForReceipt(t);
         const tax_amount =
-          subtotal > 0 && rate > 0
-            ? parseFloat(((subtotal * rate) / 100).toFixed(2))
-            : 0;
+          rate > 0 ? parseFloat(((subtotal * rate) / 100).toFixed(2)) : 0;
         return {
           ...t,
           tax_rate: rate > 0 ? formatTaxRate(rate) : t.tax_rate || "0",
           tax_amount,
         };
       });
-
       return { subtotal, receipt_tax_values };
     },
     [resolveTaxRateForReceipt],
@@ -765,10 +808,38 @@ useEffect(() => {
       const receiptTip = tipEntry
         ? parseFloat(tipEntry.tax_amount) || 0
         : parseFloat(selectedReceipt.tip) || 0;
+
+      // A saved receipt doesn't persist the frontend-only `_isManual` flag, so a
+      // manually-entered tax loses it on reopen — which hides the "Auto" button AND
+      // lets the amount get recomputed (back to formulaic) when another tax is toggled.
+      // Restore it: if a stored amount differs from what the auto (combined) formula would
+      // produce, the amount was set manually → keep it manual until the user unselects that
+      // tax or taps "Auto". Auto amount = allAutoSubtotal × rate, where the all-auto
+      // subtotal = (total − tip) / (1 + Σ all rates) — matches the combined recalc.
+      const allRateSum = nonTipTaxValues.reduce(
+        (s, t) => s + resolveTaxRateForReceipt(t) / 100,
+        0,
+      );
+      const allAutoSubtotal =
+        1 + allRateSum !== 0 ? (receiptTotal - receiptTip) / (1 + allRateSum) : 0;
+      const nonTipTaxValuesFlagged = nonTipTaxValues.map((t) => {
+        if (t._isManual) return t;
+        const stored = parseFloat(t.tax_amount);
+        if (isNaN(stored) || stored === 0) return t;
+        const rate = resolveTaxRateForReceipt(t);
+        const autoAmount =
+          rate > 0
+            ? parseFloat(((allAutoSubtotal * rate) / 100).toFixed(2))
+            : 0;
+        return Math.abs(stored - autoAmount) > 0.005
+          ? { ...t, _isManual: true }
+          : t;
+      });
+
       const { subtotal: initSubtotal, receipt_tax_values: initTaxValues } =
         recalculateReceiptTotalsFromFixedTotal(
           receiptTotal,
-          nonTipTaxValues,
+          nonTipTaxValuesFlagged,
           receiptTip,
         );
 
@@ -849,8 +920,12 @@ useEffect(() => {
         paymentLogoUrl: "",
         card_issuer_name: selectedReceipt.card_issuer_name || "",
         last_4_digit_card: selectedReceipt.last_4_digit_card || "",
+        // initSubtotal already accounts for the tip (= total − tip − taxes), so use it
+        // whenever there's a tip OR non-tip taxes. Falling back to purchasePrice when
+        // only a tip is present (common on forwarded receipts) showed the full total as
+        // the subtotal without subtracting the tip.
         subtotal:
-          initTaxValues.length > 0
+          initTaxValues.length > 0 || receiptTip > 0
             ? initSubtotal
             : selectedReceipt.subtotal || selectedReceipt.purchasePrice || 0,
         purchasePrice: selectedReceipt.purchasePrice || 0,
@@ -894,10 +969,17 @@ useEffect(() => {
     setEditedReceipt((prev) => {
       const taxes = prev.receipt_tax_values || [];
       if (taxes.length === 0) return prev;
-      const total =
-        parseFloat(prev.purchasePrice) ||
-        parseFloat(selectedReceipt.purchasePrice) ||
-        0;
+      // Respect an explicitly cleared total ("" / 0) — do NOT restore it from the
+      // original receipt, otherwise deleting the total would re-populate the taxes.
+      const clearedTotal =
+        prev.purchasePrice === "" ||
+        prev.purchasePrice === "0" ||
+        prev.purchasePrice === 0;
+      const total = clearedTotal
+        ? 0
+        : parseFloat(prev.purchasePrice) ||
+          parseFloat(selectedReceipt.purchasePrice) ||
+          0;
       if (!total) return prev;
 
       const nonTipTaxes = taxes.filter(
@@ -978,41 +1060,74 @@ useEffect(() => {
     );
   };
 
+  // Order dropdown options with the currently-selected one FIRST — injecting it when the
+  // derived list omits it (e.g. a forwarded/received receipt whose merchant / category /
+  // payment isn't in the recipient's list, so its checkmark would otherwise be missing) —
+  // then the rest alphabetically. keyOf extracts the comparable string; injectFn builds
+  // the missing selected item.
+  const orderOptionsSelectedFirst = (list, selectedKey, keyOf, injectFn) => {
+    const selKey = (selectedKey || "").toString().trim().toLowerCase();
+    let sel = null;
+    const rest = [];
+    (list || []).forEach((item) => {
+      const k = (keyOf(item) || "").toString().trim().toLowerCase();
+      if (selKey && k === selKey && !sel) sel = item;
+      else rest.push(item);
+    });
+    rest.sort((a, b) =>
+      (keyOf(a) || "").toString().toLowerCase().localeCompare((keyOf(b) || "").toString().toLowerCase())
+    );
+    if (selKey && !sel && injectFn) sel = injectFn();
+    return sel ? [sel, ...rest] : rest;
+  };
+
   const filteredMerchants = React.useMemo(() => {
-    if (!isMerchantTyping) return sortMerchantsAlpha(allMerchantsWithImages);
     const searchTerm = (editedReceipt.storeName || "").toLowerCase().trim();
-    if (!searchTerm) return sortMerchantsAlpha(allMerchantsWithImages);
-    return sortMerchantsAlpha(allMerchantsWithImages.filter((m) =>
-      m.name?.toLowerCase().includes(searchTerm)
-    ));
-  }, [allMerchantsWithImages, editedReceipt.storeName, isMerchantTyping]);
+    // Actively typing a search → filtered, alphabetical.
+    if (isMerchantTyping && searchTerm) {
+      return sortMerchantsAlpha(
+        allMerchantsWithImages.filter((m) => m.name?.toLowerCase().includes(searchTerm)),
+      );
+    }
+    // Opened (not searching) → selected merchant first, rest alphabetical.
+    // (Use selectedReceipt directly — `r` isn't defined yet at this point in render.)
+    const selected = (editedReceipt.storeName ?? selectedReceipt?.storeName ?? "").toString().trim();
+    return orderOptionsSelectedFirst(
+      allMerchantsWithImages,
+      selected,
+      (m) => m?.name,
+      () => ({ name: selected, image: editedReceipt.store_image ?? selectedReceipt?.store_image ?? "" }),
+    );
+  }, [allMerchantsWithImages, editedReceipt.storeName, editedReceipt.store_image, isMerchantTyping, selectedReceipt]);
 
   const filteredCategories = React.useMemo(() => {
-    if (!isCategoryTyping) return allExpenseCategories; // show all on open
     const searchTerm = (editedReceipt.expense_type || "").toLowerCase().trim();
-    if (!searchTerm) return allExpenseCategories;
-    return allExpenseCategories.filter((c) =>
-      c.toLowerCase().includes(searchTerm)
-    );
-  }, [allExpenseCategories, editedReceipt.expense_type, isCategoryTyping]);
+    if (isCategoryTyping && searchTerm) {
+      return allExpenseCategories.filter((c) => c.toLowerCase().includes(searchTerm));
+    }
+    const selected = (editedReceipt.expense_type ?? selectedReceipt?.expense_type ?? "").toString().trim();
+    return orderOptionsSelectedFirst(allExpenseCategories, selected, (c) => c, () => selected);
+  }, [allExpenseCategories, editedReceipt.expense_type, isCategoryTyping, selectedReceipt]);
 
   const filteredPaymentMethods = React.useMemo(() => {
-    if (!isPaymentTyping) return allPaymentMethods; // show all on open
     const searchTerm = (
       editedReceipt.card_issuer_name || editedReceipt.paymentType || ""
     ).toLowerCase().trim();
-    if (!searchTerm) return allPaymentMethods;
-    const matches = allPaymentMethods.filter((p) => {
-      const pLower = p.toLowerCase();
-      return pLower.includes(searchTerm) || searchTerm.includes(pLower);
-    });
-    return matches.length > 0 ? matches : allPaymentMethods;
-  }, [
-    allPaymentMethods,
-    editedReceipt.card_issuer_name,
-    editedReceipt.paymentType,
-    isPaymentTyping,
-  ]);
+    if (isPaymentTyping && searchTerm) {
+      const matches = allPaymentMethods.filter((p) => {
+        const pLower = p.toLowerCase();
+        return pLower.includes(searchTerm) || searchTerm.includes(pLower);
+      });
+      return matches.length > 0 ? matches : allPaymentMethods;
+    }
+    const selectedPay = getPaymentDisplayName({ ...selectedReceipt, ...editedReceipt }) || "";
+    return orderOptionsSelectedFirst(
+      allPaymentMethods,
+      selectedPay && selectedPay !== "-" ? selectedPay : "",
+      (p) => p,
+      () => selectedPay,
+    );
+  }, [allPaymentMethods, editedReceipt, isPaymentTyping, selectedReceipt, getPaymentDisplayName]);
 
   const expenseCategoryExists = (name, excludeName = "") => {
     const normalized = (name || "").trim().toLowerCase();
@@ -1038,18 +1153,38 @@ useEffect(() => {
     if (!draftSig) return "";
 
     const excludeApiId = payModalEditMode?.apiId;
-    const excludeSig = payModalEditMode?.name
-      ? getPaymentSignature(
-          payModalEditMode.name,
-          inferCardTypeFromPayment(payModalEditMode.name),
-          payCardMap
-        )
-      : "";
+    // Use the signature captured when the edit opened (built from the RESOLVED card type),
+    // falling back to name inference. Inference alone fails for custom issuers like
+    // "And Bank 1 *1111" → "Other", which made a payment flag itself as a duplicate.
+    const excludeSig =
+      payModalEditMode?.originalSig ||
+      (payModalEditMode?.name
+        ? getPaymentSignature(
+            payModalEditMode.name,
+            inferCardTypeFromPayment(payModalEditMode.name),
+            payCardMap
+          )
+        : "");
+
+    // The card being edited may be stored as SEVERAL API records (e.g. the backend kept
+    // both "*5555" and "5555"). Derive the edited record's real signature so every copy of
+    // it is excluded — otherwise editing a card flags its own duplicate as "already exists".
+    const editedApiRecord =
+      excludeApiId != null
+        ? (apiPaymentMethods || []).find(
+            (p) => String(p.id ?? p.payment_method_id) === String(excludeApiId)
+          )
+        : null;
+    const editedSig =
+      (editedApiRecord && getApiPaymentMethodSignature(editedApiRecord)) ||
+      excludeSig ||
+      "";
 
     const duplicateInApi = (apiPaymentMethods || []).some((p) => {
       const pid = p.id ?? p.payment_method_id;
       if (excludeApiId != null && String(pid) === String(excludeApiId)) return false;
       const sig = getApiPaymentMethodSignature(p);
+      if (editedSig && sig === editedSig) return false; // another copy of the edited card
       return sig && sig === draftSig;
     });
     if (duplicateInApi) return "Payment Method already exists";
@@ -1062,7 +1197,7 @@ useEffect(() => {
       const pmLast4 = (pm.last4DigitCard || "").toString().replace(/\D/g, "").slice(0, 4);
       if (!brand || pmLast4.length !== 4) return false;
       const sig = `${brand}|${pmLast4}`;
-      if (excludeSig && sig === excludeSig) return false;
+      if (editedSig && sig === editedSig) return false;
       return sig === draftSig;
     });
     if (duplicateInLocal) return "Payment Method already exists";
@@ -1077,7 +1212,7 @@ useEffect(() => {
         .slice(-4);
       if (!brand || brand === "other" || rLast4.length !== 4) return false;
       const receiptSig = `${brand}|${rLast4}`;
-      if (excludeSig && receiptSig === excludeSig) return false;
+      if (editedSig && receiptSig === editedSig) return false;
       return receiptSig === draftSig;
     });
     if (duplicateInReceipts) return "Payment Method already exists";
@@ -1174,16 +1309,18 @@ useEffect(() => {
     };
   }, []);
 
-  // iOS/Android-style locked: make scrollable content non-interactive without dark overlay
+  // iOS/Android-style locked: make the editable fields/tags non-interactive without a
+  // dark overlay. Scoped to editableContentRef (not the whole scroll area) so receipt
+  // image/PDF thumbnails stay clickable for viewing/enlarging even when locked.
   useEffect(() => {
-    const el = scrollContentRef.current;
+    const el = editableContentRef.current;
     if (!el) return;
     if (editedTags.locked && !showSplitScreen) {
       el.setAttribute("inert", "");
     } else {
       el.removeAttribute("inert");
     }
-  }, [editedTags.locked, showSplitScreen]);
+  }, [editedTags.locked, showSplitScreen, selectedReceipt?.id]);
 
   // Enrich receipt_tax_values with tax_name and tax_rate from taxData for display
   const enrichedReceiptTaxValues = React.useMemo(() => {
@@ -1357,17 +1494,28 @@ useEffect(() => {
 
   const sanitizeMoneyInput = (raw) => {
     if (raw === null || raw === undefined) return "";
-    const cleaned = String(raw).replace(/[^0-9.]/g, "");
+    const str = String(raw);
+    // Preserve a leading minus so the +/- sign toggle can produce negative amounts.
+    const isNeg = str.trim().startsWith("-");
+    const cleaned = str.replace(/[^0-9.]/g, "");
     if (!cleaned) return "";
     const [intPartRaw = "", decRaw = ""] = cleaned.split(".");
     const intPart = intPartRaw.replace(/^0+(?=\d)/, "") || (intPartRaw ? "0" : "");
     const decPart = (decRaw || "").slice(0, 2);
-    return cleaned.includes(".") ? `${intPart || "0"}.${decPart}` : intPart;
+    const body = cleaned.includes(".") ? `${intPart || "0"}.${decPart}` : intPart;
+    return isNeg && parseFloat(body) !== 0 ? `-${body}` : body;
   };
   /** Block non-numeric keys from monetary inputs at the keyboard level. */
   const preventInvalidMoneyKey = (e) => {
     if (e.ctrlKey || e.metaKey) return; // allow Ctrl+C, Ctrl+V, Ctrl+A, etc.
-    const allowed = ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab", "Enter", "Home", "End"];
+    // Enter/Return commits the field just like tapping out with the mouse (blur):
+    // it triggers onBlur, which formats the value to two decimals.
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.currentTarget.blur();
+      return;
+    }
+    const allowed = ["Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab", "Home", "End"];
     if (allowed.includes(e.key)) return;
     if (/^\d$/.test(e.key)) return; // digits 0-9
     if (e.key === ".") return;       // decimal point
@@ -1473,6 +1621,12 @@ useEffect(() => {
     if (field === "subtotal" || field === "purchasePrice" || field === "tip") {
       value = sanitizeMoneyInput(value);
     }
+    if (
+      ["product_date", "storeName", "expense_type", "purchasePrice"].includes(field) &&
+      splitPrereqError
+    ) {
+      setSplitPrereqError(null);
+    }
     setEditedReceipt((prev) => {
       const newData = { ...prev, [field]: value };
 
@@ -1490,11 +1644,22 @@ useEffect(() => {
       // When total changes, recalculate subtotal and tax amounts from rates
       if (field === "purchasePrice") {
         const total = parseFloat(value) || 0;
+        // Use the currently-displayed tax lines as the base. When the user hasn't
+        // touched taxes yet, editedReceipt.receipt_tax_values is undefined, so fall
+        // back to the enriched lines — otherwise clearing the total would leave the
+        // displayed (stale) amounts untouched.
+        const baseTaxes =
+          newData.receipt_tax_values && newData.receipt_tax_values.length
+            ? newData.receipt_tax_values
+            : enrichedReceiptTaxValues.filter(
+                (t) => !(t.tax_name || "").toLowerCase().includes("tip"),
+              );
+        // The tip is preserved (treated like the tax lines); when it exceeds the total
+        // the subtotal/taxes recompute negative (red) instead of being zeroed/capped.
         const tipAmount = parseFloat(newData.tip) || 0;
-        const taxValues = newData.receipt_tax_values || [];
         const recalculated = recalculateReceiptTotalsFromFixedTotal(
           total,
-          taxValues,
+          baseTaxes,
           tipAmount,
         );
         newData.subtotal = recalculated.subtotal;
@@ -1551,34 +1716,6 @@ useEffect(() => {
 
   const getPaymentDisplayForReceipt = (r) => getPaymentDisplayFromReceipt(r);
 
-  const getReceiptsMatchingPaymentMethod = (methodName) => {
-    const { issuer: oldIssuer, last4: oldLast4 } = parsePaymentDisplay(methodName || "");
-    const targetKey = normalizePaymentMatchKey(methodName);
-    const exactByDisplay = (receipts || []).filter(
-      (r) => normalizePaymentMatchKey(getPaymentDisplayForReceipt(r)) === targetKey
-    );
-    const exactIds = new Set(exactByDisplay.map((r) => r.id));
-    const additionalByFields = oldLast4
-      ? (receipts || []).filter((r) => {
-          if (exactIds.has(r.id)) return false;
-          const rLast4 = (r.last_4_digit_card || r.last4DigitCard || "").toString().trim();
-          if (rLast4 !== oldLast4) return false;
-          const rIssuer = (r.card_issuer_name || r.cardIssuerName || "").toString().trim().toLowerCase();
-          const rTypeLower = (r.paymentType || r.payment_type || "")
-            .toString()
-            .replace(/\s*\*\d{3,4}$/, "")
-            .trim()
-            .toLowerCase();
-          const oldIssuerLower = (oldIssuer || "").toLowerCase();
-          return (
-            (oldIssuerLower && rIssuer === oldIssuerLower) ||
-            (oldIssuerLower && rTypeLower === oldIssuerLower)
-          );
-        })
-      : [];
-    return [...exactByDisplay, ...additionalByFields];
-  };
-
   const handleDeletePaymentInDropdown = (method) => {
     if (isCashPaymentMethod(method)) return; // safety
     setPendingPayDeleteMethod(method);
@@ -1592,18 +1729,11 @@ useEffect(() => {
     if (!method) return;
     setIsPayMethodSaving(true);
     try {
-      const matchingReceipts = getReceiptsMatchingPaymentMethod(method);
+      const clearPayment = getClearPaymentMethodUpdates();
+      const matchingReceipts = getReceiptsMatchingPaymentMethod(receipts || [], method);
       if (matchingReceipts.length > 0) {
         await Promise.all(
-          matchingReceipts.map((r) =>
-            // Deleting a payment method clears it back to "Select Payment Method"
-            // (empty), not "Cash".
-            updateReceipt(r.id, {
-              paymentType: "",
-              card_issuer_name: "",
-              last_4_digit_card: "",
-            })
-          )
+          matchingReceipts.map((r) => updateReceipt(r.id, clearPayment))
         );
       }
       const apiMatch = (apiPaymentMethods || []).find(
@@ -1616,12 +1746,9 @@ useEffect(() => {
       hidePaymentMethod(method);
       deleteCustomPaymentMethod(method);
       await Promise.all([fetchApiPaymentMethods(), silentRefreshData(0)]);
-      const targetKey = normalizePaymentMatchKey(method);
-      if (normalizePaymentMatchKey(getPaymentDisplayForReceipt(editedReceipt)) === targetKey) {
-        // Reset to "Select Payment Method" (empty), not "Cash".
-        handleFieldChange("paymentType", "");
-        handleFieldChange("card_issuer_name", "");
-        handleFieldChange("last_4_digit_card", "");
+      const currentPaymentFields = { ...selectedReceipt, ...editedReceipt };
+      if (getReceiptsMatchingPaymentMethod([currentPaymentFields], method).length > 0) {
+        setEditedReceipt((prev) => ({ ...prev, ...getClearPaymentMethodUpdates() }));
       }
       setToast({ isVisible: true, message: "Payment Method Deleted", type: "success" });
     } catch (err) {
@@ -1656,7 +1783,11 @@ useEffect(() => {
     setNewPaymentCategoryType(
       _pet[method] || paymentCategoryFromApiEnum(apiMatch?.default_payment_category) || ""
     );
-    setPayModalEditMode({ name: method, apiId });
+    // Store the signature of the payment being edited using its RESOLVED card type, so the
+    // duplicate check can exclude it. Inferring the brand from the display name fails for
+    // custom issuers (e.g. "And Bank 1 *1111" → "Other"), which made it flag itself.
+    const originalSig = getPaymentSignature(method, cardType, _pct);
+    setPayModalEditMode({ name: method, apiId, originalSig });
     setPayModalError(null);
     setShowAddPaymentModal(true);
     setShowPaymentDropdown(false);
@@ -1911,11 +2042,18 @@ useEffect(() => {
     });
   };
 
-  // Tax amount input: keep total fixed; recalc subtotal and all tax rows from rates.
+  // Tax amount input: editing ONE tax changes only that tax line and the subtotal
+  // (the subtotal absorbs the change). Other tax lines and the tip are left untouched.
   const handleTaxAmountChange = (index, rawValue) => {
     const numeric = sanitizeMoneyInput(rawValue);
     const fieldKey = index === 0 ? "tax0" : "tax1";
-    setCurrencyInputs((p) => ({ ...p, [fieldKey]: numeric ? `$${numeric}` : "$" }));
+    const nNum = parseFloat(numeric);
+    setCurrencyInputs((p) => ({
+      ...p,
+      [fieldKey]: numeric
+        ? (nNum < 0 ? `-$${Math.abs(nNum).toFixed(2)}` : `$${numeric}`)
+        : "$",
+    }));
     setEditedReceipt((prev) => {
       const currentTaxValues =
         prev.receipt_tax_values ||
@@ -1923,8 +2061,39 @@ useEffect(() => {
           (t) => !(t.tax_name || "").toLowerCase().includes("tip")
         ) ||
         [];
+      // Only the edited line changes (marked manual); every other line stays as-is.
       const updatedTaxValues = currentTaxValues.map((t, i) =>
-        i === index ? { ...t, tax_amount: numeric === "" ? 0 : parseFloat(numeric) } : t
+        i === index
+          ? { ...t, tax_amount: numeric === "" ? 0 : parseFloat(numeric), _isManual: true }
+          : t
+      );
+      // Respect an explicit $0/cleared total (?? not ||) so it isn't replaced by the original.
+      const total =
+        parseFloat(prev.purchasePrice ?? r.total ?? r.purchasePrice ?? 0) || 0;
+      const tipAmount =
+        parseFloat(prev.tip) ||
+        (tipTax?.tax_amount ? parseFloat(tipTax.tax_amount) : 0);
+      // Keep TOTAL fixed; the subtotal absorbs the change so the other taxes don't move.
+      const taxSum = updatedTaxValues.reduce(
+        (s, t) => s + (parseFloat(t.tax_amount) || 0),
+        0,
+      );
+      const subtotal = parseFloat((total - taxSum - tipAmount).toFixed(2));
+      return {
+        ...prev,
+        receipt_tax_values: updatedTaxValues,
+        subtotal,
+        purchasePrice: prev.purchasePrice,
+      };
+    });
+  };
+
+  // Revert a manually overridden tax line back to rate-based auto-calculation.
+  const handleResetTaxAmount = (index) => {
+    setEditedReceipt((prev) => {
+      const currentTaxValues = prev.receipt_tax_values || [];
+      const updatedTaxValues = currentTaxValues.map((t, i) =>
+        i === index ? { ...t, _isManual: false } : t
       );
       const total =
         parseFloat(prev.purchasePrice) ||
@@ -1939,13 +2108,34 @@ useEffect(() => {
         updatedTaxValues,
         tipAmount,
       );
-      return {
-        ...prev,
-        receipt_tax_values,
-        subtotal,
-        purchasePrice: prev.purchasePrice,
-      };
+      return { ...prev, receipt_tax_values, subtotal, purchasePrice: prev.purchasePrice };
     });
+  };
+
+  // ── +/- sign toggle for currency fields (Total, Tip, Tax — not read-only Subtotal) ──
+  const formatSignedMoney = (n) =>
+    n < 0 ? `-$${Math.abs(n).toFixed(2)}` : `$${n.toFixed(2)}`;
+
+  const toggleTotalSign = () => {
+    const cur = parseFloat(editedReceipt.purchasePrice ?? r.purchasePrice ?? r.total ?? 0) || 0;
+    if (cur === 0) return; // nothing to toggle
+    const neg = -cur;
+    setCurrencyInputs((p) => ({ ...p, total: formatSignedMoney(neg) }));
+    handleFieldChange("purchasePrice", neg.toString());
+  };
+
+  const toggleTipSign = () => {
+    const cur = parseFloat(editedReceipt.tip ?? 0) || 0;
+    if (cur === 0) return;
+    const neg = -cur;
+    setCurrencyInputs((p) => ({ ...p, tip: formatSignedMoney(neg) }));
+    handleFieldChange("tip", neg.toString());
+  };
+
+  const toggleTaxSign = (index, currentAmount) => {
+    const cur = parseFloat(currentAmount ?? 0) || 0;
+    if (cur === 0) return;
+    handleTaxAmountChange(index, (-cur).toString());
   };
 
   // ── Tax field validation helpers ─────────────────────────────────────────
@@ -2402,14 +2592,17 @@ useEffect(() => {
       return;
     }
 
-    const selectedLogoUrl =
-      selectedLogoIndex !== null
-        ? logoOptions[selectedLogoIndex]?.storeUrl || ""
-        : newMerchantLogo || "";
+    const selectedOpt =
+      selectedLogoIndex !== null ? logoOptions[selectedLogoIndex] : null;
 
     setIsSavingMerchant(true);
     setAddMerchantError(null);
     try {
+      // Upload the chosen logo to Categorizr storage so it persists everywhere.
+      const selectedLogoUrl = await materializeMerchantLogo(
+        selectedOpt?.storeUrl || newMerchantLogo || "",
+        selectedOpt?.displayUrl || "",
+      );
       const addResult = await addApiMerchant(name, selectedLogoUrl);
       if (!addResult?.ok) {
         setAddMerchantError(addResult?.error || "Failed to add merchant");
@@ -2491,8 +2684,14 @@ useEffect(() => {
     setEditMerchantError(null);
     const oldName = editingMerchant.name;
     const newName = editMerchantName.trim();
-    const newLogo = editMerchantLogo || editingMerchant.image || "";
+    const editOpt =
+      editSelectedLogoIndex !== null ? editLogoOptions[editSelectedLogoIndex] : null;
     try {
+      // Upload the chosen logo to Categorizr storage so it persists everywhere.
+      const newLogo = await materializeMerchantLogo(
+        editOpt?.storeUrl || editMerchantLogo || editingMerchant.image || "",
+        editOpt?.displayUrl || "",
+      );
       const affected = (receipts || []).filter(
         (r) => (r.storeName || r.store_name || "").toLowerCase() === oldName.toLowerCase()
       );
@@ -2629,6 +2828,59 @@ useEffect(() => {
     }
     if (data?.fullImageUrl) return data.fullImageUrl;
     throw new Error("No URL returned from upload");
+  };
+
+  // Match mobile: persist a chosen merchant logo on Categorizr storage so it shows
+  // everywhere (server, mobile, web) indefinitely. External image-search URLs
+  // (logo.wine, gstatic, etc.) expire; upload the image to our own storage and
+  // return that permanent URL. Falls back to the original URL if it can't upload.
+  const materializeMerchantLogo = async (...candidateUrls) => {
+    const candidates = candidateUrls
+      .map((u) => (u || "").toString().trim())
+      .filter(Boolean);
+    const firstUrl = candidates[0] || "";
+    if (!firstUrl) return "";
+    // If any candidate is already Categorizr-hosted, keep it as-is.
+    const hosted = candidates.find((u) =>
+      /categorizr-images-production|storage\.googleapis\.com/i.test(u),
+    );
+    if (hosted) return hosted;
+
+    const fetchImageBlob = async (u) => {
+      try {
+        const proxied = u.includes("/api/imageproxy?url=")
+          ? u
+          : `/api/imageproxy?url=${encodeURIComponent(u)}`;
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 12000);
+        const resp = await fetch(proxied, { signal: ctrl.signal });
+        clearTimeout(timer);
+        if (!resp.ok) return null;
+        const blob = await resp.blob();
+        if (!blob || blob.size === 0 || !/^image\//i.test(blob.type || "")) return null;
+        return blob;
+      } catch {
+        return null;
+      }
+    };
+
+    for (const u of candidates) {
+      const blob = await fetchImageBlob(u);
+      if (!blob) continue;
+      try {
+        const ext = (blob.type.split("/")[1] || "png").split("+")[0];
+        const file = new File([blob], `merchant-logo-${Date.now()}.${ext}`, {
+          type: blob.type,
+        });
+        const uploaded = await uploadPhotoToMedia(file);
+        // uploadmediaV1 attaches the new URL to receipts — clean that up.
+        if (repairReceiptMediaOnServer) void repairReceiptMediaOnServer({ force: true });
+        if (uploaded) return uploaded;
+      } catch {
+        /* try next candidate */
+      }
+    }
+    return firstUrl;
   };
 
   const handleAddPhotoSelect = async (e) => {
@@ -2883,14 +3135,16 @@ useEffect(() => {
 
   /** Create a blank split entry */
   const createSplit = () => {
-    const mainTotal    = parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0;
-    const mainSubtotal = parseFloat(editedReceipt.subtotal) || parseFloat(selectedReceipt?.subtotal) || mainTotal;
-    const mainTaxes    = editedReceipt.receipt_tax_values || selectedReceipt?.receipt_tax_values || [];
+    // Tip is tracked separately; never carry a tip line into a split's tax list.
+    const mainTaxes = filterNonTipReceiptTaxValues(
+      editedReceipt.receipt_tax_values || selectedReceipt?.receipt_tax_values || []
+    );
     return {
       _id: Date.now() + Math.random(),
       receipt_category: editedReceipt.receipt_category ?? selectedReceipt?.receipt_category ?? 0,
       expense_type: editedReceipt.expense_type || selectedReceipt?.expense_type || "",
       subtotal: "",
+      tip: "",
       purchasePrice: "",
       product_name: "",
       receipt_tax_values: mainTaxes.map(t => ({ ...t, id: 0, tax_amount: "" })),
@@ -2899,15 +3153,20 @@ useEffect(() => {
 
   /** Open the split screen — validates required fields first */
   const handleOpenSplit = () => {
-    const total = parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0;
-    const storeName = editedReceipt.storeName || selectedReceipt?.storeName || "";
-    const missing = [];
-    if (!storeName.trim()) missing.push("Merchant Name");
-    if (!total) missing.push("Total Amount");
-    if (missing.length) {
-      setSplitError(`Please fill in: ${missing.join(", ")} before splitting.`);
+    const msg = getSplitReceiptValidationMessage({
+      // Use ?? (not ||) so a field the user explicitly cleared to "" is respected and
+      // still fails validation, instead of falling back to the original receipt value.
+      product_date: editedReceipt.product_date ?? selectedReceipt?.product_date,
+      storeName: editedReceipt.storeName ?? selectedReceipt?.storeName,
+      expense_type: editedReceipt.expense_type ?? selectedReceipt?.expense_type,
+      purchasePrice: editedReceipt.purchasePrice ?? selectedReceipt?.purchasePrice,
+    });
+    if (msg) {
+      setSplitPrereqError(msg);
+      setShowOptionsMenu(false);
       return;
     }
+    setSplitPrereqError(null);
     setSplitError(null);
     setSplits([]);
     setSplitErrors({});
@@ -2916,7 +3175,7 @@ useEffect(() => {
     setShowOptionsMenu(false);
   };
 
-  const handleForwardSuccess = async () => {
+  const handleForwardSuccess = async (recipientUserId, responseData) => {
     if (!selectedReceipt?.id) return;
 
     const isReceived = isNetworkReceivedReceipt(selectedReceipt);
@@ -2928,7 +3187,63 @@ useEffect(() => {
     setSelectedReceipt((prev) => (prev ? { ...prev, ...forwardedPatch } : prev));
     setEditedReceipt((prev) => ({ ...prev, receipt_forwarded: "1" }));
 
-    await updateReceipt(selectedReceipt.id, forwardedPatch);
+    await markReceiptAsForwarded(selectedReceipt.id);
+
+    // The server does not copy expense_type when creating the recipient's receipt.
+    // forwardreceiptv2 returns no receipt ID, so we fetch the recipient's list, find
+    // the new receipt by fk_original_receipt_id, and patch it from the sender's side.
+    const expenseToForward = (selectedReceipt.expense_type || "").trim();
+    if (expenseToForward && recipientUserId) {
+      const sourceReceiptId = String(selectedReceipt.id);
+      const token = localStorage.getItem("token");
+      if (token) {
+        (async () => {
+          try {
+            const res = await fetch(
+              `/api/user/getreceiptfromdatev1?fk_user_id=${recipientUserId}&date_time_stamp=0`,
+              { headers: { "Content-Type": "application/json", Accesstoken: token } }
+            );
+            if (!res.ok) return;
+            const data = await res.json();
+            if (!Array.isArray(data)) return;
+            // Find receipt(s) where this source was the original — newest first
+            const matching = data
+              .filter((r) => String(r.fk_original_receipt_id) === sourceReceiptId)
+              .sort((a, b) => Number(b.create_date || 0) - Number(a.create_date || 0));
+            if (matching.length === 0) return;
+            // The backend matches last_4_digit_card against the RECIPIENT's own cards,
+            // overwriting the sender's card brand/issuer. Compare and patch what differs.
+            const senderPayBase = (selectedReceipt.paymentType || "")
+              .replace(/\s*\*\d+/g, "").trim();
+            for (const newReceipt of matching) {
+              const needsExpense =
+                expenseToForward && !(newReceipt.expense_type || "").trim();
+              const recipientPayBase = (newReceipt.paymentType || "")
+                .replace(/\s*\*\d+/g, "").trim();
+              const needsPayment =
+                senderPayBase &&
+                recipientPayBase &&
+                senderPayBase.toLowerCase() !== recipientPayBase.toLowerCase();
+
+              if (!needsExpense && !needsPayment) continue;
+
+              const patch = { id: String(newReceipt.id) };
+              if (needsExpense) patch.expense_type = expenseToForward;
+              if (needsPayment) {
+                patch.paymentType = senderPayBase;
+                patch.card_issuer_name = (selectedReceipt.card_issuer_name || "").trim();
+                patch.last_4_digit_card = (selectedReceipt.last_4_digit_card || "").trim();
+              }
+              fetch("/api/receipt/updateReceiptv1", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Accesstoken: token },
+                body: JSON.stringify(patch),
+              }).catch(() => {});
+            }
+          } catch { /* ignore */ }
+        })();
+      }
+    }
 
     setToast({ isVisible: true, message: "Receipt forwarded successfully.", type: "success" });
     silentRefreshData?.(1500);
@@ -2936,7 +3251,7 @@ useEffect(() => {
 
   /** Update a field on a specific split, auto-calculating tax/total like the main form */
   const updateSplitField = (idx, field, value) => {
-    if (field === "subtotal" || field === "purchasePrice") {
+    if (field === "subtotal" || field === "purchasePrice" || field === "tip") {
       value = sanitizeMoneyInput(value);
     }
     if (field === "product_name") {
@@ -2944,6 +3259,7 @@ useEffect(() => {
     }
     const mainSubtotal = parseFloat(editedReceipt.subtotal) || parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.subtotal) || 0;
     const mainTotal    = parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0;
+    const mainTip      = parseFloat(editedReceipt.tip) || parseFloat(selectedReceipt?.tip) || 0;
 
     if (field === "subtotal" && mainSubtotal > 0 && (parseFloat(value) || 0) > mainSubtotal) {
       setAlertMsg(`Subtotal cannot exceed $${mainSubtotal.toFixed(2)}`);
@@ -2953,30 +3269,61 @@ useEffect(() => {
       setAlertMsg(`Total cannot exceed $${mainTotal.toFixed(2)}`);
       return;
     }
+    if (field === "tip" && mainTip > 0 && (parseFloat(value) || 0) > mainTip) {
+      setAlertMsg(`Tip cannot exceed $${mainTip.toFixed(2)}`);
+      return;
+    }
 
     setSplits(prev => {
       const updated = [...prev];
       const split   = updated[idx];
       if (field === "purchasePrice") {
+        // Subtotal is derived (read-only): subtotal = (total − tip) / (1 + Σrate/100)
         const totalNum = parseFloat(value) || 0;
         if (totalNum > 0) {
           const rateSum = (split.receipt_tax_values || []).reduce((s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0);
-          const sub = parseFloat((totalNum / (1 + rateSum)).toFixed(2));
+          // Seed tip proportionally to this split's share of the total the first time;
+          // once the user has set a tip, keep it fixed (main-form model).
+          const tipTouched = split.tip !== "" && split.tip != null;
+          const tipNum = tipTouched
+            ? (parseFloat(split.tip) || 0)
+            : (mainTip > 0 && mainTotal > 0
+                ? parseFloat((mainTip * (totalNum / mainTotal)).toFixed(2))
+                : 0);
+          const sub = parseFloat(((totalNum - tipNum) / (1 + rateSum)).toFixed(2));
           const taxes = (split.receipt_tax_values || []).map(t => ({
             ...t,
-            tax_amount: sub > 0 ? parseFloat(((parseFloat(t.tax_rate) / 100) * sub).toFixed(2)) : "",
+            tax_amount: sub !== 0 ? parseFloat(((parseFloat(t.tax_rate) / 100) * sub).toFixed(2)) : "",
           }));
-          updated[idx] = { ...split, purchasePrice: value, subtotal: sub > 0 ? sub.toString() : "", receipt_tax_values: taxes };
+          updated[idx] = {
+            ...split,
+            purchasePrice: value,
+            tip: mainTip > 0 ? tipNum.toString() : split.tip,
+            subtotal: sub !== 0 ? sub.toString() : "",
+            receipt_tax_values: taxes,
+          };
         } else {
           updated[idx] = { ...split, purchasePrice: value, subtotal: "", receipt_tax_values: (split.receipt_tax_values || []).map(t => ({ ...t, tax_amount: "" })) };
         }
+      } else if (field === "tip") {
+        // Changing tip KEEPS TOTAL FIXED and recomputes subtotal + taxes.
+        const tipNum   = parseFloat(value) || 0;
+        const totalNum = parseFloat(split.purchasePrice) || 0;
+        const rateSum  = (split.receipt_tax_values || []).reduce((s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0);
+        const sub = totalNum > 0 ? parseFloat(((totalNum - tipNum) / (1 + rateSum)).toFixed(2)) : 0;
+        const taxes = (split.receipt_tax_values || []).map(t => ({
+          ...t,
+          tax_amount: sub !== 0 ? parseFloat(((parseFloat(t.tax_rate) / 100) * sub).toFixed(2)) : "",
+        }));
+        updated[idx] = { ...split, tip: value, subtotal: totalNum > 0 ? sub.toString() : "", receipt_tax_values: taxes };
       } else if (field === "subtotal") {
         const sub = parseFloat(value) || 0;
+        const tipNum = parseFloat(split.tip) || 0;
         const taxes = (split.receipt_tax_values || []).map(t => ({
           ...t,
           tax_amount: sub > 0 ? parseFloat(((parseFloat(t.tax_rate) / 100) * sub).toFixed(2)) : "",
         }));
-        const total = sub + taxes.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0);
+        const total = sub + taxes.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0) + tipNum;
         updated[idx] = { ...split, subtotal: value, receipt_tax_values: taxes, purchasePrice: sub > 0 ? parseFloat(total.toFixed(2)) : "" };
       } else {
         updated[idx] = { ...split, [field]: value };
@@ -3028,6 +3375,7 @@ useEffect(() => {
     try {
       const fkUserId   = parseInt(localStorage.getItem("fk_user_id")) || 0;
       const mainTotal  = parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0;
+      const mainTip    = parseFloat(editedReceipt.tip) || parseFloat(selectedReceipt?.tip) || 0;
       const storeName  = editedReceipt.storeName || selectedReceipt?.storeName || "";
       const storeImage = editedReceipt.store_image || selectedReceipt?.store_image || "";
       const paymentType = editedReceipt.paymentType || selectedReceipt?.paymentType || "";
@@ -3045,49 +3393,120 @@ useEffect(() => {
         (selectedReceipt?.card_issuer_name ?? selectedReceipt?.cardIssuerName ?? "")
           .toString()
           .trim();
+      // Splits inherit the parent's date. If the parent is undated ("No Date"), the
+      // splits stay undated too (sentinel), rather than silently getting today's date.
       let productDate = Number(editedReceipt.product_date || selectedReceipt?.product_date) || 0;
       if (!productDate || productDate < 1000000) {
-        productDate = todayLocalCalendarUnix();
+        productDate = NO_DATE_SENTINEL_UNIX;
       }
       const receiptTag = ["0","0","0","0","0","0","0"].join(",");
 
-      // Create a new receipt for each split
+      // Gather all image URLs from both editable fields + any photos added this session,
+      // so split receipts inherit the full image set of the original receipt.
+      const splitMediaUrls = collectReceiptMediaUrlsForSave();
+      const splitCombinedImages = buildCombinedMediaField(splitMediaUrls);
+
+      // Create a new receipt for each split; capture IDs + expense/category for the
+      // post-create patch below (addReceiptv1 does not persist expense_type — see the
+      // updateReceiptv1 patch loop after this).
+      const newSplitPatches = [];
       for (const split of splits) {
         const splitSubtotal = parseFloat(split.subtotal) || 0;
-        const taxValues = (split.receipt_tax_values || []).map(t => ({
+        const splitTip      = parseFloat(split.tip) || 0;
+        const taxValues = filterNonTipReceiptTaxValues(split.receipt_tax_values || []).map(t => ({
           id: 0, fk_user_id: fkUserId, fk_receipt_id: 0,
           fk_tax_id: parseInt(t.fk_tax_id) || 0,
           tax_name: t.tax_name || "", tax_rate: t.tax_rate || "0",
           tax_amount: (parseFloat(t.tax_amount) || 0).toString(),
           created: 0, updated: 0,
         }));
+        // Persist tip like the main receipt does — as a "Tip" tax line.
+        const splitTipLine = buildReceiptTipTaxEntry({
+          tipAmount: splitTip,
+          subtotal: splitSubtotal,
+          taxDefinitions: taxData,
+          existingTipLine: null,
+          fk_receipt_id: 0,
+          fk_user_id: fkUserId,
+        });
+        if (splitTipLine) taxValues.push(splitTipLine);
         const splitTotal = parseFloat(split.purchasePrice) ||
           parseFloat((splitSubtotal + taxValues.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0)).toFixed(2));
-        await postNewReceiptForSplit({
+        const splitExpenseType =
+          split.expense_type || editedReceipt.expense_type || selectedReceipt?.expense_type || "";
+        const splitCategory = parseInt(split.receipt_category) || 0;
+        const splitProductName = split.product_name || "";
+        const splitNotes = split.notes || "";
+        const result = await postNewReceiptForSplit({
           id: 0,
           storeName,
-          product_name: split.product_name || "",
-          emailAttachment: selectedReceipt?.emailAttachment || "0",
+          product_name: splitProductName,
+          emailAttachment: splitCombinedImages || "0",
           purchasePrice: splitTotal.toString(),
           total_amount: splitTotal.toString(),
-          payment_category_type: parseInt(split.receipt_category) || 0,
+          payment_category_type: splitCategory,
           status: 0,
           paymentType,
           last_4_digit_card: last4,
           card_issuer_name: cardIssuerName,
           fk_original_receipt_id: "0",
           fk_forward_from_receipt_id: "0",
-          receipt_category: parseInt(split.receipt_category) || 0,
+          receipt_category: splitCategory,
           product_date: productDate,
-          expense_type: split.expense_type || editedReceipt.expense_type || selectedReceipt?.expense_type || "",
-          receipt_image: selectedReceipt?.receipt_image || "0",
+          expense_type: splitExpenseType,
+          receipt_image: "0",
           store_image: storeImage,
-          notes: "",
+          notes: splitNotes,
           receipt_forwarded: "0",
           receipt_tag: receiptTag,
           create_date: "",
           receipt_tax_values: taxValues,
         });
+        const newId = result?.id ? String(result.id) : null;
+        if (newId) {
+          newSplitPatches.push({
+            id: newId,
+            expense_type: splitExpenseType,
+            receipt_category: splitCategory,
+            product_name: splitProductName,
+            notes: splitNotes,
+            tax_values: taxValues,
+          });
+        }
+      }
+
+      // addReceiptv1 does not reliably persist expense_type / product_name /
+      // receipt_tax_values (and the backend de-dups the same image URL across concurrent
+      // create calls). Re-apply expense_type, category, describe-purchase, notes, taxes,
+      // and image to every split via updateReceiptv1, which does persist them.
+      if (newSplitPatches.length > 0) {
+        const token = localStorage.getItem("token");
+        // Await the patches so the refreshData() below reflects the corrected data.
+        await Promise.allSettled(
+          newSplitPatches.map((sp) => {
+            const patch = {
+              id: sp.id,
+              expense_type: sp.expense_type,
+              receipt_category: sp.receipt_category,
+              payment_category_type: sp.receipt_category,
+              product_name: sp.product_name,
+              notes: sp.notes,
+              // Re-link the taxes to the newly created split receipt id.
+              receipt_tax_values: (sp.tax_values || []).map((t) => ({
+                ...t,
+                fk_receipt_id: parseInt(sp.id) || 0,
+              })),
+            };
+            if (splitCombinedImages && splitCombinedImages !== "0") {
+              patch.emailAttachment = splitCombinedImages;
+            }
+            return fetch("/api/receipt/updateReceiptv1", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Accesstoken: token },
+              body: JSON.stringify(patch),
+            }).catch(() => {});
+          })
+        );
       }
 
       // Calculate remainder and update the existing receipt
@@ -3095,10 +3514,17 @@ useEffect(() => {
       const remainder   = parseFloat((mainTotal - splitsTotal).toFixed(2));
 
       if (remainder >= 0) {
-        // Back-calculate remainder subtotal using existing tax rates
-        const mainTaxRates = editedReceipt.receipt_tax_values || selectedReceipt?.receipt_tax_values || [];
+        // Leftover tip = main tip minus the tip already allocated across splits.
+        const splitsTipTotal = parseFloat(
+          splits.reduce((s, sp) => s + (parseFloat(sp.tip) || 0), 0).toFixed(2)
+        );
+        const remTip = parseFloat(Math.max(mainTip - splitsTipTotal, 0).toFixed(2));
+        // Back-calculate remainder subtotal (net of tip) using existing tax rates
+        const mainTaxRates = filterNonTipReceiptTaxValues(
+          editedReceipt.receipt_tax_values || selectedReceipt?.receipt_tax_values || []
+        );
         const rateSum      = mainTaxRates.reduce((s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0);
-        const remSubtotal  = rateSum > 0 ? parseFloat((remainder / (1 + rateSum)).toFixed(2)) : remainder;
+        const remSubtotal  = parseFloat(((remainder - remTip) / (1 + rateSum)).toFixed(2));
         const remTaxValues = mainTaxRates.map(t => ({
           ...t,
           id: parseInt(t.id) || 0,
@@ -3108,6 +3534,16 @@ useEffect(() => {
           created: parseInt(t.created) || 0,
           updated: parseInt(t.updated) || 0,
         }));
+        // Keep the leftover tip on the remaining receipt as a "Tip" tax line.
+        const remTipLine = buildReceiptTipTaxEntry({
+          tipAmount: remTip,
+          subtotal: remSubtotal,
+          taxDefinitions: taxData,
+          existingTipLine: findTipLineInReceiptTaxValues(selectedReceipt?.receipt_tax_values || []),
+          fk_receipt_id: selectedReceipt?.id || 0,
+          fk_user_id: fkUserId,
+        });
+        if (remTipLine) remTaxValues.push(remTipLine);
         // Build the updated existing receipt payload
         const receiptTagStr = [
           editedTags.locked ? "1" : "0",
@@ -3124,6 +3560,7 @@ useEffect(() => {
           purchasePrice: remainder.toString(),
           total_amount: remainder.toString(),
           subtotal: remSubtotal.toString(),
+          tip: remTip > 0 ? remTip.toFixed(2) : "",
           receipt_tax_values: remTaxValues,
           receipt_tag: receiptTagStr,
         });
@@ -3194,13 +3631,21 @@ useEffect(() => {
       });
       if (tipLine) receiptTaxValuesPayload.push(tipLine);
 
-      // Get store_image from selected merchant if changed
-      const selectedMerchantImage = getMerchantImage(editedReceipt.storeName);
-      const storeImageToSave =
-        selectedMerchantImage ||
-        editedReceipt.store_image ||
-        selectedReceipt.store_image ||
-        "";
+      // Edit screen: a removed/cleared merchant defaults to "Miscellaneous" so a receipt
+      // never saves with an empty name + a stale logo (which showed as "logo + —" on Home).
+      // "" (explicitly cleared) still wins over the original, but an empty result falls
+      // back to Miscellaneous.
+      const resolvedStoreName =
+        (editedReceipt.storeName ?? selectedReceipt.storeName ?? "").trim() ||
+        "Miscellaneous";
+      const isMiscMerchant = resolvedStoreName.toLowerCase() === "miscellaneous";
+      const selectedMerchantImage = getMerchantImage(resolvedStoreName);
+      const storeImageToSave = isMiscMerchant
+        ? selectedMerchantImage || "" // never carry over the previous merchant's logo
+        : selectedMerchantImage ||
+          editedReceipt.store_image ||
+          selectedReceipt.store_image ||
+          "";
 
       // Determine card_issuer_name and last4 from payment type
       let last4 =
@@ -3253,12 +3698,15 @@ useEffect(() => {
         emailAttachment: combinedReceiptImages,
         receipt_tag: receiptTag,
         receipt_tax_values: receiptTaxValuesPayload,
+        storeName: resolvedStoreName,
         store_image: storeImageToSave,
         card_issuer_name: cardIssuerName,
         paymentType: finalPaymentTypeForAPI || "", // Send WITHOUT *last4 to API
         last_4_digit_card: last4 || "", // Send separately
-        // Saving a draft receipt marks it as verified so it moves to the regular list
+        // Saving a draft receipt marks it as verified so it moves to the regular list.
+        // Saving a new forwarded receipt (blue "New" highlight) also clears the highlight.
         ...(isDraft ? { is_verify: "1", is_draft: "0" } : {}),
+        ...(isNewForwardedReceipt(selectedReceipt) ? { is_verify: "1" } : {}),
       };
 
       const success = await updateReceipt(selectedReceipt.id, updatedData);
@@ -3269,6 +3717,29 @@ useEffect(() => {
         // so it appears in Filter → Expense Category without waiting for a refresh.
         if (updatedData.expense_type && updatedData.expense_type.trim()) {
           addExpenseCategory(updatedData.expense_type.trim());
+        }
+        // Likewise, ensure the receipt's payment method exists as a manageable API
+        // record right away so it shows in Settings and Filter immediately (not only
+        // after the next background refresh's backfill). Create only a genuinely new
+        // card with a valid 4-digit last4 that isn't already in the API.
+        if (last4 && /^\d{4}$/.test(last4) && !/cash/i.test(cardIssuerName || "")) {
+          const alreadyInApi = (apiPaymentMethods || []).some((m) => {
+            if (getLast4FromPaymentApiRecord(m) !== last4) return false;
+            const eIssuer = (m.card_issuer_name || "").trim().toLowerCase();
+            return eIssuer === (cardIssuerName || "").trim().toLowerCase();
+          });
+          if (!alreadyInApi) {
+            const brandFromIssuer = inferCardTypeFromPayment(cardIssuerName || "");
+            const resolvedBrand =
+              brandFromIssuer !== "Other"
+                ? brandFromIssuer
+                : inferCardTypeFromPayment(finalPaymentTypeForAPI || "") || "Other";
+            void addApiPaymentMethod(
+              { cardIssuerName, cardTypeBrand: resolvedBrand, last4 },
+              "",
+              updatedData.expense_type || ""
+            );
+          }
         }
         // Update local state and close popup
         setSelectedReceipt((prev) => ({
@@ -3490,13 +3961,19 @@ useEffect(() => {
     });
     if (tipLine) receiptTaxValuesPayload.push(tipLine);
 
-    // Get store_image from selected merchant if changed
-    const selectedMerchantImage = getMerchantImage(editedReceipt.storeName);
-    const storeImageToSave =
-      selectedMerchantImage ||
-      editedReceipt.store_image ||
-      selectedReceipt.store_image ||
-      "";
+    // Edit screen: a removed/cleared merchant defaults to "Miscellaneous" so a receipt
+    // never saves with an empty name + a stale logo (which showed as "logo + —" on Home).
+    const resolvedStoreName =
+      (editedReceipt.storeName ?? selectedReceipt.storeName ?? "").trim() ||
+      "Miscellaneous";
+    const isMiscMerchant = resolvedStoreName.toLowerCase() === "miscellaneous";
+    const selectedMerchantImage = getMerchantImage(resolvedStoreName);
+    const storeImageToSave = isMiscMerchant
+      ? selectedMerchantImage || "" // never carry over the previous merchant's logo
+      : selectedMerchantImage ||
+        editedReceipt.store_image ||
+        selectedReceipt.store_image ||
+        "";
 
     // Determine card_issuer_name and last4 from payment type
     let last4 =
@@ -3540,12 +4017,15 @@ useEffect(() => {
       emailAttachment: combinedReceiptImages,
       receipt_tag: receiptTag,
       receipt_tax_values: receiptTaxValuesPayload,
+      storeName: resolvedStoreName,
       store_image: storeImageToSave,
       card_issuer_name: cardIssuerName,
       paymentType: finalPaymentTypeForAPI || "",
       last_4_digit_card: last4 || "",
-      // Keep draft transition behavior consistent with main Save Changes flow
+      // Keep draft transition behavior consistent with main Save Changes flow.
+      // Also clear the "New" highlight when saving a forwarded receipt.
       ...(isDraft ? { is_verify: "1", is_draft: "0" } : {}),
+      ...(isNewForwardedReceipt(selectedReceipt) ? { is_verify: "1" } : {}),
     };
 
     const success = await updateReceipt(selectedReceipt.id, updatedData);
@@ -3648,6 +4128,13 @@ useEffect(() => {
           notes: latestRec.notes || "",
           receipt_image: imageUrl,
           emailAttachment: imageUrl,
+          receiptImages: [
+            ...splitMediaField(latestRec.receipt_image || ""),
+            ...splitMediaField(latestRec.emailAttachment || ""),
+          ]
+            .map((u) => normalizeMediaUrl(u))
+            .filter((u) => u && u !== "0" && !["null", "undefined", "@"].includes(u.toLowerCase()))
+            .filter((u, i, arr) => arr.indexOf(u) === i),
           receiptFileName: `receipt_${latestRec.id || Date.now()}.jpg`,
         }),
       });
@@ -3754,14 +4241,19 @@ useEffect(() => {
         } else if (data.note) {
           message += ` ${data.note}`;
         }
+        // Primary: open the expense in QuickBooks Online. Secondary: read the
+        // expense back from QuickBooks (reliable even if the QBO UI won't load).
+        const verifyUrl = data.purchaseId
+          ? `${NODE_API_URL}/api/integrations/quickbooks/expense?fk_user_id=${encodeURIComponent(localStorage.getItem("fk_user_id") || "")}&purchaseId=${encodeURIComponent(data.purchaseId)}`
+          : null;
         setToast({
           isVisible: true,
-          message,
+          message: message,
           type: "success",
-          actionUrl: data.quickbooksUrl || null,
-          actionLabel: data.quickbooksUrlLabel || (data.quickbooksUrl
-            ? "Open this expense in QuickBooks"
-            : null),
+          actionUrl: data.quickbooksUrl || verifyUrl || null,
+          actionLabel: data.quickbooksUrl ? "Open in QuickBooks" : (verifyUrl ? "Verify in QuickBooks" : null),
+          actionUrl2: data.quickbooksUrl ? verifyUrl : null,
+          actionLabel2: data.quickbooksUrl && verifyUrl ? "Verify data" : null,
         });
 
         // Update local state only (no API call) - refreshData will fetch fresh data
@@ -3770,6 +4262,21 @@ useEffect(() => {
           setSelectedReceipt((prev) =>
             prev ? { ...prev, quickbooksLinked: true } : prev
           );
+          // Persist the linked id so the QuickBooks-linked flag (and the
+          // "update/delete in QuickBooks too?" prompts) survive a reload.
+          try {
+            const idStr = latestRec.id.toString();
+            const stored = JSON.parse(
+              localStorage.getItem("qbLinkedReceipts") || "[]"
+            );
+            const arr = Array.isArray(stored) ? stored.map((x) => x.toString()) : [];
+            if (!arr.includes(idStr)) {
+              arr.push(idStr);
+              localStorage.setItem("qbLinkedReceipts", JSON.stringify(arr));
+            }
+          } catch (persistErr) {
+            console.error("Failed to persist QuickBooks-linked receipt:", persistErr);
+          }
         }
 
         // Refresh receipt data from backend to ensure all data (including payment method logos) is up to date
@@ -5143,6 +5650,20 @@ Thank you for using our receipt management system.
                 </div>
               </div>
 
+              {/* Split prerequisite error banner */}
+              {splitPrereqError && (
+                <div className="flex items-center gap-2 bg-red-50 border-b border-red-300 px-4 py-2.5">
+                  <span className="text-red-700 text-sm font-medium flex-1">{splitPrereqError}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSplitPrereqError(null)}
+                    className="text-red-400 hover:text-red-600 text-lg leading-none flex-shrink-0"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+
               {/* Scrollable Content */}
               <div className="overflow-y-auto flex-1 min-h-0 relative">
               <div ref={scrollContentRef}>
@@ -5155,6 +5676,8 @@ Thank you for using our receipt management system.
                         const split = splits[activeSplitIndex];
                         const mainSubtotal = parseFloat(editedReceipt.subtotal) || parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.subtotal) || 0;
                         const mainTotal    = parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0;
+                        const mainTip      = parseFloat(editedReceipt.tip) || parseFloat(selectedReceipt?.tip) || 0;
+                        const hasTip       = mainTip > 0;
                         const fieldErr     = splitErrors[split._id] || {};
                         const hasAmountErr = !!fieldErr.amount;
                         return (
@@ -5185,20 +5708,19 @@ Thank you for using our receipt management system.
                                 ))}
                               </select>
                             </div>
-                            {/* Subtotal */}
+                            {/* Subtotal (read-only, derived from Total − Tip) */}
                             <div>
                               <div className="flex items-center justify-between mb-1">
-                                <label className={`text-xs font-bold uppercase tracking-wide ${hasAmountErr ? "text-red-500" : "text-gray-500"}`}>Subtotal *</label>
+                                <label className="text-xs font-bold uppercase tracking-wide text-gray-500">Subtotal</label>
                                 <span className="text-xs text-gray-400">Max: ${mainSubtotal.toFixed(2)}</span>
                               </div>
                               <div className="relative">
                                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
-                                <input type="number"
-                                  className={`w-full text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800 border ${hasAmountErr ? "border-red-400 ring-1 ring-red-300" : "border-blue-400"}`}
-                                  value={split.subtotal ?? ""} onChange={(e) => updateSplitField(activeSplitIndex, "subtotal", e.target.value)}
-                                  placeholder="0.00" min="0" max={mainSubtotal} step="0.01" />
+                                <input type="text" readOnly
+                                  className={`w-full text-sm pl-6 pr-2 py-2 rounded-md bg-gray-50 border border-gray-200 cursor-not-allowed ${parseFloat(split.subtotal) < 0 ? "text-red-600 font-medium" : "text-gray-700"}`}
+                                  value={split.subtotal !== "" && split.subtotal != null ? parseFloat(split.subtotal).toFixed(2) : ""}
+                                  placeholder="0.00" />
                               </div>
-                              {hasAmountErr && <p className="mt-1 text-xs text-red-500">{fieldErr.amount}</p>}
                             </div>
                             {/* Tax fields */}
                             {(split.receipt_tax_values || []).map((t, ti) => {
@@ -5225,6 +5747,26 @@ Thank you for using our receipt management system.
                                 </div>
                               );
                             })}
+                            {/* Tip — only when the original receipt has a tip */}
+                            {hasTip && (
+                              <div>
+                                <div className="flex items-center justify-between mb-1">
+                                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">
+                                    Tip{split.subtotal && parseFloat(split.subtotal) > 0
+                                      ? ` (${Math.round((parseFloat(split.tip || 0) / parseFloat(split.subtotal)) * 100)}%)`
+                                      : ""}
+                                  </label>
+                                  <span className="text-xs text-gray-400">Max: ${mainTip.toFixed(2)}</span>
+                                </div>
+                                <div className="relative">
+                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
+                                  <input type="number"
+                                    className="w-full border border-blue-400 text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800"
+                                    value={split.tip ?? ""} onChange={(e) => updateSplitField(activeSplitIndex, "tip", e.target.value)}
+                                    placeholder="0.00" min="0" max={mainTip} step="0.01" />
+                                </div>
+                              </div>
+                            )}
                             {/* Total */}
                             <div>
                               <div className="flex items-center justify-between mb-1">
@@ -5358,10 +5900,10 @@ Thank you for using our receipt management system.
                     {editedTags.locked && (
                       <div className="mx-3 sm:mx-6 mt-3 px-4 py-3 bg-red-50 border border-red-300 rounded-lg flex items-center gap-2 text-red-700 text-sm font-medium">
                         <img src={locked} alt="Locked" className="w-4 h-4 object-contain" />
-                        This receipt is locked. Unlock it in Tags below to edit and save changes.
+                        Please tap the lock button to unlock the screen and edit information
                       </div>
                     )}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 p-3 sm:p-6 text-sm text-gray-800">
+                    <div ref={editableContentRef} className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 p-3 sm:p-6 text-sm text-gray-800">
                       <div>
                         <h3 className="font-bold mb-4 text-gray-900 text-left">
                           RECEIPT INFORMATION
@@ -5388,16 +5930,35 @@ Thank you for using our receipt management system.
                         </div>
 
                         <div className="mb-4 text-align-left">
-                          <label className="font-bold">Date</label>
+                          <div className="flex items-center justify-between">
+                            <label className="font-bold">Date</label>
+                            {editedReceipt.product_date !== "" && (
+                              <button
+                                type="button"
+                                onClick={() => handleFieldChange("product_date", "")}
+                                className="text-red-500 hover:text-red-700 text-xs font-medium"
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </div>
                           <input
                             type="date"
                             className={inputClass}
-                            value={productDateToInputValue(
-                              editedReceipt.product_date,
-                              selectedReceipt?.create_date ?? editedReceipt?.create_date,
-                            )}
+                            value={
+                              editedReceipt.product_date === ""
+                                ? ""
+                                : productDateToInputValue(
+                                    editedReceipt.product_date,
+                                    selectedReceipt?.create_date ?? editedReceipt?.create_date,
+                                  )
+                            }
                             onChange={(e) => {
-                              if (!e.target.value) return;
+                              if (!e.target.value) {
+                                // User cleared the date (native clear button or Clear link).
+                                handleFieldChange("product_date", "");
+                                return;
+                              }
                               const unix = parseDateInputToUnix(e.target.value);
                               if (unix) handleFieldChange("product_date", unix);
                             }}
@@ -5411,24 +5972,27 @@ Thank you for using our receipt management system.
                         >
                           <label className="font-bold">Merchant</label>
                           <div className="relative w-full">
-                            {(editedReceipt.storeName || r.storeName || r.merchant) ? (
-                              <div className="absolute left-2 top-1/2 transform -translate-y-1/2 z-10">
-                                <MerchantAvatar
-                                  name={
-                                    editedReceipt.storeName ||
-                                    r.storeName ||
-                                    r.merchant
-                                  }
-                                  explicitUrl={
-                                    getMerchantImage(editedReceipt.storeName) ||
-                                    r.store_image
-                                  }
-                                  className="w-5 h-5 mt-2"
-                                />
-                              </div>
-                            ) : null}
+                            {(() => {
+                              // Respect an explicitly cleared merchant ("" wins over the
+                              // original) so removing the merchant also removes its logo.
+                              const resolvedMerchant =
+                                editedReceipt.storeName ?? r.storeName ?? r.merchant ?? "";
+                              if (!resolvedMerchant) return null;
+                              const resolvedImage =
+                                getMerchantImage(resolvedMerchant) ||
+                                (editedReceipt.store_image ?? r.store_image ?? "");
+                              return (
+                                <div className="absolute left-2 top-1/2 transform -translate-y-1/2 z-10">
+                                  <MerchantAvatar
+                                    name={resolvedMerchant}
+                                    explicitUrl={resolvedImage}
+                                    className="w-5 h-5 mt-2"
+                                  />
+                                </div>
+                              );
+                            })()}
                             <input
-                              className={`${inputClass} ${(editedReceipt.storeName || r.storeName || r.merchant) ? "pl-8" : "pl-3"}`}
+                              className={`${inputClass} ${(editedReceipt.storeName ?? r.storeName ?? r.merchant ?? "") ? "pl-8" : "pl-3"}`}
                               value={
                                 editedReceipt.storeName ?? r.storeName ?? ""
                               }
@@ -5440,6 +6004,22 @@ Thank you for using our receipt management system.
                               onFocus={() => {
                                 setIsMerchantTyping(false);
                                 setShowMerchantDropdown(true);
+                              }}
+                              onBlur={() => {
+                                // Removing the merchant (leaving it empty) defaults to
+                                // "Miscellaneous" right away in the field — not just on save.
+                                // The delay lets a dropdown selection / Add Merchant win first.
+                                setTimeout(() => {
+                                  setEditedReceipt((prev) => {
+                                    const cur = (prev.storeName ?? r.storeName ?? r.merchant ?? "").trim();
+                                    if (cur !== "") return prev;
+                                    return {
+                                      ...prev,
+                                      storeName: "Miscellaneous",
+                                      store_image: getMerchantImage("Miscellaneous") || "",
+                                    };
+                                  });
+                                }, 150);
                               }}
                               placeholder="Select or type merchant name"
                             />
@@ -5465,14 +6045,31 @@ Thank you for using our receipt management system.
                                   </div>
                                   {filteredMerchants.map((merchant, idx) => {
                                     const isMisc = merchant.name?.toLowerCase().trim() === "miscellaneous";
+                                    const currentMerchant = (editedReceipt.storeName ?? r.storeName ?? "").trim().toLowerCase();
+                                    const isSelected = !!merchant.name && currentMerchant === merchant.name.trim().toLowerCase();
                                     return (
                                     <div
                                       key={idx}
-                                      className="group px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2"
+                                      className={`group px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2 ${isSelected ? "bg-blue-50/70" : ""}`}
                                     >
                                       <div
                                         className="flex-1 flex items-center gap-2 cursor-pointer"
                                         onClick={() => {
+                                          if (isSelected) {
+                                            // Edit screen: unselecting a merchant defaults to
+                                            // "Miscellaneous" (which itself cannot be unselected).
+                                            if (isMisc) {
+                                              setShowMerchantDropdown(false);
+                                              return;
+                                            }
+                                            setEditedReceipt((prev) => ({
+                                              ...prev,
+                                              storeName: "Miscellaneous",
+                                              store_image: getMerchantImage("Miscellaneous") || "",
+                                            }));
+                                            setShowMerchantDropdown(false);
+                                            return;
+                                          }
                                           // Auto-fill expense category from receipt history if currently empty
                                           const suggestedCategory = getMerchantDefaultCategory(merchant.name);
                                           setEditedReceipt((prev) => ({
@@ -5492,6 +6089,9 @@ Thank you for using our receipt management system.
                                           className="w-5 h-5 mt-2"
                                         />
                                         <span className="truncate">{merchant.name}</span>
+                                        {isSelected && (
+                                          <Check size={15} className="text-blue-600 flex-shrink-0" />
+                                        )}
                                       </div>
                                       {!isMisc && (
                                         <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
@@ -5568,19 +6168,26 @@ Thank you for using our receipt management system.
                                     <Plus size={16} className="text-blue-600" />
                                     <span className="font-medium text-blue-600">Add Expense Category</span>
                                   </div>
-                                  {filteredCategories.map((category, idx) => (
+                                  {filteredCategories.map((category, idx) => {
+                                    const currentCategory = (editedReceipt.expense_type ?? r.expense_type ?? "").trim().toLowerCase();
+                                    const isSelected = !!category && currentCategory === category.trim().toLowerCase();
+                                    return (
                                     <div
                                       key={idx}
-                                      className="px-3 py-2 hover:bg-blue-50 text-left flex items-center justify-between group"
+                                      className={`px-3 py-2 hover:bg-blue-50 text-left flex items-center justify-between group ${isSelected ? "bg-blue-50/70" : ""}`}
                                     >
                                       <span
-                                        className="flex-1 cursor-pointer text-sm"
+                                        className="flex-1 cursor-pointer text-sm flex items-center gap-2"
                                         onClick={() => {
-                                          handleFieldChange("expense_type", category);
+                                          // Tapping the checked category unchecks it (clears the field).
+                                          handleFieldChange("expense_type", isSelected ? "" : category);
                                           setShowCategoryDropdown(false);
                                         }}
                                       >
-                                        {category}
+                                        <span className="truncate">{category}</span>
+                                        {isSelected && (
+                                          <Check size={15} className="text-blue-600 flex-shrink-0" />
+                                        )}
                                       </span>
                                       <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
                                         <button
@@ -5601,7 +6208,8 @@ Thank you for using our receipt management system.
                                         </button>
                                       </div>
                                     </div>
-                                  ))}
+                                    );
+                                  })}
                                 </div>
                               )}
                           </div>
@@ -5615,15 +6223,19 @@ Thank you for using our receipt management system.
                           <label className="font-bold">Payment Method</label>
                           <div className="relative w-full">
                             {(() => {
-                              // Merge editedReceipt with original receipt to ensure card_issuer_name is available
-                              const receiptForLogo = { ...r, ...editedReceipt };
-                              const logo = getPaymentLogo(receiptForLogo);
+                              const paymentFields = {
+                                paymentType: editedReceipt.paymentType ?? "",
+                                card_issuer_name: editedReceipt.card_issuer_name ?? "",
+                                last_4_digit_card: editedReceipt.last_4_digit_card ?? "",
+                                payment_logo_url: editedReceipt.payment_logo_url ?? "",
+                              };
+                              const logo = getPaymentInputLogo(paymentFields, getPaymentLogo);
                               return logo ? (
                                 <img
                                   src={logo}
                                   alt={
-                                    receiptForLogo.paymentType ||
-                                    receiptForLogo.card_issuer_name ||
+                                    paymentFields.paymentType ||
+                                    paymentFields.card_issuer_name ||
                                     ""
                                   }
                                   className="absolute left-2 top-1/2 transform -translate-y-1/2 w-5 h-5 rounded z-10 mt-1"
@@ -5631,26 +6243,14 @@ Thank you for using our receipt management system.
                               ) : null;
                             })()}
                             <input
-                              className={`${inputClass} ${
-                                (() => {
-                                  const receiptForLogo = {
-                                    ...r,
-                                    ...editedReceipt,
-                                  };
-                                  return getPaymentLogo(receiptForLogo);
-                                })()
-                                  ? "pl-8"
-                                  : ""
-                              }`}
+                              className={`${inputClass} pl-8`}
                               value={(() => {
-                                // Use getPaymentDisplayName to show card issuer name + last4 (like homepage)
                                 const receiptForDisplay = {
                                   ...r,
                                   ...editedReceipt,
                                 };
-                                return (
-                                  getPaymentDisplayName(receiptForDisplay) || ""
-                                );
+                                const display = getPaymentDisplayName(receiptForDisplay) || "";
+                                return display === "-" ? "" : display;
                               })()}
                               onChange={(e) => {
                                 // When user types, extract card issuer name and last4 from input
@@ -5768,15 +6368,36 @@ Thank you for using our receipt management system.
                                       : _pct[method]
                                         ? getPaymentLogo({ paymentType: _pct[method] })
                                         : getPaymentLogo(method);
+                                  const currentPaymentDisplay = getPaymentDisplayName({ ...r, ...editedReceipt }) || "";
+                                  // Case-insensitive so a forwarded/iOS payment (e.g. "VISA *1234"
+                                  // vs "Visa *1234") still matches and shows its checkmark.
+                                  const isSelected =
+                                    currentPaymentDisplay !== "-" &&
+                                    currentPaymentDisplay.trim().toLowerCase() ===
+                                      (method || "").trim().toLowerCase();
                                   return (
                                     <div
                                       key={idx}
-                                      className="px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2"
+                                      className={`px-3 py-2 hover:bg-blue-50 text-left flex items-center gap-2 ${isSelected ? "bg-blue-50/70" : ""}`}
                                       style={{ cursor: "default" }}
                                     >
                                     <div
                                       style={{ cursor: "pointer", flex: 1, display: "flex", alignItems: "center", gap: 8 }}
                                       onClick={() => {
+                                        if (isSelected) {
+                                          // Tapping the checked payment method unchecks it (clears the field).
+                                          setEditedReceipt((prev) => ({
+                                            ...prev,
+                                            paymentType: "",
+                                            card_issuer_name: "",
+                                            last_4_digit_card: "",
+                                            paymentBrand: "",
+                                            payment_logo_url: "",
+                                            paymentLogoUrl: "",
+                                          }));
+                                          setShowPaymentDropdown(false);
+                                          return;
+                                        }
                                         // Extract card issuer name and last4 from selected method
                                         const methodParts = method.split("*");
                                         const baseMethod =
@@ -5935,14 +6556,18 @@ Thank you for using our receipt management system.
                                           handleFieldChange("last_4_digit_card", "");
                                         }
 
-                                        // Auto-apply Personal/Business preference saved in Settings
-                                        const _petMap = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
-                                        const _storedExpType = _petMap[method];
-                                        if (_storedExpType === "Business") {
-                                          handleFieldChange("receipt_category", "1");
-                                        } else if (_storedExpType === "Personal") {
-                                          handleFieldChange("receipt_category", "0");
-                                        }
+                                        // Auto-apply the payment method's default expense
+                                        // type (Personal/Business) — checks the Settings
+                                        // local override AND the API record's
+                                        // default_payment_category. User selecting a
+                                        // different payment is a user-initiated change, so
+                                        // the receipt follows the new default.
+                                        const _defExpType = getPaymentDefaultExpenseType(
+                                          method,
+                                          apiPaymentMethods
+                                        );
+                                        const _rc = expenseTypeToReceiptCategory(_defExpType);
+                                        if (_rc) handleFieldChange("receipt_category", _rc);
 
                                         setShowPaymentDropdown(false);
                                       }}
@@ -5955,7 +6580,10 @@ Thank you for using our receipt management system.
                                           style={{ flexShrink: 0 }}
                                         />
                                       )}
-                                      <span style={{ flex: 1 }}>{method}</span>
+                                      <span className="truncate" style={{ minWidth: 0 }}>{method}</span>
+                                      {isSelected && (
+                                        <Check size={15} className="text-blue-600 flex-shrink-0" />
+                                      )}
                                     </div>
                                     {!isCashItem && (
                                       <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
@@ -5997,18 +6625,28 @@ Thank you for using our receipt management system.
                             type="text"
                             readOnly
                             className={`${inputClass} ${(() => {
-                              const sub =
-                                parseFloat(editedReceipt.subtotal) ||
-                                parseFloat(r.subtotal) ||
-                                0;
+                              // Prefer the edited subtotal even when it is exactly 0
+                              // (deleting the total sets it to 0 — don't fall back to old value).
+                              const hasEdited =
+                                editedReceipt.subtotal !== undefined &&
+                                editedReceipt.subtotal !== null &&
+                                editedReceipt.subtotal !== "";
+                              const sub = hasEdited
+                                ? parseFloat(editedReceipt.subtotal) || 0
+                                : parseFloat(r.subtotal) || 0;
                               return sub < 0 ? "text-red-500" : "";
                             })()}`}
                             value={(() => {
-                              const sub =
-                                parseFloat(editedReceipt.subtotal) ||
-                                parseFloat(r.subtotal) ||
-                                0;
+                              const hasEdited =
+                                editedReceipt.subtotal !== undefined &&
+                                editedReceipt.subtotal !== null &&
+                                editedReceipt.subtotal !== "";
+                              const sub = hasEdited
+                                ? parseFloat(editedReceipt.subtotal) || 0
+                                : parseFloat(r.subtotal) || 0;
                               const displaySub = Number.isFinite(sub) ? sub : 0;
+                              // Show negative subtotals (e.g. tip exceeds total) as -$X.XX in red.
+                              if (displaySub < 0) return `-$${Math.abs(displaySub).toFixed(2)}`;
                               return `$${displaySub > 0 ? displaySub.toFixed(2) : "0.00"}`;
                             })()}
                           />
@@ -6038,7 +6676,26 @@ Thank you for using our receipt management system.
                                       return `${d.tax_name} (${d.tax_rate}%)`;
                                     })()}
                                   </label>
-                                  <div className="flex items-center gap-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleTaxSign(0, currentTaxValues[0].tax_amount)}
+                                      title="Toggle + / − sign"
+                                      className="text-xs font-bold text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                                    >
+                                      +/−
+                                    </button>
+                                    {currentTaxValues[0]?._isManual && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleResetTaxAmount(0)}
+                                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                                        title="Revert to auto-calculated amount"
+                                      >
+                                        <RotateCcw size={11} />
+                                        Auto
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
                                       onClick={() => removeTaxFromReceipt(0)}
@@ -6054,7 +6711,10 @@ Thank you for using our receipt management system.
                                   value={
                                     currencyInputs.tax0 !== undefined
                                       ? currencyInputs.tax0
-                                      : `$${parseFloat(currentTaxValues[0].tax_amount || 0).toFixed(2)}`
+                                      : (() => {
+                                          const n = parseFloat(currentTaxValues[0].tax_amount || 0);
+                                          return n < 0 ? `-$${Math.abs(n).toFixed(2)}` : `$${n.toFixed(2)}`;
+                                        })()
                                   }
                                   onFocus={() => {
                                     const num = parseFloat(currentTaxValues[0].tax_amount);
@@ -6080,7 +6740,26 @@ Thank you for using our receipt management system.
                                       return `${d.tax_name} (${d.tax_rate}%)`;
                                     })()}
                                   </label>
-                                  <div className="flex items-center gap-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleTaxSign(1, currentTaxValues[1].tax_amount)}
+                                      title="Toggle + / − sign"
+                                      className="text-xs font-bold text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                                    >
+                                      +/−
+                                    </button>
+                                    {currentTaxValues[1]?._isManual && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleResetTaxAmount(1)}
+                                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                                        title="Revert to auto-calculated amount"
+                                      >
+                                        <RotateCcw size={11} />
+                                        Auto
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
                                       onClick={() => removeTaxFromReceipt(1)}
@@ -6096,7 +6775,10 @@ Thank you for using our receipt management system.
                                   value={
                                     currencyInputs.tax1 !== undefined
                                       ? currencyInputs.tax1
-                                      : `$${parseFloat(currentTaxValues[1].tax_amount || 0).toFixed(2)}`
+                                      : (() => {
+                                          const n = parseFloat(currentTaxValues[1].tax_amount || 0);
+                                          return n < 0 ? `-$${Math.abs(n).toFixed(2)}` : `$${n.toFixed(2)}`;
+                                        })()
                                   }
                                   onFocus={() => {
                                     const num = parseFloat(currentTaxValues[1].tax_amount);
@@ -6121,8 +6803,8 @@ Thank you for using our receipt management system.
                                   parseFloat(r.purchasePrice) ||
                                   0;
                                 const tipPercentage =
-                                  subtotal > 0 && tipNum > 0
-                                    ? Math.round((tipNum / subtotal) * 100)
+                                  Math.abs(subtotal) > 0 && tipNum !== 0
+                                    ? Math.round((Math.abs(tipNum) / Math.abs(subtotal)) * 100)
                                     : 0;
                                 return (
                                   <div className="mb-4 text-align-left">
@@ -6130,7 +6812,15 @@ Thank you for using our receipt management system.
                                       <label className="font-bold">
                                         TIP ({tipPercentage}%)
                                       </label>
-                                      <div className="flex items-center gap-1">
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={toggleTipSign}
+                                          title="Toggle + / − sign"
+                                          className="text-xs font-bold text-blue-600 hover:text-blue-800 px-2 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                                        >
+                                          +/−
+                                        </button>
                                         <button
                                           type="button"
                                           onClick={() => {
@@ -6148,18 +6838,19 @@ Thank you for using our receipt management system.
                                       id="edit-receipt-tip-input"
                                       type="text"
                                       inputMode="decimal"
-                                      className={`${inputClass}`}
+                                      autoComplete="off"
+                                      className={`${inputClass} ${tipNum < 0 ? "text-red-600 font-medium" : ""}`}
                                       value={
                                         currencyInputs.tip !== undefined
                                           ? currencyInputs.tip
-                                          : tipNum > 0
-                                            ? `$${tipNum.toFixed(2)}`
+                                          : tipNum !== 0
+                                            ? formatSignedMoney(tipNum)
                                             : ""
                                       }
                                       onFocus={() =>
                                         setCurrencyInputs((p) => ({
                                           ...p,
-                                          tip: tipNum > 0 ? `$${tipNum.toFixed(2)}` : "$",
+                                          tip: tipNum !== 0 ? formatSignedMoney(tipNum) : "$",
                                         }))
                                       }
                                       onKeyDown={preventInvalidMoneyKey}
@@ -6167,9 +6858,17 @@ Thank you for using our receipt management system.
                                         const raw = e.target.value;
                                         const numPart = raw.replace(/^\$?/, "");
                                         const sanitized = sanitizeMoneyInput(numPart);
-                                        const display = `$${sanitized}`;
-                                        setCurrencyInputs((p) => ({ ...p, tip: display }));
+                                        // Deleting the tip → go to $0.00 (not the last partial digit).
+                                        if (sanitized === "") {
+                                          setCurrencyInputs((p) => ({ ...p, tip: "$" }));
+                                          handleFieldChange("tip", "0");
+                                          return;
+                                        }
                                         const parsed = parseFloat(raw.replace(/[^0-9.-]/g, ""));
+                                        // A tip MAY exceed the total (matches iOS). The taxes
+                                        // and subtotal simply go negative via the shared base
+                                        // (total − tip) — no cap, no warning.
+                                        setCurrencyInputs((p) => ({ ...p, tip: `$${sanitized}` }));
                                         if (!isNaN(parsed)) handleFieldChange("tip", parsed);
                                       }}
                                       onBlur={() =>
@@ -6185,7 +6884,17 @@ Thank you for using our receipt management system.
                         })()}
 
                         <div className="mb-4 text-align-left">
-                          <label className="font-bold">TOTAL</label>
+                          <div className="flex items-center justify-between">
+                            <label className="font-bold">TOTAL</label>
+                            <button
+                              type="button"
+                              onClick={toggleTotalSign}
+                              title="Toggle + / − sign"
+                              className="text-xs font-bold text-blue-600 hover:text-blue-800 px-2 py-0.5 rounded border border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 transition-colors"
+                            >
+                              +/−
+                            </button>
+                          </div>
                           <input
                             type="text"
                             inputMode="decimal"
@@ -6202,15 +6911,18 @@ Thank you for using our receipt management system.
                               const num = parseFloat(
                                 editedReceipt.purchasePrice ?? r.total ?? r.purchasePrice ?? 0
                               );
-                              return `$${isNaN(num) ? "0.00" : num.toFixed(2)}`;
+                              if (isNaN(num)) return "$0.00";
+                              return num < 0 ? `-$${Math.abs(num).toFixed(2)}` : `$${num.toFixed(2)}`;
                             })()}
                             onFocus={() => {
                               const num = parseFloat(
                                 editedReceipt.purchasePrice ?? r.total ?? r.purchasePrice ?? 0
                               );
+                              // Show just "$" for a zero/empty total so the user can type
+                              // straight away without backspacing "0.00".
                               setCurrencyInputs((p) => ({
                                 ...p,
-                                total: `$${isNaN(num) ? "0.00" : num.toFixed(2)}`,
+                                total: !num || isNaN(num) ? "$" : `$${num.toFixed(2)}`,
                               }));
                             }}
                             onKeyDown={preventInvalidMoneyKey}
@@ -6220,9 +6932,23 @@ Thank you for using our receipt management system.
                               const numPart = raw.replace(/^-?\$?/, "");
                               const sanitized = sanitizeMoneyInput(numPart);
                               const display = `${isNeg ? "-" : ""}$${sanitized}`;
-                              setCurrencyInputs((p) => ({ ...p, total: display }));
-                              const parsed = parseFloat(raw.replace(/[^0-9.-]/g, ""));
-                              if (!isNaN(parsed)) handleFieldChange("purchasePrice", parsed);
+                              if (sanitized === "") {
+                                // Total fully deleted → propagate empty so subtotal/taxes/tip
+                                // zero out, and drop any stale per-field currency overrides so
+                                // the tax/tip inputs reflect the recalculated $0.00.
+                                setCurrencyInputs((p) => ({
+                                  ...p,
+                                  total: display,
+                                  tax0: undefined,
+                                  tax1: undefined,
+                                  tip: undefined,
+                                }));
+                                handleFieldChange("purchasePrice", "");
+                              } else {
+                                setCurrencyInputs((p) => ({ ...p, total: display }));
+                                const parsed = parseFloat(raw.replace(/[^0-9.-]/g, ""));
+                                if (!isNaN(parsed)) handleFieldChange("purchasePrice", parsed);
+                              }
                             }}
                             onBlur={() =>
                               setCurrencyInputs((p) => ({ ...p, total: undefined }))
@@ -6276,6 +7002,12 @@ Thank you for using our receipt management system.
                                       setTipVisible(false);
                                       handleFieldChange("tip", "");
                                     } else {
+                                      const totalForTip =
+                                        parseFloat(editedReceipt.purchasePrice ?? r.purchasePrice ?? r.total ?? 0) || 0;
+                                      if (totalForTip <= 0) {
+                                        setToast({ isVisible: true, message: "Add a Total before adding a tip.", type: "error" });
+                                        return;
+                                      }
                                       setTipVisible(true);
                                       handleFieldChange("tip", "0");
                                       setTimeout(() => {
@@ -6296,7 +7028,7 @@ Thank you for using our receipt management system.
                               {/* Row 3: Scrollable tax pills — selected first (A→Z), then unselected (A→Z) */}
                               <div
                                 className="flex gap-2 overflow-x-auto pb-1"
-                                style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+                                style={{ scrollbarWidth: "none", msOverflowStyle: "none", overscrollBehaviorX: "contain" }}
                               >
                                 {sortedTaxPills.map((tax, idx) => {
                                   const isSelected = tax._selIdx !== -1;
@@ -6417,7 +7149,8 @@ Thank you for using our receipt management system.
                           RECEIPT IMAGES
                         </h3>
                         <div className="flex items-center gap-2">
-                          {/* Add Photo button */}
+                          {/* Add Photo button — disabled when locked (editing an image) */}
+                          {!editedTags.locked && (
                           <button
                             type="button"
                             onClick={() => addPhotoInputRef.current?.click()}
@@ -6431,6 +7164,7 @@ Thank you for using our receipt management system.
                             )}
                             Add Photo
                           </button>
+                          )}
                           <input
                             ref={addPhotoInputRef}
                             type="file"
@@ -6441,7 +7175,7 @@ Thank you for using our receipt management system.
                         </div>
                       </div>
 
-                      <div className="border border-dashed border-blue-400 rounded-lg p-3 flex gap-4 flex-wrap">
+                      <div className="border border-dashed border-blue-400 rounded-lg p-3 flex items-start gap-4 flex-wrap">
                         {(() => {
                           // Prefer editedReceipt values so that annotated
                           // images (and newly added photos) are reflected
@@ -6477,7 +7211,7 @@ Thank you for using our receipt management system.
 
                           const allUrls = [
                             ...new Set(
-                              [...urls, ...additionalPhotoUrls]
+                              [...urls.slice().reverse(), ...additionalPhotoUrls]
                                 .map((u) => normalizeMediaUrl(u))
                                 .filter(Boolean)
                             ),
@@ -6504,12 +7238,14 @@ Thank you for using our receipt management system.
                                     src={proxyImageUrl(u)}
                                     alt="Receipt"
                                     className="w-24 h-auto rounded cursor-pointer border border-gray-200"
-                                    onClick={() => window.open(u, "_blank")}
+                                    onClick={() => window.open(proxyImageUrl(u), "_blank")}
                                     onError={(e) =>
                                       (e.target.style.display = "none")
                                     }
                                   />
                                 )}
+                                {/* Delete file — blocked when locked (viewing only) */}
+                                {!editedTags.locked && (
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -6534,8 +7270,9 @@ Thank you for using our receipt management system.
                                 >
                                   <Trash2 size={11} />
                                 </button>
-                                {/* Annotate button */}
-                                {!isPdfUrl(u) && (
+                                )}
+                                {/* Annotate button — blocked when locked (editing an image) */}
+                                {!isPdfUrl(u) && !editedTags.locked && (
                                   <button
                                     type="button"
                                     onClick={(e) => {
@@ -6552,7 +7289,7 @@ Thank you for using our receipt management system.
                                           : { type: "existing", sourceUrl }
                                       );
                                     }}
-                                    className="absolute top-1 right-8 bg-white/90 hover:bg-blue-600 hover:text-white text-gray-700 rounded p-1 opacity-0 group-hover:opacity-100 transition-all shadow"
+                                    className="absolute top-1 left-1 bg-white/90 hover:bg-blue-600 hover:text-white text-gray-700 rounded p-1 opacity-0 group-hover:opacity-100 transition-all shadow"
                                     title="Edit receipt image"
                                   >
                                     <PenLine size={11} />
@@ -6628,20 +7365,38 @@ Thank you for using our receipt management system.
 
       {showForwardModal && selectedReceipt && (
         <ForwardReceiptModal
-          receipt={{
-            ...selectedReceipt,
-            ...editedReceipt,
-            receipt_tax_values:
-              editedReceipt.receipt_tax_values ?? selectedReceipt.receipt_tax_values,
-            _sourceReceiptTaxValues: selectedReceipt.receipt_tax_values,
-            tip:
-              editedReceipt.tip ||
-              findTipLineInReceiptTaxValues(selectedReceipt.receipt_tax_values)
-                ?.tax_amount ||
-              selectedReceipt.tip ||
-              "",
-            subtotal: editedReceipt.subtotal ?? selectedReceipt.subtotal,
-          }}
+          receipt={(() => {
+            const base = {
+              ...selectedReceipt,
+              ...editedReceipt,
+              // Always use the actual receipt's store name for the forward popup —
+              // editedReceipt can carry stale data from a previously viewed receipt.
+              storeName: selectedReceipt.storeName || editedReceipt.storeName || "",
+              store_image: selectedReceipt.store_image || editedReceipt.store_image || "",
+              receipt_tax_values:
+                editedReceipt.receipt_tax_values ?? selectedReceipt.receipt_tax_values,
+              _sourceReceiptTaxValues: selectedReceipt.receipt_tax_values,
+              tip:
+                editedReceipt.tip ||
+                findTipLineInReceiptTaxValues(selectedReceipt.receipt_tax_values)
+                  ?.tax_amount ||
+                selectedReceipt.tip ||
+                "",
+              subtotal: editedReceipt.subtotal ?? selectedReceipt.subtotal,
+            };
+            // Attach the sender's payment method icon so the recipient's sync can carry it over
+            if (!base.payment_logo_url) {
+              const last4 = (base.last_4_digit_card || "").replace(/\D/g, "").slice(-4);
+              const issuer = (base.card_issuer_name || "").trim().toLowerCase();
+              const pmMatch = (apiPaymentMethods || []).find((pm) => {
+                const pmLast4 = (pm.last_4_digit_card || "").replace(/\D/g, "").slice(-4);
+                const pmIssuer = (pm.card_issuer_name || "").trim().toLowerCase();
+                return pmLast4 === last4 && pmIssuer === issuer;
+              });
+              if (pmMatch?.icon_image) base.payment_logo_url = pmMatch.icon_image;
+            }
+            return base;
+          })()}
           onClose={() => setShowForwardModal(false)}
           onSuccess={handleForwardSuccess}
         />
@@ -6706,6 +7461,8 @@ Thank you for using our receipt management system.
         isVisible={toast.isVisible}
         actionUrl={toast.actionUrl}
         actionLabel={toast.actionLabel}
+        actionUrl2={toast.actionUrl2}
+        actionLabel2={toast.actionLabel2}
         duration={toast.actionUrl ? 0 : 3000}
         onClose={() => setToast((t) => ({ ...t, isVisible: false }))}
       />
@@ -7059,7 +7816,17 @@ Thank you for using our receipt management system.
                     <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center gap-3">
                       <p className="text-sm font-medium text-gray-700 flex-shrink-0">Selected:</p>
                       <div className="p-2 border border-gray-300 rounded bg-white flex items-center justify-center min-w-[64px] min-h-[64px]">
-                        <img src={editMerchantLogo} alt="Selected logo" className="max-w-full max-h-16 w-auto h-auto object-contain" onError={(e) => { e.target.style.display = "none"; }} />
+                        <img
+                          key={editLogoOptions[editSelectedLogoIndex]?.displayUrl || editMerchantLogo}
+                          src={editLogoOptions[editSelectedLogoIndex]?.displayUrl || editMerchantLogo}
+                          alt="Selected logo"
+                          className="max-w-full max-h-16 w-auto h-auto object-contain"
+                          onError={(e) => {
+                            const fallback = editLogoOptions[editSelectedLogoIndex]?.storeUrl || editMerchantLogo;
+                            if (fallback && e.target.src !== fallback) e.target.src = fallback;
+                            else e.target.style.display = "none";
+                          }}
+                        />
                       </div>
                     </div>
                   )}
@@ -7213,10 +7980,15 @@ Thank you for using our receipt management system.
                       <p className="text-sm font-medium text-gray-700 flex-shrink-0">Selected:</p>
                       <div className="p-1 border border-gray-200 rounded bg-white flex items-center justify-center min-w-[48px] min-h-[48px]">
                         <img
-                          src={newMerchantLogo}
+                          key={logoOptions[selectedLogoIndex]?.displayUrl || newMerchantLogo}
+                          src={logoOptions[selectedLogoIndex]?.displayUrl || newMerchantLogo}
                           alt="Selected logo"
                           className="w-12 h-12 object-contain"
-                          onError={(e) => { e.target.style.display = "none"; }}
+                          onError={(e) => {
+                            const fallback = logoOptions[selectedLogoIndex]?.storeUrl || newMerchantLogo;
+                            if (fallback && e.target.src !== fallback) e.target.src = fallback;
+                            else e.target.style.display = "none";
+                          }}
                         />
                       </div>
                     </div>

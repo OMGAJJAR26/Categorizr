@@ -113,3 +113,83 @@ export const toTaxLabel = (tax) => {
     : 0;
   return `${name} | ${formatTaxRate(isNaN(val) ? 0 : val)}%`;
 };
+
+/** Required fields before split/duplicate: Date, Merchant, Expense Category, Total. */
+function getReceiptPrereqValidationMessage(fields, action) {
+  if (!fields) {
+    return `Please enter Date, Merchant, Expense Category, and Total before ${action} this receipt.`;
+  }
+  const missing = [];
+  if (fields.product_date == null || String(fields.product_date).trim() === "") {
+    missing.push("Date");
+  }
+  if (fields.storeName == null || String(fields.storeName).trim() === "") {
+    missing.push("Merchant");
+  }
+  if (fields.expense_type == null || String(fields.expense_type).trim() === "") {
+    missing.push("Expense Category");
+  }
+  const rawTotal = fields.purchasePrice;
+  if (rawTotal == null || String(rawTotal).trim() === "") {
+    missing.push("Total");
+  } else {
+    const total = parseFloat(String(rawTotal).trim());
+    if (!Number.isFinite(total) || total === 0) {
+      missing.push("Total");
+    }
+  }
+  if (!missing.length) return null;
+  if (missing.length === 1) {
+    return `Please enter ${missing[0]} before ${action} this receipt.`;
+  }
+  const last = missing.pop();
+  return `Please enter ${missing.join(", ")} and ${last} before ${action} this receipt.`;
+}
+
+export function getSplitReceiptValidationMessage(fields) {
+  if (!fields) {
+    return "Please enter Date before splitting this receipt.";
+  }
+  if (fields.product_date == null || String(fields.product_date).trim() === "") {
+    return "Please enter Date before splitting this receipt.";
+  }
+  if (fields.storeName == null || String(fields.storeName).trim() === "") {
+    return "Please enter Merchant before splitting this receipt.";
+  }
+  if (fields.expense_type == null || String(fields.expense_type).trim() === "") {
+    return "Please enter Expense Category before splitting this receipt.";
+  }
+  const rawTotal = fields.purchasePrice;
+  if (rawTotal == null || String(rawTotal).trim() === "") {
+    return "Please enter Total before splitting this receipt.";
+  }
+  const total = parseFloat(String(rawTotal).trim());
+  if (!Number.isFinite(total) || total === 0) {
+    return "Please enter Total before splitting this receipt.";
+  }
+  return null;
+}
+
+export function getDuplicateReceiptValidationMessage(fields) {
+  if (!fields) {
+    return "Please enter Date before duplicating this receipt.";
+  }
+  if (fields.product_date == null || String(fields.product_date).trim() === "") {
+    return "Please enter Date before duplicating this receipt.";
+  }
+  if (fields.storeName == null || String(fields.storeName).trim() === "") {
+    return "Please enter Merchant before duplicating this receipt.";
+  }
+  if (fields.expense_type == null || String(fields.expense_type).trim() === "") {
+    return "Please enter Expense Category before duplicating this receipt.";
+  }
+  const rawTotal = fields.purchasePrice;
+  if (rawTotal == null || String(rawTotal).trim() === "") {
+    return "Please enter Total before duplicating this receipt.";
+  }
+  const total = parseFloat(String(rawTotal).trim());
+  if (!Number.isFinite(total) || total === 0) {
+    return "Please enter Total before duplicating this receipt.";
+  }
+  return null;
+}

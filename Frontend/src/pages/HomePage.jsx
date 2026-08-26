@@ -8,11 +8,12 @@ import PropagateLoader from "react-spinners/PropagateLoader";
 import Slider from "react-slick";
 import "slick-carousel/slick/slick.css";
 import "slick-carousel/slick/slick-theme.css";
-import { Search, Plus, Link, ListChecks } from "lucide-react";
+import { Search, Plus, Link, ListChecks, Check } from "lucide-react";
 import ReceiptDetail from "./ReceiptDetail";
 import FilterBar from "../components/filters/FilterBar";
 import SortMenu from "../components/filters/SortMenu";
 import ReportOptions from "../components/reports/ReportOptions";
+import ReceiptsMoreMenu from "../components/receipts/ReceiptsMoreMenu";
 import ActiveFiltersBar from "../components/ActiveFiltersBar";
 import ReceiptsTable from "../components/receipts/ReceiptsTable";
 import ReceiptsMobileView from "../components/receipts/ReceiptsMobileView";
@@ -34,12 +35,19 @@ import ChatButton from "../components/chat/ChatButton";
 import ChatPanel from "../components/chat/ChatPanel";
 import RecoveryEmailVerificationFlow from "../components/RecoveryEmailVerificationFlow";
 import { isTimestampFromToday } from "../components/RecoveryEmailVerificationFlow";
-import { loadQbLinkedReceipts, getFkUserId } from "../utils/qbStorage";
+import { loadQbLinkedReceipts } from "../utils/qbStorage";
+import { isRecoveryEmailVerified } from "../utils/userUtils";
+import { getReceiptExpenseType } from "../utils/expenseCategories";
+import {
+  getPaymentDefaultExpenseType,
+  expenseTypeToReceiptCategory,
+} from "../utils/paymentMethodUtils";
+import { hasActiveReceiptFilters } from "../utils/receiptGallery";
 import "./HomePage.css";
 
 const HomePage = () => {
   const navigate = useNavigate();
-  const { refreshData, silentRefreshData, receipts, loading, updateReceiptStatus, deleteReceipt, bulkDeleteReceipts, updateReceipt, user, applyQuickbooksLinkedIds, markReceiptQuickbooksLinked } = useData();
+  const { refreshData, silentRefreshData, receipts, loading, updateReceiptStatus, deleteReceipt, bulkDeleteReceipts, updateReceipt, user, applyQuickbooksLinkedIds, markReceiptQuickbooksLinked, syncForwardedReceiptData, markRecoveryEmailVerified, apiExpenseCategories, apiPaymentMethods } = useData();
   const { formatCurrency } = useCurrency();
 
   // Custom hooks for complex logic
@@ -74,6 +82,19 @@ const HomePage = () => {
     return ordered.length > 0 ? ordered : filteredReceipts;
   }, [draftReceipts, sortedYears, groupedReceipts, filteredReceipts]);
 
+  const receiptsForExport = useMemo(() => {
+    const seen = new Set();
+    const ordered = [];
+    [...draftReceipts, ...swipeOrderedReceipts].forEach((r) => {
+      if (!r?.id || seen.has(r.id)) return;
+      seen.add(r.id);
+      ordered.push(r);
+    });
+    return ordered;
+  }, [draftReceipts, swipeOrderedReceipts]);
+
+  const galleryIsFiltered = hasActiveReceiptFilters(filters, searchTerm);
+
   const {
     showReportModal,
     setShowReportModal,
@@ -88,11 +109,15 @@ const HomePage = () => {
   const [selectedReceipt, setSelectedReceipt] = useState(null);
   const [selectedIndex, setSelectedIndex] = useState(null);
   const [showCustomizedReport, setShowCustomizedReport] = useState(false);
+  // Tax types chosen FOR the Tax Report only. Kept separate from the homepage filter
+  // (filters.taxTypes) so picking tax types for the report never filters the main list.
+  const [reportTaxTypes, setReportTaxTypes] = useState([]);
   const [showAddReceiptModal, setShowAddReceiptModal] = useState(false);
   const [duplicateInitialData, setDuplicateInitialData] = useState(null);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [receiptToDelete, setReceiptToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  // ── Multi-select (bulk delete / bulk send) ──
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedReceiptIds, setSelectedReceiptIds] = useState(() => new Set());
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
@@ -127,7 +152,6 @@ const HomePage = () => {
   } = useChatAssistant();
 
   const customizedReportRef = useRef(null);
-  const calledRef = useRef(false);
   const autoRefreshInFlightRef = useRef(false);
   const mobileSearchInputRef = useRef(null);
   const receiptsScrollRef = useRef(null);
@@ -171,12 +195,7 @@ const HomePage = () => {
   useEffect(() => {
     if (!user) return;
 
-    const isVerified =
-      user.isRecoveryEmailVerified ??
-      user.is_recovery_email_verified ??
-      false;
-
-    if (isVerified) return;
+    if (isRecoveryEmailVerified(user)) return;
 
     const ts = localStorage.getItem("cat_confirmEmailPopupTs");
     if (isTimestampFromToday(ts)) return; // already shown today
@@ -233,7 +252,7 @@ const HomePage = () => {
 
   const fetchQBStatus = async () => {
     try {
-      const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/status?fk_user_id=${encodeURIComponent(getFkUserId())}`);
+      const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/status?fk_user_id=${encodeURIComponent(localStorage.getItem("fk_user_id") || "")}`);
       const data = await res.json();
       const serverIds = Array.isArray(data.linkedReceiptIds) ? data.linkedReceiptIds : [];
       if (serverIds.length) {
@@ -370,13 +389,6 @@ const HomePage = () => {
 
   const closeMobileSearch = () => setShowMobileSearch(false);
 
-  useEffect(() => {
-    if (!calledRef.current) {
-      calledRef.current = true;
-      refreshData();
-    }
-  }, [refreshData]);
-
   // Auto-refresh receipts so incoming eReceipts appear without manual refresh/login cycle.
   // Uses silent refresh to avoid full-page loading flicker.
   useEffect(() => {
@@ -413,56 +425,177 @@ const HomePage = () => {
     };
   }, [user?.id, silentRefreshData]);
 
-  // Detect newly-arrived forwarded receipts and show a blue Toast notification.
+  // Detect newly-arrived forwarded receipts: show notification + sync missing data.
   useEffect(() => {
     if (!receipts || !user?.id) return;
 
-    const storageKey = `cat_seen_forwards_${user.id}`;
+    // ── Notification tracking (seen = already notified) ──
+    const notifKey = `cat_seen_forwards_${user.id}`;
     let seen;
     try {
-      seen = new Set(JSON.parse(localStorage.getItem(storageKey) || "[]"));
+      seen = new Set(JSON.parse(localStorage.getItem(notifKey) || "[]"));
     } catch {
       seen = new Set();
     }
 
-    const newForwards = receipts.filter((r) => {
+    // ── Sync tracking (separate key — existing receipts may not have been synced yet) ──
+    // v2: bumped so every already-received forwarded receipt re-syncs ONCE. This backfills
+    // the payment-method default category (Business/Personal) onto cards that an earlier
+    // build created as "None". The sync is idempotent (guarded by alreadyHave + only-when-None),
+    // so the one-time re-run is safe.
+    const syncKey = `cat_synced_forwards_v2_${user.id}`;
+    let synced;
+    try {
+      synced = new Set(JSON.parse(localStorage.getItem(syncKey) || "[]"));
+    } catch {
+      synced = new Set();
+    }
+
+    // Network-forwarded receipts (from another Categorizr user via the app)
+    const networkForwards = receipts.filter((r) => {
       const fwdId = r.fk_forward_from_receipt_id;
-      const isForwarded = fwdId && fwdId !== "0" && fwdId !== 0;
-      return isForwarded && !seen.has(String(r.id));
+      return fwdId && fwdId !== "0" && fwdId !== 0;
     });
 
-    if (newForwards.length === 0) return;
+    // Email-received eReceipts (fk_incoming_email_id set, NOT also a network-forward)
+    const emailEReceipts = receipts.filter((r) => {
+      const emailId = r.fk_incoming_email_id;
+      const fwdId = r.fk_forward_from_receipt_id;
+      const isNetworkForward = fwdId && fwdId !== "0" && fwdId !== 0;
+      return emailId && emailId !== "0" && emailId !== 0 && !isNetworkForward;
+    });
 
-    newForwards.forEach((r) => seen.add(String(r.id)));
-    try {
-      localStorage.setItem(storageKey, JSON.stringify([...seen]));
-    } catch {
-      // localStorage quota — non-fatal
+    // All receipt types that need a notification banner
+    const allForwards = [...networkForwards, ...emailEReceipts];
+
+    // Receipts that haven't shown a notification yet
+    const newForwards = allForwards.filter((r) => !seen.has(String(r.id)));
+    // Data-sync only applies to NETWORK-forwarded receipts (copies data from original receipt)
+    const toSync = networkForwards.filter((r) => {
+      const resolvedType = getReceiptExpenseType(r, apiExpenseCategories).trim();
+      const rowType = (r.expense_type || "").trim();
+      if (!synced.has(String(r.id))) return true;
+      // Keep retrying while expense_type is still blank — server may not have saved it yet
+      if (!rowType) return true;
+      // Re-sync when category is present on the payload but not yet on the row
+      return (
+        resolvedType &&
+        rowType.toLowerCase() !== resolvedType.toLowerCase()
+      );
+    });
+
+    // Show notification for newly arrived ones
+    if (newForwards.length > 0) {
+      newForwards.forEach((r) => seen.add(String(r.id)));
+      try { localStorage.setItem(notifKey, JSON.stringify([...seen])); } catch { /* quota */ }
+
+      const newNetworkForwards = newForwards.filter((r) => {
+        const fwdId = r.fk_forward_from_receipt_id;
+        return fwdId && fwdId !== "0" && fwdId !== 0;
+      });
+      const newEmailEReceipts = newForwards.filter((r) => !newNetworkForwards.includes(r));
+
+      let message;
+      if (newForwards.length === 1) {
+        if (newEmailEReceipts.length === 1) {
+          message = "New eReceipt Added";
+        } else {
+          const senderName = newNetworkForwards[0]?.originalUsername || null;
+          message = senderName
+            ? `New eReceipt forwarded from ${senderName}`
+            : "New eReceipt forwarded to you";
+        }
+      } else {
+        if (newNetworkForwards.length === 0) {
+          message = `${newForwards.length} New eReceipts Added`;
+        } else {
+          const names = [...new Set(newNetworkForwards.map((r) => r.originalUsername).filter(Boolean))];
+          message = names.length > 0
+            ? `${newForwards.length} new eReceipts forwarded from ${names.join(", ")}`
+            : `${newForwards.length} new eReceipts forwarded to you`;
+        }
+      }
+      setToast({ isVisible: true, message, type: "info", actionUrl: null, actionLabel: null });
     }
 
-    // Use originalUsername that the backend sends back on forwarded receipts
-    const latest = newForwards[newForwards.length - 1];
-    const senderName = latest.originalUsername || null;
-    const count = newForwards.length;
-
-    let message;
-    if (count === 1) {
-      message = senderName
-        ? `New eReceipt forwarded from ${senderName}`
-        : "New eReceipt forwarded to you";
-    } else {
-      const names = [...new Set(newForwards.map((r) => r.originalUsername).filter(Boolean))];
-      message = names.length > 0
-        ? `${count} new eReceipts forwarded from ${names.join(", ")}`
-        : `${count} new eReceipts forwarded to you`;
+    // Auto-add missing merchant / payment method / expense category / tax types
+    // for ALL unsynced forwarded receipts (including ones that arrived before this feature)
+    if (syncForwardedReceiptData && toSync.length > 0) {
+      // Mark upfront to prevent concurrent duplicate syncs on rapid re-renders.
+      // On failure, unmark so the next receipts refresh can retry.
+      toSync.forEach((r) => synced.add(String(r.id)));
+      try { localStorage.setItem(syncKey, JSON.stringify([...synced])); } catch { /* quota */ }
+      toSync.forEach((r) => {
+        syncForwardedReceiptData(r).catch(() => {
+          synced.delete(String(r.id));
+          try { localStorage.setItem(syncKey, JSON.stringify([...synced])); } catch { /* quota */ }
+        });
+      });
     }
+  }, [receipts, user?.id, syncForwardedReceiptData, apiExpenseCategories]);
 
-    setToast({ isVisible: true, message, type: "info", actionUrl: null, actionLabel: null });
-  }, [receipts, user?.id]);
+  // ── B3: apply a matching payment method's Default Expense Type to new eReceipts ──
+  // When a receipt arrives by email (fk_incoming_email_id set) and its payment method
+  // has a Default Expense Type (Personal/Business) configured, set the receipt's
+  // Expense Type from that default — same behaviour as Add-Receipt and Edit-Receipt.
+  //
+  // Scope guards match the user's spec:
+  //  • Only EMAIL eReceipts. NETWORK-forwarded receipts (fk_forward_from_receipt_id)
+  //    keep the sender's Expense Type untouched (Note 2).
+  //  • One-time per receipt (tracked in localStorage). Setting a default later never
+  //    rewrites receipts already processed, so existing receipts are left alone (Note 1).
+  useEffect(() => {
+    if (!receipts || !user?.id) return;
+
+    const appliedKey = `cat_exptype_applied_${user.id}`;
+    let applied;
+    try { applied = new Set(JSON.parse(localStorage.getItem(appliedKey) || "[]")); }
+    catch { applied = new Set(); }
+
+    const isNetworkForward = (r) => {
+      const fwd = r.fk_forward_from_receipt_id;
+      return fwd != null && String(fwd) !== "0";
+    };
+    const isEmailEReceipt = (r) => {
+      const email = r.fk_incoming_email_id;
+      return email != null && String(email) !== "0" && !isNetworkForward(r);
+    };
+
+    const toApply = receipts.filter(
+      (r) => isEmailEReceipt(r) && !applied.has(String(r.id))
+    );
+    if (toApply.length === 0) return;
+
+    // Mark upfront so a default configured later never retroactively rewrites these
+    // (Note 1) and so rapid re-renders don't double-process.
+    toApply.forEach((r) => applied.add(String(r.id)));
+    try { localStorage.setItem(appliedKey, JSON.stringify([...applied])); } catch { /* quota */ }
+
+    toApply.forEach((r) => {
+      const payDisplay = getPaymentDisplay ? getPaymentDisplay(r) : "";
+      if (!payDisplay || payDisplay === "-") return;
+      const defExpType = getPaymentDefaultExpenseType(payDisplay, apiPaymentMethods);
+      const targetRc = expenseTypeToReceiptCategory(defExpType);
+      if (!targetRc) return; // payment has no default → leave the eReceipt as-is
+      if (String(r.receipt_category ?? "").trim() === targetRc) return; // already correct
+      updateReceipt(r.id, { receipt_category: targetRc });
+    });
+  }, [receipts, user?.id, apiPaymentMethods, updateReceipt, getPaymentDisplay]);
 
   const handleReceiptClick = async (receipt, index) => {
     if (receipt.status === "0") {
       await updateReceiptStatus(receipt.id, "1");
+    }
+    // Clear the "New" highlight for NETWORK-forwarded receipts on first open.
+    // Email-received eReceipts are drafts — do not set is_verify on open; let the
+    // user explicitly save or discard them from the Draft Mode section.
+    if (receipt.is_verify === "0") {
+      const isNetworkReceived =
+        receipt.fk_forward_from_receipt_id != null &&
+        String(receipt.fk_forward_from_receipt_id) !== "0";
+      if (isNetworkReceived) {
+        updateReceipt(receipt.id, { is_verify: "1" });
+      }
     }
     const fresh =
       receipts.find((r) => String(r.id) === String(receipt.id)) || receipt;
@@ -475,8 +608,11 @@ const HomePage = () => {
     setSelectedIndex(null);
   };
 
-  const handleCreateReport = (type) => {
+  const handleCreateReport = (type, taxTypes = null) => {
     setReportType(type);
+    // Tax Report only: remember the tax types chosen for the report (from the popup or
+    // the active filter) WITHOUT writing them into the homepage filter.
+    setReportTaxTypes(Array.isArray(taxTypes) ? taxTypes : []);
     setShowReportModal(true);
   };
 
@@ -501,7 +637,7 @@ const HomePage = () => {
     setDuplicateInitialData(snapshot);      // triggers the duplicate modal to open
     setToast({
       isVisible: true,
-      message: "Your original receipt has been saved successfully. You are now viewing the duplicate receipt.",
+      message: "Your original receipt has been saved. You are now viewing your duplicate receipt.",
       type: "success",
     });
   };
@@ -540,6 +676,7 @@ const HomePage = () => {
     setReceiptToDelete(null);
   };
 
+  // ── Multi-select (bulk delete / bulk send) ──
   const visibleReceiptIds = useMemo(() => {
     const ids = [];
     (draftReceipts || []).forEach((r) => r?.id != null && ids.push(String(r.id)));
@@ -577,6 +714,9 @@ const HomePage = () => {
     });
   };
 
+  // Deletes in parallel and updates the list in one pass (see bulkDeleteReceipts). The
+  // loader (isBulkDeleting) stays up until the receipts are actually gone from state, then
+  // the popup closes — so the dialog never closes while rows are still showing.
   const handleBulkDeleteConfirm = async () => {
     const ids = [...selectedReceiptIds];
     if (ids.length === 0) return;
@@ -602,6 +742,7 @@ const HomePage = () => {
     });
   };
 
+  // Tools shown in the bulk "Send to" menu (Sage is always offered, matching the row menu).
   const bulkProviders = [
     { key: "quickbooks", name: "QuickBooks Online", connected: quickbooksConnected },
     { key: "sage-bc", name: "Sage", connected: true },
@@ -641,6 +782,36 @@ const HomePage = () => {
           : `Sent ${ok}, ${fail} failed.`,
       type: fail === 0 ? "success" : "error",
     });
+  };
+
+  // Renders one receipt's desktop + mobile row, prefixed with a selection checkbox while
+  // in multi-select mode. Used by both the draft and year-grouped lists.
+  const renderReceiptRow = (receipt, index, isToBeVerified = false) => {
+    const rowProps = {
+      receipt,
+      getPaymentLogo,
+      getPaymentDisplay,
+      onViewClick: () => handleReceiptClick(receipt, index),
+      onDeleteClick: handleDeleteClick,
+      onLinkToQuickBooks: quickbooksConnected ? () => handleLinkToQuickBooks(receipt) : undefined,
+      quickbooksConnected,
+      onLinkToSage: () => handleLinkToSage(receipt),
+      onLinkToXero: xeroConnected ? () => handleLinkToXero(receipt) : undefined,
+      isLinking: linkingReceiptId === receipt.id,
+      isLinkingSage: linkingSageReceiptId === receipt.id,
+      isLinkingXero: linkingXeroReceiptId === receipt.id,
+      formatCurrency,
+      isToBeVerified,
+      selectionMode,
+      isSelected: selectedReceiptIds.has(String(receipt.id)),
+      onToggleSelect: () => toggleSelectReceipt(receipt.id),
+    };
+    return (
+      <>
+        <ReceiptsTable {...rowProps} />
+        <ReceiptsMobileView {...rowProps} />
+      </>
+    );
   };
 
   const getReceiptImageUrl = (receipt) => {
@@ -688,6 +859,47 @@ const HomePage = () => {
     return null;
   };
 
+  // Return ALL valid image URLs on a receipt (for multi-image attachments).
+  const getReceiptImageUrls = (receipt) => {
+    const candidates = [
+      receipt.receipt_image,
+      receipt.emailAttachment,
+      receipt.receiptImage,
+      receipt.email_attachment,
+      receipt.emailattachment,
+      receipt.receiptimage,
+    ];
+    const invalidPatterns = ["android.resource://", "content://", "file://", "resource://"];
+    const seen = new Set();
+    const urls = [];
+    for (const field of candidates) {
+      if (!field || typeof field !== "string") continue;
+      for (const raw of splitMediaField(field)) {
+        const trimmed = (raw || "").trim();
+        if (!trimmed || ["0", "null", "@", "undefined", ""].includes(trimmed.toLowerCase())) continue;
+        if (invalidPatterns.some((p) => trimmed.startsWith(p))) continue;
+
+        let normalized;
+        if (trimmed.startsWith("/") || (!trimmed.startsWith("http://") && !trimmed.startsWith("https://") && !trimmed.startsWith("data:"))) {
+          if (trimmed.startsWith("/9j/") || /^[A-Za-z0-9+/=]+$/.test(trimmed.slice(0, 100))) {
+            normalized = trimmed.startsWith("data:") ? trimmed : `data:image/jpeg;base64,${trimmed}`;
+          } else if (trimmed.startsWith("/")) {
+            normalized = `https://categorizr.com${trimmed}`;
+          } else {
+            normalized = `https://categorizr.com/emailserver/${trimmed}`;
+          }
+        } else {
+          normalized = trimmed;
+        }
+        if (normalized && !seen.has(normalized)) {
+          seen.add(normalized);
+          urls.push(normalized);
+        }
+      }
+    }
+    return urls;
+  };
+
   // Helper: mark a receipt as QB-linked in local state + localStorage
   const markQbLinked = (receiptId) => {
     if (receiptId == null) return;
@@ -721,7 +933,7 @@ const HomePage = () => {
           Accesstoken: token || "",
         },
         body: JSON.stringify({
-          fk_user_id: getFkUserId(),
+          fk_user_id: localStorage.getItem("fk_user_id") || "",
           realmId: quickbooksRealmId,
           receiptId: receipt.id,
           storeName: receipt.storeName || receipt.merchant || "",
@@ -738,6 +950,7 @@ const HomePage = () => {
           notes: receipt.notes || receipt.Notes || "",
           receipt_image: imageUrl,
           emailAttachment: imageUrl,
+          receiptImages: getReceiptImageUrls(receipt),
           receiptFileName: `receipt_${receipt.id || Date.now()}.jpg`,
         }),
       });
@@ -813,16 +1026,24 @@ const HomePage = () => {
       
       if (isSuccess) {
         let message = data.message || "Receipt linked to QuickBooks successfully!";
-        if (data.instructions) message += ` ${data.instructions}`;
         if (data.warning) message += ` ${data.warning}`;
         else if (data.note) message += ` ${data.note}`;
+
+        // Primary action: open the created expense in QuickBooks Online.
+        // Secondary: a data-verify link that reads the expense back from QuickBooks
+        // (reliable even if the QBO sandbox UI won't load in the browser).
+        const verifyUrl = data.purchaseId
+          ? `${NODE_API_URL}/api/integrations/quickbooks/expense?fk_user_id=${encodeURIComponent(localStorage.getItem("fk_user_id") || "")}&purchaseId=${encodeURIComponent(data.purchaseId)}`
+          : null;
 
         setToast({
           isVisible: true,
           message,
           type: "success",
-          actionUrl: data.quickbooksUrl || null,
-          actionLabel: data.quickbooksUrlLabel || (data.quickbooksUrl ? "Open this expense in QuickBooks" : null),
+          actionUrl: data.quickbooksUrl || verifyUrl || null,
+          actionLabel: data.quickbooksUrl ? "Open in QuickBooks" : (verifyUrl ? "Verify in QuickBooks" : null),
+          actionUrl2: data.quickbooksUrl ? verifyUrl : null,
+          actionLabel2: data.quickbooksUrl && verifyUrl ? "Verify data" : null,
         });
         markQbLinked(receipt.id);
         refreshData();
@@ -1075,6 +1296,17 @@ const HomePage = () => {
                     updateSort={updateSort}
                     iconOnly
                   />
+                  <ReceiptsMoreMenu
+                    activeMenu={activeMenu}
+                    setActiveMenu={setActiveMenu}
+                    onSelectReport={handleCreateReport}
+                    onApplyTaxTypes={handleApplyTaxTypes}
+                    selectedTaxAndTipsTypes={filters.taxTypes}
+                    setShowCustomizedReport={setShowCustomizedReport}
+                    receiptsForExport={receiptsForExport}
+                    isFiltered={galleryIsFiltered}
+                    iconOnly
+                  />
                   <button
                     type="button"
                     onClick={() => setShowIntegrationsModal(true)}
@@ -1162,6 +1394,17 @@ const HomePage = () => {
                       setShowCustomizedReport={setShowCustomizedReport}
                     />
 
+                    <ReceiptsMoreMenu
+                      activeMenu={activeMenu}
+                      setActiveMenu={setActiveMenu}
+                      onSelectReport={handleCreateReport}
+                      onApplyTaxTypes={handleApplyTaxTypes}
+                      selectedTaxAndTipsTypes={filters.taxTypes}
+                      setShowCustomizedReport={setShowCustomizedReport}
+                      receiptsForExport={receiptsForExport}
+                      isFiltered={galleryIsFiltered}
+                    />
+
                     <button
                       type="button"
                       onClick={() => setShowIntegrationsModal(true)}
@@ -1170,6 +1413,7 @@ const HomePage = () => {
                     >
                       <Link size={18} strokeWidth={2.6} />
                     </button>
+
                     <button
                       type="button"
                       onClick={() => (selectionMode ? exitSelectionMode() : setSelectionMode(true))}
@@ -1237,46 +1481,7 @@ const HomePage = () => {
                   <div className="home-receipts-inner">
                     {draftReceipts.map((receipt, index) => (
                       <div key={receipt.id || index} className="mb-3">
-                        <ReceiptsTable
-                          receipt={receipt}
-                          getPaymentLogo={getPaymentLogo}
-                          getPaymentDisplay={getPaymentDisplay}
-                          onViewClick={() => handleReceiptClick(receipt, index)}
-                          onDeleteClick={handleDeleteClick}
-                          onLinkToQuickBooks={quickbooksConnected ? () => handleLinkToQuickBooks(receipt) : undefined}
-                          quickbooksConnected={quickbooksConnected}
-                          onLinkToSage={() => handleLinkToSage(receipt)}
-                          onLinkToXero={xeroConnected ? () => handleLinkToXero(receipt) : undefined}
-                          isLinking={linkingReceiptId === receipt.id}
-                          isLinkingSage={linkingSageReceiptId === receipt.id}
-                          isLinkingXero={linkingXeroReceiptId === receipt.id}
-                          formatCurrency={formatCurrency}
-                          isToBeVerified={true}
-                          disableDelete={true}
-                          selectionMode={selectionMode}
-                          isSelected={selectedReceiptIds.has(String(receipt.id))}
-                          onToggleSelect={() => toggleSelectReceipt(receipt.id)}
-                        />
-                        <ReceiptsMobileView
-                          receipt={receipt}
-                          getPaymentLogo={getPaymentLogo}
-                          getPaymentDisplay={getPaymentDisplay}
-                          onViewClick={() => handleReceiptClick(receipt, index)}
-                          onDeleteClick={handleDeleteClick}
-                          onLinkToQuickBooks={quickbooksConnected ? () => handleLinkToQuickBooks(receipt) : undefined}
-                          quickbooksConnected={quickbooksConnected}
-                          onLinkToSage={() => handleLinkToSage(receipt)}
-                          onLinkToXero={xeroConnected ? () => handleLinkToXero(receipt) : undefined}
-                          isLinking={linkingReceiptId === receipt.id}
-                          isLinkingSage={linkingSageReceiptId === receipt.id}
-                          isLinkingXero={linkingXeroReceiptId === receipt.id}
-                          formatCurrency={formatCurrency}
-                          isToBeVerified={true}
-                          disableDelete={true}
-                          selectionMode={selectionMode}
-                          isSelected={selectedReceiptIds.has(String(receipt.id))}
-                          onToggleSelect={() => toggleSelectReceipt(receipt.id)}
-                        />
+                        {renderReceiptRow(receipt, index, true)}
                         {selectedReceipt?.id === receipt.id && (
                           <ReceiptDetail
                             receipt={selectedReceipt}
@@ -1315,43 +1520,7 @@ const HomePage = () => {
                     <div className="home-receipts-inner">
                       {yearReceipts.map((receipt, index) => (
                         <div key={receipt.id || index} className="mb-3">
-                          <ReceiptsTable
-                            receipt={receipt}
-                            getPaymentLogo={getPaymentLogo}
-                            getPaymentDisplay={getPaymentDisplay}
-                            onViewClick={() => handleReceiptClick(receipt, index)}
-                            onDeleteClick={handleDeleteClick}
-                            onLinkToQuickBooks={quickbooksConnected ? () => handleLinkToQuickBooks(receipt) : undefined}
-                            quickbooksConnected={quickbooksConnected}
-                            onLinkToSage={() => handleLinkToSage(receipt)}
-                            onLinkToXero={xeroConnected ? () => handleLinkToXero(receipt) : undefined}
-                            isLinking={linkingReceiptId === receipt.id}
-                            isLinkingSage={linkingSageReceiptId === receipt.id}
-                            isLinkingXero={linkingXeroReceiptId === receipt.id}
-                            formatCurrency={formatCurrency}
-                            selectionMode={selectionMode}
-                            isSelected={selectedReceiptIds.has(String(receipt.id))}
-                            onToggleSelect={() => toggleSelectReceipt(receipt.id)}
-                          />
-
-                          <ReceiptsMobileView
-                            receipt={receipt}
-                            getPaymentLogo={getPaymentLogo}
-                            getPaymentDisplay={getPaymentDisplay}
-                            onViewClick={() => handleReceiptClick(receipt, index)}
-                            onDeleteClick={handleDeleteClick}
-                            onLinkToQuickBooks={quickbooksConnected ? () => handleLinkToQuickBooks(receipt) : undefined}
-                            quickbooksConnected={quickbooksConnected}
-                            onLinkToSage={() => handleLinkToSage(receipt)}
-                            onLinkToXero={xeroConnected ? () => handleLinkToXero(receipt) : undefined}
-                            isLinking={linkingReceiptId === receipt.id}
-                            isLinkingSage={linkingSageReceiptId === receipt.id}
-                            isLinkingXero={linkingXeroReceiptId === receipt.id}
-                            formatCurrency={formatCurrency}
-                            selectionMode={selectionMode}
-                            isSelected={selectedReceiptIds.has(String(receipt.id))}
-                            onToggleSelect={() => toggleSelectReceipt(receipt.id)}
-                          />
+                          {renderReceiptRow(receipt, index, false)}
 
                           {selectedReceipt?.id === receipt.id && (
                             <>
@@ -1393,6 +1562,7 @@ const HomePage = () => {
             generateSummaryReport={generateSummaryReport}
             formatCurrencyFixed2={formatCurrency}
             onApplyTaxTypes={handleApplyTaxTypes}
+            reportTaxTypes={reportTaxTypes}
           />
 
           <IntegrationsModal
@@ -1460,6 +1630,8 @@ const HomePage = () => {
             isVisible={toast.isVisible}
             actionUrl={toast.actionUrl}
             actionLabel={toast.actionLabel}
+            actionUrl2={toast.actionUrl2}
+            actionLabel2={toast.actionLabel2}
             duration={toast.actionUrl ? 0 : 3000}
             onClose={() => setToast({ ...toast, isVisible: false })}
           />
@@ -1493,6 +1665,7 @@ const HomePage = () => {
           onDone={(verified) => {
             setShowRecoveryEmailFlow(false);
             if (verified) {
+              markRecoveryEmailVerified();
               setToast({
                 isVisible: true,
                 message: "Email verified successfully!",

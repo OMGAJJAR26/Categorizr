@@ -87,10 +87,10 @@ const ReportOptions = ({
     if (type === "summary") {
       onSelectReport("summary");
     } else if (type === "tax") {
-      // Check if user has already selected tax types from the filter menu
-      // If yes, skip the popup and go directly to report generation
+      // If tax types are already chosen via the homepage filter, use them for the report
+      // (the list is already filtered by the user's own choice) — otherwise ask via popup.
       if (selectedTaxAndTipsTypes && selectedTaxAndTipsTypes.length > 0) {
-        onSelectReport("tax");
+        onSelectReport("tax", selectedTaxAndTipsTypes);
       } else {
         // Show popup only if no tax types are selected
         setShowTaxPopup(true);
@@ -161,11 +161,10 @@ const ReportOptions = ({
           onClose={() => setShowTaxPopup(false)}
           onApply={(selectedTaxTypesFromPopup) => {
             setSelectedTaxTypes(selectedTaxTypesFromPopup);
-            if (onApplyTaxTypes && selectedTaxTypesFromPopup?.length > 0) {
-              const labels = selectedTaxTypesFromPopup.map(toTaxLabel);
-              onApplyTaxTypes(labels);
-            }
-            onSelectReport("tax");
+            // Pass the chosen tax types to the report ONLY — do NOT push them into the
+            // homepage filter (onApplyTaxTypes), which would filter the main receipt list.
+            const labels = (selectedTaxTypesFromPopup || []).map(toTaxLabel);
+            onSelectReport("tax", labels);
           }}
           selectedTaxTypes={selectedTaxTypes}
           setSelectedTaxTypes={setSelectedTaxTypes}

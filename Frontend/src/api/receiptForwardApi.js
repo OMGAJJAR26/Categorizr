@@ -171,11 +171,13 @@ export const buildForwardPayload = (receipt, recipientUserId) => {
     paymentType: basePaymentType || paymentType,
     last_4_digit_card: last4,
     card_issuer_name: receipt.card_issuer_name || receipt.cardIssuerName || "",
+    payment_logo_url: receipt.paymentDisplay?.logoUrl || receipt.payment_logo_url || receipt.paymentLogoUrl || "",
     fk_original_receipt_id: originalId,
     fk_forward_from_receipt_id: String(sourceReceiptId),
     receipt_category: toInt(receipt.receipt_category),
     product_date: mobileProductDate,
     expense_type: receipt.expense_type || receipt.expenseType || "",
+    expenseType: receipt.expense_type || receipt.expenseType || "",  // camelCase alias — some API versions use this field name
     receipt_image: (receipt.receipt_image || receipt.receiptImage || "0").toString(),
     store_image: receipt.store_image || receipt.storeImage || "",
     receipt_tag: receipt.receipt_tag || "0,0,0,0,0,0,0",

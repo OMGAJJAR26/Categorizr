@@ -11,6 +11,11 @@ const XERO_APP_URL = "https://go.xero.com/";
 const QB_SANDBOX_OPEN_URL = "https://app.sandbox.qbo.intuit.com/app/homepage";
 const QB_PRODUCTION_OPEN_URL = "https://app.qbo.intuit.com/app/homepage";
 
+// Sign-up entry points for users who don't have a QuickBooks account yet.
+// US and Canada QuickBooks are separate — send the user to the right one.
+const QB_SIGNUP_US_URL = "https://quickbooks.intuit.com/signup/";
+const QB_SIGNUP_CA_URL = "https://quickbooks.intuit.com/ca/pricing/";
+
 const providers = [
   {
     id: "quickbooks",
@@ -164,7 +169,7 @@ const IntegrationsModal = ({ open, onClose, onQuickBooksDisconnected }) => {
     setQuickbooksLoading(true);
     try {
       const url = `${NODE_API_URL}/api/integrations/quickbooks/disconnect?fk_user_id=${encodeURIComponent(getFkUserId())}`;
-      const res = await fetch(url, { method: "POST" });
+      const res = await fetch(url, { method: "DELETE" });
       const data = await res.json();
       
       if (data.success) {
@@ -294,6 +299,28 @@ const IntegrationsModal = ({ open, onClose, onQuickBooksDisconnected }) => {
                   >
                     Connect
                   </button>
+                )}
+                {isQuickBooks && !isQBConnected && (
+                  <p className="mt-2 text-center text-xs text-slate-500">
+                    New to QuickBooks?{" "}
+                    <a
+                      href={QB_SIGNUP_US_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-blue-600 hover:underline"
+                    >
+                      Sign up (US)
+                    </a>
+                    <span className="mx-1 text-slate-300">|</span>
+                    <a
+                      href={QB_SIGNUP_CA_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-blue-600 hover:underline"
+                    >
+                      Canada
+                    </a>
+                  </p>
                 )}
               </div>
             );
