@@ -148,7 +148,7 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
         {/* Header */}
         <div className="relative bg-gradient-to-br from-blue-600 to-blue-700 px-6 pt-8 pb-6 text-white text-center">
           <button
-            onClick={onDone}
+            onClick={() => onDone(false)}
             className="absolute top-3 right-3 p-1.5 rounded-full hover:bg-white/20 transition-colors"
             aria-label="Skip"
           >
@@ -238,7 +238,7 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
             </div>
 
             <button
-              onClick={onDone}
+              onClick={() => onDone(false)}
               className="w-full text-xs text-slate-400 hover:text-slate-600 py-1 transition-colors"
             >
               Skip for now

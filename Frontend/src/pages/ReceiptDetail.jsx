@@ -1595,8 +1595,10 @@ useEffect(() => {
       if (matchingReceipts.length > 0) {
         await Promise.all(
           matchingReceipts.map((r) =>
+            // Deleting a payment method clears it back to "Select Payment Method"
+            // (empty), not "Cash".
             updateReceipt(r.id, {
-              paymentType: "Cash",
+              paymentType: "",
               card_issuer_name: "",
               last_4_digit_card: "",
             })
@@ -1615,7 +1617,8 @@ useEffect(() => {
       await Promise.all([fetchApiPaymentMethods(), silentRefreshData(0)]);
       const targetKey = normalizePaymentMatchKey(method);
       if (normalizePaymentMatchKey(getPaymentDisplayForReceipt(editedReceipt)) === targetKey) {
-        handleFieldChange("paymentType", "Cash");
+        // Reset to "Select Payment Method" (empty), not "Cash".
+        handleFieldChange("paymentType", "");
         handleFieldChange("card_issuer_name", "");
         handleFieldChange("last_4_digit_card", "");
       }
@@ -5912,7 +5915,11 @@ Thank you for using our receipt management system.
                                             : ""
                                         );
 
-                                        // Update last_4_digit_card
+                                        // Update last_4_digit_card — clear it when
+                                        // the chosen method has no last 4, so a stale
+                                        // value from a previous method (e.g. a deleted
+                                        // "Bank of America 8888") never leaks onto a
+                                        // plain method like "American Express".
                                         if (
                                           last4FromMethod &&
                                           /^\d{3,4}$/.test(last4FromMethod)
@@ -5921,6 +5928,8 @@ Thank you for using our receipt management system.
                                             "last_4_digit_card",
                                             last4FromMethod
                                           );
+                                        } else {
+                                          handleFieldChange("last_4_digit_card", "");
                                         }
 
                                         // Auto-apply Personal/Business preference saved in Settings
