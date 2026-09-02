@@ -497,6 +497,22 @@ async function qbFindOrCreateAccount(baseUrl, rid, accessToken, name, accountTyp
   return null;
 }
 
+// Detect the card brand (a clean, reusable QuickBooks "Payment Method" name) from
+// a Categorizr card type or payment string like "Mastercard Bank of America *7890".
+// Returns null for non-card / unknown values (Cash, Check, custom names).
+function qbCardBrandFromPaymentMethod(value) {
+  const s = (value || "").toString().toLowerCase();
+  if (!s) return null;
+  if (/\bamerican express\b|\bamex\b/.test(s)) return "American Express";
+  if (/\bmaster\s*card\b/.test(s)) return "MasterCard";
+  if (/\bvisa\b/.test(s)) return "Visa";
+  if (/\bdiscover\b/.test(s)) return "Discover";
+  if (/\bdiners\b/.test(s)) return "Diners Club";
+  if (/\bdebit\b/.test(s)) return "Debit Card";
+  if (/\bpaypal\b/.test(s)) return "PayPal";
+  return null;
+}
+
 // Find a PaymentMethod by exact Name; create it if missing. Returns Id or null.
 async function qbFindOrCreatePaymentMethod(baseUrl, rid, accessToken, name) {
   const trimmed = (name || "").toString().trim();
@@ -545,6 +561,7 @@ export async function quickbooksUploadReceipt(req, res) {
       product_name,
       receipt_category,
       payment_method,
+      card_type,
       card_number,
       subtotal,
       receipt_tax_values,
@@ -1009,10 +1026,18 @@ export async function quickbooksUploadReceipt(req, res) {
       }
 
       // Payment Method entity (the "Payment Method" dropdown) — match or create.
+      // Prefer the clean card TYPE (Visa, MasterCard, …) so the expense links to a
+      // reusable payment method rather than a one-off "Issuer *1234" entry. Use the
+      // explicit card_type when sent, else parse it out of the payment string; fall
+      // back to the full payment name (e.g. "Cash", "Check", custom labels).
+      const cardBrand =
+        qbCardBrandFromPaymentMethod(card_type) ||
+        qbCardBrandFromPaymentMethod(payment_method);
+      const paymentMethodName = cardBrand || paymentName;
       let paymentMethodId = null;
-      if (paymentName) {
+      if (paymentMethodName) {
         paymentMethodId = await qbFindOrCreatePaymentMethod(
-          baseUrl, rid, token.access_token, paymentName
+          baseUrl, rid, token.access_token, paymentMethodName
         );
       }
 

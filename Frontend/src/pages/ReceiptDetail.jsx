@@ -4120,6 +4120,9 @@ useEffect(() => {
           receipt_category: latestRec.receipt_category || "",
           payment_method:
             latestRec.paymentMethod || latestRec.payment_method || "",
+          // Card brand (Visa, MasterCard, …) so QuickBooks can link the Payment
+          // Method to the card type even when the issuer name / last-4 aren't used.
+          card_type: latestRec.paymentType || "",
           card_number:
             latestRec.last_4_digit_card || latestRec.last4Digits || "",
           subtotal: latestRec.subtotal || "",
