@@ -7346,7 +7346,12 @@ const handleSelectLogo = (index) => {
                     className="flex items-center justify-center w-8 h-8 rounded-full transition-colors disabled:opacity-50 hover:opacity-80"
                     style={{ backgroundColor: "#000000" }}
                   >
-                    <X size={18} className="text-white" />
+                    {/* Raw SVG (not lucide <X>) so the global svg.lucide-x rule
+                        in App.css can't absolutely-position it out of the circle. */}
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
                   </button>
                   <h2 className="text-xl font-bold text-gray-900">Manage Tax Types</h2>
                 </div>
