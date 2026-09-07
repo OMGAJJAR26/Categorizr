@@ -75,6 +75,7 @@ import {
   replaceUrlInMediaCsv,
   isPdfUrl,
   sanitizeUploadFile,
+  convertHeicToJpegIfNeeded,
 } from "../../utils/mediaUrlUtils";
 import PdfThumbnail from "./PdfThumbnail";
 import { findRenamedApiMerchant } from "../../utils/merchantListUtils";
@@ -543,8 +544,13 @@ const [localMerchants, setLocalMerchants] = useState([]);
     "image/png",
     "image/gif",
     "image/webp",
+    "image/heic",
+    "image/heif",
     "application/pdf",
   ];
+  // Extension fallback: HEIC/HEIF (and sometimes JPEG) files can report an empty
+  // or nonstandard MIME type in some browsers, so accept by extension too.
+  const acceptedFileExtensions = /\.(jpe?g|png|gif|webp|heic|heif|pdf)$/i;
 
   // Clean OCR text values so placeholders show instead of 0
   const cleanTextValue = (value) => {
@@ -718,7 +724,10 @@ const [localMerchants, setLocalMerchants] = useState([]);
     const errors = [];
 
     Array.from(fileList).forEach((file) => {
-      if (!acceptedFileTypes.includes(file.type)) {
+      if (
+        !acceptedFileTypes.includes(file.type) &&
+        !acceptedFileExtensions.test(file.name || "")
+      ) {
         errors.push(
           `${file.name}: Invalid file type. Please upload images or PDFs.`,
         );
@@ -772,9 +781,12 @@ const [localMerchants, setLocalMerchants] = useState([]);
     const token = localStorage.getItem("token");
 
     const formData = new FormData();
-    filesToUpload.forEach((file) => {
-      formData.append("file", sanitizeUploadFile(file)); // API field name is "file", supports multiple
-    });
+    // Convert any HEIC/HEIF (e.g. straight from an iPhone) to JPEG first, so the
+    // stored image displays everywhere and can be attached in QuickBooks.
+    for (const file of filesToUpload) {
+      const converted = await convertHeicToJpegIfNeeded(file);
+      formData.append("file", sanitizeUploadFile(converted)); // API field name is "file", supports multiple
+    }
 
     const response = await fetch("/api/user/uploadmediaV1", {
       method: "POST",
@@ -5194,7 +5206,7 @@ const handleSelectLogo = (index) => {
                       <input
                         ref={fileInputRef}
                         type="file"
-                        accept="image/*,application/pdf"
+                        accept="image/*,.heic,.heif,application/pdf"
                         onChange={handleFileSelect}
                         className="hidden"
                         disabled={isUploading}
@@ -6699,7 +6711,7 @@ const handleSelectLogo = (index) => {
                           <input
                             ref={addPhotoInputRef}
                             type="file"
-                            accept="image/*,application/pdf"
+                            accept="image/*,.heic,.heif,application/pdf"
                             className="hidden"
                             onChange={handleAddPhotoSelect}
                           />

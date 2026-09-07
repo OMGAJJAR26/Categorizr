@@ -129,6 +129,38 @@ export function sanitizeUploadFile(file) {
   });
 }
 
+/** True for an HEIC/HEIF file (by MIME or extension — iPhone HEICs often report an empty MIME). */
+export function isHeicFile(file) {
+  if (!file) return false;
+  const type = (file.type || "").toLowerCase();
+  if (type === "image/heic" || type === "image/heif") return true;
+  const name = (file.name || "").toLowerCase();
+  return name.endsWith(".heic") || name.endsWith(".heif");
+}
+
+/**
+ * Convert an HEIC/HEIF File to JPEG so it displays in every browser and can be
+ * attached in QuickBooks (which does not accept HEIC). Non-HEIC files pass
+ * through unchanged. heic2any is loaded on demand so it never bloats the main
+ * bundle. If conversion fails, the original file is returned as a fallback.
+ */
+export async function convertHeicToJpegIfNeeded(file) {
+  if (!isHeicFile(file)) return file;
+  try {
+    const heic2any = (await import("heic2any")).default;
+    const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
+    const out = Array.isArray(converted) ? converted[0] : converted;
+    const baseName = (file.name || "receipt").replace(/\.(heic|heif)$/i, "");
+    return new File([out], `${baseName}.jpg`, {
+      type: "image/jpeg",
+      lastModified: file.lastModified || Date.now(),
+    });
+  } catch (e) {
+    console.error("HEIC→JPEG conversion failed; uploading original file:", e);
+    return file;
+  }
+}
+
 export function getPdfProxyUrl(url) {
   if (!url || typeof url !== "string") return "";
   const trimmed = url.trim();
