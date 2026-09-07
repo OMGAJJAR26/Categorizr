@@ -107,12 +107,23 @@ import warrantedSelect from "../../assets/receipttags/warrantied_select.png";
 import lockedImg from "../../assets/receipttags/locked.png";
 import unlockedImg from "../../assets/receipttags/unlocked.png";
 
-/** Describe Purchase (`product_name`): default to "Duplicate" when blank, otherwise append " (1)". */
+/**
+ * Describe Purchase (`product_name`) for a duplicate. The original is copy #1
+ * (shown WITHOUT a suffix), so the first duplicate is "(2)". Duplicating a
+ * receipt that already ends in "(N)" increments it — "(2)" → "(3)" — matching
+ * the Android app. Blank descriptions default to "Duplicate".
+ */
 function withDuplicateDefaultProductName(formData) {
   if (!formData) return formData;
   const trimmed = String(formData.product_name ?? "").trim();
-  if (trimmed) return { ...formData, product_name: `${trimmed} (1)` };
-  return { ...formData, product_name: "Duplicate" };
+  if (!trimmed) return { ...formData, product_name: "Duplicate" };
+  const m = trimmed.match(/^(.*?)\s*\((\d+)\)$/);
+  if (m) {
+    const base = m[1].trim();
+    const next = parseInt(m[2], 10) + 1;
+    return { ...formData, product_name: `${base} (${next})` };
+  }
+  return { ...formData, product_name: `${trimmed} (2)` };
 }
 
 const AddReceiptModal = ({ onClose, onReceiptAdded, initialData = null, onDuplicate = null }) => {
