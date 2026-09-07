@@ -5813,7 +5813,7 @@ const handleSelectLogo = (index) => {
             setIsPaymentTyping(false);
           }, 200);
         }}
-        placeholder="Select or type payment method"
+        placeholder="Select Payment Method"
       />
       <ChevronDown
         size={16}
@@ -7343,9 +7343,10 @@ const handleSelectLogo = (index) => {
                     onClick={closeTaxModal}
                     disabled={isSavingTax || isDeletingTax}
                     aria-label="Close"
-                    className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors disabled:opacity-50"
+                    className="flex items-center justify-center w-8 h-8 rounded-full transition-colors disabled:opacity-50 hover:opacity-80"
+                    style={{ backgroundColor: "#000000" }}
                   >
-                    <X size={20} className="text-gray-600" />
+                    <X size={18} className="text-white" />
                   </button>
                   <h2 className="text-xl font-bold text-gray-900">Manage Tax Types</h2>
                 </div>

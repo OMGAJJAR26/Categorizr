@@ -218,7 +218,7 @@ const RecoveryEmailVerificationFlow = ({ onDone }) => {
               {/* Show success in green, errors in red */}
               {verified && (
                 <p className="mt-2 text-xs text-green-600 text-center font-medium">
-                  ✓ Email verified successfully!
+                  ✓ Email successfully verified
                 </p>
               )}
               {error && !verified && (
