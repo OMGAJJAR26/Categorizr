@@ -35,6 +35,7 @@ import ChatButton from "../components/chat/ChatButton";
 import ChatPanel from "../components/chat/ChatPanel";
 import RecoveryEmailVerificationFlow from "../components/RecoveryEmailVerificationFlow";
 import { isTimestampFromToday } from "../components/RecoveryEmailVerificationFlow";
+import { loadQbLinkedReceipts } from "../utils/qbStorage";
 import { isRecoveryEmailVerified } from "../utils/userUtils";
 import { getReceiptExpenseType } from "../utils/expenseCategories";
 import {
@@ -46,7 +47,7 @@ import "./HomePage.css";
 
 const HomePage = () => {
   const navigate = useNavigate();
-  const { refreshData, silentRefreshData, receipts, loading, updateReceiptStatus, deleteReceipt, bulkDeleteReceipts, updateReceipt, user, syncForwardedReceiptData, markRecoveryEmailVerified, apiExpenseCategories, apiPaymentMethods } = useData();
+  const { refreshData, silentRefreshData, receipts, loading, updateReceiptStatus, deleteReceipt, bulkDeleteReceipts, updateReceipt, user, applyQuickbooksLinkedIds, markReceiptQuickbooksLinked, syncForwardedReceiptData, markRecoveryEmailVerified, apiExpenseCategories, apiPaymentMethods } = useData();
   const { formatCurrency } = useCurrency();
 
   // Custom hooks for complex logic
@@ -140,16 +141,7 @@ const HomePage = () => {
   // ── Recovery-email verification popup ──
   const [showRecoveryEmailFlow, setShowRecoveryEmailFlow] = useState(false);
   const [linkingXeroReceiptId, setLinkingXeroReceiptId] = useState(null);
-  const [linkedQuickbooksReceiptIds, setLinkedQuickbooksReceiptIds] = useState(() => {
-    try {
-      const stored = localStorage.getItem("qbLinkedReceipts");
-      const parsed = stored ? JSON.parse(stored) : [];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (e) {
-      console.error("Failed to parse QuickBooks-linked receipts from storage:", e);
-      return [];
-    }
-  });
+  const [linkedQuickbooksReceiptIds, setLinkedQuickbooksReceiptIds] = useState(() => loadQbLinkedReceipts());
 
   // Chat assistant hook
   const {
@@ -224,7 +216,21 @@ const HomePage = () => {
       setQuickbooksConnected(true);
       window.history.replaceState({}, "", window.location.pathname);
     } else if (qb === "error") {
-      setToast({ isVisible: true, message: "QuickBooks connection failed. Please try again.", type: "error" });
+      const reason = params.get("reason");
+      const messages = {
+        missing_user: "QuickBooks could not identify your Categorizr account. Log in again, then reconnect.",
+        missing_code: "QuickBooks did not return an authorization code. Try connecting again.",
+        missing_company: "QuickBooks did not return a company id. Try connecting again.",
+        redirect_uri: "QuickBooks redirect URI does not match the server setting.",
+        token_exchange: "QuickBooks refused the connection. Check sandbox vs production and app credentials.",
+        db_save: "QuickBooks authorized, but the token could not be saved to MySQL. Check DB settings and the token table.",
+        config: "QuickBooks is missing server configuration.",
+      };
+      setToast({
+        isVisible: true,
+        message: messages[reason] || "QuickBooks connection failed. Please try again.",
+        type: "error",
+      });
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);
@@ -248,6 +254,11 @@ const HomePage = () => {
     try {
       const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/status?fk_user_id=${encodeURIComponent(localStorage.getItem("fk_user_id") || "")}`);
       const data = await res.json();
+      const serverIds = Array.isArray(data.linkedReceiptIds) ? data.linkedReceiptIds : [];
+      if (serverIds.length) {
+        const merged = applyQuickbooksLinkedIds(serverIds);
+        setLinkedQuickbooksReceiptIds(merged);
+      }
       if (data.success && data.connected) {
         setQuickbooksConnected(true);
         setQuickbooksRealmId(data.realmId || null);
@@ -892,17 +903,8 @@ const HomePage = () => {
   // Helper: mark a receipt as QB-linked in local state + localStorage
   const markQbLinked = (receiptId) => {
     if (receiptId == null) return;
-    const idStr = receiptId.toString();
-    setLinkedQuickbooksReceiptIds((prev) => {
-      if (prev.includes(idStr)) return prev;
-      const next = [...prev, idStr];
-      try {
-        localStorage.setItem("qbLinkedReceipts", JSON.stringify(next));
-      } catch (e) {
-        console.error("Failed to persist QB-linked receipts:", e);
-      }
-      return next;
-    });
+    const next = markReceiptQuickbooksLinked(receiptId);
+    setLinkedQuickbooksReceiptIds(next);
   };
 
   const handleLinkToQuickBooks = async (receipt) => {
@@ -937,15 +939,16 @@ const HomePage = () => {
           storeName: receipt.storeName || receipt.merchant || "",
           purchasePrice: receipt.purchasePrice || receipt.total_amount || "",
           product_date: receipt.product_date || "",
-          expense_type: receipt.expense_type || "",
-          product_name: receipt.product_name || "",
+          expense_type: receipt.expense_type || receipt.expenseType || "",
+          product_name: receipt.product_name || receipt.productName || "",
           receipt_category: receipt.receipt_category || "",
           payment_method: receipt.paymentMethod || receipt.payment_method || "",
+          card_type: receipt.paymentType || "",
           card_number: receipt.last_4_digit_card || receipt.last4Digits || "",
           subtotal: receipt.subtotal || "",
           receipt_tax_values: receipt.receipt_tax_values || [],
           tip: receipt.tip || "",
-          notes: receipt.notes || "",
+          notes: receipt.notes || receipt.Notes || "",
           receipt_image: imageUrl,
           emailAttachment: imageUrl,
           receiptImages: getReceiptImageUrls(receipt),
@@ -1097,6 +1100,7 @@ const HomePage = () => {
           expense_type: receipt.expense_type || "",
           product_name: receipt.product_name || "",
           payment_method: receipt.paymentMethod || receipt.payment_method || "",
+          card_type: receipt.paymentType || "",
           card_number: receipt.last_4_digit_card || receipt.last4Digits || "",
           subtotal: receipt.subtotal || "",
           receipt_tax_values: receipt.receipt_tax_values || [],
@@ -1566,6 +1570,11 @@ const HomePage = () => {
           <IntegrationsModal
             open={showIntegrationsModal}
             onClose={() => setShowIntegrationsModal(false)}
+            onQuickBooksDisconnected={() => {
+              setQuickbooksConnected(false);
+              setQuickbooksRealmId(null);
+              setLinkedQuickbooksReceiptIds([]);
+            }}
           />
 
           {showCustomizedReport && (
@@ -1625,6 +1634,7 @@ const HomePage = () => {
             actionLabel={toast.actionLabel}
             actionUrl2={toast.actionUrl2}
             actionLabel2={toast.actionLabel2}
+            duration={toast.actionUrl ? 0 : 3000}
             onClose={() => setToast({ ...toast, isVisible: false })}
           />
 

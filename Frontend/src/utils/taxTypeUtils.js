@@ -242,10 +242,22 @@ export function enrichReceiptTaxValues(receiptTaxValues, taxDefinitions, receipt
 
     const resolvedRate = resolveReceiptTaxLineRate(tax, taxDefinition, subtotal);
 
+    // A line linked to the tip tax type (is_tips flag, or a definition whose name
+    // reads as a tip) IS the tip — even if the stored line's own tax_name is empty
+    // or a generic value like "Tax" (which happens after a save round-trip). Force
+    // its name to read as a tip so downstream tip detection (isTipTax) reliably
+    // extracts it into the Tip field instead of leaving a duplicate tax row.
+    const defIsTip =
+      !!taxDefinition &&
+      (parseInt(taxDefinition.is_tips, 10) === 1 || isTipTax(taxDefinition));
+    const tax_name = defIsTip
+      ? (isTipTax(taxDefinition) ? taxDefinition.tax_name : "Tip")
+      : tax.tax_name || taxDefinition?.tax_name || (isTipTax(tax) ? "Tip" : "Tax");
+
     return {
       ...tax,
       fk_tax_id: taxId || tax.fk_tax_id || 0,
-      tax_name: tax.tax_name || taxDefinition?.tax_name || (isTipTax(tax) ? "Tip" : "Tax"),
+      tax_name,
       tax_rate: resolvedRate,
       tax_number: tax.tax_number || taxDefinition?.tax_number || "",
       tax_amount: tax.tax_amount,

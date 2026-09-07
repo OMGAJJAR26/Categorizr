@@ -207,6 +207,8 @@ const ReceiptDetail = ({
     taxData,
     refreshData,
     silentRefreshData,
+    markReceiptQuickbooksLinked,
+    applyQuickbooksLinkedIds,
     addTax,
     updateTax,
     deleteTax,
@@ -220,6 +222,7 @@ const ReceiptDetail = ({
     editCustomMerchant,
     deleteCustomMerchant,
     hideMerchant,
+    tombstoneMerchant,
     addApiMerchant,
     saveMerchLogo,
     apiMerchants,
@@ -280,6 +283,8 @@ const ReceiptDetail = ({
     isVisible: false,
     message: "",
     type: "success",
+    actionUrl: null,
+    actionLabel: null,
   });
 
   // Dropdown states
@@ -751,6 +756,7 @@ useEffect(() => {
         if (data.success && data.connected) {
           setQuickbooksConnected(true);
           setQuickbooksRealmId(data.realmId || null);
+          applyQuickbooksLinkedIds(Array.isArray(data.linkedReceiptIds) ? data.linkedReceiptIds : []);
         } else {
           setQuickbooksConnected(false);
           setQuickbooksRealmId(null);
@@ -2787,6 +2793,8 @@ useEffect(() => {
         handleFieldChange("store_image", "");
       }
       hideMerchant(merchant.name);
+      // Tombstone so a default/receipt/server copy can't resurrect it on reload.
+      tombstoneMerchant(merchant.name);
       await Promise.all([fetchApiMerchants(), silentRefreshData(0)]);
       setToast({ isVisible: true, message: "Merchant deleted successfully!", type: "success" });
     } catch (err) {
@@ -3593,8 +3601,11 @@ useEffect(() => {
       const tipAmount = parseFloat(editedReceipt.tip) || 0;
       const subtotal = parseFloat(editedReceipt.subtotal) || 0;
       const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
+      // Enrich first so a stored tip line linked by fk_tax_id (whose raw tax_name
+      // may be empty or "Tax" after a round-trip) is still recognised — this reuses
+      // its id and prevents a duplicate/orphaned "Tip" row.
       const existingTipLine = findTipLineInReceiptTaxValues(
-        selectedReceipt.receipt_tax_values,
+        enrichReceiptTaxValues(selectedReceipt.receipt_tax_values, taxData, selectedReceipt),
       );
       let receiptTaxValuesPayload = filterNonTipReceiptTaxValues(
         editedReceipt.receipt_tax_values,
@@ -3920,8 +3931,11 @@ useEffect(() => {
     const tipAmount = parseFloat(editedReceipt.tip) || 0;
     const subtotal = parseFloat(editedReceipt.subtotal) || 0;
     const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
+    // Enrich first so a stored tip line linked by fk_tax_id (whose raw tax_name
+    // may be empty or "Tax" after a round-trip) is still recognised — this reuses
+    // its id and prevents a duplicate/orphaned "Tip" row.
     const existingTipLine = findTipLineInReceiptTaxValues(
-      selectedReceipt.receipt_tax_values,
+      enrichReceiptTaxValues(selectedReceipt.receipt_tax_values, taxData, selectedReceipt),
     );
     let receiptTaxValuesPayload = filterNonTipReceiptTaxValues(
       editedReceipt.receipt_tax_values,
@@ -4086,7 +4100,7 @@ useEffect(() => {
     try {
       const token = localStorage.getItem("token");
       // Use the latest receipt data (including any saved changes)
-      const latestRec = { ...editedReceipt, ...selectedReceipt };
+      const latestRec = { ...selectedReceipt, ...editedReceipt };
       const res = await fetch(`${NODE_API_URL}/api/integrations/quickbooks/receipts`, {
         method: "POST",
         headers: {
@@ -4106,6 +4120,9 @@ useEffect(() => {
           receipt_category: latestRec.receipt_category || "",
           payment_method:
             latestRec.paymentMethod || latestRec.payment_method || "",
+          // Card brand (Visa, MasterCard, …) so QuickBooks can link the Payment
+          // Method to the card type even when the issuer name / last-4 aren't used.
+          card_type: latestRec.paymentType || "",
           card_number:
             latestRec.last_4_digit_card || latestRec.last4Digits || "",
           subtotal: latestRec.subtotal || "",
@@ -4244,6 +4261,7 @@ useEffect(() => {
 
         // Update local state only (no API call) - refreshData will fetch fresh data
         if (latestRec.id != null) {
+          markReceiptQuickbooksLinked(latestRec.id);
           setSelectedReceipt((prev) =>
             prev ? { ...prev, quickbooksLinked: true } : prev
           );
@@ -6524,7 +6542,11 @@ Thank you for using our receipt management system.
                                             : ""
                                         );
 
-                                        // Update last_4_digit_card
+                                        // Update last_4_digit_card — clear it when
+                                        // the chosen method has no last 4, so a stale
+                                        // value from a previous method (e.g. a deleted
+                                        // "Bank of America 8888") never leaks onto a
+                                        // plain method like "American Express".
                                         if (
                                           last4FromMethod &&
                                           /^\d{3,4}$/.test(last4FromMethod)
@@ -6533,6 +6555,8 @@ Thank you for using our receipt management system.
                                             "last_4_digit_card",
                                             last4FromMethod
                                           );
+                                        } else {
+                                          handleFieldChange("last_4_digit_card", "");
                                         }
 
                                         // Auto-apply the payment method's default expense
@@ -7442,6 +7466,7 @@ Thank you for using our receipt management system.
         actionLabel={toast.actionLabel}
         actionUrl2={toast.actionUrl2}
         actionLabel2={toast.actionLabel2}
+        duration={toast.actionUrl ? 0 : 3000}
         onClose={() => setToast((t) => ({ ...t, isVisible: false }))}
       />
 

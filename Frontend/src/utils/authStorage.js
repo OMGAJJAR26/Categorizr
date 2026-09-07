@@ -10,11 +10,14 @@
 // - cat_synced_forwards_<uid>: forwarded receipts whose data was already synced
 // - cat_hidden_merchants_<uid>: default/custom merchants this user deleted
 //   (must survive logout — otherwise Home Depot etc. are re-injected on login)
+// - qbLinkedReceipts[_<uid>] : receipts already pushed to QuickBooks, so the
+//   update/delete prompts still fire for them after a re-login
 const PRESERVED_LOCALSTORAGE_PREFIXES = [
   "cat_locally_forwarded",
   "cat_seen_forwards_",
   "cat_synced_forwards_",
   "cat_hidden_merchants_",
+  "qbLinkedReceipts",
 ];
 export { PRESERVED_LOCALSTORAGE_PREFIXES };
 

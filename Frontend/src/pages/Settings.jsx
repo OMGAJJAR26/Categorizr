@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { clearAuthLocalStorage } from "../utils/authStorage";
 import { containsEmoji, stripEmoji } from "../utils/emojiUtils";
 import { parseTaxRateInput, createTaxRateKeyDownHandler } from "../utils/taxRateInput";
 import { useTaxRateLimitAlert } from "../hooks/useTaxRateLimitAlert";
@@ -93,7 +94,6 @@ import {
   getExpenseCategoryRecordName,
   getExpenseCategoryRecordId,
 } from "../utils/expenseCategories";
-import { clearAuthLocalStorage } from "../utils/authStorage";
 
 /* ─── Helpers ─────────────────────────────────────────── */
 
@@ -223,7 +223,7 @@ const COLOR_MAP = {
 
 const ManageModal = ({ type, onClose }) => {
   const {
-    receiptMerchWImgRaw, customMerchants, hideMerchant, isMerchantHidden, addCustomMerchant, editCustomMerchant, deleteCustomMerchant,
+    receiptMerchWImgRaw, customMerchants, hideMerchant, isMerchantHidden, isMerchantDeleted, tombstoneMerchant, addCustomMerchant, editCustomMerchant, deleteCustomMerchant,
     receiptCategoriesRaw, customCategories, hideCategory, addCustomCategory, editCustomCategory, deleteCustomCategory,
     receiptPaymentsRaw, customPaymentMethods, hidePaymentMethod, addCustomPaymentMethod, editCustomPaymentMethod, deleteCustomPaymentMethod,
     taxData, addTax, updateTax, deleteTax, fetchTaxes,
@@ -433,6 +433,9 @@ const ManageModal = ({ type, onClose }) => {
           }
         }
         hideMerchant(item.key || item.name);
+        // Tombstone the name so it never reappears (default label, receipt-derived,
+        // or a server record the backend delete didn't actually remove).
+        tombstoneMerchant(item.name || item.key);
         deleteCustomMerchant(item.key || item.name);
         await fetchApiMerchants();
         toast("success", "Merchant Deleted");
@@ -571,7 +574,8 @@ const ManageModal = ({ type, onClose }) => {
           };
         })
         .filter(Boolean)
-        .filter((m) => !existingNames.has(normalizeMatchKey(m.name)));
+        .filter((m) => !existingNames.has(normalizeMatchKey(m.name)))
+        .filter((m) => !isMerchantDeleted(m.name)); // exclude explicitly-deleted merchants
       return [...customItems, ...apiItems];
     }
     if (type === "categories") return customCategories.filter(c => !hiddenCategories.has(c)).map(c => ({ key: c, name: c, logo: null }));

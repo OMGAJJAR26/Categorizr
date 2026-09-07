@@ -9,6 +9,10 @@
       "destination": "https://categorizr-chatbot-staging.onrender.com/api/imageproxy"
     },
     {
+      "source": "/api/integrations/:path*",
+      "destination": "https://categorizr-chatbot-staging.onrender.com/api/integrations/:path*"
+    },
+    {
       "source": "/api/:path*",
       "destination": "https://categorizr.com/emailserver/api/:path*"
     },

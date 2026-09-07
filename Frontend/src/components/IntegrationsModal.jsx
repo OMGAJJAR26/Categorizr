@@ -1,10 +1,15 @@
 import { useState, useEffect } from "react";
 import { NODE_API_URL } from "../api/Axios";
 import SimpleAlertModal from "./SimpleAlertModal";
+import { getFkUserId, clearQbLinkedReceipts } from "../utils/qbStorage";
 
-const QB_APP_URL = "https://app.qbo.intuit.com/app/homepage";
 const SAGE_APP_URL = "https://www.sageone.com/";
 const XERO_APP_URL = "https://go.xero.com/";
+// Canonical "open QuickBooks" landing for each environment. /app/homepage always
+// resolves to the user's active company (or Intuit login), unlike deep paths that
+// need company context and can show a blank/"unable to reach" page.
+const QB_SANDBOX_OPEN_URL = "https://app.sandbox.qbo.intuit.com/app/homepage";
+const QB_PRODUCTION_OPEN_URL = "https://app.qbo.intuit.com/app/homepage";
 
 // Sign-up entry points for users who don't have a QuickBooks account yet.
 // US and Canada QuickBooks are separate — send the user to the right one.
@@ -44,8 +49,6 @@ const providers = [
   },
 ];
 
-const getFkUserId = () => localStorage.getItem("fk_user_id") || "";
-
 const getConnectUrl = (id) => {
   switch (id) {
     case "quickbooks":
@@ -62,10 +65,11 @@ const getConnectUrl = (id) => {
   }
 };
 
-const IntegrationsModal = ({ open, onClose }) => {
+const IntegrationsModal = ({ open, onClose, onQuickBooksDisconnected }) => {
   const [alertMsg, setAlertMsg] = useState(null);
   const [quickbooksConnected, setQuickbooksConnected] = useState(false);
   const [quickbooksRealmId, setQuickbooksRealmId] = useState(null);
+  const [quickbooksAppUrl, setQuickbooksAppUrl] = useState(QB_SANDBOX_OPEN_URL);
   const [quickbooksLoading, setQuickbooksLoading] = useState(false);
   const [xeroConnected, setXeroConnected] = useState(false);
   const [xeroLoading, setXeroLoading] = useState(false);
@@ -80,6 +84,10 @@ const IntegrationsModal = ({ open, onClose }) => {
         if (data.success && data.connected) {
           setQuickbooksConnected(true);
           setQuickbooksRealmId(data.realmId || null);
+          setQuickbooksAppUrl(
+            data.appUrl ||
+              (data.environment === "production" ? QB_PRODUCTION_OPEN_URL : QB_SANDBOX_OPEN_URL)
+          );
         } else {
           setQuickbooksConnected(false);
           setQuickbooksRealmId(null);
@@ -113,6 +121,10 @@ const IntegrationsModal = ({ open, onClose }) => {
 
   const handleConnect = (provider) => {
     if (!provider.connectable) return;
+    if (provider.id === "quickbooks" && !getFkUserId()) {
+      setAlertMsg("Please log in again before connecting QuickBooks.");
+      return;
+    }
     const url = getConnectUrl(provider.id);
       if (url && url !== "#") {
       // For OAuth-based integrations (QuickBooks, Xero, FreshBooks), redirect
@@ -127,7 +139,22 @@ const IntegrationsModal = ({ open, onClose }) => {
   };
 
   const handleOpenQuickBooks = () => {
-    window.open(QB_APP_URL, "_blank", "noopener,noreferrer");
+    const url = quickbooksAppUrl || QB_SANDBOX_OPEN_URL;
+    // Anchor-click opens a new tab more reliably than window.open (which some
+    // popup blockers suppress even inside a click handler). Fall back to
+    // navigating the current tab if the new tab is blocked outright.
+    try {
+      const a = document.createElement("a");
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch {
+      const win = window.open(url, "_blank", "noopener,noreferrer");
+      if (!win) window.location.href = url;
+    }
   };
 
   const handleOpenXero = () => {
@@ -148,7 +175,8 @@ const IntegrationsModal = ({ open, onClose }) => {
       if (data.success) {
         setQuickbooksConnected(false);
         setQuickbooksRealmId(null);
-        // Optionally show a toast notification
+        clearQbLinkedReceipts();
+        onQuickBooksDisconnected?.();
       } else {
         setAlertMsg(data.error || "Failed to disconnect QuickBooks");
       }
@@ -170,9 +198,23 @@ const IntegrationsModal = ({ open, onClose }) => {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full px-2 py-2 text-2xl leading-none text-gray-600 hover:bg-gray-200 w-auto"
+            className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full transition-colors"
+            style={{ backgroundColor: "#000000" }}
+            aria-label="Close"
           >
-            ‹
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#FFFFFF"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
           </button>
           <h2 className="text-2xl font-semibold text-slate-900">Integrations</h2>
         </div>

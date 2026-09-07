@@ -7,6 +7,18 @@ import OAuthClient from "intuit-oauth";
 import { XeroClient } from "xero-node";
 import axios from "axios";
 import { create } from "xmlbuilder2";
+import {
+  saveQuickBooksToken,
+  getQuickBooksToken,
+  deleteQuickBooksToken,
+  getValidQuickBooksToken,
+  getLinkedReceiptIds,
+  addLinkedReceipt,
+  getLinkedPurchaseId,
+  removeLinkedReceipt,
+  exchangeQuickBooksAuthorizationCode,
+  isMysqlConfigured,
+} from "../services/quickbooksTokenStore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QB_TOKENS_PATH = path.join(__dirname, "..", "data", "quickbooks-tokens.json");
@@ -66,17 +78,24 @@ function getQuickBooksClient() {
 export async function quickbooksConnect(req, res) {
   if (!ensureEnv(["QB_CLIENT_ID", "QB_CLIENT_SECRET", "QB_REDIRECT_URI"], res, "QuickBooks")) return;
 
+  // Carry the Categorizr user id AND the initiating frontend origin through OAuth
+  // via `state`, so the callback can (a) store the token against the right user
+  // (fk_user_id) and (b) return the user to the SAME origin they started from —
+  // otherwise they land on a different origin with no session and get logged out.
+  const fkUserId = req.query.fk_user_id || req.query.fkUserId || "";
+  const returnUrl = req.query.return_url || "";
+  if (!String(fkUserId).trim()) {
+    return redirectQuickBooksError(res, returnUrl, "missing_user");
+  }
+  const state = Buffer.from(
+    JSON.stringify({ u: String(fkUserId), r: String(returnUrl), n: crypto.randomUUID() })
+  ).toString("base64url");
+
   const client = getQuickBooksClient();
   try {
     const authUri = client.authorizeUri({
-      scope: [
-        "com.intuit.quickbooks.accounting",
-        "openid",
-        "profile",
-        "email",
-        "phone",
-      ],
-      state: crypto.randomUUID(),
+      scope: ["com.intuit.quickbooks.accounting"],
+      state,
     });
     return res.redirect(authUri);
   } catch (err) {
@@ -85,81 +104,271 @@ export async function quickbooksConnect(req, res) {
   }
 }
 
-export async function quickbooksCallback(req, res) {
-  if (!ensureEnv(["QB_CLIENT_ID", "QB_CLIENT_SECRET", "QB_REDIRECT_URI"], res, "QuickBooks")) return;
-
-  const client = getQuickBooksClient();
+function parseOAuthState(state) {
   try {
-    await client.createToken(req.url);
-    const token = client.getToken();
-    const realmId = client.getToken()?.realmId || req.query.realmId;
-    if (realmId) {
-      quickbooksTokens.set(realmId, token);
-      saveQuickBooksTokens();
-    }
-    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-    const redirectUrl = `${frontendUrl}/?quickbooks=connected&realmId=${encodeURIComponent(realmId || "")}`;
-    return res.redirect(redirectUrl);
-  } catch (err) {
-    console.error("QuickBooks callback error", err);
-    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-    return res.redirect(`${frontendUrl}/?quickbooks=error`);
+    const decoded = JSON.parse(Buffer.from(state || "", "base64url").toString());
+    return {
+      fkUserId: String(decoded.u || "").trim(),
+      returnUrl: String(decoded.r || "").trim(),
+    };
+  } catch {
+    return { fkUserId: "", returnUrl: "" };
   }
 }
 
-export async function quickbooksStatus(req, res) {
-  const realmId = req.query.realmId;
-  let connected = false;
-  let resolvedRealmId = null;
-  if (realmId) {
-    connected = quickbooksTokens.has(realmId);
-    if (connected) resolvedRealmId = realmId;
-  } else {
-    const first = quickbooksTokens.keys().next();
-    if (!first.done) {
-      resolvedRealmId = first.value;
-      connected = true;
-    }
+function redirectQuickBooksError(res, returnUrl, reason) {
+  const params = new URLSearchParams({ quickbooks: "error" });
+  if (reason) params.set("reason", String(reason).slice(0, 48));
+  return res.redirect(`${resolveFrontendOrigin(returnUrl)}/?${params.toString()}`);
+}
+
+export async function quickbooksCallback(req, res) {
+  const { fkUserId, returnUrl } = parseOAuthState(req.query.state);
+
+  if (!process.env.QB_CLIENT_ID || !process.env.QB_CLIENT_SECRET || !process.env.QB_REDIRECT_URI) {
+    console.error("QuickBooks callback missing QB_CLIENT_ID / QB_CLIENT_SECRET / QB_REDIRECT_URI");
+    return redirectQuickBooksError(res, returnUrl, "config");
   }
-  return res.status(200).json({
-    success: true,
-    connected,
-    realmId: resolvedRealmId || undefined,
-  });
+
+  if (req.query.error) {
+    console.error("QuickBooks OAuth denied:", req.query.error, req.query.error_description || "");
+    return redirectQuickBooksError(res, returnUrl, String(req.query.error).slice(0, 40));
+  }
+
+  const code = req.query.code;
+  const realmId = req.query.realmId;
+  if (!code) return redirectQuickBooksError(res, returnUrl, "missing_code");
+  if (!fkUserId) {
+    console.error("QuickBooks callback missing fk_user_id in OAuth state");
+    return redirectQuickBooksError(res, returnUrl, "missing_user");
+  }
+  if (!realmId) return redirectQuickBooksError(res, returnUrl, "missing_company");
+
+  let token;
+  try {
+    token = await exchangeQuickBooksAuthorizationCode(code);
+  } catch (err) {
+    const body = err?.response?.data;
+    console.error("QuickBooks token exchange failed:", body || err.message);
+    const detail = String(body?.error_description || body?.error || err.message || "");
+    const reason = /redirect/i.test(detail) ? "redirect_uri" : "token_exchange";
+    return redirectQuickBooksError(res, returnUrl, reason);
+  }
+
+  try {
+    if (!isMysqlConfigured()) {
+      throw new Error("MySQL is not configured (DB_HOST, DB_USER, DB_NAME).");
+    }
+    await saveQuickBooksToken({
+      fkUserId,
+      realmId,
+      accessToken: token.access_token,
+      refreshToken: token.refresh_token,
+      expiresIn: token.expires_in,
+      xRefreshExpiresIn: token.x_refresh_token_expires_in,
+      tokenJson: token,
+    });
+  } catch (err) {
+    console.error("QuickBooks token save failed:", err.message);
+    return redirectQuickBooksError(res, returnUrl, "db_save");
+  }
+
+  const frontendUrl = resolveFrontendOrigin(returnUrl);
+  return res.redirect(
+    `${frontendUrl}/?quickbooks=connected&realmId=${encodeURIComponent(realmId)}`
+  );
+}
+
+// Return the origin to send the user back to after OAuth. Prefer the origin they
+// started from (so they stay logged in), but only if it's one of our own Categorizr
+// Vercel origins (main + preview deploys); otherwise fall back to FRONTEND_URL.
+function resolveFrontendOrigin(returnUrl) {
+  const fallback = process.env.FRONTEND_URL || "http://localhost:5173";
+  if (
+    typeof returnUrl === "string" &&
+    /^https:\/\/categorizr-staging[a-z0-9-]*\.vercel\.app$/i.test(returnUrl)
+  ) {
+    return returnUrl;
+  }
+  return fallback;
+}
+
+export async function quickbooksStatus(req, res) {
+  try {
+    const fkUserId = req.query.fk_user_id || req.query.fkUserId;
+    if (!fkUserId) {
+      return res.status(200).json({ success: true, connected: false, linkedReceiptIds: [] });
+    }
+    const row = await getQuickBooksToken(fkUserId);
+    const linkedReceiptIds = await getLinkedReceiptIds(fkUserId);
+    return res.status(200).json({
+      success: true,
+      connected: !!row,
+      realmId: row?.realm_id || undefined,
+      environment: process.env.QB_ENVIRONMENT || "sandbox",
+      appUrl: qbOpenBooksUrl(row?.realm_id),
+      linkedReceiptIds,
+    });
+  } catch (err) {
+    console.error("QuickBooks status error", err);
+    return res.status(200).json({ success: true, connected: false, linkedReceiptIds: [] });
+  }
 }
 
 export async function quickbooksDisconnect(req, res) {
   try {
-    const realmId = req.query.realmId;
-    
-    if (realmId) {
-      // Disconnect specific realmId
-      if (quickbooksTokens.has(realmId)) {
-        quickbooksTokens.delete(realmId);
-        saveQuickBooksTokens();
-        return res.status(200).json({
-          success: true,
-          message: "QuickBooks disconnected successfully",
-        });
-      } else {
-        return res.status(404).json({
-          success: false,
-          error: "QuickBooks account not found",
-        });
-      }
-    } else {
-      // Disconnect all accounts
-      const count = quickbooksTokens.size;
-      quickbooksTokens.clear();
-      saveQuickBooksTokens();
-      return res.status(200).json({
-        success: true,
-        message: `Disconnected ${count} QuickBooks account(s)`,
-      });
+    const fkUserId = req.query.fk_user_id || req.query.fkUserId;
+    if (!fkUserId) {
+      return res.status(400).json({ success: false, error: "Missing fk_user_id" });
     }
+    const result = await deleteQuickBooksToken(fkUserId);
+    if (result?.realmId) {
+      quickbooksTokens.delete(String(result.realmId));
+    } else {
+      quickbooksTokens.clear();
+    }
+    saveQuickBooksTokens();
+    return res.status(200).json({
+      success: true,
+      message: "QuickBooks disconnected successfully",
+      deleted: result?.deleted || 0,
+    });
   } catch (err) {
     console.error("QuickBooks disconnect error", err);
     return res.status(500).json({ error: "Failed to disconnect QuickBooks" });
+  }
+}
+
+// Read a created expense back from QuickBooks so it can be verified WITHOUT
+// opening the QBO sandbox UI. GET /quickbooks/expense?fk_user_id=..&purchaseId=..
+export async function quickbooksGetExpense(req, res) {
+  try {
+    const fkUserId = req.query.fk_user_id || req.query.fkUserId;
+    const purchaseId = req.query.purchaseId || req.query.txnId;
+    if (!fkUserId || !purchaseId) {
+      return res.status(400).json({ success: false, error: "Missing fk_user_id or purchaseId" });
+    }
+    const valid = await getValidQuickBooksToken(fkUserId);
+    if (!valid?.accessToken) {
+      return res.status(400).json({ success: false, error: "QuickBooks not connected." });
+    }
+    const rid = valid.realmId;
+    const baseUrl = isQbProduction()
+      ? "https://quickbooks.api.intuit.com"
+      : "https://sandbox-quickbooks.api.intuit.com";
+    const headers = { Authorization: `Bearer ${valid.accessToken}`, Accept: "application/json" };
+
+    const purchaseRes = await axios.get(
+      `${baseUrl}/v3/company/${rid}/purchase/${encodeURIComponent(purchaseId)}?minorversion=69`,
+      { headers }
+    );
+    const p = purchaseRes.data?.Purchase;
+    if (!p) return res.status(404).json({ success: false, error: "Purchase not found in QuickBooks." });
+
+    let attachments = [];
+    try {
+      const q = `SELECT * FROM Attachable WHERE AttachableRef.EntityRef.value = '${purchaseId}'`;
+      const attRes = await axios.get(
+        `${baseUrl}/v3/company/${rid}/query?query=${encodeURIComponent(q)}`,
+        { headers }
+      );
+      attachments = (attRes.data?.QueryResponse?.Attachable || []).map((a) => ({
+        id: a.Id, fileName: a.FileName, size: a.Size,
+      }));
+    } catch { /* ignore */ }
+
+    const lines = (p.Line || [])
+      .filter((l) => l.DetailType === "AccountBasedExpenseLineDetail")
+      .map((l) => ({
+        amount: l.Amount,
+        description: l.Description || "",
+        account:
+          l.AccountBasedExpenseLineDetail?.AccountRef?.name ||
+          l.AccountBasedExpenseLineDetail?.AccountRef?.value,
+      }));
+
+    return res.status(200).json({
+      success: true,
+      realmId: rid,
+      purchaseId: p.Id,
+      docNumber: p.DocNumber || null,
+      txnDate: p.TxnDate,
+      total: p.TotalAmt,
+      paymentType: p.PaymentType,
+      payee: p.EntityRef?.name || p.EntityRef?.value || null,
+      paymentAccount: p.AccountRef?.name || p.AccountRef?.value || null,
+      paymentMethod: p.PaymentMethodRef?.name || p.PaymentMethodRef?.value || null,
+      memo: p.PrivateNote || null,
+      lines,
+      attachments,
+    });
+  } catch (err) {
+    console.error("QuickBooks getExpense error", err?.response?.data || err.message);
+    return res.status(500).json({
+      success: false,
+      error: err?.response?.data?.Fault?.Error?.[0]?.Message || err.message,
+    });
+  }
+}
+
+// Delete the QuickBooks expense linked to a Categorizr receipt, then clear the
+// link. POST /quickbooks/expense/delete  { fk_user_id, receiptId }
+export async function quickbooksDeleteExpense(req, res) {
+  try {
+    const fkUserId = req.body?.fk_user_id || req.body?.fkUserId || req.query.fk_user_id;
+    const receiptId = req.body?.receiptId || req.query.receiptId;
+    if (!fkUserId || !receiptId) {
+      return res.status(400).json({ success: false, error: "Missing fk_user_id or receiptId" });
+    }
+    const purchaseId = await getLinkedPurchaseId(fkUserId, receiptId);
+    if (!purchaseId) {
+      return res.status(200).json({ success: true, deleted: false, message: "No linked QuickBooks expense." });
+    }
+    const valid = await getValidQuickBooksToken(fkUserId);
+    if (!valid?.accessToken) {
+      return res.status(400).json({ success: false, error: "QuickBooks not connected." });
+    }
+    const rid = valid.realmId;
+    const baseUrl = isQbProduction()
+      ? "https://quickbooks.api.intuit.com"
+      : "https://sandbox-quickbooks.api.intuit.com";
+    const headers = {
+      Authorization: `Bearer ${valid.accessToken}`,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    };
+
+    let syncToken = null;
+    try {
+      const g = await axios.get(
+        `${baseUrl}/v3/company/${rid}/purchase/${encodeURIComponent(purchaseId)}?minorversion=69`,
+        { headers }
+      );
+      syncToken = g.data?.Purchase?.SyncToken;
+    } catch {
+      // Already gone in QuickBooks → just clear our link.
+      await removeLinkedReceipt(fkUserId, receiptId);
+      return res.status(200).json({ success: true, deleted: true, message: "Expense already removed in QuickBooks; link cleared." });
+    }
+
+    try {
+      await axios.post(
+        `${baseUrl}/v3/company/${rid}/purchase?operation=delete&minorversion=69`,
+        { Id: purchaseId, SyncToken: syncToken },
+        { headers }
+      );
+    } catch (err) {
+      return res.status(500).json({
+        success: false,
+        error: err?.response?.data?.Fault?.Error?.[0]?.Message || err.message,
+      });
+    }
+
+    await removeLinkedReceipt(fkUserId, receiptId);
+    return res.status(200).json({ success: true, deleted: true, purchaseId, message: `Deleted QuickBooks expense ${purchaseId}.` });
+  } catch (err) {
+    console.error("QuickBooks delete expense error", err);
+    return res.status(500).json({ success: false, error: err.message });
   }
 }
 
@@ -194,6 +403,145 @@ async function getValidQuickBooksClient(realmId) {
   return client;
 }
 
+// ---- QuickBooks helpers (shared by receipt upload) --------------------------
+
+// Format a tax rate for display: "13.0000" -> "13", "13.9950" -> "13.995".
+function qbFormatRate(rate) {
+  const n = parseFloat(rate);
+  return isNaN(n) ? String(rate ?? "").trim() : String(n);
+}
+
+const qbFault = (err) =>
+  err?.response?.data?.Fault?.Error?.[0]?.Message ||
+  err?.response?.data?.Fault?.Error?.[0]?.Detail ||
+  err?.message ||
+  "unknown error";
+
+/** Open the QuickBooks company UI (books), not the Intuit Developer portal.
+ *  Use /login (not /app/...) so the first hop stays on app.sandbox.qbo.intuit.com.
+ *  sandbox.qbo.intuit.com NXDOMAINs for some users; production qbo has no sandbox company.
+ */
+function isQbProduction() {
+  return (process.env.QB_ENVIRONMENT || "sandbox") === "production";
+}
+
+function qbUiOrigin() {
+  return isQbProduction()
+    ? "https://app.qbo.intuit.com"
+    : "https://app.sandbox.qbo.intuit.com";
+}
+
+// Standard QuickBooks Online deep links. QBO opens these in the browser's
+// currently-active company, so the user must have the connected company selected.
+// (The older /login?deeplinkcompanyid=…&pagereq=… form does not route and shows
+// an "unable to reach / untitled" page.)
+function qbOpenBooksUrl() {
+  // /app/homepage always resolves to the user's active company (or Intuit login);
+  // /app/expenses can render blank without company context. Used for the generic
+  // "Open QuickBooks" button (specific expense deep links use qbPurchaseAppUrl).
+  return `${qbUiOrigin()}/app/homepage`;
+}
+
+function qbPurchaseAppUrl({ purchaseId, paymentType }) {
+  if (!purchaseId) {
+    return qbOpenBooksUrl();
+  }
+  const txnPath = paymentType === "Check" ? "check" : "expense";
+  return `${qbUiOrigin()}/app/${txnPath}?txnId=${encodeURIComponent(purchaseId)}`;
+}
+
+// Find an Account by exact Name; create it with the given type if missing.
+// Returns the account Id, or null on failure.
+async function qbFindOrCreateAccount(baseUrl, rid, accessToken, name, accountType, accountSubType) {
+  const trimmed = (name || "").toString().trim();
+  if (!trimmed) return null;
+  const auth = { Authorization: `Bearer ${accessToken}`, Accept: "application/json" };
+  const escaped = trimmed.replace(/'/g, "\\'");
+  try {
+    const q = `SELECT * FROM Account WHERE Name = '${escaped}' MAXRESULTS 1`;
+    const url = `${baseUrl}/v3/company/${rid}/query?query=${encodeURIComponent(q)}`;
+    const res = await axios.get(url, { headers: auth });
+    const found = res.data?.QueryResponse?.Account?.[0];
+    if (found?.Id) return found.Id;
+  } catch (err) {
+    console.warn(`Account query failed for "${trimmed}":`, qbFault(err));
+  }
+  const createOnce = async (body) => {
+    const res = await axios.post(`${baseUrl}/v3/company/${rid}/account`, body, {
+      headers: { ...auth, "Content-Type": "application/json" },
+    });
+    return res.data?.Account;
+  };
+  try {
+    const body = { Name: trimmed, AccountType: accountType };
+    if (accountSubType) body.AccountSubType = accountSubType;
+    const created = await createOnce(body);
+    if (created?.Id) {
+      console.log(`✓ Created account "${trimmed}" (${accountType}/${accountSubType || "-"}) id ${created.Id}`);
+      return created.Id;
+    }
+  } catch (err) {
+    console.warn(`Account create failed for "${trimmed}":`, qbFault(err));
+    if (accountSubType) {
+      try {
+        const created = await createOnce({ Name: trimmed, AccountType: accountType });
+        if (created?.Id) {
+          console.log(`✓ Created account "${trimmed}" (${accountType}/no-subtype) id ${created.Id}`);
+          return created.Id;
+        }
+      } catch (retryErr) {
+        console.warn(`Account create retry failed for "${trimmed}":`, qbFault(retryErr));
+      }
+    }
+  }
+  return null;
+}
+
+// Detect the card brand (a clean, reusable QuickBooks "Payment Method" name) from
+// a Categorizr card type or payment string like "Mastercard Bank of America *7890".
+// Returns null for non-card / unknown values (Cash, Check, custom names).
+function qbCardBrandFromPaymentMethod(value) {
+  const s = (value || "").toString().toLowerCase();
+  if (!s) return null;
+  if (/\bamerican express\b|\bamex\b/.test(s)) return "American Express";
+  if (/\bmaster\s*card\b/.test(s)) return "MasterCard";
+  if (/\bvisa\b/.test(s)) return "Visa";
+  if (/\bdiscover\b/.test(s)) return "Discover";
+  if (/\bdiners\b/.test(s)) return "Diners Club";
+  if (/\bdebit\b/.test(s)) return "Debit Card";
+  if (/\bpaypal\b/.test(s)) return "PayPal";
+  return null;
+}
+
+// Find a PaymentMethod by exact Name; create it if missing. Returns Id or null.
+async function qbFindOrCreatePaymentMethod(baseUrl, rid, accessToken, name) {
+  const trimmed = (name || "").toString().trim();
+  if (!trimmed) return null;
+  const auth = { Authorization: `Bearer ${accessToken}`, Accept: "application/json" };
+  try {
+    const q = `SELECT * FROM PaymentMethod WHERE Name = '${trimmed.replace(/'/g, "\\'")}' MAXRESULTS 1`;
+    const url = `${baseUrl}/v3/company/${rid}/query?query=${encodeURIComponent(q)}`;
+    const res = await axios.get(url, { headers: auth });
+    const found = res.data?.QueryResponse?.PaymentMethod?.[0];
+    if (found?.Id) return found.Id;
+  } catch (err) {
+    console.warn(`PaymentMethod query failed for "${trimmed}":`, qbFault(err));
+  }
+  try {
+    const res = await axios.post(`${baseUrl}/v3/company/${rid}/paymentmethod`, { Name: trimmed }, {
+      headers: { ...auth, "Content-Type": "application/json" },
+    });
+    const created = res.data?.PaymentMethod;
+    if (created?.Id) {
+      console.log(`✓ Created payment method "${trimmed}" id ${created.Id}`);
+      return created.Id;
+    }
+  } catch (err) {
+    console.warn(`PaymentMethod create failed for "${trimmed}":`, qbFault(err));
+  }
+  return null;
+}
+
 export async function quickbooksUploadReceipt(req, res) {
   try {
     console.log("quickbooksUploadReceipt called with body:", JSON.stringify(req.body, null, 2));
@@ -213,6 +561,7 @@ export async function quickbooksUploadReceipt(req, res) {
       product_name,
       receipt_category,
       payment_method,
+      card_type,
       card_number,
       subtotal,
       receipt_tax_values,
@@ -220,6 +569,7 @@ export async function quickbooksUploadReceipt(req, res) {
       notes,
       receipt_image,
       emailAttachment,
+      receiptImages,
       receiptFileName,
     } = req.body;
 
@@ -240,29 +590,30 @@ export async function quickbooksUploadReceipt(req, res) {
       hasEmailAttachment: !!emailAttachment,
     });
 
-    let client;
-    try {
-      client = await getValidQuickBooksClient(realmId);
-    } catch (clientErr) {
-      console.error("Error getting QuickBooks client:", clientErr);
-      return res.status(500).json({ error: "Failed to initialize QuickBooks client: " + clientErr.message });
+    // Load a valid access token from the DB for this user (auto-refreshes).
+    const fkUserId = req.body.fk_user_id || req.body.fkUserId;
+    if (!fkUserId) {
+      return res.status(400).json({ error: "Missing fk_user_id. Cannot resolve QuickBooks connection." });
     }
-    
-    if (!client) {
+    let validToken;
+    try {
+      validToken = await getValidQuickBooksToken(fkUserId);
+    } catch (clientErr) {
+      console.error("Error getting QuickBooks token:", clientErr);
+      return res.status(500).json({ error: "Failed to get QuickBooks token: " + clientErr.message });
+    }
+    if (!validToken || !validToken.accessToken) {
       return res.status(400).json({ error: "QuickBooks not connected. Connect QuickBooks first." });
     }
 
-    const token = client.getToken();
-    if (!token || !token.access_token) {
-      return res.status(400).json({ error: "Invalid QuickBooks token. Please reconnect." });
-    }
-
-    const rid = realmId || token.realmId;
+    // Existing code below reads token.access_token — keep that shape.
+    const token = { access_token: validToken.accessToken };
+    const rid = validToken.realmId || realmId;
     if (!rid) {
       return res.status(400).json({ error: "QuickBooks company ID not found. Please reconnect." });
     }
-    
-    console.log("QuickBooks client and token validated, realmId:", rid);
+
+    console.log("QuickBooks token validated, realmId:", rid);
 
     const baseUrl =
       (process.env.QB_ENVIRONMENT || "sandbox") === "production"
@@ -270,102 +621,66 @@ export async function quickbooksUploadReceipt(req, res) {
         : "https://sandbox-quickbooks.api.intuit.com";
     const uploadUrl = `${baseUrl}/v3/company/${rid}/upload?minorversion=69`;
 
-    // Image is optional - try to load it if available
-    const imageSource = receipt_image || emailAttachment;
-    let fileBuffer = null;
-    let contentType = "image/jpeg";
-    let fileName = receiptFileName || `receipt_${receiptId || Date.now()}.jpg`;
-    let hasImage = false;
+    // Images are optional. Support MULTIPLE images: the frontend may send an array
+    // (receiptImages); fall back to the single receipt_image / emailAttachment field.
+    const rawSources = (
+      Array.isArray(receiptImages) && receiptImages.length
+        ? receiptImages
+        : [receipt_image || emailAttachment]
+    )
+      .filter((s) => typeof s === "string" && s.trim() && s.trim() !== "0")
+      .map((s) => s.trim());
+    // De-dupe while preserving order.
+    const imageSources = [...new Set(rawSources)];
 
-    if (imageSource && imageSource !== "0" && imageSource.trim() !== "") {
+    const baseFileName = receiptFileName || `receipt_${receiptId || "img"}`;
+    const loadImage = async (src, idx) => {
       try {
-        if (imageSource.startsWith("data:") || imageSource.startsWith("/9j/") || /^[A-Za-z0-9+/=]+$/.test(imageSource.slice(0, 100))) {
-          const base64 = imageSource.includes(",") ? imageSource.split(",")[1] : imageSource;
-          fileBuffer = Buffer.from(base64, "base64");
-          hasImage = fileBuffer && fileBuffer.length > 0;
-        } else if (imageSource.startsWith("http://") || imageSource.startsWith("https://")) {
-          const imgRes = await axios.get(imageSource, { responseType: "arraybuffer", timeout: 30000 });
-          fileBuffer = Buffer.from(imgRes.data);
-          const ct = imgRes.headers["content-type"];
-          if (ct) contentType = ct.split(";")[0].trim();
-          const ext = contentType.includes("png") ? "png" : contentType.includes("pdf") ? "pdf" : "jpg";
-          fileName = fileName.replace(/\.[^.]+$/, `.${ext}`) || `receipt.${ext}`;
-          hasImage = fileBuffer && fileBuffer.length > 0;
+        if (src.startsWith("data:") || src.startsWith("/9j/") || /^[A-Za-z0-9+/=]+$/.test(src.slice(0, 100))) {
+          const base64 = src.includes(",") ? src.split(",")[1] : src;
+          const buf = Buffer.from(base64, "base64");
+          if (buf && buf.length > 0) {
+            return { buffer: buf, contentType: "image/jpeg", fileName: `${baseFileName}_${idx + 1}.jpg` };
+          }
+        } else if (src.startsWith("http://") || src.startsWith("https://")) {
+          const imgRes = await axios.get(src, { responseType: "arraybuffer", timeout: 30000 });
+          const buf = Buffer.from(imgRes.data);
+          if (buf && buf.length > 0) {
+            let ct = "image/jpeg";
+            const hdr = imgRes.headers["content-type"];
+            if (hdr) ct = hdr.split(";")[0].trim();
+            const ext = ct.includes("png") ? "png" : ct.includes("pdf") ? "pdf" : ct.includes("gif") ? "gif" : "jpg";
+            return { buffer: buf, contentType: ct, fileName: `${baseFileName}_${idx + 1}.${ext}` };
+          }
         }
       } catch (err) {
-        console.warn("Could not load receipt image, will create transaction without attachment:", err.message);
-        hasImage = false;
+        console.warn(`Could not load receipt image #${idx + 1}:`, err.message);
+      }
+      return null;
+    };
+
+    const imageFiles = (
+      await Promise.all(imageSources.map((src, idx) => loadImage(src, idx)))
+    ).filter(Boolean);
+    console.log(`Loaded ${imageFiles.length}/${imageSources.length} receipt image(s) for attachment`);
+
+    // Get Expense account for Purchase line item — exact name = Categorizr expense category.
+    // Do not substring-match (e.g. "1a-2" must not match an account named "a" or "1").
+    let expenseAccountId = null;
+    const categoryName = (expense_type || "").toString().trim();
+    if (categoryName && categoryName !== "0") {
+      expenseAccountId = await qbFindOrCreateAccount(
+        baseUrl, rid, token.access_token, categoryName, "Expense", "OtherBusinessExpenses"
+      );
+      if (expenseAccountId) {
+        console.log(`✓ Expense category account "${categoryName}" id ${expenseAccountId}`);
+      } else {
+        console.warn(`Could not find or create expense account "${categoryName}"`);
       }
     }
 
-    // Get Expense account for Purchase line item - try to match expense_type first
-    let expenseAccountId = null;
-    try {
-      // First, try to find an expense account that matches expense_type (e.g., "Electronics")
-      if (expense_type && expense_type.trim() && expense_type !== "0") {
-        const accountName = expense_type.trim();
-        
-        // Query all expense accounts to find a match (exact or partial)
-        const allAccountsQueryUrl = `${baseUrl}/v3/company/${rid}/query?query=SELECT * FROM Account WHERE AccountType='Expense'`;
-        try {
-          const accountRes = await axios.get(allAccountsQueryUrl, {
-            headers: {
-              Authorization: `Bearer ${token.access_token}`,
-              Accept: "application/json",
-            },
-          });
-          const allAccounts = accountRes.data?.QueryResponse?.Account || [];
-          
-          // Try exact match first
-          let matchedAccount = allAccounts.find(acc => 
-            acc.Name && acc.Name.trim().toLowerCase() === accountName.toLowerCase()
-          );
-          
-          // If no exact match, try partial match (e.g., "Electronics" matches "Electronics:Equipment")
-          if (!matchedAccount) {
-            matchedAccount = allAccounts.find(acc => 
-              acc.Name && (
-                acc.Name.toLowerCase().includes(accountName.toLowerCase()) ||
-                accountName.toLowerCase().includes(acc.Name.toLowerCase())
-              )
-            );
-          }
-          
-          if (matchedAccount) {
-            expenseAccountId = matchedAccount.Id;
-            console.log(`✓ Found matching expense account for "${accountName}":`, matchedAccount.Name, "ID:", matchedAccount.Id);
-          } else {
-            // Create a new expense account with the expense_type name
-            try {
-              const createAccountUrl = `${baseUrl}/v3/company/${rid}/account`;
-              const accountData = {
-                Name: accountName,
-                AccountType: "Expense",
-                AccountSubType: "OtherMiscellaneousServiceCost",
-              };
-              const createAccountRes = await axios.post(createAccountUrl, accountData, {
-                headers: {
-                  Authorization: `Bearer ${token.access_token}`,
-                  "Content-Type": "application/json",
-                  Accept: "application/json",
-                },
-              });
-              const newAccount = createAccountRes.data?.Account;
-              if (newAccount?.Id) {
-                expenseAccountId = newAccount.Id;
-                console.log(`✓ Created new expense account "${accountName}":`, newAccount.Name, "ID:", newAccount.Id);
-              }
-            } catch (createErr) {
-              console.warn(`Could not create expense account "${accountName}":`, createErr.message);
-            }
-          }
-        } catch (err) {
-          console.warn(`Could not query expense accounts:`, err.message);
-        }
-      }
-      
-      // If no matching account found, get the first available expense account
-      if (!expenseAccountId) {
+    if (!expenseAccountId) {
+      try {
         const accountQueryUrl = `${baseUrl}/v3/company/${rid}/query?query=SELECT * FROM Account WHERE AccountType='Expense' MAXRESULTS 1`;
         const accountRes = await axios.get(accountQueryUrl, {
           headers: {
@@ -378,9 +693,9 @@ export async function quickbooksUploadReceipt(req, res) {
           expenseAccountId = accounts[0].Id;
           console.log(`Using default expense account:`, accounts[0].Name, "ID:", accounts[0].Id);
         }
+      } catch (err) {
+        console.warn("Could not fetch Expense account:", err.message);
       }
-    } catch (err) {
-      console.warn("Could not fetch Expense account:", err.message);
     }
 
     // Get Bank account for Purchase (top-level AccountRef) - required for Cash/Check/CreditCard payment types
@@ -401,11 +716,11 @@ export async function quickbooksUploadReceipt(req, res) {
       console.warn("Could not fetch Bank account:", err.message);
     }
 
-    // Bank account is required for Purchase with PaymentType Cash/Check/CreditCard
+    // A bank account is only the FALLBACK payment account now — card payments use a
+    // Credit Card account resolved from the Categorizr payment method below, so a
+    // missing bank account is no longer fatal on its own.
     if (!bankAccountId) {
-      return res.status(400).json({ 
-        error: "No bank account found in QuickBooks. Please set up at least one bank account (like 'Cash' or 'Checking') in your QuickBooks company." 
-      });
+      console.warn("No Bank account found — will rely on a Credit Card payment account.");
     }
 
     if (!expenseAccountId) {
@@ -416,6 +731,8 @@ export async function quickbooksUploadReceipt(req, res) {
 
     // Create a Purchase (Expense) transaction
     let purchaseId = null;
+    let wasUpdate = false;
+    let qbPaymentType = "Cash";
     let finalAmount = 0.01; // Store for use in response messages
     try {
       let purchaseDate;
@@ -482,8 +799,27 @@ export async function quickbooksUploadReceipt(req, res) {
         });
       }
       
-      const tipAmount = parseFloat(tip) || 0;
-      const subtotalAmount = parseFloat(subtotal) || (finalAmount - totalTax - tipAmount);
+      // Tip may arrive in the `tip` field OR embedded in receipt_tax_values as a
+      // "Tip" entry — use whichever has a value so the Tip line is never dropped.
+      let tipAmount = parseFloat(tip) || 0;
+      if (!tipAmount) {
+        const tipEntry = (Array.isArray(receipt_tax_values) ? receipt_tax_values : [])
+          .find((t) => /tip/i.test((t.tax_name || "")));
+        if (tipEntry) tipAmount = parseFloat(tipEntry.tax_amount) || 0;
+      }
+      // The QuickBooks expense total is the SUM of its line amounts (QuickBooks
+      // derives TotalAmt from the lines). So main line + taxes + tip must equal the
+      // receipt total. Trust the passed-in subtotal ONLY when it's consistent with
+      // that; otherwise derive it (total − taxes − tip). This prevents a subtotal
+      // that already includes the tip from inflating the total — e.g. a $400 receipt
+      // posting as $440 because the $40 tip was added on top of a $400 "subtotal".
+      const passedSubtotal = parseFloat(subtotal);
+      const derivedSubtotal = finalAmount - totalTax - tipAmount;
+      const subtotalAmount =
+        Number.isFinite(passedSubtotal) &&
+        Math.abs(passedSubtotal + totalTax + tipAmount - finalAmount) < 0.01
+          ? passedSubtotal
+          : derivedSubtotal;
       
       // Build comprehensive memo with ALL receipt details
       // This will be the primary place for description since Line.Description is not supported
@@ -525,25 +861,27 @@ export async function quickbooksUploadReceipt(req, res) {
       }
       const memo = memoParts.length > 0 ? memoParts.join(" | ") : null;
       
-      // Build line item description - include expense_type for category visibility
-      // Format: "product_name (expense_type)" or just "expense_type" if no product_name
-      let lineItemDescription;
+      // Build the main expense line's Description.
+      // Only populate it when the receipt has a "Describe Purchase"; if it's empty
+      // the Description stays BLANK (do NOT fall back to the category name).
+      // Format when present: "Describe Purchase (Expense Category)".
+      let lineItemDescription = "";
       if (product_name && product_name.trim()) {
-        if (expense_type && expense_type.trim()) {
-          lineItemDescription = `${product_name.trim()} (${expense_type.trim()})`;
-        } else {
-          lineItemDescription = product_name.trim();
-        }
-      } else {
-        lineItemDescription = expense_type || "Expense";
+        lineItemDescription =
+          expense_type && expense_type.trim()
+            ? `${product_name.trim()} (${expense_type.trim()})`
+            : product_name.trim();
       }
       
       // Note: ItemRef lookup will be done after baseUrl and rid are available
       
       // Get tax codes for taxes (GST, PST, etc.) - TaxCodeRef goes inside AccountBasedExpenseLineDetail
       const taxCodes = new Map(); // Map tax name to TaxCode
-      const taxValues = Array.isArray(receipt_tax_values) ? receipt_tax_values.filter(t => 
-        t.tax_name && t.tax_name.toLowerCase() !== "tip" && parseFloat(t.tax_amount) > 0
+      // Include every non-tip tax with a non-zero amount — POSITIVE OR NEGATIVE
+      // (some receipts carry negative VAT/GST); only truly zero amounts are skipped.
+      const taxValues = Array.isArray(receipt_tax_values) ? receipt_tax_values.filter(t =>
+        t.tax_name && t.tax_name.toLowerCase() !== "tip" &&
+        !isNaN(parseFloat(t.tax_amount)) && parseFloat(t.tax_amount) !== 0
       ) : [];
       
       if (taxValues.length > 0) {
@@ -598,105 +936,56 @@ export async function quickbooksUploadReceipt(req, res) {
         }
       }
       
-      // Build line items with Description
-      // Description goes at Line level, BEFORE DetailType (property order matters)
+      // FULL mapping: expense category on the main line (= subtotal), then each tax on
+      // its own line (Other Expense / Other Miscellaneous Expense) and a Tip line.
+      // QuickBooks shows "--Split--" in the Expenses list, but every tax/tip is itemised
+      // on the expense form — per the client's spec.
       const lineItems = [];
-      
-      // Main expense line item with Description
       const mainLineItem = {
         Amount: subtotalAmount > 0 ? subtotalAmount : finalAmount,
       };
-      
-      // Add Description BEFORE DetailType (order matters for QuickBooks)
       if (lineItemDescription && lineItemDescription.trim()) {
         mainLineItem.Description = lineItemDescription.trim();
-      } else if (product_name && product_name.trim()) {
-        mainLineItem.Description = product_name.trim();
-      } else if (expense_type && expense_type.trim()) {
-        mainLineItem.Description = expense_type.trim();
       }
-      
-      // Then add DetailType and AccountBasedExpenseLineDetail
       mainLineItem.DetailType = "AccountBasedExpenseLineDetail";
       mainLineItem.AccountBasedExpenseLineDetail = {
-        AccountRef: {
-          value: expenseAccountId,
-        },
+        AccountRef: { value: expenseAccountId },
       };
-      
-      // Add TaxCodeRef to main line item for first tax (only if we have a value)
-      if (taxValues.length > 0) {
-        const firstTax = taxValues[0];
-        const firstTaxCode = taxCodes.get(firstTax.tax_name);
-        if (firstTaxCode && firstTaxCode.value) {
-          mainLineItem.AccountBasedExpenseLineDetail.TaxCodeRef = {
-            value: firstTaxCode.value,
-          };
-        }
-      }
-      
       lineItems.push(mainLineItem);
-      
-      // Add additional taxes as separate line items (only if multiple taxes)
-      if (taxValues.length > 1) {
-        for (let i = 1; i < taxValues.length; i++) {
-          const tax = taxValues[i];
-          const taxAmount = parseFloat(tax.tax_amount) || 0;
-          const taxCode = taxCodes.get(tax.tax_name);
-          
-          const taxLineItem = {
-            Amount: taxAmount,
-          };
-          
-          // Add Description BEFORE DetailType
-          if (tax.tax_name && tax.tax_name.trim()) {
-            taxLineItem.Description = tax.tax_name.trim();
-          }
-          
-          // Then add DetailType and AccountBasedExpenseLineDetail
-          taxLineItem.DetailType = "AccountBasedExpenseLineDetail";
-          taxLineItem.AccountBasedExpenseLineDetail = {
-            AccountRef: {
-              value: expenseAccountId,
-            },
-          };
-          
-          // Add TaxCodeRef only if we have a value
-          if (taxCode && taxCode.value) {
-            taxLineItem.AccountBasedExpenseLineDetail.TaxCodeRef = {
-              value: taxCode.value,
-            };
-          }
-          
-          lineItems.push(taxLineItem);
-        }
+
+      // Each tax → its own line. Category account matched/created as Other Expense /
+      // Other Miscellaneous Expense; category name + Description both read "NAME (rate%)".
+      for (const tax of taxValues) {
+        const taxAmount = parseFloat(tax.tax_amount) || 0;
+        if (taxAmount === 0) continue;
+        const label = `${(tax.tax_name || "Tax").trim()} (${qbFormatRate(tax.tax_rate)}%)`;
+        const taxAccountId = await qbFindOrCreateAccount(
+          baseUrl, rid, token.access_token, label, "Other Expense", "OtherMiscellaneousExpense"
+        );
+        lineItems.push({
+          Amount: taxAmount,
+          Description: label,
+          DetailType: "AccountBasedExpenseLineDetail",
+          AccountBasedExpenseLineDetail: { AccountRef: { value: taxAccountId || expenseAccountId } },
+        });
       }
-      
-      // Add tip as separate line item with Description
+
+      // Tip → category account "TIP" (Other Expense), Description "TIP (x%)".
       if (tipAmount > 0) {
-        const tipLineItem = {
+        // Tip % is tip ÷ subtotal; fall back to the receipt total when the derived
+        // subtotal isn't usable (e.g. odd data where tip exceeds the total), so a
+        // real tip never shows as 0%.
+        const tipBase = subtotalAmount > 0 ? subtotalAmount : Math.abs(parseFloat(finalAmount)) || 0;
+        const tipPct = tipBase > 0 ? Math.round((tipAmount / tipBase) * 100) : 0;
+        const tipAccountId = await qbFindOrCreateAccount(
+          baseUrl, rid, token.access_token, "TIP", "Other Expense", "OtherMiscellaneousExpense"
+        );
+        lineItems.push({
           Amount: tipAmount,
-          Description: "Tip",
-        };
-        // Add DetailType after Description
-        tipLineItem.DetailType = "AccountBasedExpenseLineDetail";
-        tipLineItem.AccountBasedExpenseLineDetail = {
-          AccountRef: {
-            value: expenseAccountId,
-          },
-        };
-        lineItems.push(tipLineItem);
-      }
-      
-      // Ensure total matches sum of line items
-      const lineItemsTotal = lineItems.reduce((sum, item) => sum + (parseFloat(item.Amount) || 0), 0);
-      const taxTotal = taxValues.reduce((sum, t) => sum + (parseFloat(t.tax_amount) || 0), 0);
-      const expectedTotal = subtotalAmount + taxTotal + tipAmount;
-      
-      if (Math.abs(lineItemsTotal - expectedTotal) > 0.01) {
-        // Adjust main line item to match total
-        const adjustment = expectedTotal - (lineItemsTotal - (mainLineItem.Amount || 0));
-        mainLineItem.Amount = adjustment > 0 ? adjustment : subtotalAmount;
+          Description: `TIP (${tipPct}%)`,
+          DetailType: "AccountBasedExpenseLineDetail",
+          AccountBasedExpenseLineDetail: { AccountRef: { value: tipAccountId || expenseAccountId } },
+        });
       }
       
       // Extract card number for RefNo
@@ -712,27 +1001,65 @@ export async function quickbooksUploadReceipt(req, res) {
         }
       }
       
+      // ── Resolve QuickBooks "Payment account" + "Payment Method" from the
+      // Categorizr payment method (e.g. "Mastercard Bank of America *7890"). ──
+      // The Payment account (AccountRef) must be a Credit Card account for card
+      // payments — match by name or create one (Account Type/Detail Type Credit Card).
+      const paymentName = (paymentMethodDisplay || "").toString().trim();
+      let accountRefId = null;
+      let finalPaymentType = paymentType;
+      if (finalPaymentType === "CreditCard" && paymentName) {
+        accountRefId = await qbFindOrCreateAccount(
+          baseUrl, rid, token.access_token, paymentName, "Credit Card", "CreditCard"
+        );
+      }
+      if (!accountRefId) {
+        // Fall back to a bank/cash account. A Bank account can't carry PaymentType
+        // "CreditCard", so downgrade the type to keep the Purchase valid.
+        accountRefId = bankAccountId;
+        if (finalPaymentType === "CreditCard") finalPaymentType = "Cash";
+      }
+      if (!accountRefId) {
+        return res.status(400).json({
+          error: "No payment account available in QuickBooks. Add a bank or credit card account, then retry.",
+        });
+      }
+
+      // Payment Method entity (the "Payment Method" dropdown) — match or create.
+      // Prefer the clean card TYPE (Visa, MasterCard, …) so the expense links to a
+      // reusable payment method rather than a one-off "Issuer *1234" entry. Use the
+      // explicit card_type when sent, else parse it out of the payment string; fall
+      // back to the full payment name (e.g. "Cash", "Check", custom labels).
+      const cardBrand =
+        qbCardBrandFromPaymentMethod(card_type) ||
+        qbCardBrandFromPaymentMethod(payment_method);
+      const paymentMethodName = cardBrand || paymentName;
+      let paymentMethodId = null;
+      if (paymentMethodName) {
+        paymentMethodId = await qbFindOrCreatePaymentMethod(
+          baseUrl, rid, token.access_token, paymentMethodName
+        );
+      }
+
       // Build Purchase data with all fields
       const purchaseData = {
-        PaymentType: paymentType,
-        AccountRef: {
-          value: bankAccountId,
-        },
+        PaymentType: finalPaymentType,
+        AccountRef: { value: accountRefId },
         TxnDate: purchaseDate,
         TotalAmt: finalAmount,
         Line: lineItems,
       };
-      
-      // Note: PaymentMethodRef is NOT supported for Purchase transactions
-      // Payment method is determined by PaymentType (Cash, Check, CreditCard) which is already set
-      // The payment_method from receipt is included in Memo for reference
-      
+      if (paymentMethodId) {
+        purchaseData.PaymentMethodRef = { value: paymentMethodId };
+      }
+
       // Query vendor FIRST before building purchaseData
       // EntityRef must use 'value' (vendor ID) - 'name' alone may cause validation errors
       let vendorId = null;
       if (storeName && storeName.trim()) {
         try {
-          const vendorQueryUrl = `${baseUrl}/v3/company/${rid}/query?query=SELECT * FROM Vendor WHERE DisplayName='${encodeURIComponent(storeName.trim())}' MAXRESULTS 1`;
+          const vq = `SELECT * FROM Vendor WHERE DisplayName = '${storeName.trim().replace(/'/g, "\\'")}' MAXRESULTS 1`;
+          const vendorQueryUrl = `${baseUrl}/v3/company/${rid}/query?query=${encodeURIComponent(vq)}`;
           const vendorRes = await axios.get(vendorQueryUrl, {
             headers: {
               Authorization: `Bearer ${token.access_token}`,
@@ -779,15 +1106,18 @@ export async function quickbooksUploadReceipt(req, res) {
         };
       }
       
-      // RefNo (Ref no. field) - temporarily removed to test if it causes validation error
-      // QuickBooks might use RefNumber instead of RefNo
-      // if (refNo && refNo.trim()) {
-      //   purchaseData.RefNo = refNo.trim();
-      // }
-      
-      // Memo field - contains all receipt details including description
-      if (memo && memo.trim() && memo !== "0") {
-        purchaseData.Memo = memo.trim();
+      // Ref no. → "Cat - <receiptId>" (QuickBooks DocNumber, max 21 chars).
+      if (receiptId != null && `${receiptId}`.trim() !== "") {
+        purchaseData.DocNumber = `Cat - ${`${receiptId}`.trim()}`.slice(0, 21);
+      }
+
+      // Memo on a QBO Purchase is PrivateNote (Memo is ignored by the API).
+      const notesText = notes && notes.toString().trim() && notes.toString().trim() !== "0"
+        ? notes.toString().trim()
+        : "";
+      if (notesText) {
+        purchaseData.PrivateNote = notesText;
+        purchaseData.Memo = notesText;
       }
       
       console.log("Purchase data prepared:", {
@@ -799,6 +1129,7 @@ export async function quickbooksUploadReceipt(req, res) {
         TxnDate: purchaseData.TxnDate,
         TotalAmt: purchaseData.TotalAmt,
         Memo: purchaseData.Memo || "Not set",
+        PrivateNote: purchaseData.PrivateNote || "Not set",
         LineCount: purchaseData.Line.length,
         LineItems: purchaseData.Line.map(l => ({ 
           Description: l.Description, 
@@ -816,6 +1147,7 @@ export async function quickbooksUploadReceipt(req, res) {
       console.log("- TxnDate:", purchaseData.TxnDate);
       console.log("- TotalAmt:", purchaseData.TotalAmt);
       console.log("- Memo:", purchaseData.Memo || "not set");
+      console.log("- PrivateNote:", purchaseData.PrivateNote || "not set");
       console.log("- EntityRef:", JSON.stringify(purchaseData.EntityRef || "not set"));
       console.log("- Line count:", purchaseData.Line.length);
       purchaseData.Line.forEach((line, idx) => {
@@ -827,23 +1159,42 @@ export async function quickbooksUploadReceipt(req, res) {
         });
       });
       
-      console.log("Creating Purchase:", JSON.stringify(purchaseData, null, 2));
-      
-      // Log detailed error information if request fails
-      let purchaseRes;
-      try {
-        purchaseRes = await axios.post(
-          purchaseUrl,
-          purchaseData,
-          {
-            headers: {
-              Authorization: `Bearer ${token.access_token}`,
-              "Content-Type": "application/json",
-              Accept: "application/json",
-            },
+      // If this receipt is already linked to a QuickBooks expense, UPDATE that
+      // expense in place (adds Id + SyncToken) instead of creating a duplicate.
+      const existingPurchaseId = await getLinkedPurchaseId(fkUserId, receiptId);
+      if (existingPurchaseId) {
+        try {
+          const existingRes = await axios.get(
+            `${baseUrl}/v3/company/${rid}/purchase/${encodeURIComponent(existingPurchaseId)}?minorversion=69`,
+            { headers: { Authorization: `Bearer ${token.access_token}`, Accept: "application/json" } }
+          );
+          const existing = existingRes.data?.Purchase;
+          if (existing?.Id && existing?.SyncToken != null) {
+            purchaseData.Id = existing.Id;
+            purchaseData.SyncToken = existing.SyncToken;
+            purchaseData.sparse = false;
+            wasUpdate = true;
+            console.log(`Updating existing QuickBooks Purchase ${existing.Id} (SyncToken ${existing.SyncToken})`);
           }
-        );
-      } catch (err) {
+        } catch (err) {
+          // Expense was deleted in QB / not found → fall through and create a new one.
+          console.warn(`Linked Purchase ${existingPurchaseId} not found; will create new.`, err.response?.status || err.message);
+        }
+      }
+
+      console.log(purchaseData.Id ? "Updating Purchase:" : "Creating Purchase:", JSON.stringify(purchaseData, null, 2));
+
+      // Log detailed error information if request fails
+      const postPurchase = (body) =>
+        axios.post(purchaseUrl, body, {
+          headers: {
+            Authorization: `Bearer ${token.access_token}`,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+        });
+
+      const handlePurchaseError = (err) => {
         console.error("QuickBooks Purchase API Error:", JSON.stringify(err.response?.data, null, 2));
         const fault = err.response?.data?.Fault;
         if (fault && fault.Error) {
@@ -864,6 +1215,32 @@ export async function quickbooksUploadReceipt(req, res) {
           fault: fault,
         });
         throw err;
+      };
+
+      let purchaseRes;
+      try {
+        purchaseRes = await postPurchase(purchaseData);
+      } catch (firstErr) {
+        // Some companies reject optional fields (PaymentMethodRef / DocNumber) on a
+        // Purchase. Rather than lose the whole expense, strip them and retry once so
+        // the transaction, categories and attachment still go through.
+        if (purchaseData.PaymentMethodRef || purchaseData.DocNumber) {
+          console.warn(
+            "Purchase failed with optional fields; retrying without PaymentMethodRef/DocNumber:",
+            qbFault(firstErr)
+          );
+          const retryData = { ...purchaseData };
+          delete retryData.PaymentMethodRef;
+          delete retryData.DocNumber;
+          try {
+            purchaseRes = await postPurchase(retryData);
+          } catch (retryErr) {
+            purchaseRes = undefined;
+            handlePurchaseError(retryErr);
+          }
+        } else {
+          handlePurchaseError(firstErr);
+        }
       }
 
       console.log("Purchase creation response:", JSON.stringify(purchaseRes.data, null, 2));
@@ -872,6 +1249,7 @@ export async function quickbooksUploadReceipt(req, res) {
       const purchase = purchaseRes.data?.Purchase || purchaseRes.data?.QueryResponse?.Purchase?.[0];
       if (purchase?.Id) {
         purchaseId = purchase.Id;
+        qbPaymentType = finalPaymentType;
         console.log("Purchase created successfully with ID:", purchaseId, "SyncToken:", purchase.SyncToken);
         
         // Verify Purchase exists and check for attachments
@@ -949,137 +1327,93 @@ export async function quickbooksUploadReceipt(req, res) {
       return res.status(400).json({ error: "Failed to create expense transaction in QuickBooks." });
     }
 
-    // If we have an image, attach it to the Purchase
-    if (hasImage && fileBuffer && fileBuffer.length > 0) {
+    if (fkUserId && receiptId) {
       try {
-        // Clean filename - remove special characters but keep extension
-        const cleanFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
-        
-        // Build metadata - attach to Purchase
+        await addLinkedReceipt(fkUserId, receiptId, purchaseId);
+      } catch (linkErr) {
+        console.warn("Could not persist QuickBooks-linked receipt id:", linkErr.message);
+      }
+    }
+
+    // Attach EVERY receipt image to the Purchase (QuickBooks Attachable).
+    // On UPDATE, skip re-attaching — the image is already on the expense and
+    // re-uploading would pile up duplicate attachments.
+    let attachedCount = 0;
+    for (let i = 0; !wasUpdate && i < imageFiles.length; i++) {
+      const img = imageFiles[i];
+      try {
+        const cleanFileName = img.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
         const metadata = {
-          AttachableRef: [
-            {
-              EntityRef: {
-                type: "Purchase",
-                value: purchaseId,
-              },
-            },
-          ],
-          ContentType: contentType,
+          AttachableRef: [{ EntityRef: { type: "Purchase", value: purchaseId } }],
+          ContentType: img.contentType,
           FileName: cleanFileName,
         };
 
         const form = new FormData();
-        form.append("file_content_01", fileBuffer, { filename: metadata.FileName, contentType: metadata.ContentType });
+        form.append("file_content_01", img.buffer, { filename: cleanFileName, contentType: img.contentType });
         form.append("file_metadata_01", JSON.stringify(metadata), {
           contentType: "application/json",
           filename: "file_metadata_01",
         });
 
-        // Upload attachment - simplified approach without getLength
-        let attachmentSuccess = false;
-        let attachableId = null;
-        let attachmentWarning = null;
-        
-        try {
-          const headers = {
+        // Intuit's /upload rejects chunked transfer-encoding — send the multipart body
+        // as a single Buffer with an explicit Content-Length.
+        const formBuffer = form.getBuffer();
+        const response = await axios.post(uploadUrl, formBuffer, {
+          headers: {
             Authorization: `Bearer ${token.access_token}`,
+            Accept: "application/json",
             ...form.getHeaders(),
-          };
-          
-          console.log("Uploading attachment to QuickBooks:", {
-            url: uploadUrl,
-            fileName: cleanFileName,
-            contentType: contentType,
-            fileSize: fileBuffer.length,
-            purchaseId: purchaseId,
-            metadata: JSON.stringify(metadata, null, 2),
-          });
-
-          const response = await axios.post(uploadUrl, form, { 
-            headers, 
-            maxBodyLength: Infinity, 
-            maxContentLength: Infinity,
-            timeout: 60000,
-          });
-          const data = response.data;
-          console.log("QuickBooks attachment upload response:", JSON.stringify(data, null, 2));
-          
-          const fault = data?.Fault || data?.AttachableResponse?.[0]?.Fault;
-          if (fault) {
-            console.error("QuickBooks attachment fault (but Purchase was created):", JSON.stringify(fault, null, 2));
-            attachmentWarning = "Receipt image attachment failed, but expense transaction was created successfully.";
-          } else {
-            const attachable = data?.AttachableResponse?.[0]?.Attachable || data?.Attachable;
-            if (attachable?.Id) {
-              attachmentSuccess = true;
-              attachableId = attachable.Id;
-            }
-          }
-        } catch (err) {
-          console.error("QuickBooks attachment upload error (but Purchase was created):", err?.response?.data || err.message);
-          console.error("Error stack:", err.stack);
-          attachmentWarning = "Receipt image attachment failed, but expense transaction was created successfully.";
+            "Content-Length": formBuffer.length,
+          },
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity,
+          timeout: 60000,
+        });
+        const data = response.data;
+        const fault = data?.Fault || data?.AttachableResponse?.[0]?.Fault;
+        const attachable = data?.AttachableResponse?.[0]?.Attachable || data?.Attachable;
+        if (!fault && attachable?.Id) {
+          attachedCount++;
+          console.log(`✓ Attached image ${i + 1}/${imageFiles.length} (Attachable ${attachable.Id})`);
+        } else {
+          console.error(`Attachment ${i + 1} fault:`, JSON.stringify(fault || data, null, 2));
         }
-        
-        // Send success response after attachment attempt (whether it succeeded or failed)
-        // Note: QuickBooks doesn't support direct deep links to specific transactions
-        // Users need to go to Expenses page and search/filter for the transaction
-        const environment = (process.env.QB_ENVIRONMENT || "sandbox") === "production" ? "app" : "sandbox";
-        const quickbooksBaseUrl = `https://${environment}.qbo.intuit.com`;
-        
-        // Ensure finalAmount is a valid number
-        const displayAmount = (typeof finalAmount === "number" && !isNaN(finalAmount)) 
-          ? finalAmount.toFixed(2) 
-          : "0.00";
-        
-        return res.status(200).json({
-          success: true,
-          message: attachmentSuccess 
-            ? `Receipt linked to QuickBooks successfully! Purchase ID: ${purchaseId}`
-            : `Expense created in QuickBooks! Purchase ID: ${purchaseId}`,
-          purchaseId: purchaseId,
-          attachableId: attachableId,
-          quickbooksUrl: `${quickbooksBaseUrl}/app/expenses`,
-          instructions: attachmentSuccess 
-            ? `To view the receipt: 1) Go to Expenses in QuickBooks, 2) Find transaction #${purchaseId} (or search by amount $${displayAmount}), 3) Click on the transaction to see the attached receipt image.`
-            : `To view the expense: Go to Expenses in QuickBooks and search for transaction #${purchaseId} or amount $${displayAmount}.`,
-          ...(attachmentWarning && { warning: attachmentWarning }),
-        });
       } catch (err) {
-        console.error("Error preparing attachment:", err.message);
-        console.error("Error stack:", err.stack);
-        // Return success anyway - Purchase was created
-        const environment = (process.env.QB_ENVIRONMENT || "sandbox") === "production" ? "app" : "sandbox";
-        const quickbooksBaseUrl = `https://${environment}.qbo.intuit.com`;
-        const displayAmount = (typeof finalAmount === "number" && !isNaN(finalAmount)) 
-          ? finalAmount.toFixed(2) 
-          : "0.00";
-        return res.status(200).json({
-          success: true,
-          message: `Expense created in QuickBooks! Purchase ID: ${purchaseId}`,
-          purchaseId: purchaseId,
-          quickbooksUrl: `${quickbooksBaseUrl}/app/expenses`,
-          instructions: `To view the expense: Go to Expenses in QuickBooks and search for transaction #${purchaseId} or amount $${displayAmount}.`,
-          warning: "Receipt image could not be attached, but expense transaction was created.",
-        });
+        console.error(`Attachment ${i + 1} upload error:`, err?.response?.data || err.message);
       }
-    } else {
-      // No image - just return success with Purchase ID
-      const environment = (process.env.QB_ENVIRONMENT || "sandbox") === "production" ? "app" : "sandbox";
-      const quickbooksBaseUrl = `https://${environment}.qbo.intuit.com`;
-      const displayAmount = (typeof finalAmount === "number" && !isNaN(finalAmount)) 
-        ? finalAmount.toFixed(2) 
-        : "0.00";
-      return res.status(200).json({
-        success: true,
-        message: `Expense created in QuickBooks! Purchase ID: ${purchaseId}`,
-        purchaseId: purchaseId,
-        quickbooksUrl: `${quickbooksBaseUrl}/app/expenses`,
-        instructions: `To view the expense: Go to Expenses in QuickBooks and search for transaction #${purchaseId} or amount $${displayAmount}.`,
-        note: "No receipt image was attached, but expense transaction was created.",
-      });
     }
+
+    const displayAmount = (typeof finalAmount === "number" && !isNaN(finalAmount)) ? finalAmount.toFixed(2) : "0.00";
+    const quickbooksUrl = qbPurchaseAppUrl({
+      purchaseId,
+      realmId: rid,
+      paymentType: qbPaymentType,
+    });
+
+    let warning;
+    if (imageFiles.length > 0 && attachedCount === 0) {
+      warning = "Expense created, but the receipt image(s) could not be attached.";
+    } else if (attachedCount > 0 && attachedCount < imageFiles.length) {
+      warning = `Expense created; ${attachedCount} of ${imageFiles.length} image(s) attached.`;
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: wasUpdate
+        ? `QuickBooks expense updated! Purchase ID: ${purchaseId}`
+        : (attachedCount > 0
+            ? `Receipt linked to QuickBooks successfully! Purchase ID: ${purchaseId}`
+            : `Expense created in QuickBooks! Purchase ID: ${purchaseId}`),
+      purchaseId,
+      updated: wasUpdate,
+      attachedCount,
+      imageCount: imageFiles.length,
+      quickbooksUrl,
+      quickbooksUrlLabel: "Open this expense in QuickBooks",
+      instructions: `Sign in to Intuit if asked, then review transaction #${purchaseId} ($${displayAmount}).`,
+      ...(warning && { warning }),
+    });
   } catch (err) {
     console.error("QuickBooks upload receipt - unexpected error:", err);
     console.error("Error stack:", err.stack);
