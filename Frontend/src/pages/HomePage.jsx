@@ -624,7 +624,7 @@ const HomePage = () => {
     // Use silentRefreshData so the receipt list stays visible while re-fetching.
     // A 1.5s delay gives the server time to commit the new receipt before we re-query.
     silentRefreshData(1500);
-    setToast({ isVisible: true, message: "Saved successfully!", type: "success" });
+    setToast({ isVisible: true, message: "Receipt Added", type: "success" });
   };
 
   /**
@@ -1493,7 +1493,7 @@ const HomePage = () => {
                             setSelectedIndex={setSelectedIndex}
                             onSelectReceipt={handleReceiptClick}
                             onClose={handleCloseReceiptDetail}
-                            onSaved={() => setToast({ isVisible: true, message: "Receipt updated!", type: "success" })}
+                            onSaved={() => setToast({ isVisible: true, message: "Receipt Updated", type: "success" })}
                           />
                         )}
                       </div>
@@ -1533,7 +1533,7 @@ const HomePage = () => {
                                 setSelectedIndex={setSelectedIndex}
                                 onSelectReceipt={handleReceiptClick}
                                 onClose={handleCloseReceiptDetail}
-                                onSaved={() => setToast({ isVisible: true, message: "Receipt updated!", type: "success" })}
+                                onSaved={() => setToast({ isVisible: true, message: "Receipt Updated", type: "success" })}
                               />
                             </>
                           )}
@@ -1670,7 +1670,7 @@ const HomePage = () => {
               markRecoveryEmailVerified();
               setToast({
                 isVisible: true,
-                message: "Email verified successfully!",
+                message: "Email successfully verified",
                 type: "success",
                 actionUrl: null,
                 actionLabel: null,

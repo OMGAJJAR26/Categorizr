@@ -192,7 +192,7 @@ const Signup = () => {
 
           setToastConfig({
             isVisible: true,
-            message: data.message || "Signup successful",
+            message: "Username created",
             type: "success",
           });
           if (didWipePriorUser) {
