@@ -6599,7 +6599,7 @@ const handleSelectLogo = (index) => {
                         onChange={(e) =>
                           handleFieldChange("product_name", e.target.value)
                         }
-                        placeholder="e.g., Nespresso VertuoPlus Espresso Maker"
+                        placeholder={'e.g. "Nespresso VertuePlus Espresso Maker"'}
                         rows={2}
                       />
                       {descriptionOverflow && (
@@ -6616,7 +6616,7 @@ const handleSelectLogo = (index) => {
                         onChange={(e) =>
                           handleFieldChange("notes", e.target.value)
                         }
-                        placeholder="e.g., Birthday gift for Mom"
+                        placeholder={'e.g. "Model No. NESP155, 5 year warranty"'}
                         rows={6}
                       />
                       {notesOverflow && (
