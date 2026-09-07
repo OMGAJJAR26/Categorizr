@@ -516,6 +516,19 @@ const HomePage = () => {
         }
       }
       setToast({ isVisible: true, message, type: "info", actionUrl: null, actionLabel: null });
+
+      // Auto-scroll to the newly-arrived forwarded receipt so the user sees it
+      // right away on the main list. Prefer a network-forward (always in the
+      // regular list); a short delay lets the new row render first. No-op if the
+      // row isn't currently visible (e.g. hidden by an active filter).
+      const scrollTarget = newNetworkForwards[0] || newForwards[0];
+      if (scrollTarget?.id != null) {
+        const anchorId = `receipt-anchor-${scrollTarget.id}`;
+        setTimeout(() => {
+          const el = document.getElementById(anchorId);
+          if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 400);
+      }
     }
 
     // Auto-add missing merchant / payment method / expense category / tax types
@@ -1521,7 +1534,7 @@ const HomePage = () => {
 
                     <div className="home-receipts-inner">
                       {yearReceipts.map((receipt, index) => (
-                        <div key={receipt.id || index} className="mb-3">
+                        <div key={receipt.id || index} id={`receipt-anchor-${receipt.id}`} className="mb-3">
                           {renderReceiptRow(receipt, index, false)}
 
                           {selectedReceipt?.id === receipt.id && (
