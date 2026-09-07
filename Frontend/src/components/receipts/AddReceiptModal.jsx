@@ -5225,7 +5225,7 @@ const handleSelectLogo = (index) => {
                           : "Click to upload or drag and drop"}
                       </p>
                       <p className="text-sm text-gray-500">
-                        Supports images (JPG, PNG, GIF, WebP) and PDFs
+                        Supports images (JPG, PNG, GIF, WebP, HEIC) and PDFs
                       </p>
                       <p className="text-xs text-gray-400 mt-1">
                         Maximum file size: 10MB per file
@@ -7337,32 +7337,33 @@ const handleSelectLogo = (index) => {
             >
               {/* Sticky Header */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
-                <h2 className="text-xl font-bold text-gray-900">Manage Tax Types</h2>
-                <div className="flex items-center gap-2">
-                  {!editingTaxId && !showAddTaxForm && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowAddTaxForm(true);
-                        setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber("");
-                        clearTaxRateLimitAlert();
-                        setTaxNameOverflow(false); setTaxNumberOverflow(false);
-                        setError(null);
-                      }}
-                      className="px-4 py-1.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors"
-                    >
-                      Add
-                    </button>
-                  )}
+                <div className="flex items-center gap-3">
                   <button
                     type="button"
                     onClick={closeTaxModal}
                     disabled={isSavingTax || isDeletingTax}
+                    aria-label="Close"
                     className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors disabled:opacity-50"
                   >
                     <X size={20} className="text-gray-600" />
                   </button>
+                  <h2 className="text-xl font-bold text-gray-900">Manage Tax Types</h2>
                 </div>
+                {!editingTaxId && !showAddTaxForm && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddTaxForm(true);
+                      setNewTaxName(""); setNewTaxRate(""); setNewTaxNumber("");
+                      clearTaxRateLimitAlert();
+                      setTaxNameOverflow(false); setTaxNumberOverflow(false);
+                      setError(null);
+                    }}
+                    className="px-4 py-1.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    Add
+                  </button>
+                )}
               </div>
 
               {/* Scrollable Body */}
