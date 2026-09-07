@@ -7079,7 +7079,7 @@ Thank you for using our receipt management system.
                         className={`w-full border rounded-md p-2 mb-1 text-sm ${descriptionOverflow ? "border-red-400 bg-red-50" : "border-blue-400"}`}
                         value={editedReceipt.product_name ?? r.product_name ?? ""}
                         onChange={(e) => handleFieldChange("product_name", e.target.value)}
-                        placeholder="No description provided"
+                        placeholder={'e.g. "Nespresso VertuePlus Espresso Maker"'}
                         rows={2}
                       />
                       {descriptionOverflow && (
@@ -7094,7 +7094,7 @@ Thank you for using our receipt management system.
                         className={`w-full border rounded-md p-2 mb-1 text-sm ${notesOverflow ? "border-red-400 bg-red-50" : "border-blue-400"}`}
                         value={editedReceipt.notes ?? r.notes ?? ""}
                         onChange={(e) => handleFieldChange("notes", e.target.value)}
-                        placeholder="No notes provided"
+                        placeholder={'e.g. "Model No. NESP155, 5 year warranty"'}
                         rows={6}
                       />
                       {notesOverflow && (
