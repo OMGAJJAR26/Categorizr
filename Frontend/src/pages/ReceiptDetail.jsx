@@ -1530,12 +1530,15 @@ useEffect(() => {
       urls.push(normalized);
     };
 
-    splitMediaField(editedReceipt.receipt_image ?? selectedReceipt.receipt_image ?? "").forEach(
-      pushUnique
-    );
+    // Original photo (emailAttachment) first, then the newer one (receipt_image),
+    // then any extra photos — so saved order matches the display (original left,
+    // new photos to the right) and stays that way after reload.
     splitMediaField(
       editedReceipt.emailAttachment ?? selectedReceipt.emailAttachment ?? ""
     ).forEach(pushUnique);
+    splitMediaField(editedReceipt.receipt_image ?? selectedReceipt.receipt_image ?? "").forEach(
+      pushUnique
+    );
     additionalPhotoUrls.forEach(pushUnique);
 
     const pending = pendingAnnotatedMediaRef.current;
@@ -7214,7 +7217,9 @@ Thank you for using our receipt management system.
 
                           const allUrls = [
                             ...new Set(
-                              [...urls.slice().reverse(), ...additionalPhotoUrls]
+                              // Keep the original photo first; newly added photos
+                              // appear to its right (no reverse).
+                              [...urls, ...additionalPhotoUrls]
                                 .map((u) => normalizeMediaUrl(u))
                                 .filter(Boolean)
                             ),
