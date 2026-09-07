@@ -1508,7 +1508,7 @@ const HomePage = () => {
                   <div key={year}>
                     <div className="home-year-header">
                       <span>
-                        {year} ({yearReceipts.length} Receipts)
+                        {year} ({yearReceipts.length} {yearReceipts.length === 1 ? "Receipt" : "Receipts"})
                       </span>
                       <span className="home-year-total sm:mr-[196px]">
                         TOTAL: {formatCurrency(yearTotal)}
