@@ -447,7 +447,10 @@ const HomePage = () => {
     // the payment-method default category (Business/Personal) onto cards that an earlier
     // build created as "None". The sync is idempotent (guarded by alreadyHave + only-when-None),
     // so the one-time re-run is safe.
-    const syncKey = `cat_synced_forwards_v2_${user.id}`;
+    // v3: bumped so every already-received forwarded receipt re-syncs ONCE more,
+    // backfilling the recipient's own merchant logo onto forwards that adopted the
+    // sender's logo. Idempotent, so the one-time re-run is safe.
+    const syncKey = `cat_synced_forwards_v3_${user.id}`;
     let synced;
     try {
       synced = new Set(JSON.parse(localStorage.getItem(syncKey) || "[]"));

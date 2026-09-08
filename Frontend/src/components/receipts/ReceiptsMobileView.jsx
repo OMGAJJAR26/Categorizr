@@ -78,6 +78,16 @@ const ReceiptsMobileView = ({
           New
         </span>
       )}
+      {(receipt.badgeStatus === "both" || receipt.badgeStatus === "forwarded") && (
+        <span className="self-start bg-white text-green-500 text-xs font-semibold px-2 py-1 rounded-full border border-green-500">
+          Forwarded
+        </span>
+      )}
+      {(receipt.badgeStatus === "both" || receipt.badgeStatus === "received") && (
+        <span className="self-start bg-white text-blue-500 text-xs font-semibold px-2 py-1 rounded-full border border-blue-500">
+          Received
+        </span>
+      )}
       <div className={`flex justify-between items-center ${isUnread ? 'text-gray-400' : 'text-gray-800'}`}>
         <div className="flex items-center gap-2.5">
           <RowSelectCheckbox selectionMode={selectionMode} isSelected={isSelected} onToggleSelect={onToggleSelect} />
