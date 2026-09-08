@@ -1495,7 +1495,7 @@ const HomePage = () => {
                   </div>
                   <div className="home-receipts-inner">
                     {draftReceipts.map((receipt, index) => (
-                      <div key={receipt.id || index} className="mb-3">
+                      <div key={receipt.id || index} id={`receipt-anchor-${receipt.id}`} className="mb-3">
                         {renderReceiptRow(receipt, index, true)}
                         {selectedReceipt?.id === receipt.id && (
                           <ReceiptDetail
