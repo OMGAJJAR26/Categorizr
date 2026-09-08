@@ -153,6 +153,10 @@ const HomePage = () => {
 
   const customizedReportRef = useRef(null);
   const autoRefreshInFlightRef = useRef(false);
+  // False until the first forwarded-receipt scan of this session completes. Used
+  // so forwards that already existed at login are marked seen silently (no
+  // banner / auto-scroll) — only forwards that arrive later in the session notify.
+  const didInitForwardsRef = useRef(false);
   const mobileSearchInputRef = useRef(null);
   const receiptsScrollRef = useRef(null);
   const [showMobileSearch, setShowMobileSearch] = useState(false);
@@ -484,11 +488,17 @@ const HomePage = () => {
       );
     });
 
+    // First scan of the session: everything already present was downloaded before
+    // login, so mark it seen WITHOUT a banner/scroll. Only forwards that arrive
+    // afterwards notify.
+    const isFirstForwardScan = !didInitForwardsRef.current;
+
     // Show notification for newly arrived ones
     if (newForwards.length > 0) {
       newForwards.forEach((r) => seen.add(String(r.id)));
       try { localStorage.setItem(notifKey, JSON.stringify([...seen])); } catch { /* quota */ }
-
+    }
+    if (newForwards.length > 0 && !isFirstForwardScan) {
       const newNetworkForwards = newForwards.filter((r) => {
         const fwdId = r.fk_forward_from_receipt_id;
         return fwdId && fwdId !== "0" && fwdId !== 0;
@@ -530,6 +540,10 @@ const HomePage = () => {
         }, 400);
       }
     }
+
+    // Mark the initial scan complete once receipts have actually loaded, so
+    // pre-login forwards were seeded silently above and only later arrivals notify.
+    if (receipts.length > 0) didInitForwardsRef.current = true;
 
     // Auto-add missing merchant / payment method / expense category / tax types
     // for ALL unsynced forwarded receipts (including ones that arrived before this feature)
