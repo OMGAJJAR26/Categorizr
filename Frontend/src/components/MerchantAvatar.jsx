@@ -32,7 +32,13 @@ const getRawCached = (name) => {
   try {
     const val = localStorage.getItem(merchantKey(name));
     if (!val) return null;
-    if (val === "failed") return "failed";
+    // Ignore stale "failed" markers and evict them. These were often written when
+    // the (now sunset) Clearbit fallback failed, permanently hiding a logo the
+    // image search can actually resolve — so treat them as "not cached" and retry.
+    if (val === "failed") {
+      localStorage.removeItem(merchantKey(name));
+      return null;
+    }
     const raw = unproxyImageUrl(val); // strip proxy prefix for old cached entries
     // Evict any localhost URL that was cached during local dev — useless on staging/prod
     if (/localhost|127\.0\.0\.1/i.test(raw)) {
@@ -257,8 +263,10 @@ const MerchantAvatar = ({ name, explicitUrl, className = "w-6 h-6" }) => {
           if (rawCached) clearCached(name);
           if (rawApiUrl) setRawApiUrl(null);
         } else if (finalDisplay === clearbitDisplay) {
-          // Clearbit also failed — mark permanently failed
-          try { localStorage.setItem(merchantKey(name), "failed"); } catch {}
+          // Clearbit's logo API is sunset (logo.clearbit.com no longer resolves),
+          // so its failure is expected and must NOT be persisted as "failed" —
+          // doing so blocked the working image-search fetch on future loads.
+          // Fall through to the letter avatar for this render; it retries next time.
         }
         // directSrc or intermediate failures just flow to the next candidate via failedUrls
       }}
