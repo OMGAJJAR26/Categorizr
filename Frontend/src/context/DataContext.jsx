@@ -3103,62 +3103,39 @@ setMerchantsWithImages(
             );
           }
         }
-      } else {
-        // Merchant already exists on the recipient's account. Prefer the
-        // recipient's OWN logo for this merchant over the sender's forwarded
-        // logo, so a forwarded receipt matches the recipient's other receipts
-        // of the same merchant. Recipient logo = the merchant record's logo,
-        // else a NON-forwarded receipt of the same merchant, else the locally
-        // saved merchant logo. We never let the sender's forwarded logo become
-        // the merchant's canonical logo.
-        const siblingLogo =
-          (lastRawReceiptsRef.current || []).find(
-            (r) =>
-              r &&
-              String(r.id) !== String(receipt.id) &&
-              (r.storeName || r.store_name || "").toLowerCase() ===
-                storeName.toLowerCase() &&
-              !isNetworkReceivedReceipt(r) &&
-              r.store_image &&
-              r.store_image !== "0"
-          )?.store_image || "";
-        const recipientLogo = existingMerchant.store_image_url || siblingLogo || "";
-
-        if (recipientLogo) {
-          saveMerchLogo(storeName, recipientLogo);
-          // Backfill the merchant record's logo from the recipient's real logo
-          // (never the sender's forwarded one) when it was empty.
-          if (!existingMerchant.store_image_url && recipientLogo !== storeImage) {
-            tasks.push(updateApiMerchant(existingMerchant.id, storeName, recipientLogo));
-          }
-          // Patch the forwarded receipt to show the recipient's logo.
-          if (receipt.id && storeImage !== recipientLogo) {
-            setReceipts((prev) =>
-              prev.map((r) =>
-                String(r.id) === String(receipt.id)
-                  ? { ...r, store_image: recipientLogo }
-                  : r
-              )
-            );
-            tasks.push(
-              (async () => {
-                const token = localStorage.getItem("token");
-                if (!token) return;
-                // Full-row update so this logo patch never wipes taxes/other fields.
-                const payload = buildReceiptUpdatePayloadFromRow({
-                  ...receipt,
-                  store_image: recipientLogo,
-                });
-                await postReceiptUpdatePayload(payload, token);
-              })()
-            );
-          }
-        } else if (storeImage && !existingMerchant.store_image_url) {
-          // No recipient logo exists anywhere — the forwarded logo is the only
-          // one available, so adopt it as the merchant's logo.
-          tasks.push(updateApiMerchant(existingMerchant.id, storeName, storeImage));
-          saveMerchLogo(storeName, storeImage);
+      } else if (existingMerchant.store_image_url) {
+        // Recipient already HAS a logo for this merchant — use it, not the
+        // sender's forwarded logo, so the forwarded receipt matches the
+        // recipient's other receipts of the same merchant.
+        const canonicalLogo = existingMerchant.store_image_url;
+        saveMerchLogo(storeName, canonicalLogo);
+        if (receipt.id && storeImage && storeImage !== canonicalLogo) {
+          setReceipts((prev) =>
+            prev.map((r) =>
+              String(r.id) === String(receipt.id)
+                ? { ...r, store_image: canonicalLogo }
+                : r
+            )
+          );
+          tasks.push(
+            (async () => {
+              const token = localStorage.getItem("token");
+              if (!token) return;
+              // Full-row update so this logo patch never wipes taxes/other fields.
+              const payload = buildReceiptUpdatePayloadFromRow({
+                ...receipt,
+                store_image: canonicalLogo,
+              });
+              await postReceiptUpdatePayload(payload, token);
+            })()
+          );
         }
+      } else if (storeImage) {
+        // Merchant exists on the recipient's list but has NO logo yet — accept
+        // the sender's forwarded logo and store it as this merchant's logo going
+        // forward.
+        tasks.push(updateApiMerchant(existingMerchant.id, storeName, storeImage));
+        saveMerchLogo(storeName, storeImage);
       }
     }
 
