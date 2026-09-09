@@ -157,6 +157,11 @@ const HomePage = () => {
   // so forwards that already existed at login are marked seen silently (no
   // banner / auto-scroll) — only forwards that arrive later in the session notify.
   const didInitForwardsRef = useRef(false);
+  // Auto-scroll to a just Added/Edited receipt on the main list. A new receipt's
+  // server id isn't known until the next fetch, so we snapshot ids before an Add
+  // and diff to find it; Edit sets the id directly.
+  const prevReceiptIdsRef = useRef(null);
+  const [scrollToReceiptId, setScrollToReceiptId] = useState(null);
   const mobileSearchInputRef = useRef(null);
   const receiptsScrollRef = useRef(null);
   const [showMobileSearch, setShowMobileSearch] = useState(false);
@@ -651,11 +656,44 @@ const HomePage = () => {
   };
 
   const handleReceiptAdded = () => {
+    // Snapshot current ids so we can detect the newly-added receipt once the
+    // refresh brings it in, and scroll to it.
+    prevReceiptIdsRef.current = new Set((receipts || []).map((r) => String(r.id)));
     // Use silentRefreshData so the receipt list stays visible while re-fetching.
     // A 1.5s delay gives the server time to commit the new receipt before we re-query.
     silentRefreshData(1500);
     setToast({ isVisible: true, message: "Receipt Added", type: "success" });
   };
+
+  // Detect the newly-added receipt after an Add and target it for scrolling.
+  useEffect(() => {
+    if (!prevReceiptIdsRef.current) return;
+    const prev = prevReceiptIdsRef.current;
+    const added = (receipts || []).find((r) => r && !prev.has(String(r.id)));
+    if (added) {
+      prevReceiptIdsRef.current = null;
+      setScrollToReceiptId(String(added.id));
+    }
+  }, [receipts]);
+
+  // Scroll a just Added/Edited receipt into view once its row is in the DOM.
+  useEffect(() => {
+    if (!scrollToReceiptId) return;
+    let tries = 0;
+    let timer;
+    const attempt = () => {
+      const el = document.getElementById(`receipt-anchor-${scrollToReceiptId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        setScrollToReceiptId(null);
+        return;
+      }
+      if (++tries < 12) timer = setTimeout(attempt, 300);
+      else setScrollToReceiptId(null);
+    };
+    timer = setTimeout(attempt, 300);
+    return () => clearTimeout(timer);
+  }, [scrollToReceiptId]);
 
   /**
    * Called by AddReceiptModal after the original receipt is saved.
@@ -1523,7 +1561,10 @@ const HomePage = () => {
                             setSelectedIndex={setSelectedIndex}
                             onSelectReceipt={handleReceiptClick}
                             onClose={handleCloseReceiptDetail}
-                            onSaved={() => setToast({ isVisible: true, message: "Receipt Updated", type: "success" })}
+                            onSaved={() => {
+                              setToast({ isVisible: true, message: "Receipt Updated", type: "success" });
+                              if (selectedReceipt?.id != null) setScrollToReceiptId(String(selectedReceipt.id));
+                            }}
                           />
                         )}
                       </div>
@@ -1563,7 +1604,10 @@ const HomePage = () => {
                                 setSelectedIndex={setSelectedIndex}
                                 onSelectReceipt={handleReceiptClick}
                                 onClose={handleCloseReceiptDetail}
-                                onSaved={() => setToast({ isVisible: true, message: "Receipt Updated", type: "success" })}
+                                onSaved={() => {
+                              setToast({ isVisible: true, message: "Receipt Updated", type: "success" });
+                              if (selectedReceipt?.id != null) setScrollToReceiptId(String(selectedReceipt.id));
+                            }}
                               />
                             </>
                           )}
