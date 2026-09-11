@@ -674,6 +674,42 @@ export function parsePurchaseDate(text) {
 export function parsePaymentMethod(text) {
   if (!text) return '';
 
+  // Payment-terminal section (common on card receipts): the card TYPE and the
+  // masked NUMBER are on SEPARATE lines, e.g.
+  //   ACCT:  MASTERCARD
+  //   CARD NUMBER:  ***********7836 P
+  // The generic patterns below miss this because the type isn't right next to
+  // the digits and the first "MASTERCARD" keyword is often far away (near the
+  // total). Read this structured block first so it matches iOS/Android.
+  const cardNumberLineMatch = text.match(
+    /CARD\s*(?:NUMBER|NO|#)\.?\s*[:#]?\s*[X*•\d\s]*?(\d{4})\b/i,
+  );
+  if (cardNumberLineMatch) {
+    const last4 = cardNumberLineMatch[1];
+    const acctMatch = text.match(
+      /\bACCT\.?\s*[:#]?\s*(MASTERCARD|MASTER\s*CARD|VISA|AMEX|AMERICAN\s+EXPRESS|DISCOVER|DINERS(?:\s+CLUB)?|DEBIT)/i,
+    );
+    let typeSrc = acctMatch ? acctMatch[1] : '';
+    if (!typeSrc) {
+      // Fall back to the card-type keyword nearest the card-number line.
+      const idx = text.indexOf(cardNumberLineMatch[0]);
+      const around = text.substring(Math.max(0, idx - 140), idx + 40);
+      const t = around.match(
+        /MASTERCARD|MASTER\s*CARD|VISA|AMEX|AMERICAN\s+EXPRESS|DISCOVER|DINERS|DEBIT/i,
+      );
+      typeSrc = t ? t[0] : '';
+    }
+    const T = typeSrc.toUpperCase();
+    let cardName = '';
+    if (/MASTER/.test(T)) cardName = 'MasterCard';
+    else if (/VISA/.test(T)) cardName = 'Visa';
+    else if (/AMEX|AMERICAN/.test(T)) cardName = 'American Express';
+    else if (/DISCOVER/.test(T)) cardName = 'Discover';
+    else if (/DINERS/.test(T)) cardName = 'Diners Club';
+    else if (/DEBIT/.test(T)) cardName = 'Debit Card';
+    if (cardName) return `${cardName} *${last4}`;
+  }
+
   const paymentPatterns = [
     { pattern: /\bAMERICAN\s+EXPRESS\b/i, name: 'American Express' },
     { pattern: /\bAMEX\b/i, name: 'American Express' },
