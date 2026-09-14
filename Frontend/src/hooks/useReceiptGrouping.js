@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { filterReceipts } from "../utils/receiptFilters";
-import { sortReceipts, sortYears } from "../utils/receiptSorting";
+import { sortReceipts, sortYears, compareByDayThenTotal } from "../utils/receiptSorting";
 
 /**
  * Receipts that belong in the amber "Draft / To Be Verified" section.
@@ -58,8 +58,10 @@ export const useReceiptGrouping = (receipts, filters, sortConfig, searchTerm) =>
       if (isToBeVerified(r)) draft.push(r);
       else regular.push(r);
     });
-    // Sort draft receipts newest first
-    draft.sort((a, b) => Number(b.product_date || 0) - Number(a.product_date || 0));
+    // Sort drafts the same way as the main list: newest day first, then largest
+    // total → smallest for that day, then a stable id tiebreaker (so Split /
+    // Duplicate drafts keep the same order across logout/login).
+    draft.sort(compareByDayThenTotal);
     // Apply the same filters to drafts so they respect active filter selections
     const filteredDraft = filterReceipts(draft, filters, searchTerm);
     return { draftReceipts: filteredDraft, regularReceipts: regular };
