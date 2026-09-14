@@ -3,7 +3,7 @@ import { NODE_API_URL, proxyImageUrl, unproxyImageUrl } from "../api/Axios";
 import {
   encodeReceiptTags,
   formatTaxRate,
-  getSplitReceiptValidationMessage,
+  getSplitReceiptMissingMessages,
   parseReceiptTags,
   taxTypeDedupKey,
   taxTypesMatch,
@@ -387,9 +387,9 @@ const ReceiptDetail = ({
   const [alertMsg, setAlertMsg] = useState(null);
   const [showMaxDefaultTaxModal, setShowMaxDefaultTaxModal] = useState(false);
 
-  // Auto-dismiss split prerequisite banner after 3.5 s
+  // Auto-dismiss split prerequisite banner(s) after 3.5 s
   useEffect(() => {
-    if (!splitPrereqError) return;
+    if (!splitPrereqError?.length) return;
     const t = setTimeout(() => setSplitPrereqError(null), 3500);
     return () => clearTimeout(t);
   }, [splitPrereqError]);
@@ -3156,7 +3156,7 @@ useEffect(() => {
 
   /** Open the split screen — validates required fields first */
   const handleOpenSplit = () => {
-    const msg = getSplitReceiptValidationMessage({
+    const msgs = getSplitReceiptMissingMessages({
       // Use ?? (not ||) so a field the user explicitly cleared to "" is respected and
       // still fails validation, instead of falling back to the original receipt value.
       product_date: editedReceipt.product_date ?? selectedReceipt?.product_date,
@@ -3164,8 +3164,8 @@ useEffect(() => {
       expense_type: editedReceipt.expense_type ?? selectedReceipt?.expense_type,
       purchasePrice: editedReceipt.purchasePrice ?? selectedReceipt?.purchasePrice,
     });
-    if (msg) {
-      setSplitPrereqError(msg);
+    if (msgs.length) {
+      setSplitPrereqError(msgs);
       setShowOptionsMenu(false);
       return;
     }
@@ -5656,17 +5656,26 @@ Thank you for using our receipt management system.
                 </div>
               </div>
 
-              {/* Split prerequisite error banner */}
-              {splitPrereqError && (
-                <div className="flex items-center gap-2 bg-red-50 border-b border-red-300 px-4 py-2.5">
-                  <span className="text-red-700 text-sm font-medium flex-1">{splitPrereqError}</span>
-                  <button
-                    type="button"
-                    onClick={() => setSplitPrereqError(null)}
-                    className="text-red-400 hover:text-red-600 text-lg leading-none flex-shrink-0"
-                  >
-                    ×
-                  </button>
+              {/* Split prerequisite error banner(s) — one per missing field */}
+              {splitPrereqError?.length > 0 && (
+                <div>
+                  {splitPrereqError.map((msg, i) => (
+                    <div
+                      key={`${msg}-${i}`}
+                      className="flex items-center gap-2 bg-red-50 border-b border-red-300 px-4 py-2.5"
+                    >
+                      <span className="text-red-700 text-sm font-medium flex-1">{msg}</span>
+                      {i === 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setSplitPrereqError(null)}
+                          className="text-red-400 hover:text-red-600 text-lg leading-none flex-shrink-0"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
 
