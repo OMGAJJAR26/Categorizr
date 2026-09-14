@@ -146,28 +146,35 @@ function getReceiptPrereqValidationMessage(fields, action) {
   return `Please enter ${missing.join(", ")} and ${last} before ${action} this receipt.`;
 }
 
-export function getSplitReceiptValidationMessage(fields) {
-  if (!fields) {
-    return "Please enter Date before splitting this receipt.";
+/**
+ * Returns one banner message per required field that is still missing before a
+ * receipt can be Split — Date, Expense Category and Total. Returns an empty
+ * array when all three are present (Split may proceed).
+ *
+ * Merchant is intentionally NOT validated: a receipt can never be saved without
+ * one because an empty merchant defaults to "Miscellaneous", so there is nothing
+ * for the user to fix and no Merchant banner is shown.
+ */
+export function getSplitReceiptMissingMessages(fields) {
+  const f = fields || {};
+  const messages = [];
+  if (f.product_date == null || String(f.product_date).trim() === "") {
+    messages.push("Please select Date");
   }
-  if (fields.product_date == null || String(fields.product_date).trim() === "") {
-    return "Please enter Date before splitting this receipt.";
+  if (f.expense_type == null || String(f.expense_type).trim() === "") {
+    messages.push("Please select Expense Category");
   }
-  if (fields.storeName == null || String(fields.storeName).trim() === "") {
-    return "Please enter Merchant before splitting this receipt.";
+  const rawTotal = f.purchasePrice;
+  const total = parseFloat(String(rawTotal ?? "").trim());
+  if (
+    rawTotal == null ||
+    String(rawTotal).trim() === "" ||
+    !Number.isFinite(total) ||
+    total === 0
+  ) {
+    messages.push("Please enter Total");
   }
-  if (fields.expense_type == null || String(fields.expense_type).trim() === "") {
-    return "Please enter Expense Category before splitting this receipt.";
-  }
-  const rawTotal = fields.purchasePrice;
-  if (rawTotal == null || String(rawTotal).trim() === "") {
-    return "Please enter Total before splitting this receipt.";
-  }
-  const total = parseFloat(String(rawTotal).trim());
-  if (!Number.isFinite(total) || total === 0) {
-    return "Please enter Total before splitting this receipt.";
-  }
-  return null;
+  return messages;
 }
 
 export function getDuplicateReceiptValidationMessage(fields) {

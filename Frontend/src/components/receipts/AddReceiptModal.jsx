@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { formatTaxRate, taxTypeDedupKey, taxTypesMatch, getSplitReceiptValidationMessage, getDuplicateReceiptValidationMessage } from "../../utils/receiptFormatters";
+import { formatTaxRate, taxTypeDedupKey, taxTypesMatch, getSplitReceiptMissingMessages, getDuplicateReceiptValidationMessage } from "../../utils/receiptFormatters";
 import {
   parseDateInputToUnix,
   todayLocalCalendarUnix,
@@ -1260,9 +1260,9 @@ const [localMerchants, setLocalMerchants] = useState([]);
     return () => clearTimeout(t);
   }, [error]);
 
-  // Auto-dismiss split/duplicate prerequisite banner after 3.5 s
+  // Auto-dismiss split/duplicate prerequisite banner(s) after 3.5 s
   useEffect(() => {
-    if (!actionPrereqError) return;
+    if (!actionPrereqError?.length) return;
     const t = setTimeout(() => setActionPrereqError(null), 3500);
     return () => clearTimeout(t);
   }, [actionPrereqError]);
@@ -3098,7 +3098,7 @@ const handleFieldChange = (field, value) => {
     const validationMsg = getDuplicateReceiptValidationMessage(formData);
     if (validationMsg) {
       setShowDuplicateConfirm(false);
-      setActionPrereqError(validationMsg);
+      setActionPrereqError([validationMsg]);
       return;
     }
     setIsDuplicateSaving(true);
@@ -3183,9 +3183,9 @@ const handleFieldChange = (field, value) => {
 
   /** Open split screen - validates required fields first, starts empty (no auto-splits) */
   const handleOpenSplit = () => {
-    const msg = getSplitReceiptValidationMessage(formData);
-    if (msg) {
-      setActionPrereqError(msg);
+    const msgs = getSplitReceiptMissingMessages(formData);
+    if (msgs.length) {
+      setActionPrereqError(msgs);
       return;
     }
     setActionPrereqError(null);
@@ -4815,7 +4815,7 @@ const handleSelectLogo = (index) => {
                                 setShowOptionsMenu(false);
                                 const validationMsg = getDuplicateReceiptValidationMessage(formData);
                                 if (validationMsg) {
-                                  setActionPrereqError(validationMsg);
+                                  setActionPrereqError([validationMsg]);
                                   return;
                                 }
                                 setShowDuplicateConfirm(true);
@@ -4839,17 +4839,26 @@ const handleSelectLogo = (index) => {
                 </div>
               </div>
 
-              {/* Split / duplicate prerequisite error banner */}
-              {actionPrereqError && (
-                <div className="flex items-center gap-2 bg-red-50 border-b border-red-300 px-4 py-2.5">
-                  <span className="text-red-700 text-sm font-medium flex-1">{actionPrereqError}</span>
-                  <button
-                    type="button"
-                    onClick={() => setActionPrereqError(null)}
-                    className="text-red-400 hover:text-red-600 text-lg leading-none flex-shrink-0"
-                  >
-                    ×
-                  </button>
+              {/* Split / duplicate prerequisite error banner(s) — one per missing field */}
+              {actionPrereqError?.length > 0 && (
+                <div>
+                  {actionPrereqError.map((msg, i) => (
+                    <div
+                      key={`${msg}-${i}`}
+                      className="flex items-center gap-2 bg-red-50 border-b border-red-300 px-4 py-2.5"
+                    >
+                      <span className="text-red-700 text-sm font-medium flex-1">{msg}</span>
+                      {i === 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setActionPrereqError(null)}
+                          className="text-red-400 hover:text-red-600 text-lg leading-none flex-shrink-0"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
 
