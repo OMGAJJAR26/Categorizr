@@ -1732,6 +1732,20 @@ setMerchantsWithImages(
       });
 
       receiptsWithIntegrations = receiptsWithIntegrations.map(r => {
+        // Fill an empty merchant logo from the canonical merchant record so the
+        // homepage avatar shows the logo on FIRST load. Previously an empty
+        // store_image (common on email-received drafts, e.g. the Costco receipt)
+        // left only the letter fallback ("C") until the user opened the receipt —
+        // which cached the logo and made it appear only after returning. The
+        // merchant map already holds each merchant's canonical logo (API record
+        // first, then any receipt that carries one).
+        if ((!r.store_image || r.store_image === "0") && r.storeName) {
+          const mm = merchantsWithImagesMap.get(
+            r.storeName.toString().trim().toLowerCase()
+          );
+          if (mm && mm.image) r = { ...r, store_image: mm.image };
+        }
+
         // Received forwarded receipts carry the SENDER's payment method — do not
         // overwrite it with the recipient's own card that happens to share the same last4.
         const forwardFromId = String(r.fk_forward_from_receipt_id ?? r.fkForwardFromReceiptId ?? "0").trim();
