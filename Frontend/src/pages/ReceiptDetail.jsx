@@ -258,6 +258,7 @@ const ReceiptDetail = ({
   const [editedReceipt, setEditedReceipt] = useState({});
   const [isSaving, setIsSaving] = useState(false);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [showQbDeletePrompt, setShowQbDeletePrompt] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showImageDeleteConfirm, setShowImageDeleteConfirm] = useState(false);
   const [pendingImageDelete, setPendingImageDelete] = useState(null); // { type: "additional"|"existing", index?: number, url?: string }
@@ -3778,15 +3779,25 @@ useEffect(() => {
     }
   };
 
-  // Handle delete
-  const handleDelete = async () => {
+  // Step 1: user tapped "Delete" in the Confirmation dialog. Dismiss it, then —
+  // for a QuickBooks-linked receipt — open the QuickBooks delete prompt in the
+  // same place. Otherwise delete straight away.
+  const handleConfirmDelete = () => {
+    setShowDeleteConfirmation(false);
+    if (selectedReceipt?.quickbooksLinked) {
+      setShowQbDeletePrompt(true);
+    } else {
+      void performDelete(false);
+    }
+  };
+
+  // Step 2: actually delete the receipt. `alsoDeleteFromQb` deletes the linked
+  // QuickBooks expense as well; the WebApp receipt is deleted either way (the
+  // user already confirmed deletion in the Confirmation dialog).
+  const performDelete = async (alsoDeleteFromQb) => {
     setIsDeleting(true);
     try {
-      // If linked to QuickBooks, offer to delete the QB expense too.
-      if (
-        selectedReceipt?.quickbooksLinked &&
-        window.confirm("This receipt is linked to QuickBooks. Also delete the expense from QuickBooks?")
-      ) {
+      if (alsoDeleteFromQb && selectedReceipt?.quickbooksLinked) {
         try {
           await fetch(`${NODE_API_URL}/api/integrations/quickbooks/expense/delete`, {
             method: "POST",
@@ -3802,6 +3813,7 @@ useEffect(() => {
       }
       const success = await deleteReceipt(selectedReceipt.id);
       if (success) {
+        setShowQbDeletePrompt(false);
         setShowDeleteConfirmation(false);
         onClose();
         // Don't refresh data here - deleteReceipt already updates local state
@@ -7436,8 +7448,23 @@ Thank you for using our receipt management system.
       <DeleteConfirmationDialog
         isOpen={showDeleteConfirmation}
         onClose={() => setShowDeleteConfirmation(false)}
-        onConfirm={handleDelete}
+        onConfirm={handleConfirmDelete}
         isDeleting={isDeleting}
+      />
+
+      {/* QuickBooks delete prompt — appears in place of the Confirmation dialog
+          once the user confirms deletion of a QuickBooks-linked receipt.
+          "Delete" removes it from QuickBooks too; "Cancel" keeps it in QuickBooks
+          but still deletes the WebApp receipt (already confirmed). */}
+      <DeleteConfirmationDialog
+        isOpen={showQbDeletePrompt}
+        onClose={() => performDelete(false)}
+        onConfirm={() => performDelete(true)}
+        isDeleting={isDeleting}
+        title="QuickBooks"
+        message="This receipt is linked to QuickBooks. Would you also like to delete this receipt from QuickBooks?"
+        subtext=""
+        confirmLabel="Delete"
       />
 
       <AnimatePresence>
