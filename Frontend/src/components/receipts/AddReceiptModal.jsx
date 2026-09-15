@@ -181,6 +181,7 @@ const AddReceiptModal = ({ onClose, onReceiptAdded, initialData = null, onDuplic
   const [showMaxDefaultTaxModal, setShowMaxDefaultTaxModal] = useState(false);
   const [files, setFiles] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [isConvertingFiles, setIsConvertingFiles] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState(null);
@@ -739,6 +740,19 @@ const [localMerchants, setLocalMerchants] = useState([]);
     setIsDragging(false);
   }, []);
 
+  // Convert any HEIC/HEIF files (straight from an iPhone) to JPEG at SELECTION
+  // time — not just at upload. The browser can't render a HEIC, so a raw HEIC
+  // gives a blank preview, "downloads" itself when enlarged, and shows nothing
+  // after reload. Converting here means the preview, enlarge and stored image
+  // are all a JPEG. Non-HEIC files pass straight through.
+  const convertHeicFilesForDisplay = async (fileList) => {
+    const out = [];
+    for (const f of fileList) {
+      out.push(await convertHeicToJpegIfNeeded(f));
+    }
+    return out;
+  };
+
   const validateFiles = (fileList) => {
     const validFiles = [];
     const errors = [];
@@ -775,10 +789,13 @@ const [localMerchants, setLocalMerchants] = useState([]);
     const validFiles = validateFiles(droppedFiles);
 
     if (validFiles.length > 0) {
-      setFiles(validFiles);
+      setIsConvertingFiles(true);
+      const readyFiles = await convertHeicFilesForDisplay(validFiles);
+      setIsConvertingFiles(false);
+      setFiles(readyFiles);
 
       // Generate PDF preview if PDF is dropped
-      const firstFile = validFiles[0];
+      const firstFile = readyFiles[0];
       if (
         firstFile.type === "application/pdf" ||
         firstFile.name.toLowerCase().endsWith(".pdf")
@@ -978,10 +995,13 @@ const [localMerchants, setLocalMerchants] = useState([]);
     const validFiles = validateFiles(selectedFiles);
 
     if (validFiles.length > 0) {
-      setFiles(validFiles);
+      setIsConvertingFiles(true);
+      const readyFiles = await convertHeicFilesForDisplay(validFiles);
+      setIsConvertingFiles(false);
+      setFiles(readyFiles);
 
       // Generate PDF preview if PDF is selected
-      const firstFile = validFiles[0];
+      const firstFile = readyFiles[0];
       if (
         firstFile.type === "application/pdf" ||
         firstFile.name.toLowerCase().endsWith(".pdf")
@@ -1005,11 +1025,14 @@ const [localMerchants, setLocalMerchants] = useState([]);
 
   // ── Add Photo handler (in the form step receipt images section) ─────────
   const handleAddPhotoSelect = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const rawFile = e.target.files?.[0];
+    if (!rawFile) return;
     if (addPhotoInputRef.current) addPhotoInputRef.current.value = "";
     setIsAddingPhoto(true);
     try {
+      // Convert HEIC → JPEG first so both the upload and the local-URL fallback
+      // below produce an image the browser can actually display.
+      const file = await convertHeicToJpegIfNeeded(rawFile);
       const newUrls = await uploadFilesToMedia([file]);
       if (newUrls.length > 0) {
         setUploadedMediaUrls((prev) => {
@@ -5229,7 +5252,7 @@ const handleSelectLogo = (index) => {
                             ? "border-blue-500 bg-blue-50"
                             : "border-gray-300 hover:border-blue-400 hover:bg-gray-50"
                         }
-                        ${isUploading ? "pointer-events-none opacity-50" : ""}
+                        ${isUploading || isConvertingFiles ? "pointer-events-none opacity-50" : ""}
                       `}
                     >
                       <input
@@ -5238,7 +5261,7 @@ const handleSelectLogo = (index) => {
                         accept="image/*,.heic,.heif,application/pdf"
                         onChange={handleFileSelect}
                         className="hidden"
-                        disabled={isUploading}
+                        disabled={isUploading || isConvertingFiles}
                       />
 
                       <Upload
@@ -5249,7 +5272,9 @@ const handleSelectLogo = (index) => {
                       />
 
                       <p className="text-gray-700 font-medium mb-2">
-                        {isDragging
+                        {isConvertingFiles
+                          ? "Preparing image…"
+                          : isDragging
                           ? "Drop files here..."
                           : "Click to upload or drag and drop"}
                       </p>
