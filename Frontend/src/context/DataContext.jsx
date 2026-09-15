@@ -2408,8 +2408,12 @@ setMerchantsWithImages(
       storeName: receipt.storeName ?? "",
       product_name: receipt.product_name ?? "",
       emailAttachment: receipt.emailAttachment ?? "0",
+      // purchasePrice is the canonical total in the WebApp (kept equal to
+      // total_amount on load; only purchasePrice is edited). Resolve once,
+      // purchasePrice first, and send both fields equal so an edited total is
+      // never paired with a stale total_amount that the backend would keep.
       purchasePrice: (receipt.purchasePrice ?? receipt.total_amount ?? "0").toString(),
-      total_amount: (receipt.total_amount ?? receipt.purchasePrice ?? "0").toString(),
+      total_amount: (receipt.purchasePrice ?? receipt.total_amount ?? "0").toString(),
       payment_category_type: parseInt(receipt.payment_category_type ?? 0) || 0,
       status: parseInt(receipt.status ?? 0) || 0,
       paymentType: hasPayment ? normalizedPaymentType : CLEAR_PAYMENT_API_VALUE,
@@ -2759,15 +2763,27 @@ setMerchantsWithImages(
         storeName: getValue("storeName", ""),
         product_name: getValue("product_name", ""),
         emailAttachment: apiMediaFields.emailAttachment,
-        // Preserve purchasePrice - only update if explicitly provided
+        // purchasePrice is the WebApp's single source of truth for the receipt
+        // total — the Total field only ever writes purchasePrice, never
+        // total_amount. Resolve the total ONCE (purchasePrice first, falling back
+        // to total_amount for records that only carry the snake_case field, then
+        // the existing value) and send BOTH fields with that same value.
+        //
+        // Previously total_amount used `getValue("total_amount") ?? getValue("purchasePrice")`,
+        // but total_amount is spread in from the unedited selectedReceipt, so it
+        // was never null and the new purchasePrice was ignored — an edited total
+        // (including a flip to a negative amount) was sent next to a stale
+        // total_amount and the backend kept the old value ("total not saving").
         purchasePrice: (() => {
           const val = getValue("purchasePrice");
-          if (val === null || val === undefined) return existingReceipt?.purchasePrice?.toString() || existingReceipt?.total_amount?.toString() || "0";
+          if (val === null || val === undefined || val === "")
+            return existingReceipt?.purchasePrice?.toString() || existingReceipt?.total_amount?.toString() || "0";
           return val.toString();
         })(),
         total_amount: (() => {
-          const val = getValue("total_amount") ?? getValue("purchasePrice");
-          if (val === null || val === undefined) return existingReceipt?.total_amount?.toString() || existingReceipt?.purchasePrice?.toString() || "0";
+          const val = getValue("purchasePrice");
+          if (val === null || val === undefined || val === "")
+            return existingReceipt?.purchasePrice?.toString() || existingReceipt?.total_amount?.toString() || "0";
           return val.toString();
         })(),
         payment_category_type: (() => {
