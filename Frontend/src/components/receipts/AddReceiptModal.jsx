@@ -490,13 +490,33 @@ const [localMerchants, setLocalMerchants] = useState([]);
       return;
     }
     if (initialData.formData) {
+      // A duplicated receipt carries its tip as a "Tip" line INSIDE
+      // receipt_tax_values (the backend stores it there), while receipt.tip is
+      // empty. If left in the array, that Tip line renders as a tax row in
+      // RECEIPT TOTALS and — because tax rows are removed by index — deleting a
+      // real tax (GST/HST) can remove the tip line instead. So split the tip out
+      // into formData.tip and keep only genuine (non-tip) taxes in the array,
+      // mirroring how the Edit screen initialises a receipt.
+      const rawTaxValues = initialData.formData.receipt_tax_values || [];
+      const tipLine = findTipLineInReceiptTaxValues(rawTaxValues);
+      const tipAmt = tipLine ? parseFloat(tipLine.tax_amount) || 0 : 0;
       // Mark tax lines that already have stored amounts as manually overridden so
       // they are not wiped when the user later changes price, subtotal, or tip.
-      const taxWithManual = (initialData.formData.receipt_tax_values || []).map((t) => ({
+      const taxWithManual = filterNonTipReceiptTaxValues(rawTaxValues).map((t) => ({
         ...t,
         _isManual: parseFloat(t.tax_amount) > 0,
       }));
-      setFormData({ ...initialData.formData, receipt_tax_values: taxWithManual });
+      const extractedTip =
+        (initialData.formData.tip ?? "") !== ""
+          ? initialData.formData.tip
+          : tipAmt > 0
+            ? tipAmt.toFixed(2)
+            : "";
+      setFormData({
+        ...initialData.formData,
+        tip: extractedTip,
+        receipt_tax_values: taxWithManual,
+      });
     }
     if (initialData.tags)            setTags(initialData.tags);
     if (initialData.uploadedMediaUrls) setUploadedMediaUrls(initialData.uploadedMediaUrls);
