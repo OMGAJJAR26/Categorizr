@@ -5,6 +5,7 @@ const DeleteConfirmationDialog = ({
   onClose,
   onConfirm,
   isDeleting,
+  title = "Confirmation",
   message = "Are you sure you want to delete this Receipt?",
   subtext = "This action is irreversible.",
   confirmLabel = "Delete",
@@ -48,14 +49,16 @@ const DeleteConfirmationDialog = ({
           {/* Content */}
           <div className="p-6 text-center">
             <h2 className="text-xl font-bold text-gray-900 mb-2">
-              Confirmation
+              {title}
             </h2>
             <p className="text-gray-600 mb-1">
               {message}
             </p>
-            <p className="text-gray-500 text-sm">
-              {subtext}
-            </p>
+            {subtext ? (
+              <p className="text-gray-500 text-sm">
+                {subtext}
+              </p>
+            ) : null}
           </div>
 
           {/* Footer */}
