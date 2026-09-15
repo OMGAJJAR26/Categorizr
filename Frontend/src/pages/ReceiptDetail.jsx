@@ -5420,27 +5420,32 @@ Thank you for using our receipt management system.
               </motion.button>
             )}
 
-            {/* Mobile Navigation Buttons - Bottom of screen */}
-            <div className="md:hidden fixed bottom-16 left-1/2 transform -translate-x-1/2 z-50 flex gap-4">
-              {currentIndex > 0 && (
-                <motion.button
-                  whileTap={{ scale: 0.9 }}
-                  onClick={goToPrevious}
-                  className="bg-white/90 hover:bg-white border border-gray-300 rounded-full p-3 shadow-lg"
-                >
-                  <ChevronLeft size={24} className="text-blue-600" />
-                </motion.button>
-              )}
-              {currentIndex < sortedReceipts.length - 1 && (
-                <motion.button
-                  whileTap={{ scale: 0.9 }}
-                  onClick={goToNext}
-                  className="bg-white/90 hover:bg-white border border-gray-300 rounded-full p-3 shadow-lg"
-                >
-                  <ChevronRight size={24} className="text-blue-600" />
-                </motion.button>
-              )}
-            </div>
+            {/* Mobile Navigation Buttons - side edges, vertically centered.
+                Previously these floated at the bottom center (fixed bottom-16 z-50),
+                directly over the sticky "Save Changes" bar (z-40) — so tapping Save
+                landed on the ► arrow and navigated to the next receipt instead,
+                discarding the edit ("total reverts immediately"). Mirroring the
+                desktop side placement keeps them clear of the Save button. */}
+            {currentIndex > 0 && (
+              <motion.button
+                whileTap={{ scale: 0.9 }}
+                onClick={goToPrevious}
+                aria-label="Previous receipt"
+                className="md:hidden fixed top-1/2 -translate-y-1/2 left-2 z-50 bg-white/90 hover:bg-white border border-gray-300 rounded-full p-2 shadow-lg"
+              >
+                <ChevronLeft size={22} className="text-blue-600" />
+              </motion.button>
+            )}
+            {currentIndex < sortedReceipts.length - 1 && (
+              <motion.button
+                whileTap={{ scale: 0.9 }}
+                onClick={goToNext}
+                aria-label="Next receipt"
+                className="md:hidden fixed top-1/2 -translate-y-1/2 right-2 z-50 bg-white/90 hover:bg-white border border-gray-300 rounded-full p-2 shadow-lg"
+              >
+                <ChevronRight size={22} className="text-blue-600" />
+              </motion.button>
+            )}
 
             {/* Receipt Counter */}
             <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-50 bg-black/70 text-white px-3 py-1 rounded-full text-xs sm:text-sm font-medium shadow-lg">
