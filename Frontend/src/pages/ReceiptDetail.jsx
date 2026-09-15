@@ -24,6 +24,7 @@ import {
   isPdfUrl,
   sanitizeUploadFile,
   dedupeEmailAttachmentPdfUrls,
+  convertHeicToJpegIfNeeded,
 } from "../utils/mediaUrlUtils";
 import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationDialog";
 import ForwardReceiptModal from "../components/receipts/ForwardReceiptModal";
@@ -2814,8 +2815,11 @@ useEffect(() => {
   /** Upload a single file to /api/user/uploadmediaV1 and return the CDN URL */
   const uploadPhotoToMedia = async (file) => {
     const token = localStorage.getItem("token");
+    // Never store a HEIC/HEIF on the server — it can't be shown in the browser
+    // or attached in QuickBooks. Convert to JPEG first (no-op for other types).
+    const uploadable = await convertHeicToJpegIfNeeded(file);
     const formData = new FormData();
-    formData.append("file", sanitizeUploadFile(file));
+    formData.append("file", sanitizeUploadFile(uploadable));
     const response = await fetch("/api/user/uploadmediaV1", {
       method: "POST",
       headers: { Accesstoken: token },
@@ -2887,11 +2891,15 @@ useEffect(() => {
   };
 
   const handleAddPhotoSelect = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const rawFile = e.target.files?.[0];
+    if (!rawFile) return;
     if (addPhotoInputRef.current) addPhotoInputRef.current.value = "";
     setIsAddingPhoto(true);
     try {
+      // Convert HEIC/HEIF (straight from an iPhone) to JPEG up front so the photo
+      // both uploads and — on any fallback — previews/enlarges as an image the
+      // browser can render, instead of a .heic the browser silently downloads.
+      const file = await convertHeicToJpegIfNeeded(rawFile);
       let url;
       try {
         url = await uploadPhotoToMedia(file);
