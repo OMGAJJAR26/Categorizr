@@ -91,6 +91,22 @@ export function resolveReceiptCalendarUnix(
 
   // --- Timestamps with a time component (e.g. mobile Date.now()) ---
   if (!isUtcDateOnlyUnix(ts)) {
+    // Date-picker "local midnight" stored as UTC. The mobile apps store the
+    // PICKED calendar day as local midnight, so the UTC time-of-day is just the
+    // sender's timezone offset (a whole 15-minute step, zero seconds) — NOT a
+    // purchase time. Recover the sender's local calendar day:
+    //   • time-of-day after 12:00 UTC ⇒ sender is EAST of UTC (local midnight fell
+    //     on the next day) ⇒ the intended day is UTC day + 1;
+    //   • at/before 12:00 UTC ⇒ west of/at UTC ⇒ the UTC day already matches.
+    // Fixes the "WebApp shows 1 day behind Android" for UTC+ devices (e.g. UTC+8,
+    // stored as 16:00 UTC). UTC noon (the forwarded-receipt anchor) already
+    // returned above, so it never reaches here.
+    const secOfDay = ts % 86400;
+    if (secOfDay % 900 === 0 && secOfDay !== UTC_NOON_OFFSET_SEC) {
+      return secOfDay > UTC_NOON_OFFSET_SEC
+        ? Math.floor((utcDay + ONE_DAY_MS) / 1000)
+        : Math.floor(utcDay / 1000);
+    }
     const createUtcDay =
       createTs >= 1000000 ? utcCalendarDayMs(createTs) : 0;
 
