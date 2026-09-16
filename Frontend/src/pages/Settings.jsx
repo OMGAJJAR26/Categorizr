@@ -632,8 +632,27 @@ const ManageModal = ({ type, onClose }) => {
     return [];
   };
 
-  const receiptItems = buildReceiptItems().filter(i => i.name.toLowerCase().includes(search.toLowerCase()));
-  const customItems  = buildCustomItems().filter(i => i.name.toLowerCase().includes(search.toLowerCase()));
+  // Collapse duplicate names so a record the backend stored twice (e.g. a "Bose"
+  // merchant or "22wwebapp" category created twice by a forward-sync race) shows
+  // once — mirroring how the Payment Methods list already dedupes. Runs across
+  // BOTH the receipt-derived and custom/API sections (a name in both shows once).
+  const dedupeByName = (items) => {
+    const seen = new Set();
+    return items.filter((i) => {
+      const k = normalizeMatchKey(i?.name);
+      if (!k) return true;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  };
+  const receiptItems = dedupeByName(
+    buildReceiptItems().filter(i => i.name.toLowerCase().includes(search.toLowerCase()))
+  );
+  const _receiptItemKeys = new Set(receiptItems.map((i) => normalizeMatchKey(i.name)));
+  const customItems = dedupeByName(
+    buildCustomItems().filter(i => i.name.toLowerCase().includes(search.toLowerCase()))
+  ).filter((i) => !_receiptItemKeys.has(normalizeMatchKey(i.name)));
   const taxItems     = type === "taxes" ? taxData.filter(t => (t.tax_name || "").toLowerCase().includes(search.toLowerCase())) : [];
   const Icon = cfg.icon;
   const mInput = "flex-1 min-w-0 bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all";
