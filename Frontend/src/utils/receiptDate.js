@@ -107,23 +107,14 @@ export function resolveReceiptCalendarUnix(
         ? Math.floor((utcDay + ONE_DAY_MS) / 1000)
         : Math.floor(utcDay / 1000);
     }
-    const createUtcDay =
-      createTs >= 1000000 ? utcCalendarDayMs(createTs) : 0;
-
-    // Created same UTC day but product instant is "evening before" in Americas:
-    // e.g. product 03:31 UTC June 3, create same → treat as June 2
-    if (
-      createUtcDay &&
-      utcDay === createUtcDay &&
-      new Date(ts * 1000).getUTCHours() < 12
-    ) {
-      return Math.floor((utcDay - ONE_DAY_MS) / 1000);
-    }
-
-    if (utcDay !== localDay) {
-      if (utcDay - localDay === ONE_DAY_MS) return Math.floor(localDay / 1000);
-      if (localDay - utcDay === ONE_DAY_MS) return Math.floor(localDay / 1000);
-    }
+    // Genuine instant timestamp — a real time-of-day with minutes/seconds (e.g.
+    // product_date defaulted to Date.now() when no date was picked). Anchor it to
+    // its UTC calendar day so the receipt shows the SAME date on every device in
+    // every timezone (never varying by the viewer's region) — matching how the
+    // date-picker values above resolve deterministically. A previous rule
+    // hardcoded "before-noon UTC ⇒ the day before" (assumed an Americas viewer)
+    // and pushed east-of-UTC receipts a day back; a viewer-local rule would make
+    // the date shift by region. UTC-day is stable everywhere.
     return Math.floor(utcDay / 1000);
   }
 
