@@ -127,7 +127,9 @@ function withDuplicateDefaultProductName(formData) {
   return { ...formData, product_name: `${trimmed} (2)` };
 }
 
-const AddReceiptModal = ({ onClose, onReceiptAdded, initialData = null, onDuplicate = null }) => {
+const AddReceiptModal = ({ onClose, onReceiptAdded, onMultiScan = null, initialData = null, onDuplicate = null }) => {
+  // Multiple Receipt Scan: WebApp Add Receipt accepts up to this many files at once.
+  const MAX_SCAN_FILES = 5;
   const MAX_NOTES_LENGTH = 500;
   const MAX_DESCRIPTION_LENGTH = 100;
   const {
@@ -772,11 +774,20 @@ const [localMerchants, setLocalMerchants] = useState([]);
       }
     });
 
+    // Multiple Receipt Scan: cap at MAX_SCAN_FILES; keep the first N and warn.
+    let capped = validFiles;
+    if (validFiles.length > MAX_SCAN_FILES) {
+      capped = validFiles.slice(0, MAX_SCAN_FILES);
+      errors.push(
+        `You can upload up to ${MAX_SCAN_FILES} receipts at a time. The first ${MAX_SCAN_FILES} were kept.`,
+      );
+    }
+
     if (errors.length > 0) {
       setError(errors.join("\n"));
     }
 
-    return validFiles;
+    return capped;
   };
 
   const handleDrop = useCallback(async (e) => {
@@ -2060,6 +2071,17 @@ const handleFieldChange = (field, value) => {
   const handleUpload = async () => {
     if (files.length === 0) {
       setError("Please select at least one file to upload.");
+      return;
+    }
+
+    // Multiple Receipt Scan: 2–5 files → hand off to the parent, which scans each
+    // into its own DRAFT receipt (shown in the Draft Receipts section with a
+    // skeleton per file) and closes this modal. A single file keeps the classic
+    // OCR → editable form → save flow below.
+    if (files.length > 1 && typeof onMultiScan === "function") {
+      const scanFiles = files.slice(0, MAX_SCAN_FILES);
+      onMultiScan(scanFiles);
+      onClose();
       return;
     }
 
@@ -5258,6 +5280,7 @@ const handleSelectLogo = (index) => {
                       <input
                         ref={fileInputRef}
                         type="file"
+                        multiple
                         accept="image/*,.heic,.heif,application/pdf"
                         onChange={handleFileSelect}
                         className="hidden"
@@ -5282,7 +5305,10 @@ const handleSelectLogo = (index) => {
                         Supports images (JPG, PNG, GIF, WebP, HEIC) and PDFs
                       </p>
                       <p className="text-xs text-gray-400 mt-1">
-                        Maximum file size: 10MB per file
+                        Up to {MAX_SCAN_FILES} receipts at a time • 10MB per file
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        Selecting 2 or more sends each to Draft Receipts to review.
                       </p>
                     </div>
                     {/* Error Message */}
@@ -5415,10 +5441,14 @@ const handleSelectLogo = (index) => {
                       </button>
                       <button
                         onClick={handleUpload}
-                        disabled={files.length === 0 || isUploading}
+                        disabled={files.length === 0 || isUploading || isConvertingFiles}
                         className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {isUploading ? "Uploading..." : "Upload"}
+                        {isUploading
+                          ? "Uploading..."
+                          : files.length > 1
+                          ? `Scan ${files.length} to Drafts`
+                          : "Upload"}
                       </button>
                     </div>
                   </div>

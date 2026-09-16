@@ -21,6 +21,7 @@ import ReportModals from "../components/reports/ReportModals";
 import CustomizedReportModal from "../components/receipts/CustomizedReportModal";
 import AddReceiptModal from "../components/receipts/AddReceiptModal";
 import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationDialog";
+import ReceiptScanSkeleton from "../components/receipts/ReceiptScanSkeleton";
 import BulkActionBar from "../components/receipts/BulkActionBar";
 import Toast from "../components/Toast";
 import IntegrationsModal from "../components/IntegrationsModal";
@@ -47,7 +48,7 @@ import "./HomePage.css";
 
 const HomePage = () => {
   const navigate = useNavigate();
-  const { refreshData, silentRefreshData, receipts, loading, updateReceiptStatus, deleteReceipt, bulkDeleteReceipts, updateReceipt, user, applyQuickbooksLinkedIds, markReceiptQuickbooksLinked, syncForwardedReceiptData, markRecoveryEmailVerified, apiExpenseCategories, apiPaymentMethods } = useData();
+  const { refreshData, silentRefreshData, receipts, loading, updateReceiptStatus, deleteReceipt, bulkDeleteReceipts, updateReceipt, user, applyQuickbooksLinkedIds, markReceiptQuickbooksLinked, syncForwardedReceiptData, markRecoveryEmailVerified, apiExpenseCategories, apiPaymentMethods, scanReceiptsToDrafts } = useData();
   const { formatCurrency } = useCurrency();
 
   // Custom hooks for complex logic
@@ -116,6 +117,7 @@ const HomePage = () => {
   const [duplicateInitialData, setDuplicateInitialData] = useState(null);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [showQbDeletePrompt, setShowQbDeletePrompt] = useState(false);
+  const [pendingScanCount, setPendingScanCount] = useState(0);
   const [receiptToDelete, setReceiptToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
   // ── Multi-select (bulk delete / bulk send) ──
@@ -664,6 +666,38 @@ const HomePage = () => {
     // A 1.5s delay gives the server time to commit the new receipt before we re-query.
     silentRefreshData(1500);
     setToast({ isVisible: true, message: "Receipt Added", type: "success" });
+  };
+
+  // ── Multiple Receipt Scan → Draft Receipts ──────────────────────────────────
+  // Called by Add Receipt when 2–5 files are uploaded. Each file becomes a draft.
+  // A skeleton placeholder is shown per in-flight scan, retired as each finishes.
+  const handleMultiScan = async (files) => {
+    const list = Array.from(files || []).slice(0, 5);
+    if (list.length === 0) return;
+    setPendingScanCount(list.length);
+    setToast({
+      isVisible: true,
+      message: `Scanning ${list.length} receipts…`,
+      type: "success",
+    });
+    try {
+      const { created, failed } = await scanReceiptsToDrafts(list, {
+        onProgress: () => setPendingScanCount((c) => Math.max(0, c - 1)),
+      });
+      setToast({
+        isVisible: true,
+        message:
+          failed > 0
+            ? `Added ${created} to Drafts • ${failed} couldn't be scanned`
+            : `Added ${created} receipt${created === 1 ? "" : "s"} to Drafts`,
+        type: failed > 0 ? "error" : "success",
+      });
+    } catch (e) {
+      console.error("Multi-scan failed:", e);
+      setToast({ isVisible: true, message: "Scan failed. Please try again.", type: "error" });
+    } finally {
+      setPendingScanCount(0);
+    }
   };
 
   // Detect the newly-added receipt after an Add and target it for scrolling.
@@ -1566,12 +1600,17 @@ const HomePage = () => {
               )}
 
               {/* ── Draft / To Be Verified receipts ── */}
-              {draftReceipts.length > 0 && (
+              {(draftReceipts.length > 0 || pendingScanCount > 0) && (
                 <div className="mb-4">
                   <div className="home-year-header bg-amber-50 border-b border-amber-200 flex items-center justify-between">
                     <span className="text-amber-700 font-bold">
                       Draft Receipts ({draftReceipts.length}{" "}
                       {draftReceipts.length === 1 ? "Receipt" : "Receipts"})
+                      {pendingScanCount > 0 && (
+                        <span className="ml-2 font-semibold text-amber-600">
+                          • Scanning {pendingScanCount}…
+                        </span>
+                      )}
                     </span>
                     <span className="text-amber-700 font-bold">
                       TOTAL: {formatCurrency(
@@ -1580,6 +1619,12 @@ const HomePage = () => {
                     </span>
                   </div>
                   <div className="home-receipts-inner">
+                    {pendingScanCount > 0 &&
+                      Array.from({ length: pendingScanCount }).map((_, i) => (
+                        <div key={`scan-skeleton-${i}`} className="mb-3">
+                          <ReceiptScanSkeleton />
+                        </div>
+                      ))}
                     {draftReceipts.map((receipt, index) => (
                       <div key={receipt.id || index} id={`receipt-anchor-${receipt.id}`} className="mb-3">
                         {renderReceiptRow(receipt, index, true)}
@@ -1695,6 +1740,7 @@ const HomePage = () => {
               key="add-receipt"
               onClose={() => setShowAddReceiptModal(false)}
               onReceiptAdded={handleReceiptAdded}
+              onMultiScan={handleMultiScan}
               onDuplicate={handleDuplicate}
             />
           )}
