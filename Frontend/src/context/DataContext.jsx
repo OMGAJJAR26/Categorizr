@@ -15,6 +15,8 @@ import {
   dedupeReceiptMediaAcrossReceipts,
   resolveReceiptMediaFieldsForApi,
   receiptMediaStorageKey,
+  sanitizeUploadFile,
+  convertHeicToJpegIfNeeded,
 } from "../utils/mediaUrlUtils";
 import {
   DEFAULT_MERCHANTS_WITH_LOGOS,
@@ -2655,6 +2657,139 @@ setMerchantsWithImages(
     [silentRefreshData]
   );
 
+  // ── Multiple Receipt Scan → Draft Receipts ──────────────────────────────────
+  // Upload up to N receipt files, OCR each, and create ONE draft receipt per file
+  // (is_draft:1) so they land in the "Draft Receipts" section for the user to
+  // confirm/save. Used by the WebApp Add Receipt "multi-scan" path. `onProgress`
+  // fires once per finished file (success or failure) so the caller can retire a
+  // skeleton placeholder. Returns { created, failed }.
+  const uploadSingleFileToMedia = async (file, token) => {
+    const form = new FormData();
+    form.append("file", sanitizeUploadFile(file));
+    const resp = await fetch(`${BASE_URL}/user/uploadmediaV1`, {
+      method: "POST",
+      headers: { Accesstoken: token },
+      body: form,
+    });
+    if (!resp.ok) throw new Error(`Media upload failed: ${resp.status}`);
+    const data = await resp.json();
+    const isHttp = (v) => typeof v === "string" && /^https?:\/\//i.test(v.trim());
+    let urls = Array.isArray(data)
+      ? data.map((i) => (i?.fullImageUrl || "").toString().trim()).filter(isHttp)
+      : isHttp(data?.fullImageUrl)
+        ? [data.fullImageUrl.toString().trim()]
+        : [];
+    // uploadmediaV1 is cumulative — this file's URL is the last one.
+    return urls.length ? urls[urls.length - 1] : "";
+  };
+
+  const buildDraftPayloadFromParsed = (parsed, mediaUrl, fkUserId) => {
+    const merchantName = (parsed?.merchantName || "").toString().trim() || "Miscellaneous";
+    const totalNum = parseFloat(parsed?.total ?? parsed?.subtotal ?? 0) || 0;
+    // Date: parseReceipt returns a display date string; fall back to today.
+    let productDate = 0;
+    const rawDate = parsed?.purchaseDate;
+    if (rawDate) {
+      const t = Date.parse(rawDate);
+      if (!Number.isNaN(t)) productDate = Math.floor(t / 1000);
+    }
+    if (!productDate) productDate = Math.floor(Date.now() / 1000);
+    // Payment: only carry a card when OCR found a 4-digit number (matches the
+    // single-scan rule — a card can't exist without its last 4).
+    const ocrPay = (parsed?.paymentMethod || "").toString();
+    const last4Match = ocrPay.match(/\*(\d{3,4})\b/);
+    const hasLast4 = !!(last4Match && last4Match[1] && last4Match[1] !== "0000");
+    const last4 = hasLast4 ? last4Match[1] : "";
+    const paymentType = hasLast4 ? ocrPay.replace(/\s*\*\d{3,4}\b/g, "").trim() : "";
+    // Merchant logo: OCR-detected, else the account's canonical merchant logo.
+    let storeImage = (parsed?.merchantLogo || "").toString().trim();
+    if (!storeImage) {
+      const mm = (merchantsWithImages || []).find(
+        (m) => (m.name || "").toString().trim().toLowerCase() === merchantName.toLowerCase()
+      );
+      storeImage = mm?.image || "";
+    }
+    return {
+      id: 0,
+      fk_user_id: fkUserId,
+      storeName: merchantName,
+      product_name: "",
+      emailAttachment: mediaUrl || "0",
+      purchasePrice: totalNum.toString(),
+      total_amount: totalNum.toString(),
+      payment_category_type: 0,
+      status: 0,
+      paymentType,
+      last_4_digit_card: last4,
+      card_issuer_name: "",
+      fk_original_receipt_id: "0",
+      fk_forward_from_receipt_id: "0",
+      receipt_category: 0,
+      product_date: productDate,
+      expense_type: "",
+      receipt_image: "0",
+      store_image: storeImage,
+      notes: "",
+      receipt_forwarded: "0",
+      receipt_tag: "0,0,0,0,0,0,0",
+      is_draft: 1, // ← lands in the Draft Receipts (To Be Verified) section
+      is_verify: 0,
+      receipt_tax_values: [],
+    };
+  };
+
+  const scanReceiptsToDrafts = useCallback(async (files, { onProgress } = {}) => {
+    const token = localStorage.getItem("token");
+    const fkUserId = parseInt(localStorage.getItem("fk_user_id")) || 0;
+    if (!token || !files?.length) return { created: 0, failed: 0 };
+    // parseReceipt pulls in tesseract/pdf — load it on demand so it never bloats
+    // the main bundle.
+    let parseReceipt = null;
+    try {
+      parseReceipt = (await import("../utils/receiptParser")).parseReceipt;
+    } catch {
+      parseReceipt = null;
+    }
+    let created = 0;
+    let failed = 0;
+    for (const rawFile of files) {
+      try {
+        const file = await convertHeicToJpegIfNeeded(rawFile);
+        const mediaUrl = await uploadSingleFileToMedia(file, token);
+        let parsed = null;
+        if (parseReceipt) {
+          try {
+            parsed = await parseReceipt(file, merchantsWithImages || []);
+          } catch {
+            parsed = null;
+          }
+        }
+        const payload = buildDraftPayloadFromParsed(parsed, mediaUrl, fkUserId);
+        const resp = await fetch(`${BASE_URL}/receipt/addReceiptv1`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accesstoken: token },
+          body: JSON.stringify(payload),
+        });
+        if (resp.ok) created += 1;
+        else failed += 1;
+      } catch (e) {
+        console.error("[scanReceiptsToDrafts] failed for a file:", e);
+        failed += 1;
+      } finally {
+        onProgress?.();
+      }
+    }
+    // uploadmediaV1 attaches each new URL to every receipt — clean that up, then
+    // pull the freshly created drafts into the list.
+    try {
+      await repairReceiptMediaOnServer({ force: true });
+    } catch {
+      await silentRefreshData(0);
+    }
+    return { created, failed };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [merchantsWithImages, repairReceiptMediaOnServer, silentRefreshData]);
+
   // Update receipt function - calls backend API to persist changes
   // API expects id field in the body for update
   const updateReceipt = async (receiptId, updates) => {
@@ -3773,6 +3908,7 @@ setMerchantsWithImages(
         refreshData: fetchData,
         refreshDataAfterAuth,
         silentRefreshData,
+        scanReceiptsToDrafts,
         markRecoveryEmailVerified,
         updateUserProfile,
         calculateSubtotal,
