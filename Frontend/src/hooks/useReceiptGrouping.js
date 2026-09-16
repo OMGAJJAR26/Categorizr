@@ -31,12 +31,13 @@ const isToBeVerified = (r) => {
  */
 export const isNewForwardedReceipt = (r) => {
   if (!r || r.is_draft === "1" || r.is_verify !== "0") return false;
-  // The "New" highlight stays until the user OPENS the receipt on the WebApp.
-  // Web-open is tracked by is_verify (only the WebApp's own open handler sets
-  // is_verify="1"; the mobile app never touches it). We intentionally do NOT
-  // clear on status="1": the mobile app / auto-refresh can flip status shortly
-  // after arrival, which was making the highlight vanish (or never appear) before
-  // the user viewed it here.
+  // Respect the cross-device read state: a received receipt the user already
+  // opened on ANOTHER device (the mobile app sets status="1" when read) should
+  // not re-highlight here on a synced device. The highlight clears when the
+  // receipt is read anywhere — via is_verify (opened on the WebApp) OR status
+  // (read on mobile). Tradeoff: status can occasionally be flipped by the mobile
+  // app / auto-refresh, which may clear the highlight before it's viewed here.
+  if (String(r.status ?? "0") === "1") return false;
   const isNetworkReceived =
     r.fk_forward_from_receipt_id != null &&
     String(r.fk_forward_from_receipt_id) !== "0";

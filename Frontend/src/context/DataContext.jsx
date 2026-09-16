@@ -70,6 +70,14 @@ const BASE_URL = "/api";
 // Deduplication cache for cross-account sender-receipt fetches (keyed by sender user ID).
 // Module-level so parallel syncForwardedReceiptData calls share in-flight promises.
 const _senderReceiptFetchCache = new Map();
+// Names a forward-sync is currently CREATING (case-insensitive). Concurrent
+// syncForwardedReceiptData calls for the same forwarded receipt (overlapping
+// refresh cycles) otherwise each check a stale apiMerchants/apiExpenseCategories
+// list, find nothing, and both POST — creating duplicate rows (two "Bose"
+// merchants / two "22wwebapp" categories seen ~0.07s apart). These locks make the
+// second caller skip creation. Cleared once the create settles.
+const _forwardMerchantCreateLocks = new Set();
+const _forwardCategoryCreateLocks = new Set();
 const onlyDigits = (s) => (s ?? "").toString().replace(/\D/g, "");
 // DEFAULT_PAYMENT_METHODS removed — payment methods now come exclusively
 // from the getPaymentMethodv1 API (apiPaymentMethods) and from receipts.
@@ -3222,7 +3230,12 @@ setMerchantsWithImages(
       const existingMerchant = (apiMerchants || []).find(
         (m) => (m.store_name || "").toLowerCase() === storeName.toLowerCase()
       );
-      if (!existingMerchant) {
+      const merchantLockKey = storeName.toLowerCase();
+      if (!existingMerchant && !_forwardMerchantCreateLocks.has(merchantLockKey)) {
+        // Hold a short-lived lock so a concurrent sync of the same forwarded
+        // receipt doesn't also create this merchant before apiMerchants refreshes.
+        _forwardMerchantCreateLocks.add(merchantLockKey);
+        setTimeout(() => _forwardMerchantCreateLocks.delete(merchantLockKey), 8000);
         let logoToUse = storeImage;
         if (!logoToUse) {
           // Sender used a local app asset (no URL) — try prefix-match against known merchants.
@@ -3402,7 +3415,14 @@ setMerchantsWithImages(
       const catExists = (apiExpenseCategories || []).some(
         (c) => (c.expense_category_name || "").toLowerCase() === expenseType.toLowerCase()
       );
-      if (!catExists) tasks.push(addApiExpenseCategory(expenseType));
+      const catLockKey = expenseType.toLowerCase();
+      if (!catExists && !_forwardCategoryCreateLocks.has(catLockKey)) {
+        // Short-lived lock: stop a concurrent sync of the same forwarded receipt
+        // from also creating this category before apiExpenseCategories refreshes.
+        _forwardCategoryCreateLocks.add(catLockKey);
+        setTimeout(() => _forwardCategoryCreateLocks.delete(catLockKey), 8000);
+        tasks.push(addApiExpenseCategory(expenseType));
+      }
       // Patch in-memory receipt when API row is missing expense_type (common on forwards)
       const currentType = (receipt.expense_type || "").trim();
       if (receipt.id && currentType.toLowerCase() !== expenseType.toLowerCase()) {
@@ -3515,7 +3535,12 @@ setMerchantsWithImages(
                     (c.expense_category_name || "").toLowerCase() ===
                     fetchedType.toLowerCase()
                 );
-                if (!catExists2) addApiExpenseCategory(fetchedType);
+                const catLockKey2 = (fetchedType || "").toLowerCase();
+                if (!catExists2 && catLockKey2 && !_forwardCategoryCreateLocks.has(catLockKey2)) {
+                  _forwardCategoryCreateLocks.add(catLockKey2);
+                  setTimeout(() => _forwardCategoryCreateLocks.delete(catLockKey2), 8000);
+                  addApiExpenseCategory(fetchedType);
+                }
               }
 
               // Preserve the receipt's real taxes so this update never wipes them.
