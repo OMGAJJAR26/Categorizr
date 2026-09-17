@@ -163,6 +163,10 @@ export const useReceiptFilters = () => {
         
         case FILTER_TYPES.DATE:
           newFilters[FILTER_TYPES.DATE] = null;
+          // Also clear the range the Date modal persists separately, so tapping
+          // the chip's "X" fully resets the date filter (the modal won't reopen
+          // pre-filled with the old range).
+          localStorage.removeItem("dateRange");
           break;
         
         case FILTER_TYPES.MERCHANT:

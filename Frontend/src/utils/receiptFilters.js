@@ -76,7 +76,8 @@ const matchesPrice = (receipt, priceFilter) => {
 };
 
 const matchesDate = (receipt, dateRange) => {
-  if (!dateRange || !receipt.product_date) return true;
+  // No active range (or an incomplete one) → include everything.
+  if (!dateRange || !dateRange.startDate || !dateRange.endDate) return true;
 
   const start = dateRange.startDate instanceof Date
     ? dateRange.startDate
@@ -87,7 +88,13 @@ const matchesDate = (receipt, dateRange) => {
 
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return true;
 
-  const productDate = new Date(Number(receipt.product_date) * 1000);
+  // A valid date range is active: receipts with NO date must be excluded — an
+  // undated receipt can't fall inside a date range. (product_date below the
+  // ~1,000,000 sentinel means "No Date".)
+  const pd = Number(receipt.product_date);
+  if (!pd || pd < 1000000) return false;
+
+  const productDate = new Date(pd * 1000);
   return productDate >= start && productDate <= end;
 };
 
