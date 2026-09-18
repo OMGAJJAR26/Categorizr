@@ -3282,16 +3282,20 @@ useEffect(() => {
     const remTotal    = parseFloat((mainTotal    - otherSum((sp) => sp.purchasePrice)).toFixed(2));
     const remTip      = parseFloat((mainTip       - otherSum((sp) => sp.tip)).toFixed(2));
 
+    const AGGREGATE_MSG = {
+      title: "Sorry",
+      message: "Aggregate total of all split totals cannot exceed total of original receipt total.",
+    };
     if (field === "subtotal" && mainSubtotal > 0 && (parseFloat(value) || 0) > remSubtotal + 0.005) {
-      setAlertMsg(`Subtotal cannot exceed $${Math.max(0, remSubtotal).toFixed(2)}`);
+      setAlertMsg(AGGREGATE_MSG);
       return;
     }
     if (field === "purchasePrice" && mainTotal > 0 && (parseFloat(value) || 0) > remTotal + 0.005) {
-      setAlertMsg(`Total cannot exceed $${Math.max(0, remTotal).toFixed(2)}`);
+      setAlertMsg(AGGREGATE_MSG);
       return;
     }
     if (field === "tip" && mainTip > 0 && (parseFloat(value) || 0) > remTip + 0.005) {
-      setAlertMsg(`Tip cannot exceed $${Math.max(0, remTip).toFixed(2)}`);
+      setAlertMsg(AGGREGATE_MSG);
       return;
     }
 
@@ -5819,7 +5823,7 @@ Thank you for using our receipt management system.
                                         value={t.tax_amount ?? ""}
                                         onChange={(e) => {
                                           const v = parseFloat(e.target.value) || 0;
-                                          if (maxTax > 0 && v > maxTax + 0.005) { setAlertMsg(`${t.tax_name} cannot exceed $${maxTax.toFixed(2)}`); return; }
+                                          if (maxTax > 0 && v > maxTax + 0.005) { setAlertMsg({ title: "Sorry", message: "Aggregate total of all split totals cannot exceed total of original receipt total." }); return; }
                                           const updatedTaxes = split.receipt_tax_values.map((tv, tvi) => tvi === ti ? { ...tv, tax_amount: e.target.value } : tv);
                                           updateSplitField(activeSplitIndex, "receipt_tax_values", updatedTaxes);
                                         }}
@@ -8791,15 +8795,22 @@ Thank you for using our receipt management system.
       {alertMsg && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs mx-auto p-6 text-center">
-            <div className="w-12 h-12 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4">
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            </div>
-            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{alertMsg}</p>
+            {(typeof alertMsg === "object" ? alertMsg.title : null) && (
+              <h3 className="text-lg font-bold text-slate-900 mb-2">{alertMsg.title}</h3>
+            )}
+            {typeof alertMsg !== "object" && (
+              <div className="w-12 h-12 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              </div>
+            )}
+            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
+              {typeof alertMsg === "object" ? alertMsg.message : alertMsg}
+            </p>
             <button
               onClick={() => setAlertMsg(null)}
               className="mt-5 w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl transition-colors"
             >
-              OK
+              Ok
             </button>
           </div>
         </div>
