@@ -251,6 +251,23 @@ const ReceiptDetail = ({
   const openingReceipt = findContextReceipt(receipts, receipt);
   const [selectedReceipt, setSelectedReceipt] = useState(openingReceipt);
   const [sortedReceipts, setSortedReceipts] = useState([]);
+
+  // Viewing a received (network-forwarded) receipt on the WebApp — by opening it
+  // (tap) OR by SWIPING to it inside this modal — clears its "New" highlight by
+  // setting is_verify="1". Runs whenever the shown receipt changes, so swiping
+  // through highlighted receipts marks each one as seen. Only network-received,
+  // still-highlighted receipts are touched; a plain refresh or receiving another
+  // receipt never triggers this (the receipt isn't being viewed).
+  useEffect(() => {
+    const r = selectedReceipt;
+    if (r?.id && isNewForwardedReceipt(r)) {
+      updateReceipt(r.id, { is_verify: "1" });
+      setSelectedReceipt((prev) =>
+        prev && String(prev.id) === String(r.id) ? { ...prev, is_verify: "1" } : prev
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReceipt?.id]);
   const [startX, setStartX] = useState(null);
   const [direction, setDirection] = useState(0);
   const [shareMenu, setShareMenu] = useState(false);
