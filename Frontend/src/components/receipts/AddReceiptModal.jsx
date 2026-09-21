@@ -3306,28 +3306,35 @@ const handleFieldChange = (field, value) => {
     if (field === "product_name") {
       value = (value || "").toString().slice(0, MAX_DESCRIPTION_LENGTH);
     }
-    const mainSubtotal = parseFloat(formData.subtotal) || parseFloat(formData.purchasePrice) || 0;
-    const mainTotal    = parseFloat(formData.purchasePrice) || 0;
-    const mainTip      = parseFloat(formData.tip) || 0;
+    // Cap each field at what's LEFT: the main amount minus what the OTHER splits
+    // already took (per field), so the allowance shrinks as splits are added.
+    const rawMainSubtotal = parseFloat(formData.subtotal) || parseFloat(formData.purchasePrice) || 0;
+    const rawMainTotal    = parseFloat(formData.purchasePrice) || 0;
+    const rawMainTip      = parseFloat(formData.tip) || 0;
+    const otherSplitsCap = splits.filter((_, i) => i !== idx);
+    const otherSumCap = (fn) => otherSplitsCap.reduce((s, sp) => s + (parseFloat(fn(sp)) || 0), 0);
+    const mainSubtotal = Math.max(0, parseFloat((rawMainSubtotal - otherSumCap((sp) => sp.subtotal)).toFixed(2)));
+    const mainTotal    = Math.max(0, parseFloat((rawMainTotal    - otherSumCap((sp) => sp.purchasePrice)).toFixed(2)));
+    const mainTip      = Math.max(0, parseFloat((rawMainTip       - otherSumCap((sp) => sp.tip)).toFixed(2)));
 
     // ── Max-amount guards ────────────────────────────────────────────────────
     if (field === "subtotal") {
       const sub = parseFloat(value) || 0;
-      if (mainSubtotal > 0 && sub > mainSubtotal) {
+      if (rawMainSubtotal > 0 && sub > mainSubtotal + 0.005) {
         setAlertMsg(`Subtotal cannot exceed $${mainSubtotal.toFixed(2)}`);
         return;
       }
     }
     if (field === "purchasePrice") {
       const total = parseFloat(value) || 0;
-      if (mainTotal > 0 && total > mainTotal) {
+      if (rawMainTotal > 0 && total > mainTotal + 0.005) {
         setAlertMsg(`Total cannot exceed $${mainTotal.toFixed(2)}`);
         return;
       }
     }
     if (field === "tip") {
       const tip = parseFloat(value) || 0;
-      if (mainTip > 0 && tip > mainTip) {
+      if (rawMainTip > 0 && tip > mainTip + 0.005) {
         setAlertMsg(`Tip cannot exceed $${mainTip.toFixed(2)}`);
         return;
       }
@@ -5006,10 +5013,23 @@ const handleSelectLogo = (index) => {
                       /* ── Split Detail View ── */
                       (() => {
                         const split = splits[activeSplitIndex];
-                        const mainSubtotal = parseFloat(formData.subtotal) || parseFloat(formData.purchasePrice) || 0;
-                        const mainTotal    = parseFloat(formData.purchasePrice) || 0;
-                        const mainTip      = parseFloat(formData.tip) || 0;
-                        const hasTip       = mainTip > 0;
+                        const rawMainSubtotal = parseFloat(formData.subtotal) || parseFloat(formData.purchasePrice) || 0;
+                        const rawMainTotal    = parseFloat(formData.purchasePrice) || 0;
+                        const rawMainTip      = parseFloat(formData.tip) || 0;
+                        const mainTaxList     = filterNonTipReceiptTaxValues(formData.receipt_tax_values || []);
+                        // "Max" for THIS split = the main amount minus what the OTHER splits already
+                        // took (per field), so the remaining allowance shrinks as splits are added.
+                        const otherSplits = splits.filter((_, i) => i !== activeSplitIndex);
+                        const otherSum = (fn) => otherSplits.reduce((s, sp) => s + (parseFloat(fn(sp)) || 0), 0);
+                        const remClamp = (v) => Math.max(0, parseFloat(v.toFixed(2)));
+                        const mainSubtotal = remClamp(rawMainSubtotal - otherSum((sp) => sp.subtotal));
+                        const mainTotal    = remClamp(rawMainTotal    - otherSum((sp) => sp.purchasePrice));
+                        const mainTip      = remClamp(rawMainTip       - otherSum((sp) => sp.tip));
+                        const maxTaxAt = (ti) => remClamp(
+                          (parseFloat(mainTaxList[ti]?.tax_amount) || 0)
+                          - otherSplits.reduce((s, sp) => s + (parseFloat(sp.receipt_tax_values?.[ti]?.tax_amount) || 0), 0)
+                        );
+                        const hasTip       = rawMainTip > 0;
                         const fieldErr     = splitErrors[split._id] || {};
                         const hasAmountErr = !!fieldErr.amount;
                         return (
@@ -5068,7 +5088,7 @@ const handleSelectLogo = (index) => {
 
                             {/* Tax fields */}
                             {(split.receipt_tax_values || []).map((t, ti) => {
-                              const maxTax = parseFloat(((parseFloat(t.tax_rate || 0) / 100) * mainSubtotal).toFixed(2));
+                              const maxTax = maxTaxAt(ti);
                               return (
                                 <div key={ti}>
                                   <div className="flex items-center justify-between mb-1">
