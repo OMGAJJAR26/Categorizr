@@ -5819,112 +5819,104 @@ Thank you for using our receipt management system.
                               </div>
                             </div>
 
-                            {/* RECEIPT INFORMATION → Category */}
+                            {/* RECEIPT INFORMATION → Category (row: label left, value/select right) */}
                             <div>
                               <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Receipt Information</p>
-                              <label className="block text-xs font-semibold text-gray-500 mb-1">Category</label>
-                              <select
-                                className="w-full border border-blue-400 text-sm px-2 py-2 rounded-md bg-white text-gray-800"
-                                value={split.expense_type || ""}
-                                onChange={(e) => updateSplitField(activeSplitIndex, "expense_type", e.target.value)}
-                              >
-                                <option value="">Select category</option>
-                                {allExpenseCategories.map(cat => (
-                                  <option key={cat} value={cat}>{cat}</option>
-                                ))}
-                              </select>
+                              <div className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 flex items-center justify-between gap-2">
+                                <span className="text-sm font-bold text-gray-900 flex-shrink-0">Category</span>
+                                <select
+                                  className="text-sm text-right text-gray-800 bg-transparent outline-none max-w-[62%] truncate cursor-pointer"
+                                  value={split.expense_type || ""}
+                                  onChange={(e) => updateSplitField(activeSplitIndex, "expense_type", e.target.value)}
+                                >
+                                  <option value="">Select category</option>
+                                  {allExpenseCategories.map(cat => (
+                                    <option key={cat} value={cat}>{cat}</option>
+                                  ))}
+                                </select>
+                              </div>
                             </div>
 
-                            {/* RECEIPT TOTALS */}
-                            <div className="space-y-4">
-                              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Receipt Totals</p>
-                              {/* Subtotal (read-only, derived from Total − Tip) */}
-                              <div>
-                                <div className="flex items-center justify-between mb-1">
-                                  <label className="text-xs font-bold uppercase tracking-wide text-gray-500">
-                                    Subtotal <span className="font-normal text-gray-400 normal-case">(max. ${maxSubtotal.toFixed(2)})</span>
-                                  </label>
+                            {/* RECEIPT TOTALS — iOS-style rows: label + (max) on the left, value box on the right */}
+                            <div>
+                              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Receipt Totals</p>
+                              <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100 overflow-hidden">
+                                {/* Subtotal (read-only, derived from Total − Tip) */}
+                                <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+                                  <span className="text-sm font-bold text-gray-900">
+                                    Subtotal <span className="font-normal text-gray-400">(max. ${maxSubtotal.toFixed(2)})</span>
+                                  </span>
+                                  <span className={`text-sm min-w-[92px] text-right px-2 py-1 rounded-md bg-gray-100 ${parseFloat(split.subtotal) < 0 ? "text-red-600 font-medium" : "text-gray-600"}`}>
+                                    ${split.subtotal !== "" && split.subtotal != null ? parseFloat(split.subtotal).toFixed(2) : "0.00"}
+                                  </span>
                                 </div>
-                                <div className="relative">
-                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
-                                  <input type="text" readOnly
-                                    className={`w-full text-sm pl-6 pr-2 py-2 rounded-md bg-gray-50 border border-gray-200 cursor-not-allowed ${parseFloat(split.subtotal) < 0 ? "text-red-600 font-medium" : "text-gray-700"}`}
-                                    value={split.subtotal !== "" && split.subtotal != null ? parseFloat(split.subtotal).toFixed(2) : ""}
-                                    placeholder="0.00" />
-                                </div>
-                              </div>
-                              {/* Tax fields */}
-                              {(split.receipt_tax_values || []).map((t, ti) => {
-                                const maxTax = maxTaxAt(ti);
-                                return (
-                                  <div key={ti}>
-                                    <div className="flex items-center justify-between mb-1">
-                                      <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">
-                                        {t.tax_name} ({t.tax_rate}%) <span className="font-normal text-gray-400 normal-case">(max. ${maxTax.toFixed(2)})</span>
-                                      </label>
+                                {/* Tax fields */}
+                                {(split.receipt_tax_values || []).map((t, ti) => {
+                                  const maxTax = maxTaxAt(ti);
+                                  return (
+                                    <div key={ti} className="flex items-center justify-between gap-2 px-3 py-2.5">
+                                      <span className="text-sm font-bold text-gray-900">
+                                        {t.tax_name} ({parseFloat(t.tax_rate) || 0}%) <span className="font-normal text-gray-400">(max. ${maxTax.toFixed(2)})</span>
+                                      </span>
+                                      <div className="relative min-w-[92px]">
+                                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">$</span>
+                                        <input type="number"
+                                          className="w-full text-sm text-right pl-5 pr-2 py-1 rounded-md bg-gray-100 border border-transparent focus:border-blue-400 focus:bg-white text-gray-800 outline-none"
+                                          value={t.tax_amount ?? ""}
+                                          onChange={(e) => {
+                                            const v = parseFloat(e.target.value) || 0;
+                                            if (maxTax > 0 && v > maxTax + 0.005) { setAlertMsg({ title: "Sorry", message: "Aggregate total of all split totals cannot exceed total of original receipt total." }); return; }
+                                            const updatedTaxes = split.receipt_tax_values.map((tv, tvi) => tvi === ti ? { ...tv, tax_amount: e.target.value } : tv);
+                                            updateSplitField(activeSplitIndex, "receipt_tax_values", updatedTaxes);
+                                          }}
+                                          placeholder="0.00" min="0" step="0.01" />
+                                      </div>
                                     </div>
-                                    <div className="relative">
-                                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
+                                  );
+                                })}
+                                {/* Tip — only when the original receipt has a tip */}
+                                {hasTip && (
+                                  <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+                                    <span className="text-sm font-bold text-gray-900">
+                                      TIP <span className="font-normal text-gray-400">(max. ${maxTip.toFixed(2)})</span>
+                                    </span>
+                                    <div className="relative min-w-[92px]">
+                                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">$</span>
                                       <input type="number"
-                                        className="w-full border border-blue-400 text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800"
-                                        value={t.tax_amount ?? ""}
-                                        onChange={(e) => {
-                                          const v = parseFloat(e.target.value) || 0;
-                                          if (maxTax > 0 && v > maxTax + 0.005) { setAlertMsg({ title: "Sorry", message: "Aggregate total of all split totals cannot exceed total of original receipt total." }); return; }
-                                          const updatedTaxes = split.receipt_tax_values.map((tv, tvi) => tvi === ti ? { ...tv, tax_amount: e.target.value } : tv);
-                                          updateSplitField(activeSplitIndex, "receipt_tax_values", updatedTaxes);
-                                        }}
-                                        placeholder="0.00" min="0" step="0.01" />
+                                        className="w-full text-sm text-right pl-5 pr-2 py-1 rounded-md bg-gray-100 border border-transparent focus:border-blue-400 focus:bg-white text-gray-800 outline-none"
+                                        value={split.tip ?? ""} onChange={(e) => updateSplitField(activeSplitIndex, "tip", e.target.value)}
+                                        placeholder="0.00" min="0" max={maxTip} step="0.01" />
                                     </div>
                                   </div>
-                                );
-                              })}
-                              {/* Tip — only when the original receipt has a tip */}
-                              {hasTip && (
-                                <div>
-                                  <div className="flex items-center justify-between mb-1">
-                                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">
-                                      Tip{split.subtotal && parseFloat(split.subtotal) > 0
-                                        ? ` (${Math.round((parseFloat(split.tip || 0) / parseFloat(split.subtotal)) * 100)}%)`
-                                        : ""} <span className="font-normal text-gray-400 normal-case">(max. ${maxTip.toFixed(2)})</span>
-                                    </label>
-                                  </div>
-                                  <div className="relative">
-                                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
+                                )}
+                                {/* Total */}
+                                <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+                                  <span className={`text-sm font-bold ${hasAmountErr ? "text-red-500" : "text-gray-900"}`}>
+                                    TOTAL <span className="font-normal text-gray-400">(max. ${maxTotal.toFixed(2)})</span>
+                                  </span>
+                                  <div className="relative min-w-[92px]">
+                                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">$</span>
                                     <input type="number"
-                                      className="w-full border border-blue-400 text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800"
-                                      value={split.tip ?? ""} onChange={(e) => updateSplitField(activeSplitIndex, "tip", e.target.value)}
-                                      placeholder="0.00" min="0" max={maxTip} step="0.01" />
+                                      className={`w-full text-sm text-right font-bold pl-5 pr-2 py-1 rounded-md bg-gray-100 text-gray-900 outline-none border ${hasAmountErr ? "border-red-400 ring-1 ring-red-300" : "border-transparent focus:border-blue-400 focus:bg-white"}`}
+                                      value={split.purchasePrice ?? ""} onChange={(e) => updateSplitField(activeSplitIndex, "purchasePrice", e.target.value)}
+                                      placeholder="0.00" min="0" max={maxTotal} step="0.01" />
                                   </div>
                                 </div>
-                              )}
-                              {/* Total */}
-                              <div>
-                                <div className="flex items-center justify-between mb-1">
-                                  <label className={`text-xs font-bold uppercase tracking-wide ${hasAmountErr ? "text-red-500" : "text-gray-500"}`}>
-                                    Total * <span className="font-normal text-gray-400 normal-case">(max. ${maxTotal.toFixed(2)})</span>
-                                  </label>
-                                </div>
-                                <div className="relative">
-                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none">$</span>
-                                  <input type="number"
-                                    className={`w-full text-sm pl-6 pr-2 py-2 rounded-md bg-white text-gray-800 border ${hasAmountErr ? "border-red-400 ring-1 ring-red-300" : "border-blue-400"}`}
-                                    value={split.purchasePrice ?? ""} onChange={(e) => updateSplitField(activeSplitIndex, "purchasePrice", e.target.value)}
-                                    placeholder="0.00" min="0" max={maxTotal} step="0.01" />
-                                </div>
-                                {hasAmountErr && <p className="mt-1 text-xs text-red-500">{fieldErr.amount}</p>}
                               </div>
+                              {hasAmountErr && <p className="mt-1 text-xs text-red-500">{fieldErr.amount}</p>}
                             </div>
 
                             {/* MORE INFORMATION → Describe Purchase */}
                             <div>
                               <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">More Information</p>
-                              <label className="block text-xs font-semibold text-gray-500 mb-1">Describe Purchase</label>
-                              <input type="text"
-                                className="w-full border border-blue-400 text-sm px-2 py-2 rounded-md bg-white text-gray-800"
-                                value={split.product_name || ""} onChange={(e) => updateSplitField(activeSplitIndex, "product_name", e.target.value)}
-                                maxLength={MAX_DESCRIPTION_LENGTH}
-                                placeholder="Enter a description" />
+                              <div className="bg-white border border-gray-200 rounded-xl px-3 py-2.5">
+                                <p className="text-sm font-bold text-gray-900 mb-1">Describe Purchase</p>
+                                <input type="text"
+                                  className="w-full text-sm text-gray-800 bg-transparent outline-none placeholder-gray-400"
+                                  value={split.product_name || ""} onChange={(e) => updateSplitField(activeSplitIndex, "product_name", e.target.value)}
+                                  maxLength={MAX_DESCRIPTION_LENGTH}
+                                  placeholder="Enter a description" />
+                              </div>
                             </div>
                           </div>
                         );
@@ -5947,6 +5939,13 @@ Thank you for using our receipt management system.
                         const storeName = editedReceipt.storeName || selectedReceipt?.storeName || "—";
                         const baseName  = splitBaseName();
                         const mainType  = parseInt(editedReceipt.receipt_category ?? selectedReceipt?.receipt_category) === 1 ? "Business" : "Personal";
+                        const mainCategory = (editedReceipt.expense_type ?? selectedReceipt?.expense_type ?? "").toString().trim();
+                        // Receipt-photo thumbnail for the Main Receipt card (first non-PDF image).
+                        const mainThumbUrl = (() => {
+                          const urls = collectReceiptMediaUrlsForSave();
+                          const first = (urls || []).find((u) => u && !/\.pdf($|\?)/i.test(u));
+                          return first ? proxyImageUrl(first) : null;
+                        })();
                         const dateLabel = formatReceiptDate({
                           product_date: editedReceipt.product_date ?? selectedReceipt?.product_date,
                           create_date: selectedReceipt?.create_date,
@@ -5965,8 +5964,8 @@ Thank you for using our receipt management system.
                           <div className="mt-1">
                             {[
                               ["Subtotal", subtotal, false],
-                              ...mainTaxList.map((t, ti) => [`${t.tax_name} (${t.tax_rate}%)`, taxAt(ti), false]),
-                              ...(hasTip ? [["Tip", tip, false]] : []),
+                              ...mainTaxList.map((t, ti) => [`${t.tax_name} (${parseFloat(t.tax_rate) || 0}%)`, taxAt(ti), false]),
+                              ...(hasTip ? [["TIP", tip, false]] : []),
                               ["TOTAL", total, true],
                             ].map(([lbl, val, bold], i) => (
                               <div key={i} className={`flex items-center justify-between py-1.5 border-b border-gray-100 ${bold ? "font-bold text-gray-900" : ""}`}>
@@ -5983,10 +5982,16 @@ Thank you for using our receipt management system.
                           <div>
                             <p className="text-blue-600 font-bold text-base mb-2">Main Receipt</p>
                             <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 flex items-center gap-3">
+                              {mainThumbUrl ? (
+                                <img src={mainThumbUrl} alt="" loading="lazy"
+                                  className="w-12 h-14 object-cover rounded-md border border-gray-200 flex-shrink-0 bg-gray-900" />
+                              ) : (
+                                <div className="w-12 h-14 rounded-md bg-gray-100 border border-gray-200 flex-shrink-0" />
+                              )}
                               <div className="flex-1 min-w-0">
                                 <p className="font-bold text-gray-900 text-sm truncate">{storeName}</p>
-                                {(editedReceipt.product_name || selectedReceipt?.product_name) && (
-                                  <p className="text-xs text-gray-600 truncate">{editedReceipt.product_name || selectedReceipt?.product_name}</p>
+                                {mainCategory && (
+                                  <p className="text-xs text-gray-600 truncate">{mainCategory}</p>
                                 )}
                                 <p className="text-xs text-gray-400">{mainType}</p>
                               </div>
@@ -6013,13 +6018,16 @@ Thank you for using our receipt management system.
                           <div>
                             <p className="text-blue-600 font-bold text-base mb-2">Splits</p>
                             <div className="space-y-3">
-                              {/* Added splits */}
+                              {/* Added splits — info column (left) + breakdown table (right), iOS-style */}
                               {splits.map((split, idx) => {
                                 const hasErr = !!splitErrors[split._id];
+                                const splitType = parseInt(split.receipt_category) === 1 ? "Business" : "Personal";
+                                const splitCat = (split.expense_type || "").toString().trim();
                                 return (
                                   <div key={split._id}
-                                    className={`bg-white border rounded-xl overflow-hidden ${hasErr ? "border-red-400" : "border-gray-200"}`}>
-                                    <div className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50"
+                                    className={`bg-white border rounded-xl overflow-hidden flex ${hasErr ? "border-red-400" : "border-gray-200"}`}>
+                                    {/* Left: merchant / category / type + remove + edit */}
+                                    <div className="flex items-center gap-2 px-3 py-3 w-2/5 min-w-0 cursor-pointer hover:bg-gray-50"
                                       onClick={() => setActiveSplitIndex(idx)}>
                                       <button type="button" onClick={(e) => { e.stopPropagation(); removeSplit(idx); }}
                                         className="flex-shrink-0 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600"
@@ -6028,12 +6036,14 @@ Thank you for using our receipt management system.
                                       </button>
                                       <div className="flex-1 min-w-0">
                                         <p className="font-bold text-gray-900 text-sm truncate">{splitLabel(idx)}</p>
-                                        <p className="text-xs text-gray-400">{parseInt(split.receipt_category) === 1 ? "Business" : "Personal"}</p>
-                                        {hasErr && <p className="text-xs text-red-500 font-medium">Incomplete — tap to fix</p>}
+                                        {splitCat && <p className="text-xs text-gray-600 truncate">{splitCat}</p>}
+                                        <p className="text-xs text-gray-400">{splitType}</p>
+                                        {hasErr && <p className="text-xs text-red-500 font-medium">Tap to fix</p>}
                                       </div>
                                       <ChevronRight size={18} className="text-blue-500 flex-shrink-0" />
                                     </div>
-                                    <div className="px-4 pb-2">
+                                    {/* Right: totals breakdown */}
+                                    <div className="flex-1 min-w-0 border-l border-gray-200 px-3 py-1">
                                       <Breakdown
                                         subtotal={split.subtotal}
                                         taxAt={(ti) => split.receipt_tax_values?.[ti]?.tax_amount}
@@ -6045,15 +6055,16 @@ Thank you for using our receipt management system.
                                 );
                               })}
 
-                              {/* Remainder (the original receipt) */}
-                              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-                                <div className="flex items-center gap-3 px-4 py-3">
+                              {/* Remainder (the original receipt) — same two-column layout, no remove/edit */}
+                              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden flex">
+                                <div className="flex items-center px-3 py-3 w-2/5 min-w-0">
                                   <div className="flex-1 min-w-0">
                                     <p className="font-bold text-gray-900 text-sm truncate">{baseName}</p>
+                                    {mainCategory && <p className="text-xs text-gray-600 truncate">{mainCategory}</p>}
                                     <p className="text-xs text-gray-400">{mainType}</p>
                                   </div>
                                 </div>
-                                <div className="px-4 pb-2">
+                                <div className="flex-1 min-w-0 border-l border-gray-200 px-3 py-1">
                                   <Breakdown
                                     subtotal={remSubtotal}
                                     taxAt={(ti) => remTaxAt(ti)}
