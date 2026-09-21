@@ -3693,8 +3693,14 @@ useEffect(() => {
       const selectedMerchantImage = getMerchantImage(resolvedStoreName);
       const storeImageToSave = isMiscMerchant
         ? selectedMerchantImage || "" // never carry over the previous merchant's logo
-        : selectedMerchantImage ||
+        : // Prefer the logo the user is actually looking at / just picked
+          // (editedReceipt.store_image — set by the merchant dropdown AND by the
+          // "edit merchant → change logo" flow) over getMerchantImage(), whose
+          // merchant map can lag a just-edited logo by a render. Using the stale
+          // map value first was intermittently REVERTING a freshly-picked logo on
+          // "Save Changes" ("sometimes when add logo it does not save").
           editedReceipt.store_image ||
+          selectedMerchantImage ||
           selectedReceipt.store_image ||
           "";
 
@@ -4032,8 +4038,12 @@ useEffect(() => {
     const selectedMerchantImage = getMerchantImage(resolvedStoreName);
     const storeImageToSave = isMiscMerchant
       ? selectedMerchantImage || "" // never carry over the previous merchant's logo
-      : selectedMerchantImage ||
+      : // Prefer the logo the user is actually looking at / just picked
+        // (editedReceipt.store_image) over getMerchantImage(), whose merchant map
+        // can lag a just-edited logo by a render and was intermittently reverting
+        // a freshly-picked logo on save.
         editedReceipt.store_image ||
+        selectedMerchantImage ||
         selectedReceipt.store_image ||
         "";
 
