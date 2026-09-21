@@ -10,7 +10,6 @@
  */
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import { X, Undo2, Trash2, Pen, Eraser, Download, Loader2 } from "lucide-react";
-import { proxyImageUrl } from "../../api/Axios";
 
 const COLORS = ["#EF4444", "#3B82F6", "#000000", "#16A34A", "#F97316", "#7C3AED"];
 
@@ -195,14 +194,24 @@ const ReceiptAnnotator = ({ imageUrl, onSave, onClose }) => {
         );
       };
 
-      // 1. Image proxy — same URL rules as proxyImageUrl() (Vite → Render locally,
-      //    Vercel rewrite → Render, or VITE_NODE_API_URL absolute on staging).
-      if (imageUrl && !imageUrl.startsWith("data:") && !imageUrl.startsWith("blob:")) {
+      // 1. Image proxy — fetch through the SAME-ORIGIN *relative* path
+      //    (/api/imageproxy?url=…). On Vercel this is rewritten to Render and
+      //    locally the Vite dev proxy forwards it, so the request is never a
+      //    cross-origin fetch. proxyImageUrl() would return an ABSOLUTE Render URL
+      //    on staging/production (VITE_NODE_API_URL is set) — a cross-origin fetch
+      //    that CORS can block, and a cross-origin <img> that taints the canvas.
+      //    When every strategy failed that way we silently fell back to a BLANK
+      //    WHITE image (step 7) and saved it OVER the original receipt photo — the
+      //    "receipt image disappears after using the marking/edit tool" bug. The
+      //    relative path returns a canvas-safe blob, so the real receipt composes.
+      if (imageUrl && !imageUrl.startsWith("data:") && !imageUrl.startsWith("blob:") && rawUrl) {
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 10000);
-          const proxyUrl = proxyImageUrl(rawUrl);
-          const resp = await fetch(proxyUrl, { signal: controller.signal });
+          const timeoutId = setTimeout(() => controller.abort(), 20000);
+          const sameOriginProxy = rawUrl.includes("/api/imageproxy?url=")
+            ? rawUrl
+            : `/api/imageproxy?url=${encodeURIComponent(rawUrl)}`;
+          const resp = await fetch(sameOriginProxy, { signal: controller.signal });
           clearTimeout(timeoutId);
           if (resp.ok) {
             const blob = await resp.blob();
@@ -315,10 +324,15 @@ const ReceiptAnnotator = ({ imageUrl, onSave, onClose }) => {
         }
       }
 
-      // 7. Last resort: white (strokes only) — avoids crashing but looks wrong
+      // 7. If we STILL couldn't reconstruct the real receipt image, ABORT instead
+      //    of saving a blank white image. Saving white here would upload it and
+      //    REPLACE the original receipt photo on the server — permanently losing
+      //    it (the "image disappears after annotating" data loss). Failing loudly
+      //    keeps the original intact so the user can retry once the proxy responds.
       if (!backgroundDrawn) {
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, output.width, output.height);
+        throw new Error(
+          "Couldn't load the receipt image to draw on — your original receipt was NOT changed. Wait a moment for the image to finish loading, then tap Save Annotation again."
+        );
       }
 
       // 8. Overlay the transparent annotation layer on top
