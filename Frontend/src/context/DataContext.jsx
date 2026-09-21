@@ -44,6 +44,7 @@ import {
   getApiPaymentMethodCacheKey,
   getApiPaymentMethodDisplayName,
   getApiPaymentMethodSignature,
+  getBrandFromPaymentApiRecord,
   getLast4FromPaymentApiRecord,
   inferCardTypeFromPayment,
   isPaymentApiRecord,
@@ -2708,7 +2709,33 @@ setMerchantsWithImages(
     const last4Match = ocrPay.match(/\*(\d{3,4})\b/);
     const hasLast4 = !!(last4Match && last4Match[1] && last4Match[1] !== "0000");
     const last4 = hasLast4 ? last4Match[1] : "";
-    const paymentType = hasLast4 ? ocrPay.replace(/\s*\*\d{3,4}\b/g, "").trim() : "";
+    let paymentType = hasLast4 ? ocrPay.replace(/\s*\*\d{3,4}\b/g, "").trim() : "";
+    // Reuse an EXISTING payment method instead of creating a duplicate: if OCR
+    // found a card type + last-4, scan the account's saved payment methods for one
+    // whose brand AND last-4 both match, and adopt its issuer name (e.g. a card the
+    // user named "Web 1 Bank *7836"). Without this the draft saves with an empty
+    // issuer + bare brand, and Save Changes then spins up a brand-new
+    // "MasterCard *7836" method alongside the user's existing one.
+    let cardIssuerName = "";
+    if (hasLast4) {
+      const normBrand = (b) => {
+        const x = (b || "").toString().trim().toLowerCase();
+        return x && x !== "other" ? x : "";
+      };
+      const ocrBrand = normBrand(inferCardTypeFromPayment(paymentType) || paymentType);
+      const matchedPm = (apiPaymentMethods || []).find((m) => {
+        if (getLast4FromPaymentApiRecord(m) !== last4) return false;
+        const pmBrand = normBrand(getBrandFromPaymentApiRecord(m));
+        // Require the card TYPE to match too (per spec). If either side's brand is
+        // unknown, fall back to a last-4 match rather than miss the existing card.
+        return !ocrBrand || !pmBrand || pmBrand === ocrBrand;
+      });
+      if (matchedPm) {
+        cardIssuerName = (matchedPm.card_issuer_name || "").toString().trim();
+        const pmBrand = (getBrandFromPaymentApiRecord(matchedPm) || "").trim();
+        if (pmBrand) paymentType = pmBrand; // canonical brand from the saved method
+      }
+    }
     // Merchant logo: OCR-detected, else the account's canonical merchant logo.
     let storeImage = (parsed?.merchantLogo || "").toString().trim();
     if (!storeImage) {
@@ -2729,7 +2756,7 @@ setMerchantsWithImages(
       status: 0,
       paymentType,
       last_4_digit_card: last4,
-      card_issuer_name: "",
+      card_issuer_name: cardIssuerName,
       fk_original_receipt_id: "0",
       fk_forward_from_receipt_id: "0",
       receipt_category: 0,
@@ -2796,7 +2823,7 @@ setMerchantsWithImages(
     }
     return { created, failed };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [merchantsWithImages, repairReceiptMediaOnServer, silentRefreshData]);
+  }, [merchantsWithImages, apiPaymentMethods, repairReceiptMediaOnServer, silentRefreshData]);
 
   // Update receipt function - calls backend API to persist changes
   // API expects id field in the body for update

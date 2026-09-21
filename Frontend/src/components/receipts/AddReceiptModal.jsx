@@ -35,6 +35,7 @@ import {
   cardTypeIntToBrand,
   getApiPaymentMethodDisplayName,
   getApiPaymentMethodSignature,
+  getBrandFromPaymentApiRecord,
   getClearPaymentMethodUpdates,
   getLast4FromPaymentApiRecord,
   getPaymentMethodListLabel,
@@ -2210,6 +2211,33 @@ const handleFieldChange = (field, value) => {
       );
       const cleanPaymentType = ocrHasLast4 ? ocrPaymentMethod : "";
 
+      // Reuse an EXISTING saved payment method instead of creating a duplicate: if
+      // OCR read a card type + last-4, look for a saved method whose brand AND
+      // last-4 both match, and adopt its issuer name (e.g. a card the user named
+      // "Web 1 Bank *7836"). Pre-filling card_issuer_name here makes the save path
+      // treat it as the existing custom card, so no new "MasterCard *7836" method
+      // is created alongside the user's own.
+      const normBrand = (b) => {
+        const x = (b || "").toString().trim().toLowerCase();
+        return x && x !== "other" ? x : "";
+      };
+      let ocrCardIssuerName = "";
+      if (ocrHasLast4) {
+        const ocrL4 = ocrLast4Match[1];
+        const ocrBrand = normBrand(
+          inferCardTypeFromPayment(ocrPaymentMethod.replace(/\s*\*\d{3,4}\b/g, "").trim())
+        );
+        const payCardMap = readPayCardTypeMap();
+        const matchedPm = (apiPaymentMethods || []).find((m) => {
+          if (getLast4FromPaymentApiRecord(m) !== ocrL4) return false;
+          const pmBrand = normBrand(getBrandFromPaymentApiRecord(m, payCardMap));
+          return !ocrBrand || !pmBrand || pmBrand === ocrBrand;
+        });
+        if (matchedPm) {
+          ocrCardIssuerName = (matchedPm.card_issuer_name || "").toString().trim();
+        }
+      }
+
       const cleanNumericValue = (value) => {
         if (!value) return "";
         const num = parseFloat(value);
@@ -2317,7 +2345,7 @@ const handleFieldChange = (field, value) => {
         expense_type: autoCategory,
         ...(ocrReceiptCategory ? { receipt_category: ocrReceiptCategory } : {}),
         paymentType: cleanPaymentType,
-        card_issuer_name: "",
+        card_issuer_name: ocrCardIssuerName,
         // Populate the dedicated last4 field from the OCR-detected card so the
         // payment dropdown's selected label and the Edit Payment Method modal show
         // the 4 digits ("MasterCard *7836") instead of a bare brand ("MasterCard").
