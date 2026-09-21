@@ -2219,8 +2219,21 @@ const isBlockedTaxRateInput = (val) => {
       const directApiId = item.isApiItem ? getApiMerchantId({ id: item.apiId }) : null;
       const { apiId: resolvedApiId } = await resolveMerchantApiIdForName(item.name);
       const apiId = directApiId ?? resolvedApiId;
-      if (apiId !== null) {
-        const deleteMerchantResult = await deleteApiMerchant(apiId);
+      // Delete EVERY backend store record for this name so duplicate records
+      // (same name, different ids) are all removed, not just the shown one.
+      const merchantIdsToDelete = Array.from(
+        new Set(
+          [
+            apiId,
+            ...(item.duplicateIds || []),
+            ...(apiMerchants || [])
+              .filter((m) => normalizeMerchantKey(m.store_name) === normalizeMerchantKey(item.name))
+              .map((m) => m?.id ?? m?.store_id ?? m?.fk_store_id ?? null),
+          ].filter((v) => v !== null && v !== undefined)
+        )
+      );
+      for (const delId of merchantIdsToDelete) {
+        const deleteMerchantResult = await deleteApiMerchant(delId);
         if (!deleteMerchantResult?.ok) throw new Error(deleteMerchantResult?.error || "Failed to delete merchant");
       }
       deleteCustomMerchant(item.name);
@@ -2400,11 +2413,6 @@ const isBlockedTaxRateInput = (val) => {
 
   const applyCategoryDelete = async (item) => {
     // Resolve the API record by apiId (preferred) or by name match
-    const apiCategoryMatch = item.apiId
-      ? (apiExpenseCategories || []).find(c => String(c.id) === String(item.apiId))
-      : (apiExpenseCategories || []).find(c => normalizeMatchKey(c.expense_category_name) === normalizeMatchKey(item.name));
-    const apiId = apiCategoryMatch?.id ?? null;
-
     // Clear the category from every receipt that references it
     const matching = getReceiptsByCategory(item.name || "");
     if (matching.length > 0) {
@@ -2418,9 +2426,23 @@ const isBlockedTaxRateInput = (val) => {
       deleteCustomCategory(item.key);
     }
 
-    // Delete from the API when we have a confirmed API id
-    if (apiId) {
-      const deleteCategoryResult = await deleteApiExpenseCategory(String(apiId));
+    // Delete EVERY backend record for this name so duplicate category records
+    // (same name, different ids) are all removed, not just the shown one.
+    const categoryIdsToDelete = Array.from(
+      new Set(
+        [
+          item.apiId,
+          ...(item.duplicateIds || []),
+          ...(apiExpenseCategories || [])
+            .filter((c) => normalizeMatchKey(getExpenseCategoryRecordName(c)) === normalizeMatchKey(item.name))
+            .map((c) => getExpenseCategoryRecordId(c)),
+        ]
+          .filter((v) => v !== null && v !== undefined)
+          .map(String)
+      )
+    );
+    for (const delId of categoryIdsToDelete) {
+      const deleteCategoryResult = await deleteApiExpenseCategory(delId);
       if (!deleteCategoryResult?.ok) throw new Error(deleteCategoryResult?.error || "Failed to delete expense category");
     }
 
@@ -2774,18 +2796,34 @@ const isBlockedTaxRateInput = (val) => {
       // Manage Merchants lists exactly GET /userstore/getStorev1.
       // Deleted starter stores (Home Depot, etc.) stay gone because they are
       // not re-injected from a hardcoded default list or leftover receipts.
-      const apiItems = (apiMerchants || [])
+      // Collapse duplicate backend store records (same store_name, different ids —
+      // e.g. a forward/sync race that created "Canadian Tire" twice) so the list
+      // shows each merchant once, matching the Filter list and the payments dedup.
+      // Every id for a name is kept in duplicateIds so one delete removes all copies.
+      const apiItems = [];
+      const apiMerchantByName = new Map();
+      (apiMerchants || [])
         .filter((m) => m.store_name)
-        .map((m) => {
+        .forEach((m) => {
           const apiId = m?.id ?? m?.store_id ?? m?.fk_store_id ?? null;
-          return {
-            key: `api_${apiId ?? m.store_name}`,
-            name: m.store_name,
-            logo: merchLogos[m.store_name] || m.store_image_url || null,
+          const name = m.store_name;
+          const k = normalizeMerchantKey(name);
+          const existing = apiMerchantByName.get(k);
+          if (existing) {
+            if (apiId != null) existing.duplicateIds.push(apiId);
+            return;
+          }
+          const item = {
+            key: `api_${apiId ?? name}`,
+            name,
+            logo: merchLogos[name] || m.store_image_url || null,
             isReceiptItem: false,
             apiId,
             isApiItem: true,
+            duplicateIds: apiId != null ? [apiId] : [],
           };
+          apiMerchantByName.set(k, item);
+          apiItems.push(item);
         });
       const apiNameKeys = new Set(apiItems.map((m) => normalizeMerchantKey(m.name)));
       const rItems = receiptMerchWImgRaw
@@ -2824,21 +2862,34 @@ const isBlockedTaxRateInput = (val) => {
     }
     if (type === "categories") {
       // API expense categories are the source of truth (GET /userexpensecategory/getExpenseCategoryv1)
-      const apiItems = (apiExpenseCategories || [])
-        .map((c) => {
-          const categoryName = getExpenseCategoryRecordName(c);
-          if (!categoryName || isCategoryHidden(categoryName)) return null;
-          const apiId = getExpenseCategoryRecordId(c);
-          return {
-            key: apiId != null ? `api_${apiId}` : `api_name_${categoryName.toLowerCase()}`,
-            name: categoryName,
-            logo: null,
-            isReceiptItem: false,
-            isApiItem: true,
-            apiId,
-          };
-        })
-        .filter(Boolean);
+      // Collapse duplicate backend category records (same name, different ids —
+      // e.g. a sync race that created "2 iPhone" twice) so each category shows
+      // once, matching the Filter list. duplicateIds holds every id so one delete
+      // removes all copies from the backend.
+      const apiItems = [];
+      const apiCategoryByName = new Map();
+      (apiExpenseCategories || []).forEach((c) => {
+        const categoryName = getExpenseCategoryRecordName(c);
+        if (!categoryName || isCategoryHidden(categoryName)) return;
+        const apiId = getExpenseCategoryRecordId(c);
+        const k = categoryName.toLowerCase();
+        const existing = apiCategoryByName.get(k);
+        if (existing) {
+          if (apiId != null) existing.duplicateIds.push(apiId);
+          return;
+        }
+        const item = {
+          key: apiId != null ? `api_${apiId}` : `api_name_${k}`,
+          name: categoryName,
+          logo: null,
+          isReceiptItem: false,
+          isApiItem: true,
+          apiId,
+          duplicateIds: apiId != null ? [apiId] : [],
+        };
+        apiCategoryByName.set(k, item);
+        apiItems.push(item);
+      });
       const apiNameKeys = new Set(apiItems.map((item) => (item.name || "").toLowerCase()));
       const rItems = receiptCategoriesRaw
         .filter(
