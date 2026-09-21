@@ -3461,6 +3461,12 @@ useEffect(() => {
       // post-create patch below (addReceiptv1 does not persist expense_type — see the
       // updateReceiptv1 patch loop after this).
       const newSplitPatches = [];
+      // Sum each split's ACTUAL total (the same value the child receipt is created
+      // with below). Counting only sp.purchasePrice here undercounts any split whose
+      // Total field is blank — its child is still created from subtotal+tax, so the
+      // remainder came out equal to the full amount and the original receipt kept its
+      // full total while the splits were added ("split total doesn't change").
+      let splitsEffectiveTotal = 0;
       for (const split of splits) {
         const splitSubtotal = parseFloat(split.subtotal) || 0;
         const splitTip      = parseFloat(split.tip) || 0;
@@ -3483,6 +3489,7 @@ useEffect(() => {
         if (splitTipLine) taxValues.push(splitTipLine);
         const splitTotal = parseFloat(split.purchasePrice) ||
           parseFloat((splitSubtotal + taxValues.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0)).toFixed(2));
+        splitsEffectiveTotal += splitTotal;
         const splitExpenseType =
           split.expense_type || editedReceipt.expense_type || selectedReceipt?.expense_type || "";
         const splitCategory = parseInt(split.receipt_category) || 0;
@@ -3560,11 +3567,14 @@ useEffect(() => {
         );
       }
 
-      // Calculate remainder and update the existing receipt
-      const splitsTotal = parseFloat(splits.reduce((s, sp) => s + (parseFloat(sp.purchasePrice) || 0), 0).toFixed(2));
-      const remainder   = parseFloat((mainTotal - splitsTotal).toFixed(2));
+      // Calculate remainder and update the existing receipt. Use the splits' ACTUAL
+      // totals (splitsEffectiveTotal) so the original shrinks by exactly what the
+      // splits took, and ALWAYS write the remainder (clamped ≥ 0) — never skip the
+      // update, or the original would keep its full pre-split total.
+      const splitsTotal = parseFloat(splitsEffectiveTotal.toFixed(2));
+      const remainder   = Math.max(0, parseFloat((mainTotal - splitsTotal).toFixed(2)));
 
-      if (remainder >= 0) {
+      {
         // Leftover tip = main tip minus the tip already allocated across splits.
         const splitsTipTotal = parseFloat(
           splits.reduce((s, sp) => s + (parseFloat(sp.tip) || 0), 0).toFixed(2)
