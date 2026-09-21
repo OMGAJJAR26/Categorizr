@@ -341,12 +341,41 @@ export function dedupeReceiptMediaAcrossReceipts(receipts) {
     });
   });
 
+    // Split family key: a split receipt stores the ORIGINAL receipt's id in
+    // fk_original_receipt_id, so the original (keyed by its own id) and all of its
+    // splits share one key. Network-forwarded receipts also use fk_original_receipt_id
+    // (for the sender's source id), so they are excluded — keyed by their own id.
+  const splitGroupKey = (r) => {
+    const fwd = r?.fk_forward_from_receipt_id;
+    const isForwarded = fwd != null && String(fwd) !== "0" && String(fwd) !== "";
+    const orig = r?.fk_original_receipt_id;
+    const hasOrig =
+      !isForwarded && orig != null && String(orig) !== "0" && String(orig) !== "";
+    return hasOrig ? String(orig) : String(r?.id ?? "");
+  };
+
   return receipts.map((receipt, index) => {
     const receiptCreateDate = parseInt(receipt?.create_date, 10) || 0;
     const owned = collectReceiptMediaUrls(receipt).filter((url) => {
       const owner = urlOwner.get(url);
       if (!owner) return false;
       if (owner.index === index) return true;
+      // Splits intentionally share the original's image: the original and its splits
+      // (linked by fk_original_receipt_id) are one split family, so they ALL keep the
+      // URL — the photo shows on the original AND every split, not just the newest.
+      // Keep it whenever ANOTHER receipt in this receipt's own split family also
+      // carries the URL (contamination on an unrelated receipt has no such family
+      // sibling, so it still gets stripped). Durable signal; the 60-second window
+      // below is a fallback for older splits created before family-linking.
+      const myGroup = splitGroupKey(receipt);
+      const holders = urlAllIndices.get(url) || [];
+      if (
+        holders.some(
+          (h) => h.index !== index && splitGroupKey(receipts[h.index]) === myGroup
+        )
+      ) {
+        return true;
+      }
       // Receipts created within 60 seconds of each other are likely intentional splits
       // sharing the same image — allow them to all keep the URL.
       if (receiptCreateDate > 0 && owner.createDate > 0 &&
