@@ -1667,16 +1667,16 @@ useEffect(() => {
       // When total changes, recalculate subtotal and tax amounts from rates
       if (field === "purchasePrice") {
         const total = parseFloat(value) || 0;
-        // Use the currently-displayed tax lines as the base. When the user hasn't
-        // touched taxes yet, editedReceipt.receipt_tax_values is undefined, so fall
-        // back to the enriched lines — otherwise clearing the total would leave the
-        // displayed (stale) amounts untouched.
-        const baseTaxes =
-          newData.receipt_tax_values && newData.receipt_tax_values.length
-            ? newData.receipt_tax_values
-            : enrichedReceiptTaxValues.filter(
-                (t) => !(t.tax_name || "").toLowerCase().includes("tip"),
-              );
+        // Use the currently-displayed tax lines as the base. Only fall back to the
+        // enriched lines when taxes are UNTOUCHED (receipt_tax_values is undefined) —
+        // an explicitly emptied array ([]) means the user removed every tax, so it must
+        // stay empty. Treating [] like "untouched" made changing the total (e.g. the +/−
+        // sign toggle) resurrect the removed taxes.
+        const baseTaxes = Array.isArray(newData.receipt_tax_values)
+          ? newData.receipt_tax_values
+          : enrichedReceiptTaxValues.filter(
+              (t) => !(t.tax_name || "").toLowerCase().includes("tip"),
+            );
         // The tip is preserved (treated like the tax lines); when it exceeds the total
         // the subtotal/taxes recompute negative (red) instead of being zeroed/capped.
         const tipAmount = parseFloat(newData.tip) || 0;
