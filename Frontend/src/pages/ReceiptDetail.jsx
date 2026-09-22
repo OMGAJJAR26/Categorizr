@@ -3458,13 +3458,17 @@ useEffect(() => {
       const storeName  = editedReceipt.storeName || selectedReceipt?.storeName || "";
       const storeImage = editedReceipt.store_image || selectedReceipt?.store_image || "";
       const paymentType = editedReceipt.paymentType || selectedReceipt?.paymentType || "";
-      const last4 =
-        (editedReceipt?.last_4_digit_card ?? editedReceipt?.last4DigitCard ?? "")
-          .toString()
-          .trim() ||
-        (selectedReceipt?.last_4_digit_card ?? selectedReceipt?.last4DigitCard ?? "")
-          .toString()
-          .trim();
+      // ?? (not ||) so an explicitly cleared last-4 stays cleared on the split children
+      // instead of falling back to the original receipt's old number.
+      const last4 = (
+        editedReceipt?.last_4_digit_card ??
+        editedReceipt?.last4DigitCard ??
+        selectedReceipt?.last_4_digit_card ??
+        selectedReceipt?.last4DigitCard ??
+        ""
+      )
+        .toString()
+        .trim();
       const cardIssuerName =
         (editedReceipt?.card_issuer_name ?? editedReceipt?.cardIssuerName ?? "")
           .toString()
@@ -3742,14 +3746,19 @@ useEffect(() => {
           selectedReceipt.store_image ||
           "";
 
-      // Determine card_issuer_name and last4 from payment type
-      let last4 =
-        (editedReceipt.last_4_digit_card ?? editedReceipt.last4DigitCard ?? "")
-          .toString()
-          .trim() ||
-        (selectedReceipt.last_4_digit_card ?? selectedReceipt.last4DigitCard ?? "")
-          .toString()
-          .trim();
+      // Determine card_issuer_name and last4 from payment type.
+      // Use ?? (not ||) so an explicitly cleared last-4 on the edited receipt (user picked a
+      // no-number card like plain "American Express") is respected — an empty string must NOT
+      // fall back to the original receipt's old number and resurrect it on save.
+      let last4 = (
+        editedReceipt.last_4_digit_card ??
+        editedReceipt.last4DigitCard ??
+        selectedReceipt.last_4_digit_card ??
+        selectedReceipt.last4DigitCard ??
+        ""
+      )
+        .toString()
+        .trim();
       const paymentType = editedReceipt.paymentType || "";
 
       // Extract last4 from paymentType if present (e.g. "Diners Club *9999" → "9999")
@@ -4085,14 +4094,18 @@ useEffect(() => {
         selectedReceipt.store_image ||
         "";
 
-    // Determine card_issuer_name and last4 from payment type
-    let last4 =
-      (editedReceipt.last_4_digit_card ?? editedReceipt.last4DigitCard ?? "")
-        .toString()
-        .trim() ||
-      (selectedReceipt.last_4_digit_card ?? selectedReceipt.last4DigitCard ?? "")
-        .toString()
-        .trim();
+    // Determine card_issuer_name and last4 from payment type.
+    // Use ?? (not ||) so an explicitly cleared last-4 (user picked a no-number card) is kept
+    // instead of falling back to the original receipt's old number and resurrecting it.
+    let last4 = (
+      editedReceipt.last_4_digit_card ??
+      editedReceipt.last4DigitCard ??
+      selectedReceipt.last_4_digit_card ??
+      selectedReceipt.last4DigitCard ??
+      ""
+    )
+      .toString()
+      .trim();
     const paymentType = editedReceipt.paymentType || "";
 
     // Extract last4 from paymentType if present
