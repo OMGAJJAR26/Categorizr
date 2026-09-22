@@ -13,6 +13,13 @@ import { collectReceiptMediaUrls } from "./mediaUrlUtils";
  *     them with next/prev when a receipt has more than one image.
  * The onclick calls the viewer when present (interactive preview) and otherwise just
  * follows the href (PDF / plain new tab).
+ *
+ * The anchor is rendered as a full-width, padded block. html2pdf/jsPDF places each
+ * PDF link annotation over the anchor's own bounding box, sized to that box — a short
+ * inline "View" produced a ~18pt-wide hotspot that, combined with html2pdf's slight
+ * link-vs-image offset, fell off the visible text and read as "not clickable", while a
+ * wider "View (N)" still overlapped. Filling the cell gives every link the same wide,
+ * reliable hotspot regardless of label length.
  */
 const buildReceiptImageCell = (receipt, fontSize = "11px") => {
   const urls = collectReceiptMediaUrls(receipt);
@@ -24,7 +31,7 @@ const buildReceiptImageCell = (receipt, fontSize = "11px") => {
     `<a href="${firstUrl}" target="_blank" rel="noopener noreferrer" ` +
     `data-images="${dataImages}" ` +
     `onclick="return window.__openReceiptImages ? window.__openReceiptImages(event, this) : true" ` +
-    `style="color: #1a73e8; text-decoration: none; font-weight: 500; cursor: pointer; font-size: ${fontSize};">${label}</a>`
+    `style="display: block; text-align: center; padding: 3px 8px; color: #1a73e8; text-decoration: none; font-weight: 500; cursor: pointer; font-size: ${fontSize};">${label}</a>`
   );
 };
 
