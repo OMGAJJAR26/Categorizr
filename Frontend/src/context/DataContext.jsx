@@ -3082,6 +3082,19 @@ setMerchantsWithImages(
         })(),
       };
 
+      // Explicit tax clear → honour it in BOTH payload branches. The payment-cleared
+      // branch above uses buildReceiptUpdatePayloadFromRow, which restores the freshest
+      // taxes on an empty array — that silently re-added the taxes the user had just
+      // removed (they reappeared on reopen). When the caller included receipt_tax_values
+      // in the update (even an empty array = "removed all taxes"), send it verbatim so
+      // the backend actually clears them. Applied here so it covers the clear-payment
+      // branch too (a receipt with no payment method takes that path).
+      if (Object.prototype.hasOwnProperty.call(apiUpdates, "receipt_tax_values")) {
+        updatePayload.receipt_tax_values = Array.isArray(apiUpdates.receipt_tax_values)
+          ? apiUpdates.receipt_tax_values
+          : [];
+      }
+
       // Explicit date clear → "No Date". The user cleared the date when product_date is
       // present in the update but empty/0. The backend treats 0/""/null as "no change"
       // (keeps the old date), so we persist a tiny sentinel (< 1,000,000) instead; both
