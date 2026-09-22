@@ -25,6 +25,7 @@ import {
   sanitizeUploadFile,
   dedupeEmailAttachmentPdfUrls,
   convertHeicToJpegIfNeeded,
+  recordSplitMediaFamily,
 } from "../utils/mediaUrlUtils";
 import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationDialog";
 import ForwardReceiptModal from "../components/receipts/ForwardReceiptModal";
@@ -1408,6 +1409,9 @@ useEffect(() => {
   );
 
   const goToPrevious = () => {
+    // Block receipt navigation while the Split screen is open — swiping/paging to a
+    // neighbouring receipt mid-split leaked the split amounts onto that receipt.
+    if (showSplitScreen) return;
     if (currentIndex <= 0) return;
     const prevIndex = currentIndex - 1;
     const prevReceipt = sortedReceipts[prevIndex];
@@ -1424,6 +1428,7 @@ useEffect(() => {
   };
 
   const goToNext = () => {
+    if (showSplitScreen) return; // see goToPrevious — no navigation mid-split
     if (currentIndex < 0 || currentIndex >= sortedReceipts.length - 1) return;
     const nextIndex = currentIndex + 1;
     const nextReceipt = sortedReceipts[nextIndex];
@@ -3484,13 +3489,21 @@ useEffect(() => {
       }
       const receiptTag = ["0","0","0","0","0","0","0"].join(",");
 
-      // Split receipts do NOT inherit the original's image, and are NOT linked to the
-      // original via fk_original_receipt_id. That field carries forwarding semantics
-      // (the source receipt id of a network-forwarded receipt), so reusing it to group
-      // splits corrupted forwarding — a forwarded split carried the original's id and
-      // the recipient received duplicates / the wrong "forwarded" grouping. Leaving the
-      // splits image-less keeps the photo uniquely on the ORIGINAL (which keeps it, with
-      // no cross-receipt dedupe conflict) and keeps every split an independent receipt.
+      // Split children SHOW the original's image(s) too, but they are NOT linked via
+      // fk_original_receipt_id — that field carries forwarding semantics, and reusing it to
+      // group splits corrupted forwarding (a forwarded split carried the original's id and
+      // the recipient got duplicates / wrong "forwarded" grouping). Instead each child gets
+      // its OWN copy of the media URLs (applied in the patch loop below, since concurrent
+      // addReceiptv1 calls de-dup the same URL), and the original + children are recorded as
+      // a "split media family" so the cross-receipt media dedup keeps the shared image on
+      // ALL of them. fk_original_receipt_id stays "0", so forwarding is unaffected.
+      const mainMediaUrls = collectReceiptMediaUrls({
+        ...selectedReceipt,
+        ...editedReceipt,
+      });
+      const sharedMediaField = mainMediaUrls.length
+        ? buildCombinedMediaField(mainMediaUrls)
+        : "0";
 
       // Create a new receipt for each split; capture IDs + expense/category for the
       // post-create patch below (addReceiptv1 does not persist expense_type — see the
@@ -3584,6 +3597,11 @@ useEffect(() => {
               payment_category_type: sp.receipt_category,
               product_name: sp.product_name,
               notes: sp.notes,
+              // Give each split child its own copy of the original's image(s). Applied via
+              // updateReceiptv1 (not addReceiptv1, which de-dups concurrent same-URL creates).
+              ...(sharedMediaField !== "0"
+                ? { emailAttachment: sharedMediaField, receipt_image: "0" }
+                : {}),
               // Re-link the taxes to the newly created split receipt id.
               receipt_tax_values: (sp.tax_values || []).map((t) => ({
                 ...t,
@@ -3597,6 +3615,16 @@ useEffect(() => {
             }).catch(() => {});
           })
         );
+      }
+
+      // Record the original + its split children as a media family so the cross-receipt
+      // dedup keeps the shared image on ALL of them (see recordSplitMediaFamily). Only when
+      // there is actually a shared image to protect.
+      if (sharedMediaField !== "0" && newSplitPatches.length > 0) {
+        recordSplitMediaFamily([
+          selectedReceipt.id,
+          ...newSplitPatches.map((sp) => sp.id),
+        ]);
       }
 
       // Calculate remainder and update the existing receipt. Use the splits' ACTUAL
@@ -5506,7 +5534,7 @@ Thank you for using our receipt management system.
             className="relative inline-block w-full max-w-4xl"
           >
             {/* Navigation Buttons - Desktop/Tablet (side positioned) */}
-            {currentIndex > 0 && (
+            {currentIndex > 0 && !showSplitScreen && (
               <motion.button
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.9 }}
@@ -5520,7 +5548,7 @@ Thank you for using our receipt management system.
               </motion.button>
             )}
 
-            {currentIndex < sortedReceipts.length - 1 && (
+            {currentIndex < sortedReceipts.length - 1 && !showSplitScreen && (
               <motion.button
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.9 }}
@@ -5540,7 +5568,7 @@ Thank you for using our receipt management system.
                 landed on the ► arrow and navigated to the next receipt instead,
                 discarding the edit ("total reverts immediately"). Mirroring the
                 desktop side placement keeps them clear of the Save button. */}
-            {currentIndex > 0 && (
+            {currentIndex > 0 && !showSplitScreen && (
               <motion.button
                 whileTap={{ scale: 0.9 }}
                 onClick={goToPrevious}
@@ -5550,7 +5578,7 @@ Thank you for using our receipt management system.
                 <ChevronLeft size={22} className="text-blue-600" />
               </motion.button>
             )}
-            {currentIndex < sortedReceipts.length - 1 && (
+            {currentIndex < sortedReceipts.length - 1 && !showSplitScreen && (
               <motion.button
                 whileTap={{ scale: 0.9 }}
                 onClick={goToNext}
