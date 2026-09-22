@@ -3452,13 +3452,13 @@ useEffect(() => {
       }
       const receiptTag = ["0","0","0","0","0","0","0"].join(",");
 
-      // Split receipts inherit the original's full image set so the receipt photo(s)
-      // show on the original AND every split. Each split is linked to the original via
-      // fk_original_receipt_id (below), and the cross-receipt media dedupe keeps a
-      // shared image across that split family — without the link, the dedupe's
-      // "newest wins" rule stripped the image from the (older) original.
-      const splitMediaUrls = collectReceiptMediaUrlsForSave();
-      const splitCombinedImages = buildCombinedMediaField(splitMediaUrls);
+      // Split receipts do NOT inherit the original's image, and are NOT linked to the
+      // original via fk_original_receipt_id. That field carries forwarding semantics
+      // (the source receipt id of a network-forwarded receipt), so reusing it to group
+      // splits corrupted forwarding — a forwarded split carried the original's id and
+      // the recipient received duplicates / the wrong "forwarded" grouping. Leaving the
+      // splits image-less keeps the photo uniquely on the ORIGINAL (which keeps it, with
+      // no cross-receipt dedupe conflict) and keeps every split an independent receipt.
 
       // Create a new receipt for each split; capture IDs + expense/category for the
       // post-create patch below (addReceiptv1 does not persist expense_type — see the
@@ -3502,7 +3502,7 @@ useEffect(() => {
           id: 0,
           storeName,
           product_name: splitProductName,
-          emailAttachment: splitCombinedImages || "0",
+          emailAttachment: "0", // no inherited image — keeps the photo on the original
           purchasePrice: splitTotal.toString(),
           total_amount: splitTotal.toString(),
           payment_category_type: splitCategory,
@@ -3510,11 +3510,7 @@ useEffect(() => {
           paymentType,
           last_4_digit_card: last4,
           card_issuer_name: cardIssuerName,
-          // Link to the original so the media dedupe treats them as one split family
-          // (keeps the shared image on the original AND the splits). This is a local
-          // split link only — fk_forward_from_receipt_id stays "0", so forwarded-receipt
-          // sync never treats a split as a network-received receipt.
-          fk_original_receipt_id: String(selectedReceipt?.id ?? "0"),
+          fk_original_receipt_id: "0", // independent receipt — never linked (see note above)
           fk_forward_from_receipt_id: "0",
           receipt_category: splitCategory,
           product_date: productDate,
@@ -3556,18 +3552,12 @@ useEffect(() => {
               payment_category_type: sp.receipt_category,
               product_name: sp.product_name,
               notes: sp.notes,
-              // Preserve the split→original link through the full-row update so the
-              // media dedupe keeps recognising the split family after a refresh.
-              fk_original_receipt_id: String(selectedReceipt?.id ?? "0"),
               // Re-link the taxes to the newly created split receipt id.
               receipt_tax_values: (sp.tax_values || []).map((t) => ({
                 ...t,
                 fk_receipt_id: parseInt(sp.id) || 0,
               })),
             };
-            if (splitCombinedImages && splitCombinedImages !== "0") {
-              patch.emailAttachment = splitCombinedImages;
-            }
             return fetch("/api/receipt/updateReceiptv1", {
               method: "POST",
               headers: { "Content-Type": "application/json", Accesstoken: token },
