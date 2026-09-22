@@ -3689,6 +3689,12 @@ useEffect(() => {
           tip: remTip > 0 ? remTip.toFixed(2) : "",
           receipt_tax_values: remTaxValues,
           receipt_tag: receiptTagStr,
+          // Explicitly keep the original's own image(s) on the remainder — the spread of
+          // editedReceipt can carry an empty emailAttachment and blank it out otherwise. The
+          // recorded split-media family lets the dedup keep it shared with the children.
+          ...(sharedMediaField !== "0"
+            ? { emailAttachment: sharedMediaField, receipt_image: "0" }
+            : {}),
         });
       }
 
