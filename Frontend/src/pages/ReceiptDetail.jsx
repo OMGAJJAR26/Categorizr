@@ -873,8 +873,12 @@ useEffect(() => {
           rate > 0
             ? parseFloat(((allAutoSubtotal * rate) / 100).toFixed(2))
             : 0;
+        // _autoFlagged marks this as INFERRED-manual from a load-time amount/rate mismatch
+        // (e.g. a stale amount saved at a low total), NOT a deliberate user edit. When the
+        // user later changes the total, an auto tax like this must recompute from its rate,
+        // so handleFieldChange clears the flag for total edits (see baseTaxes remap there).
         return Math.abs(stored - autoAmount) > 0.005
-          ? { ...t, _isManual: true }
+          ? { ...t, _isManual: true, _autoFlagged: true }
           : t;
       });
 
@@ -1698,11 +1702,22 @@ useEffect(() => {
         // an explicitly emptied array ([]) means the user removed every tax, so it must
         // stay empty. Treating [] like "untouched" made changing the total (e.g. the +/−
         // sign toggle) resurrect the removed taxes.
-        const baseTaxes = Array.isArray(newData.receipt_tax_values)
+        const baseTaxesRaw = Array.isArray(newData.receipt_tax_values)
           ? newData.receipt_tax_values
           : enrichedReceiptTaxValues.filter(
               (t) => !(t.tax_name || "").toLowerCase().includes("tip"),
             );
+        // A tax that was only INFERRED-manual on load (_autoFlagged) — e.g. a stale amount
+        // saved at a $0/low total — must recompute from its rate when the user changes the
+        // total. Clear that flag here (but keep taxes the user actually edited this session,
+        // _userEdited, and rate-less lines, which can't be recomputed) so GST/HST recalculates.
+        const baseTaxes = baseTaxesRaw.map((t) =>
+          t._autoFlagged &&
+          !t._userEdited &&
+          resolveTaxRateForReceipt(t) > 0
+            ? { ...t, _isManual: false, _autoFlagged: false }
+            : t,
+        );
         // The tip is preserved (treated like the tax lines); when it exceeds the total
         // the subtotal/taxes recompute negative (red) instead of being zeroed/capped.
         const tipAmount = parseFloat(newData.tip) || 0;
@@ -2129,7 +2144,7 @@ useEffect(() => {
       // Only the edited line changes (marked manual); every other line stays as-is.
       const updatedTaxValues = currentTaxValues.map((t, i) =>
         i === index
-          ? { ...t, tax_amount: numeric === "" ? 0 : parseFloat(numeric), _isManual: true }
+          ? { ...t, tax_amount: numeric === "" ? 0 : parseFloat(numeric), _isManual: true, _userEdited: true, _autoFlagged: false }
           : t
       );
       // Respect an explicit $0/cleared total (?? not ||) so it isn't replaced by the original.
