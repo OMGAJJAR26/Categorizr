@@ -1555,8 +1555,50 @@ export const DataProvider = ({ children }) => {
 
       // Remove cross-receipt media contamination from uploadmediaV1 / stale API data.
       lastRawReceiptsRef.current = formattedReceipts;
-      const formattedReceiptsDeduped =
+      const formattedReceiptsMediaDeduped =
         dedupeReceiptMediaAcrossReceipts(formattedReceipts);
+
+      // Collapse duplicate RECEIVED (forwarded-in) receipts. When the same source
+      // receipt is forwarded to this user more than once — a double-forward, a
+      // mixed mobile/web re-send, or a backend re-insert — the recipient's list
+      // shows the same receipt several times. Keep exactly one copy per
+      // (sender, source-receipt, store, total) group: prefer the one the user has
+      // already opened (is_verify=1), then the newest. Only received receipts with
+      // a real sender+source are grouped, so a user's own receipts are never merged.
+      const formattedReceiptsDeduped = (() => {
+        const receivedKey = (r) => {
+          const fwdFrom = String(r.fk_forward_from_receipt_id ?? "0").trim();
+          const origId = String(r.fk_original_receipt_id ?? "0").trim();
+          if (!fwdFrom || fwdFrom === "0" || !origId || origId === "0") return null;
+          return [
+            fwdFrom,
+            origId,
+            (r.storeName || "").trim().toLowerCase(),
+            parseFloat(r.purchasePrice ?? 0) || 0,
+          ].join("|");
+        };
+        const isBetter = (a, b) => {
+          const av = String(a.is_verify ?? "0") === "1" ? 1 : 0;
+          const bv = String(b.is_verify ?? "0") === "1" ? 1 : 0;
+          if (av !== bv) return av > bv;
+          return (Number(a.createDate) || 0) >= (Number(b.createDate) || 0);
+        };
+        // First pass: pick the winning receipt id for each duplicate group.
+        const winners = new Map();
+        for (const r of formattedReceiptsMediaDeduped) {
+          const key = receivedKey(r);
+          if (!key) continue;
+          const prev = winners.get(key);
+          if (!prev || isBetter(r, prev)) winners.set(key, r);
+        }
+        // Second pass: keep every non-received receipt, plus only the winner of
+        // each received group — preserving the original list order.
+        return formattedReceiptsMediaDeduped.filter((r) => {
+          const key = receivedKey(r);
+          if (!key) return true;
+          return winners.get(key) === r;
+        });
+      })();
 
       // Merge in locally tracked QuickBooks-linked state, so users can see which
       // receipts have already been sent to QuickBooks even after a reload.
