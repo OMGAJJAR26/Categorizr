@@ -277,6 +277,19 @@ export function preserveStoredReceiptTaxTotals(receiptTotal, taxValues, tip) {
   if (taxes.length === 0) return null;
   if (!taxes.every(hasStoredTaxAmount)) return null;
 
+  // An auto (non-manual) tax that has a real rate must RECOMPUTE from that rate when the
+  // total changes — preserving its stale stored amount is exactly the "GST/HST doesn't
+  // recalculate after I edit the total" bug (a tax saved at a $0 total keeps its tiny old
+  // amount). Bail out so the caller's rate-based recompute runs instead (it keeps manual
+  // lines and recomputes auto lines). Only fully manual / rate-less sets are preserved here
+  // (e.g. forwarded lines with no usable rate, which the recompute would otherwise wipe).
+  const anyAutoWithRate = taxes.some((t) => {
+    if (t._isManual) return false;
+    const rate = parseFloat(formatTaxRate(t.tax_rate));
+    return !isNaN(rate) && rate > 0;
+  });
+  if (anyAutoWithRate) return null;
+
   const totalTax = taxes.reduce(
     (sum, t) => sum + (parseFloat(t.tax_amount) || 0),
     0,

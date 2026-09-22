@@ -700,8 +700,12 @@ const ReceiptDetail = ({
       const receipt_tax_values = nonTipTaxes.map((t) => {
         if (t._isManual) return { ...t, tax_amount: parseFloat(t.tax_amount) || 0 };
         const rate = resolveTaxRateForReceipt(t);
+        // Rate-based when a real rate exists; otherwise keep the stored amount (a rate-less
+        // line — e.g. a forwarded tax — can't be recomputed, so don't wipe it to 0).
         const tax_amount =
-          rate > 0 ? parseFloat(((subtotal * rate) / 100).toFixed(2)) : 0;
+          rate > 0
+            ? parseFloat(((subtotal * rate) / 100).toFixed(2))
+            : (parseFloat(t.tax_amount) || 0);
         return {
           ...t,
           tax_rate: rate > 0 ? formatTaxRate(rate) : t.tax_rate || "0",
