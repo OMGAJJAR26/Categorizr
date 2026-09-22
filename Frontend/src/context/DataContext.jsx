@@ -3068,9 +3068,17 @@ setMerchantsWithImages(
         // did not pass tax lines and the in-state copy has none yet (common right
         // after an iOS forward), fall back to the freshest fetched tax values.
         receipt_tax_values: (() => {
+          const provided = Object.prototype.hasOwnProperty.call(apiUpdates, "receipt_tax_values");
           const candidate = getValue("receipt_tax_values", []);
           if (Array.isArray(candidate) && candidate.length > 0) return candidate;
-          return resolveFreshestReceiptTaxValues(receiptId) || (Array.isArray(candidate) ? candidate : []);
+          // An EXPLICITLY provided empty array means the user removed every tax line —
+          // send it so the backend actually clears them. Only when the caller did not
+          // include receipt_tax_values at all (a partial patch, e.g. a logo/store_image
+          // or status update) do we preserve the freshest fetched taxes, so a partial
+          // update never wipes them. Previously any empty array fell back to the fresh
+          // taxes, which silently re-added the taxes the user had just removed.
+          if (provided) return Array.isArray(candidate) ? candidate : [];
+          return resolveFreshestReceiptTaxValues(receiptId) || [];
         })(),
       };
 
