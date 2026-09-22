@@ -98,11 +98,23 @@ export const taxTypesMatch = (a, b) => {
 export const taxDefinitionMatchesReceiptLine = (receiptLine, taxDefinition) => {
   const defId = parseInt(taxDefinition?.id) || 0;
   const lineId = parseInt(receiptLine?.fk_tax_id) || 0;
-  if (defId > 0 && lineId > 0 && defId === lineId) return true;
+  // When BOTH sides carry a real tax-type id, match STRICTLY by id. Same-named tax types
+  // with different rates (e.g. HST 12%, HST 9%, HST 16%) are distinct types, so only the
+  // one actually on the receipt should be highlighted — never all of them by name.
+  if (defId > 0 && lineId > 0) return defId === lineId;
   const defName = (taxDefinition?.tax_name || "").toString().trim().toLowerCase();
   const lineName = (receiptLine?.tax_name || "").toString().trim().toLowerCase();
   if (!defName || defName.includes("tip")) return false;
-  return defName === lineName;
+  if (defName !== lineName) return false;
+  // No usable id on one side (legacy / forwarded line): also require the RATE to match, so
+  // distinct same-named rates still don't all light up. Fall back to name-only only when a
+  // rate is unavailable.
+  const defRate = parseFloat(String(taxDefinition?.tax_rate ?? "").replace(/%/g, ""));
+  const lineRate = parseFloat(String(receiptLine?.tax_rate ?? "").replace(/%/g, ""));
+  if (Number.isFinite(defRate) && Number.isFinite(lineRate)) {
+    return Math.abs(defRate - lineRate) < 0.0001;
+  }
+  return true;
 };
 
 export const toTaxLabel = (tax) => {
