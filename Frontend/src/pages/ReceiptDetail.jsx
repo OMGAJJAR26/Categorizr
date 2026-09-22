@@ -111,6 +111,18 @@ const defaultPaymentMethods = [
   "Diners Club",
 ];
 
+// Tip is entered as an amount; its percentage of the subtotal is derived for display.
+// Rounding to a whole number made small-but-real tips (e.g. $6,000 on a $4.97M subtotal
+// = 0.12%) read as "0%". Show whole numbers at ≥1%, otherwise up to 2 decimals, so a
+// non-zero tip never displays as 0%.
+const formatTipPercentage = (tipAmount, subtotal) => {
+  const tip = Math.abs(Number(tipAmount) || 0);
+  const base = Math.abs(Number(subtotal) || 0);
+  if (base === 0 || tip === 0) return 0;
+  const pct = (tip / base) * 100;
+  return pct >= 1 ? Math.round(pct) : parseFloat(pct.toFixed(2));
+};
+
 // Resolve the canonical card-issuer display name from a raw payment type string.
 // Always returns the full brand name (e.g. "Diners Club", not "Club").
 const resolveIssuerName = (pt) => {
@@ -4523,10 +4535,7 @@ useEffect(() => {
               receipt.subtotal || receipt.purchasePrice || 0
             );
 
-            let tipPercentage = 0;
-            if (subtotal > 0 && tipAmount > 0) {
-              tipPercentage = Math.round((tipAmount / subtotal) * 100);
-            }
+            const tipPercentage = formatTipPercentage(tipAmount, subtotal);
 
             return `
               <div class="total-row">
@@ -5009,10 +5018,7 @@ Thank you for using our receipt management system.
               receipt.subtotal || receipt.purchasePrice || 0
             );
 
-            let tipPercentage = 0;
-            if (subtotal > 0 && tipAmount > 0) {
-              tipPercentage = Math.round((tipAmount / subtotal) * 100);
-            }
+            const tipPercentage = formatTipPercentage(tipAmount, subtotal);
 
             return `
               <div class="total-row">
@@ -7013,10 +7019,7 @@ Thank you for using our receipt management system.
                                   parseFloat(r.subtotal) ||
                                   parseFloat(r.purchasePrice) ||
                                   0;
-                                const tipPercentage =
-                                  Math.abs(subtotal) > 0 && tipNum !== 0
-                                    ? Math.round((Math.abs(tipNum) / Math.abs(subtotal)) * 100)
-                                    : 0;
+                                const tipPercentage = formatTipPercentage(tipNum, subtotal);
                                 return (
                                   <div className="mb-4 text-align-left">
                                     <div className="flex items-center justify-between">
