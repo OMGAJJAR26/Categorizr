@@ -318,8 +318,51 @@ export function resolveReceiptMediaFieldsForApi(receiptId, updates, allReceipts)
   };
 }
 
+// ── Split-media families ────────────────────────────────────────────────────
+// A split family is the set of receipt ids that INTENTIONALLY share the same media:
+// the original receipt plus the split children created from it. It is recorded (in
+// localStorage) at split time so the media dedup below keeps the shared image on ALL of
+// them, instead of resolving each URL to a single owner and blanking the rest.
+//
+// We key on plain receipt ids — NOT fk_original_receipt_id, which carries network-forward
+// semantics — so giving splits a shared image never affects forwarding. The 60-second
+// create-window heuristic can't cover this case: the backend stamps its own create_date on
+// new receipts, so a child split from an OLD original is always far outside the window.
+const SPLIT_FAMILIES_KEY = "cat_split_media_families";
+
+export function recordSplitMediaFamily(ids) {
+  try {
+    const clean = [
+      ...new Set((ids || []).map((x) => String(x)).filter((x) => x && x !== "0")),
+    ];
+    if (clean.length < 2) return;
+    const raw = JSON.parse(localStorage.getItem(SPLIT_FAMILIES_KEY) || "[]");
+    const list = Array.isArray(raw) ? raw : [];
+    list.push(clean);
+    // Bound the registry so it can't grow without limit.
+    localStorage.setItem(SPLIT_FAMILIES_KEY, JSON.stringify(list.slice(-300)));
+  } catch {
+    /* localStorage unavailable / quota — dedup simply falls back to the 60s window */
+  }
+}
+
+// receiptId → family index, for O(1) "are these two in the same split family?" checks.
+function loadSplitFamilyMap() {
+  const map = new Map();
+  try {
+    const raw = JSON.parse(localStorage.getItem(SPLIT_FAMILIES_KEY) || "[]");
+    (Array.isArray(raw) ? raw : []).forEach((family, i) => {
+      (Array.isArray(family) ? family : []).forEach((id) => map.set(String(id), i));
+    });
+  } catch {
+    /* ignore */
+  }
+  return map;
+}
+
 export function dedupeReceiptMediaAcrossReceipts(receipts) {
   if (!Array.isArray(receipts) || receipts.length <= 1) return receipts;
+  const splitFamilyMap = loadSplitFamilyMap();
 
   const urlOwner = new Map();
   // url → all receipt indices and create_dates that have it
@@ -351,6 +394,14 @@ export function dedupeReceiptMediaAcrossReceipts(receipts) {
       // sharing the same image — allow them to all keep the URL.
       if (receiptCreateDate > 0 && owner.createDate > 0 &&
           Math.abs(receiptCreateDate - owner.createDate) <= 60) {
+        return true;
+      }
+      // Recorded split family: the original + its split children intentionally share this
+      // image, so every family member keeps it regardless of create_date.
+      const selfId = String(receipt?.id ?? "");
+      const ownerId = String(receipts[owner.index]?.id ?? "");
+      const selfFam = splitFamilyMap.get(selfId);
+      if (selfFam !== undefined && selfFam === splitFamilyMap.get(ownerId)) {
         return true;
       }
       return false;
