@@ -650,8 +650,13 @@ const ReceiptDetail = ({
         (t) => !(t.tax_name || "").toLowerCase().includes("tip"),
       );
 
-      // Total is 0/empty with NO tip → zero the whole receipt (avoid stale amounts).
-      if (totalNum === 0 && tipNum === 0) {
+      // Total cleared to 0/empty → zero the subtotal and every tax amount (a clean slate),
+      // regardless of any tip. Previously this only fired when the tip was also 0, so
+      // clearing the total on a receipt that had a tip (and especially manual/fixed tax
+      // amounts) fell through to the rate-based recompute and showed a NEGATIVE subtotal
+      // with stale-looking tax amounts. The "tip/taxes may exceed the total" (negative
+      // subtotal) behaviour still applies for a real, POSITIVE total below.
+      if (totalNum === 0) {
         return {
           subtotal: 0,
           receipt_tax_values: nonTipTaxes.map((t) => ({ ...t, tax_amount: 0 })),
