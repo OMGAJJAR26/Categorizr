@@ -1871,6 +1871,13 @@ useEffect(() => {
             newPaymentCategoryType || ""
           );
         }
+        // A payment method's default expense type (Personal/Business) applies to the
+        // receipts that use that card. When it changes, propagate it to every associated
+        // receipt — this is what the confirmation dialog promises ("all receipts associated
+        // ... will also be updated"). Update BOTH receipt_category (drives the receipt's
+        // Personal/Business "TYPE") and payment_category_type (the stored default marker).
+        // A blank / "None" default leaves each receipt's category untouched.
+        const newRcCategory = expenseTypeToReceiptCategory(newPaymentCategoryType); // "0" | "1" | ""
         const matchingReceipts = (receipts || []).filter(
           (r) => getPaymentDisplayForReceipt(r).toLowerCase() === (oldName || "").toLowerCase()
         );
@@ -1881,6 +1888,9 @@ useEffect(() => {
             last_4_digit_card: last4 || r.last_4_digit_card || "",
             payment_logo_url: "",
             paymentLogoUrl: "",
+            ...(newRcCategory
+              ? { receipt_category: newRcCategory, payment_category_type: newRcCategory }
+              : {}),
           })));
         }
         const _pct = readPayCardTypeMap();
@@ -1899,6 +1909,12 @@ useEffect(() => {
         handleFieldChange("last_4_digit_card", last4);
         handleFieldChange("payment_logo_url", "");
         handleFieldChange("paymentLogoUrl", "");
+        // Reflect the new default category on the receipt being edited right away so the
+        // open Edit Receipt modal's Expense Type flips without needing a reload.
+        if (newRcCategory) {
+          handleFieldChange("receipt_category", newRcCategory);
+          handleFieldChange("payment_category_type", newRcCategory);
+        }
         setPayModalEditMode(null);
         handleCloseAddPaymentModal();
         setToast({ isVisible: true, message: "Payment Method Updated", type: "success" });
