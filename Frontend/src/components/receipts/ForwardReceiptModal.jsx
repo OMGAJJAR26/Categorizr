@@ -8,6 +8,12 @@ import {
 } from "../../api/networkApi";
 import { forwardReceiptToUser } from "../../api/receiptForwardApi";
 import { useData } from "../../context/DataContext";
+import { getPaymentDisplay } from "../../utils/reportGenerators";
+import {
+  getPaymentDefaultExpenseType,
+  paymentCategoryToApiEnum,
+  paymentCategoryFromApiEnum,
+} from "../../utils/paymentMethodUtils";
 
 const UserAvatar = ({ name }) => (
   <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
@@ -16,7 +22,7 @@ const UserAvatar = ({ name }) => (
 );
 
 const ForwardReceiptModal = ({ receipt, onClose, onSuccess }) => {
-  const { user } = useData();
+  const { user, apiPaymentMethods } = useData();
   const [members, setMembers] = useState([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -54,7 +60,44 @@ const ForwardReceiptModal = ({ receipt, onClose, onSuccess }) => {
     setForwardingId(memberId);
     setError("");
 
-    const result = await forwardReceiptToUser(receipt, memberId, user);
+    // Carry the SENDER's payment-method default expense type (Personal/Business) so the
+    // recipient's received card gets the right default. The receipt's own
+    // payment_category_type is often 0 (Personal) even when the card's default is Business,
+    // so resolve the default from the payment method and pass it as the override.
+    const paymentCategoryEnum = (() => {
+      // 1) Match by display label (Settings override + API record).
+      const viaLabel = getPaymentDefaultExpenseType(
+        getPaymentDisplay(receipt),
+        apiPaymentMethods,
+      );
+      if (viaLabel) return paymentCategoryToApiEnum(viaLabel);
+      // 2) Fallback: match the API card directly by last-4 (refine by issuer when needed).
+      const last4 = String(
+        receipt.last_4_digit_card || receipt.last4DigitCard || "",
+      ).trim();
+      if (last4 && last4 !== "0") {
+        const matches = (apiPaymentMethods || []).filter(
+          (m) => String(m?.card_number || "").trim() === last4,
+        );
+        const issuer = String(receipt.card_issuer_name || "").trim().toLowerCase();
+        const pick =
+          (issuer &&
+            matches.find(
+              (m) => String(m?.card_issuer_name || "").trim().toLowerCase() === issuer,
+            )) ||
+          matches[0];
+        const def = pick && paymentCategoryFromApiEnum(pick.default_payment_category);
+        if (def) return paymentCategoryToApiEnum(def);
+      }
+      return null;
+    })();
+
+    const result = await forwardReceiptToUser(
+      receipt,
+      memberId,
+      user,
+      paymentCategoryEnum ? { paymentCategoryEnum } : {},
+    );
 
     if (result.ok) {
       // Close the modal first; the parent (ReceiptDetail) shows the success toast

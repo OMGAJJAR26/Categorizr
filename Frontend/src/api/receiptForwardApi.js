@@ -125,8 +125,11 @@ const buildForwardTaxValues = (receipt, recipientUserId) => {
   return taxLines;
 };
 
-/** UserReceipt body for POST /user/forwardreceiptv2. Sender from Accesstoken; recipient via forward_to_user_id. */
-export const buildForwardPayload = (receipt, recipientUserId) => {
+/** UserReceipt body for POST /user/forwardreceiptv2. Sender from Accesstoken; recipient via forward_to_user_id.
+ *  opts.paymentCategoryEnum ("0" Personal | "1" Business | "2" None) overrides the receipt's own
+ *  payment_category_type — the recipient reads this field to set the received card's default expense
+ *  type, so it must carry the SENDER's payment-method default, not the receipt's (often 0) value. */
+export const buildForwardPayload = (receipt, recipientUserId, opts = {}) => {
   const sourceReceiptId = toPositiveInt(receipt.id);
   const recipientId = toPositiveInt(recipientUserId);
   const paymentType = (receipt.paymentType || receipt.payment_type || "")
@@ -166,7 +169,10 @@ export const buildForwardPayload = (receipt, recipientUserId) => {
       receipt.purchase_price ??
       "0"
     ).toString(),
-    payment_category_type: toInt(receipt.payment_category_type),
+    payment_category_type:
+      opts.paymentCategoryEnum != null && opts.paymentCategoryEnum !== ""
+        ? toInt(opts.paymentCategoryEnum)
+        : toInt(receipt.payment_category_type),
     status: toInt(receipt.status, 1),
     paymentType: basePaymentType || paymentType,
     last_4_digit_card: last4,
@@ -191,7 +197,7 @@ export const buildForwardPayload = (receipt, recipientUserId) => {
   };
 };
 
-export const forwardReceiptToUser = async (receipt, recipientUserId, senderUser) => {
+export const forwardReceiptToUser = async (receipt, recipientUserId, senderUser, opts = {}) => {
   const token = localStorage.getItem("token");
   if (!token) return { ok: false, error: "Missing token" };
   if (!receipt?.id) return { ok: false, error: "Receipt not saved yet." };
@@ -208,7 +214,7 @@ export const forwardReceiptToUser = async (receipt, recipientUserId, senderUser)
     return { ok: false, error: "You cannot forward a receipt to yourself." };
   }
 
-  const body = buildForwardPayload(receipt, recipientId);
+  const body = buildForwardPayload(receipt, recipientId, opts);
 
   try {
     const res = await fetch(`${BASE_URL}/user/forwardreceiptv2`, {
