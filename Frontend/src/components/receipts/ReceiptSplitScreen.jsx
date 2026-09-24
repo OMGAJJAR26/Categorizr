@@ -200,7 +200,8 @@ const ReceiptSplitScreen = ({
           const mainCategory = (main?.expenseType || "").toString().trim();
           const payLogo = main?.paymentLogo;
           const payTitle = main?.paymentTitle || "";
-          const thumbUrl = main?.thumbnailUrl;
+          const thumbUrl = main?.thumbnailUrl;       // receipt photo (if any)
+          const merchantLogo = main?.merchantLogo;   // fallback when there's no photo
           const dateLabel = main?.dateLabel || "—";
           // Remainder breakdown = main − amounts taken by all splits (per field).
           const sumSplits = (fn) => splits.reduce((s, sp) => s + (parseFloat(fn(sp)) || 0), 0);
@@ -237,6 +238,9 @@ const ReceiptSplitScreen = ({
                   {thumbUrl ? (
                     <img src={thumbUrl} alt="" loading="lazy"
                       className="w-12 h-14 object-cover rounded-md border border-gray-200 flex-shrink-0 bg-gray-900" />
+                  ) : merchantLogo ? (
+                    <img src={merchantLogo} alt="" loading="lazy"
+                      className="w-12 h-14 object-contain rounded-md border border-gray-200 flex-shrink-0 bg-white p-1" />
                   ) : (
                     <div className="w-12 h-14 rounded-md bg-gray-100 border border-gray-200 flex-shrink-0" />
                   )}
