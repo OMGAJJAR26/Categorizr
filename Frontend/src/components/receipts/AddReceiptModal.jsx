@@ -4850,6 +4850,8 @@ const handleSelectLogo = (index) => {
                         return d === "-" ? "" : d;
                       })(),
                       thumbnailUrl: getImagePreviewUrl(),
+                      // No receipt photo (e.g. manual add) → show the merchant logo instead.
+                      merchantLogo: getMerchantImage(formData.storeName) || detectedMerchantLogo || "",
                       dateLabel: (() => {
                         const raw = (formData.product_date || "").toString().trim();
                         if (!raw) return "—";

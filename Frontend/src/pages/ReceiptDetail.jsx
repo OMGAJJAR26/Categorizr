@@ -5759,6 +5759,8 @@ Thank you for using our receipt management system.
                         const first = (urls || []).find((u) => u && !/\.pdf($|\?)/i.test(u));
                         return first ? proxyImageUrl(first) : null;
                       })(),
+                      // No receipt photo → show the merchant logo instead of an empty box.
+                      merchantLogo: editedReceipt.store_image || selectedReceipt?.store_image || "",
                       dateLabel: formatReceiptDate({
                         product_date: editedReceipt.product_date ?? selectedReceipt?.product_date,
                         create_date: selectedReceipt?.create_date,
