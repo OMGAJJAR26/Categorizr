@@ -7,11 +7,11 @@ import {
   toApiTextValue,
 } from "./receiptTextFields.js";
 
-test("toApiTextValue sends null (never '0') for blank input", () => {
-  assert.equal(toApiTextValue(""), null);
-  assert.equal(toApiTextValue("   "), null);
-  assert.equal(toApiTextValue(null), null);
-  assert.equal(toApiTextValue(undefined), null);
+test("toApiTextValue sends empty string (never '0') for blank input", () => {
+  assert.equal(toApiTextValue(""), "");
+  assert.equal(toApiTextValue("   "), "");
+  assert.equal(toApiTextValue(null), "");
+  assert.equal(toApiTextValue(undefined), "");
   // The old "0" sentinel must never go out — mobile shows it literally.
   assert.notEqual(toApiTextValue(""), CLEAR_TEXT_API_VALUE);
 });

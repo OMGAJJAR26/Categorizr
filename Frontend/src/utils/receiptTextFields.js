@@ -1,11 +1,11 @@
 /**
  * Clearing free-text receipt fields (Describe Purchase, Notes).
  *
- * updateReceiptv1 ignores empty strings: a field sent as "" keeps whatever the
- * server already had. The WebApp used to send the string "0" to force a clear,
- * but "0" is NOT user content — iOS and Android render it literally in Describe
- * Purchase / Notes (they have no sentinel translation). So outgoing blanks now go
- * out as null (JSON null) instead: no other client ever shows a stray "0".
+ * The WebApp used to send the string "0" to force a clear (older updateReceiptv1
+ * ignored ""), but "0" is NOT user content — iOS and Android render it literally.
+ * The backend now accepts an EMPTY STRING as "clear this field" (JSON null is
+ * still ignored — PHP null !== ""), so outgoing blanks go out as "" instead: the
+ * field is actually cleared and no other client ever shows a stray "0".
  *
  * On the way IN we still collapse the legacy "0" sentinel (and null/"") to empty,
  * so receipts saved by older builds — or by mobile — never display a literal "0".
@@ -18,13 +18,13 @@ export const CLEAR_TEXT_API_VALUE = "0";
 export const CLEARABLE_TEXT_FIELDS = ["product_name", "notes"];
 
 /**
- * Outgoing value for updateReceiptv1. Blank goes out as null (never "0"), so the
- * cleared field can't surface as a literal "0" on other devices. Real text passes
- * through untouched.
+ * Outgoing value for updateReceiptv1. Blank goes out as "" (never "0", never
+ * null) — the backend clears the column on "", and no client shows a literal
+ * "0". Real text passes through untouched.
  */
 export const toApiTextValue = (value) => {
   const text = (value ?? "").toString();
-  return text.trim() === "" ? null : text;
+  return text.trim() === "" ? "" : text;
 };
 
 /**
