@@ -4010,8 +4010,10 @@ const handleSelectLogo = (index) => {
     setNewCardIssuerName(isCustomCardIssuer(issuer, cardType) ? issuer : "");
     setNewLast4Digits(last4 || "");
     const _pet = (() => { try { return JSON.parse(localStorage.getItem("cat_pay_expense_type") || "{}"); } catch { return {}; } })();
+    // API record wins (reflects edits from any device, e.g. iOS); the local override
+    // map is only a fallback for methods not present in the API.
     setNewPaymentCategoryType(
-      _pet[method] || paymentCategoryFromApiEnum(apiMatch?.default_payment_category) || ""
+      apiMatch ? paymentCategoryFromApiEnum(apiMatch.default_payment_category) : (_pet[method] || "")
     );
     // Capture the signature using the RESOLVED card type so the duplicate check can
     // exclude the payment being edited. Inferring the brand from the display name

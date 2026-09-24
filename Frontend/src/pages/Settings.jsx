@@ -3431,12 +3431,14 @@ const isBlockedTaxRateInput = (val) => {
                                 // (e.g. "MasterCard *7979") so users know they can add a custom issuer.
                                 setNewIssuerName(isCustomCardIssuer(pIssuer, pBrand) ? pIssuer : "");
                                 setNewLast4(pLast4 || "");
+                                // API record wins (reflects edits from any device, e.g. iOS);
+                                // the local override map is only a fallback for methods not in the API.
                                 setNewExpenseType(
-                                  payExpenseTypeMap[item.name] ||
-                                    paymentCategoryFromApiEnum(
-                                      pApiRecord?.default_payment_category ?? pApiMatches[0]?.default_payment_category
-                                    ) ||
-                                    ""
+                                  (pApiRecord ?? pApiMatches[0])
+                                    ? paymentCategoryFromApiEnum(
+                                        (pApiRecord ?? pApiMatches[0]).default_payment_category
+                                      )
+                                    : (payExpenseTypeMap[item.name] || "")
                                 );
                                 setPayEditMode({ item, apiId: pApiId });
                                 setShowAddForm(true);
