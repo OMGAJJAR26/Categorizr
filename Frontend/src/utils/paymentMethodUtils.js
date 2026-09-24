@@ -172,18 +172,22 @@ const readPayExpenseTypeMap = () => {
 
 /**
  * The default expense TYPE ("Personal" | "Business" | "") configured for a payment
- * method. Checks the local override map first, then the API record's
- * default_payment_category. `paymentDisplay` is the label like "Visa *1234".
+ * method. The API record is the source of truth (so a change made on any device —
+ * e.g. iOS — is reflected); the local override map is only a fallback for payment
+ * methods that don't exist in the API yet. `paymentDisplay` is the label like
+ * "Visa *1234".
  */
 export const getPaymentDefaultExpenseType = (paymentDisplay, apiPaymentMethods = []) => {
   const name = (paymentDisplay || "").toString().trim();
   if (!name) return "";
-  const map = readPayExpenseTypeMap();
-  if (map[name]) return paymentCategoryFromApiEnum(map[name]);
   const apiMatch = (apiPaymentMethods || []).find((m) =>
     apiPaymentMethodMatchesLabel(m, name)
   );
-  return paymentCategoryFromApiEnum(apiMatch?.default_payment_category);
+  // Known API method → trust the server value (never let a stale local override win).
+  if (apiMatch) return paymentCategoryFromApiEnum(apiMatch.default_payment_category);
+  const map = readPayExpenseTypeMap();
+  if (map[name]) return paymentCategoryFromApiEnum(map[name]);
+  return "";
 };
 
 /**
