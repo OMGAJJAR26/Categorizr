@@ -12,6 +12,8 @@ import {
 import {X,ChevronLeft,ChevronRight, Trash2, ChevronDown, Plus, Pencil, MoreHorizontal, Camera, PenLine, AlertCircle, RotateCcw, Check,} from "lucide-react";
 import ReceiptAnnotator from "../components/receipts/ReceiptAnnotator";
 import PdfThumbnail from "../components/receipts/PdfThumbnail";
+import ReceiptSplitScreen from "../components/receipts/ReceiptSplitScreen";
+import { useReceiptSplits } from "../hooks/useReceiptSplits";
 import {
   splitMediaField,
   buildCombinedMediaField,
@@ -411,16 +413,35 @@ const ReceiptDetail = ({
 
   // ── Split feature ─────────────────────────────────────────────────────────
   const [showSplitScreen, setShowSplitScreen] = useState(false);
-  const [activeSplitIndex, setActiveSplitIndex] = useState(null);
-  const [splits, setSplits] = useState([]);
-  const [isSavingSplits, setIsSavingSplits] = useState(false);
-  const [splitErrors, setSplitErrors] = useState({});
   const [splitError, setSplitError] = useState(null);
   const [splitPrereqError, setSplitPrereqError] = useState(null);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [showForwardModal, setShowForwardModal] = useState(false);
   const [alertMsg, setAlertMsg] = useState(null);
   const [showMaxDefaultTaxModal, setShowMaxDefaultTaxModal] = useState(false);
+
+  // Split state + shared field math (SAVE stays local — see handleSaveSplits).
+  const {
+    splits, setSplits,
+    activeSplitIndex, setActiveSplitIndex,
+    splitErrors, setSplitErrors,
+    isSavingSplits, setIsSavingSplits,
+    addSplit, removeSplit, resetSplits,
+    updateSplitField, splitBaseName, splitLabel,
+  } = useReceiptSplits(
+    {
+      subtotal: parseFloat(editedReceipt.subtotal) || parseFloat(selectedReceipt?.subtotal) || 0,
+      total: parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0,
+      tip: parseFloat(editedReceipt.tip) || parseFloat(selectedReceipt?.tip) || 0,
+      taxValues: filterNonTipReceiptTaxValues(
+        editedReceipt.receipt_tax_values || selectedReceipt?.receipt_tax_values || []
+      ),
+      receiptCategory: editedReceipt.receipt_category ?? selectedReceipt?.receipt_category ?? 0,
+      expenseType: editedReceipt.expense_type ?? selectedReceipt?.expense_type ?? "",
+      storeName: editedReceipt.storeName || selectedReceipt?.storeName || "",
+    },
+    { onAlert: (msg) => setAlertMsg({ title: "Sorry", message: msg }), maxDescriptionLength: MAX_DESCRIPTION_LENGTH },
+  );
 
   // Auto-dismiss split prerequisite banner(s) after 3.5 s
   useEffect(() => {
@@ -3221,24 +3242,6 @@ useEffect(() => {
     return res.json();
   };
 
-  /** Create a blank split entry */
-  const createSplit = () => {
-    // Tip is tracked separately; never carry a tip line into a split's tax list.
-    const mainTaxes = filterNonTipReceiptTaxValues(
-      editedReceipt.receipt_tax_values || selectedReceipt?.receipt_tax_values || []
-    );
-    return {
-      _id: Date.now() + Math.random(),
-      receipt_category: editedReceipt.receipt_category ?? selectedReceipt?.receipt_category ?? 0,
-      expense_type: editedReceipt.expense_type || selectedReceipt?.expense_type || "",
-      subtotal: "",
-      tip: "",
-      purchasePrice: "",
-      product_name: "",
-      receipt_tax_values: mainTaxes.map(t => ({ ...t, id: 0, tax_amount: "" })),
-    };
-  };
-
   /** Open the split screen — validates required fields first */
   const handleOpenSplit = () => {
     const msgs = getSplitReceiptMissingMessages({
@@ -3256,9 +3259,7 @@ useEffect(() => {
     }
     setSplitPrereqError(null);
     setSplitError(null);
-    setSplits([]);
-    setSplitErrors({});
-    setActiveSplitIndex(null);
+    resetSplits();
     setShowSplitScreen(true);
     setShowOptionsMenu(false);
   };
@@ -3336,128 +3337,6 @@ useEffect(() => {
     setToast({ isVisible: true, message: "Receipt forwarded successfully.", type: "success" });
     silentRefreshData?.(1500);
   };
-
-  /** Update a field on a specific split, auto-calculating tax/total like the main form */
-  const updateSplitField = (idx, field, value) => {
-    if (field === "subtotal" || field === "purchasePrice" || field === "tip") {
-      value = sanitizeMoneyInput(value);
-    }
-    if (field === "product_name") {
-      value = (value || "").toString().slice(0, MAX_DESCRIPTION_LENGTH);
-    }
-    const mainSubtotal = parseFloat(editedReceipt.subtotal) || parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.subtotal) || 0;
-    const mainTotal    = parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0;
-    const mainTip      = parseFloat(editedReceipt.tip) || parseFloat(selectedReceipt?.tip) || 0;
-
-    // Cap each field at what's LEFT (main − the amounts other splits already took),
-    // so the max shrinks as splits are added — matching the mobile app.
-    const others = splits.filter((_, i) => i !== idx);
-    const otherSum = (fn) => others.reduce((s, sp) => s + (parseFloat(fn(sp)) || 0), 0);
-    const remSubtotal = parseFloat((mainSubtotal - otherSum((sp) => sp.subtotal)).toFixed(2));
-    const remTotal    = parseFloat((mainTotal    - otherSum((sp) => sp.purchasePrice)).toFixed(2));
-    const remTip      = parseFloat((mainTip       - otherSum((sp) => sp.tip)).toFixed(2));
-
-    const AGGREGATE_MSG = {
-      title: "Sorry",
-      message: "Aggregate total of all split totals cannot exceed total of original receipt total.",
-    };
-    if (field === "subtotal" && mainSubtotal > 0 && (parseFloat(value) || 0) > remSubtotal + 0.005) {
-      setAlertMsg(AGGREGATE_MSG);
-      return;
-    }
-    if (field === "purchasePrice" && mainTotal > 0 && (parseFloat(value) || 0) > remTotal + 0.005) {
-      setAlertMsg(AGGREGATE_MSG);
-      return;
-    }
-    if (field === "tip" && mainTip > 0 && (parseFloat(value) || 0) > remTip + 0.005) {
-      setAlertMsg(AGGREGATE_MSG);
-      return;
-    }
-
-    setSplits(prev => {
-      const updated = [...prev];
-      const split   = updated[idx];
-      if (field === "purchasePrice") {
-        // Subtotal is derived (read-only): subtotal = (total − tip) / (1 + Σrate/100)
-        const totalNum = parseFloat(value) || 0;
-        if (totalNum > 0) {
-          const rateSum = (split.receipt_tax_values || []).reduce((s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0);
-          // Seed tip proportionally to this split's share of the total the first time;
-          // once the user has set a tip, keep it fixed (main-form model).
-          const tipTouched = split.tip !== "" && split.tip != null;
-          const tipNum = tipTouched
-            ? (parseFloat(split.tip) || 0)
-            : (mainTip > 0 && mainTotal > 0
-                ? parseFloat((mainTip * (totalNum / mainTotal)).toFixed(2))
-                : 0);
-          const sub = parseFloat(((totalNum - tipNum) / (1 + rateSum)).toFixed(2));
-          const taxes = (split.receipt_tax_values || []).map(t => ({
-            ...t,
-            tax_amount: sub !== 0 ? parseFloat(((parseFloat(t.tax_rate) / 100) * sub).toFixed(2)) : "",
-          }));
-          updated[idx] = {
-            ...split,
-            purchasePrice: value,
-            tip: mainTip > 0 ? tipNum.toString() : split.tip,
-            subtotal: sub !== 0 ? sub.toString() : "",
-            receipt_tax_values: taxes,
-          };
-        } else {
-          updated[idx] = { ...split, purchasePrice: value, subtotal: "", receipt_tax_values: (split.receipt_tax_values || []).map(t => ({ ...t, tax_amount: "" })) };
-        }
-      } else if (field === "tip") {
-        // Changing tip KEEPS TOTAL FIXED and recomputes subtotal + taxes.
-        const tipNum   = parseFloat(value) || 0;
-        const totalNum = parseFloat(split.purchasePrice) || 0;
-        const rateSum  = (split.receipt_tax_values || []).reduce((s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0);
-        const sub = totalNum > 0 ? parseFloat(((totalNum - tipNum) / (1 + rateSum)).toFixed(2)) : 0;
-        const taxes = (split.receipt_tax_values || []).map(t => ({
-          ...t,
-          tax_amount: sub !== 0 ? parseFloat(((parseFloat(t.tax_rate) / 100) * sub).toFixed(2)) : "",
-        }));
-        updated[idx] = { ...split, tip: value, subtotal: totalNum > 0 ? sub.toString() : "", receipt_tax_values: taxes };
-      } else if (field === "subtotal") {
-        const sub = parseFloat(value) || 0;
-        const tipNum = parseFloat(split.tip) || 0;
-        const taxes = (split.receipt_tax_values || []).map(t => ({
-          ...t,
-          tax_amount: sub > 0 ? parseFloat(((parseFloat(t.tax_rate) / 100) * sub).toFixed(2)) : "",
-        }));
-        const total = sub + taxes.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0) + tipNum;
-        updated[idx] = { ...split, subtotal: value, receipt_tax_values: taxes, purchasePrice: sub > 0 ? parseFloat(total.toFixed(2)) : "" };
-      } else {
-        updated[idx] = { ...split, [field]: value };
-      }
-      return updated;
-    });
-
-    if ((field === "subtotal" || field === "purchasePrice") && splits[idx]) {
-      const id = splits[idx]._id;
-      if (splitErrors[id]?.amount) {
-        setSplitErrors(prev => { const n = { ...prev }; delete n[id]; return n; });
-      }
-    }
-  };
-
-  /** Base label for splits: the original receipt's merchant name. Splits are
-   *  numbered after the original — original, then " (2)", " (3)", … */
-  const splitBaseName = () =>
-    (editedReceipt.storeName || selectedReceipt?.storeName || "Receipt").toString().trim();
-
-  /** Display label for a split row by index (original is the remainder row). */
-  const splitLabel = (idx) => `${splitBaseName()} (${idx + 2})`;
-
-  /** Add a new blank split and open its detail view */
-  const addSplit = () => {
-    const newIdx  = splits.length;
-    // Default the description to "<Merchant> (N)" (editable), matching mobile.
-    const newSlot = { ...createSplit(), product_name: splitLabel(newIdx) };
-    setSplits(prev => [...prev, newSlot]);
-    setActiveSplitIndex(newIdx);
-  };
-
-  /** Remove a split by index */
-  const removeSplit = (idx) => setSplits(prev => prev.filter((_, i) => i !== idx));
 
   /** Save all splits — creates new receipts, updates existing receipt to the remainder */
   const handleSaveSplits = async () => {
@@ -5862,318 +5741,43 @@ Thank you for using our receipt management system.
               <div ref={scrollContentRef}>
                 {/* ── Split Screen ─────────────────────────────────────────── */}
                 {showSplitScreen ? (
-                  <div className="p-4 sm:p-6">
-                    {activeSplitIndex !== null && splits[activeSplitIndex] ? (
-                      /* Split Detail View */
-                      (() => {
-                        const split = splits[activeSplitIndex];
-                        const mainSubtotal = parseFloat(editedReceipt.subtotal) || parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.subtotal) || 0;
-                        const mainTotal    = parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0;
-                        const mainTip      = parseFloat(editedReceipt.tip) || parseFloat(selectedReceipt?.tip) || 0;
-                        const hasTip       = mainTip > 0;
-                        const fieldErr     = splitErrors[split._id] || {};
-                        const hasAmountErr = !!fieldErr.amount;
-                        // Main receipt tax amounts (non-tip), aligned with split.receipt_tax_values.
-                        const mainTaxList = filterNonTipReceiptTaxValues(
-                          editedReceipt.receipt_tax_values || selectedReceipt?.receipt_tax_values || []
-                        );
-                        // "max" = what's LEFT: main − amounts the OTHER splits already took, per
-                        // field. Shrinks as splits are added/filled (mirrors the mobile app).
-                        const otherSplits = splits.filter((_, i) => i !== activeSplitIndex);
-                        const otherSum = (fn) => otherSplits.reduce((s, sp) => s + (parseFloat(fn(sp)) || 0), 0);
-                        const remClamp = (v) => Math.max(0, parseFloat(v.toFixed(2)));
-                        const maxSubtotal = remClamp(mainSubtotal - otherSum((sp) => sp.subtotal));
-                        const maxTotal    = remClamp(mainTotal    - otherSum((sp) => sp.purchasePrice));
-                        const maxTip      = remClamp(mainTip       - otherSum((sp) => sp.tip));
-                        const maxTaxAt = (ti) => remClamp(
-                          (parseFloat(mainTaxList[ti]?.tax_amount) || 0)
-                          - otherSplits.reduce((s, sp) => s + (parseFloat(sp.receipt_tax_values?.[ti]?.tax_amount) || 0), 0)
-                        );
-                        return (
-                          <div className="space-y-4">
-                            {/* Personal / Business */}
-                            <div className="flex justify-center">
-                              <div className="inline-flex rounded-full overflow-hidden border border-gray-200 bg-gray-100 p-0.5">
-                                <button type="button"
-                                  className={`px-6 py-1.5 text-sm font-semibold rounded-full transition-colors ${parseInt(split.receipt_category) !== 1 ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}
-                                  onClick={() => updateSplitField(activeSplitIndex, "receipt_category", 0)}>Personal</button>
-                                <button type="button"
-                                  className={`px-6 py-1.5 text-sm font-semibold rounded-full transition-colors ${parseInt(split.receipt_category) === 1 ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}
-                                  onClick={() => updateSplitField(activeSplitIndex, "receipt_category", 1)}>Business</button>
-                              </div>
-                            </div>
-
-                            {/* RECEIPT INFORMATION → Category (row: label left, value/select right) */}
-                            <div>
-                              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Receipt Information</p>
-                              <div className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 flex items-center justify-between gap-2">
-                                <span className="text-sm font-bold text-gray-900 flex-shrink-0">Category</span>
-                                <select
-                                  className="text-sm text-right text-gray-800 bg-transparent outline-none max-w-[62%] truncate cursor-pointer"
-                                  value={split.expense_type || ""}
-                                  onChange={(e) => updateSplitField(activeSplitIndex, "expense_type", e.target.value)}
-                                >
-                                  <option value="">Select category</option>
-                                  {allExpenseCategories.map(cat => (
-                                    <option key={cat} value={cat}>{cat}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            </div>
-
-                            {/* RECEIPT TOTALS — iOS-style rows: label + (max) on the left, value box on the right */}
-                            <div>
-                              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Receipt Totals</p>
-                              <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100 overflow-hidden">
-                                {/* Subtotal (read-only, derived from Total − Tip) */}
-                                <div className="flex items-center justify-between gap-2 px-3 py-2.5">
-                                  <span className="text-sm font-bold text-gray-900">
-                                    Subtotal <span className="font-normal text-gray-400">(max. ${maxSubtotal.toFixed(2)})</span>
-                                  </span>
-                                  <span className={`text-sm min-w-[92px] text-right px-2 py-1 rounded-md bg-gray-100 ${parseFloat(split.subtotal) < 0 ? "text-red-600 font-medium" : "text-gray-600"}`}>
-                                    ${split.subtotal !== "" && split.subtotal != null ? parseFloat(split.subtotal).toFixed(2) : "0.00"}
-                                  </span>
-                                </div>
-                                {/* Tax fields */}
-                                {(split.receipt_tax_values || []).map((t, ti) => {
-                                  const maxTax = maxTaxAt(ti);
-                                  return (
-                                    <div key={ti} className="flex items-center justify-between gap-2 px-3 py-2.5">
-                                      <span className="text-sm font-bold text-gray-900">
-                                        {t.tax_name} ({parseFloat(t.tax_rate) || 0}%) <span className="font-normal text-gray-400">(max. ${maxTax.toFixed(2)})</span>
-                                      </span>
-                                      <div className="relative min-w-[92px]">
-                                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">$</span>
-                                        <input type="number"
-                                          className="w-full text-sm text-right pl-5 pr-2 py-1 rounded-md bg-gray-100 border border-transparent focus:border-blue-400 focus:bg-white text-gray-800 outline-none"
-                                          value={t.tax_amount ?? ""}
-                                          onChange={(e) => {
-                                            const v = parseFloat(e.target.value) || 0;
-                                            if (maxTax > 0 && v > maxTax + 0.005) { setAlertMsg({ title: "Sorry", message: "Aggregate total of all split totals cannot exceed total of original receipt total." }); return; }
-                                            const updatedTaxes = split.receipt_tax_values.map((tv, tvi) => tvi === ti ? { ...tv, tax_amount: e.target.value } : tv);
-                                            updateSplitField(activeSplitIndex, "receipt_tax_values", updatedTaxes);
-                                          }}
-                                          placeholder="0.00" min="0" step="0.01" />
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                                {/* Tip — only when the original receipt has a tip */}
-                                {hasTip && (
-                                  <div className="flex items-center justify-between gap-2 px-3 py-2.5">
-                                    <span className="text-sm font-bold text-gray-900">
-                                      TIP <span className="font-normal text-gray-400">(max. ${maxTip.toFixed(2)})</span>
-                                    </span>
-                                    <div className="relative min-w-[92px]">
-                                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">$</span>
-                                      <input type="number"
-                                        className="w-full text-sm text-right pl-5 pr-2 py-1 rounded-md bg-gray-100 border border-transparent focus:border-blue-400 focus:bg-white text-gray-800 outline-none"
-                                        value={split.tip ?? ""} onChange={(e) => updateSplitField(activeSplitIndex, "tip", e.target.value)}
-                                        placeholder="0.00" min="0" max={maxTip} step="0.01" />
-                                    </div>
-                                  </div>
-                                )}
-                                {/* Total */}
-                                <div className="flex items-center justify-between gap-2 px-3 py-2.5">
-                                  <span className={`text-sm font-bold ${hasAmountErr ? "text-red-500" : "text-gray-900"}`}>
-                                    TOTAL <span className="font-normal text-gray-400">(max. ${maxTotal.toFixed(2)})</span>
-                                  </span>
-                                  <div className="relative min-w-[92px]">
-                                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">$</span>
-                                    <input type="number"
-                                      className={`w-full text-sm text-right font-bold pl-5 pr-2 py-1 rounded-md bg-gray-100 text-gray-900 outline-none border ${hasAmountErr ? "border-red-400 ring-1 ring-red-300" : "border-transparent focus:border-blue-400 focus:bg-white"}`}
-                                      value={split.purchasePrice ?? ""} onChange={(e) => updateSplitField(activeSplitIndex, "purchasePrice", e.target.value)}
-                                      placeholder="0.00" min="0" max={maxTotal} step="0.01" />
-                                  </div>
-                                </div>
-                              </div>
-                              {hasAmountErr && <p className="mt-1 text-xs text-red-500">{fieldErr.amount}</p>}
-                            </div>
-
-                            {/* MORE INFORMATION → Describe Purchase */}
-                            <div>
-                              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">More Information</p>
-                              <div className="bg-white border border-gray-200 rounded-xl px-3 py-2.5">
-                                <p className="text-sm font-bold text-gray-900 mb-1">Describe Purchase</p>
-                                <input type="text"
-                                  className="w-full text-sm text-gray-800 bg-transparent outline-none placeholder-gray-400"
-                                  value={split.product_name || ""} onChange={(e) => updateSplitField(activeSplitIndex, "product_name", e.target.value)}
-                                  maxLength={MAX_DESCRIPTION_LENGTH}
-                                  placeholder="Enter a description" />
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })()
-                    ) : (
-                      /* ── Split Overview ── */
-                      (() => {
-                        const mainTotal    = parseFloat(editedReceipt.purchasePrice || selectedReceipt?.purchasePrice || 0);
-                        const mainSubtotal = parseFloat(editedReceipt.subtotal) || parseFloat(selectedReceipt?.subtotal) || mainTotal;
-                        const mainTip      = parseFloat(editedReceipt.tip) || parseFloat(selectedReceipt?.tip) || 0;
-                        const hasTip       = mainTip > 0;
-                        const mainTaxList  = filterNonTipReceiptTaxValues(
-                          editedReceipt.receipt_tax_values || selectedReceipt?.receipt_tax_values || []
-                        );
-                        const splitsTotal = parseFloat(splits.reduce((s, sp) => s + (parseFloat(sp.purchasePrice) || 0), 0).toFixed(2));
-                        const remainder   = parseFloat((mainTotal - splitsTotal).toFixed(2));
-                        const isOverBudget = remainder < -0.009;
-                        const payLogo = getPaymentLogo({ ...selectedReceipt, ...editedReceipt });
-                        const payTitle = getPaymentDisplayName({ ...selectedReceipt, ...editedReceipt }) || "";
-                        const storeName = editedReceipt.storeName || selectedReceipt?.storeName || "—";
-                        const baseName  = splitBaseName();
-                        const mainType  = parseInt(editedReceipt.receipt_category ?? selectedReceipt?.receipt_category) === 1 ? "Business" : "Personal";
-                        const mainCategory = (editedReceipt.expense_type ?? selectedReceipt?.expense_type ?? "").toString().trim();
-                        // Receipt-photo thumbnail for the Main Receipt card (first non-PDF image).
-                        const mainThumbUrl = (() => {
-                          const urls = collectReceiptMediaUrlsForSave();
-                          const first = (urls || []).find((u) => u && !/\.pdf($|\?)/i.test(u));
-                          return first ? proxyImageUrl(first) : null;
-                        })();
-                        const dateLabel = formatReceiptDate({
-                          product_date: editedReceipt.product_date ?? selectedReceipt?.product_date,
-                          create_date: selectedReceipt?.create_date,
-                        });
-                        // Remainder breakdown = main − amounts taken by all splits (per field).
-                        const sumSplits = (fn) => splits.reduce((s, sp) => s + (parseFloat(fn(sp)) || 0), 0);
-                        const remSubtotal = parseFloat((mainSubtotal - sumSplits((sp) => sp.subtotal)).toFixed(2));
-                        const remTip      = parseFloat((mainTip - sumSplits((sp) => sp.tip)).toFixed(2));
-                        const remTaxAt = (ti) => parseFloat((
-                          (parseFloat(mainTaxList[ti]?.tax_amount) || 0)
-                          - splits.reduce((s, sp) => s + (parseFloat(sp.receipt_tax_values?.[ti]?.tax_amount) || 0), 0)
-                        ).toFixed(2));
-
-                        // One split's / the remainder's totals breakdown table.
-                        const Breakdown = ({ subtotal, taxAt, tip, total }) => (
-                          <div className="mt-1">
-                            {[
-                              ["Subtotal", subtotal, false],
-                              ...mainTaxList.map((t, ti) => [`${t.tax_name} (${parseFloat(t.tax_rate) || 0}%)`, taxAt(ti), false]),
-                              ...(hasTip ? [["TIP", tip, false]] : []),
-                              ["TOTAL", total, true],
-                            ].map(([lbl, val, bold], i) => (
-                              <div key={i} className={`flex items-center justify-between py-1.5 border-b border-gray-100 ${bold ? "font-bold text-gray-900" : ""}`}>
-                                <span className={bold ? "text-sm uppercase" : "text-sm text-gray-700"}>{lbl}</span>
-                                <span className={`text-sm ${bold ? "text-gray-900" : "text-gray-500"}`}>${(parseFloat(val) || 0).toFixed(2)}</span>
-                              </div>
-                            ))}
-                          </div>
-                        );
-
-                        return (
-                        <div className="space-y-4">
-                          {/* ── Main Receipt ── */}
-                          <div>
-                            <p className="text-blue-600 font-bold text-base mb-2">Main Receipt</p>
-                            <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 flex items-center gap-3">
-                              {mainThumbUrl ? (
-                                <img src={mainThumbUrl} alt="" loading="lazy"
-                                  className="w-12 h-14 object-cover rounded-md border border-gray-200 flex-shrink-0 bg-gray-900" />
-                              ) : (
-                                <div className="w-12 h-14 rounded-md bg-gray-100 border border-gray-200 flex-shrink-0" />
-                              )}
-                              <div className="flex-1 min-w-0">
-                                <p className="font-bold text-gray-900 text-sm truncate">{storeName}</p>
-                                {mainCategory && (
-                                  <p className="text-xs text-gray-600 truncate">{mainCategory}</p>
-                                )}
-                                <p className="text-xs text-gray-400">{mainType}</p>
-                              </div>
-                              <div className="text-right flex-shrink-0">
-                                <p className="font-bold text-gray-900 text-sm">${mainTotal.toFixed(2)}</p>
-                                {dateLabel !== "—" && <p className="text-xs text-gray-500">{dateLabel}</p>}
-                                {payTitle && (
-                                  <p className="text-xs text-gray-500 flex items-center gap-1 justify-end mt-0.5">
-                                    {payLogo && <img src={payLogo} alt="" className="w-6 h-4 object-contain" />}
-                                    {payTitle}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          {isOverBudget && (
-                            <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-red-600 text-xs font-medium">
-                              ⚠ Splits exceed total by ${Math.abs(remainder).toFixed(2)}
-                            </div>
-                          )}
-
-                          {/* ── Splits ── */}
-                          <div>
-                            <p className="text-blue-600 font-bold text-base mb-2">Splits</p>
-                            <div className="space-y-3">
-                              {/* Added splits — info column (left) + breakdown table (right), iOS-style */}
-                              {splits.map((split, idx) => {
-                                const hasErr = !!splitErrors[split._id];
-                                const splitType = parseInt(split.receipt_category) === 1 ? "Business" : "Personal";
-                                const splitCat = (split.expense_type || "").toString().trim();
-                                return (
-                                  <div key={split._id}
-                                    className={`bg-white border rounded-xl overflow-hidden flex ${hasErr ? "border-red-400" : "border-gray-200"}`}>
-                                    {/* Left: merchant / category / type + remove + edit */}
-                                    <div className="flex items-center gap-2 px-3 py-3 w-2/5 min-w-0 cursor-pointer hover:bg-gray-50"
-                                      onClick={() => setActiveSplitIndex(idx)}>
-                                      <button type="button" onClick={(e) => { e.stopPropagation(); removeSplit(idx); }}
-                                        className="flex-shrink-0 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600"
-                                        title="Remove split">
-                                        <span className="text-base leading-none font-bold">−</span>
-                                      </button>
-                                      <div className="flex-1 min-w-0">
-                                        <p className="font-bold text-gray-900 text-sm truncate">{splitLabel(idx)}</p>
-                                        {splitCat && <p className="text-xs text-gray-600 truncate">{splitCat}</p>}
-                                        <p className="text-xs text-gray-400">{splitType}</p>
-                                        {hasErr && <p className="text-xs text-red-500 font-medium">Tap to fix</p>}
-                                      </div>
-                                      <ChevronRight size={18} className="text-blue-500 flex-shrink-0" />
-                                    </div>
-                                    {/* Right: totals breakdown */}
-                                    <div className="flex-1 min-w-0 border-l border-gray-200 px-3 py-1">
-                                      <Breakdown
-                                        subtotal={split.subtotal}
-                                        taxAt={(ti) => split.receipt_tax_values?.[ti]?.tax_amount}
-                                        tip={split.tip}
-                                        total={split.purchasePrice}
-                                      />
-                                    </div>
-                                  </div>
-                                );
-                              })}
-
-                              {/* Remainder (the original receipt) — same two-column layout, no remove/edit */}
-                              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden flex">
-                                <div className="flex items-center px-3 py-3 w-2/5 min-w-0">
-                                  <div className="flex-1 min-w-0">
-                                    <p className="font-bold text-gray-900 text-sm truncate">{baseName}</p>
-                                    {mainCategory && <p className="text-xs text-gray-600 truncate">{mainCategory}</p>}
-                                    <p className="text-xs text-gray-400">{mainType}</p>
-                                  </div>
-                                </div>
-                                <div className="flex-1 min-w-0 border-l border-gray-200 px-3 py-1">
-                                  <Breakdown
-                                    subtotal={remSubtotal}
-                                    taxAt={(ti) => remTaxAt(ti)}
-                                    tip={remTip}
-                                    total={remainder}
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Add Split Button */}
-                          <button type="button" onClick={addSplit}
-                            className="w-full flex items-center justify-center gap-2 py-3 text-blue-600 font-semibold text-base hover:bg-blue-50 rounded-xl transition-colors">
-                            <Plus size={20} /> Add Split
-                          </button>
-
-                          {splitError && (
-                            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">{splitError}</div>
-                          )}
-                        </div>
-                        );
-                      })()
-                    )}
-                  </div>
+                  <ReceiptSplitScreen
+                    main={{
+                      subtotal: parseFloat(editedReceipt.subtotal) || parseFloat(selectedReceipt?.subtotal) || 0,
+                      total: parseFloat(editedReceipt.purchasePrice) || parseFloat(selectedReceipt?.purchasePrice) || 0,
+                      tip: parseFloat(editedReceipt.tip) || parseFloat(selectedReceipt?.tip) || 0,
+                      taxValues: filterNonTipReceiptTaxValues(
+                        editedReceipt.receipt_tax_values || selectedReceipt?.receipt_tax_values || []
+                      ),
+                      storeName: editedReceipt.storeName || selectedReceipt?.storeName || "",
+                      expenseType: editedReceipt.expense_type ?? selectedReceipt?.expense_type ?? "",
+                      receiptCategory: editedReceipt.receipt_category ?? selectedReceipt?.receipt_category ?? 0,
+                      paymentLogo: getPaymentLogo({ ...selectedReceipt, ...editedReceipt }),
+                      paymentTitle: getPaymentDisplayName({ ...selectedReceipt, ...editedReceipt }) || "",
+                      thumbnailUrl: (() => {
+                        const urls = collectReceiptMediaUrlsForSave();
+                        const first = (urls || []).find((u) => u && !/\.pdf($|\?)/i.test(u));
+                        return first ? proxyImageUrl(first) : null;
+                      })(),
+                      dateLabel: formatReceiptDate({
+                        product_date: editedReceipt.product_date ?? selectedReceipt?.product_date,
+                        create_date: selectedReceipt?.create_date,
+                      }),
+                    }}
+                    splits={splits}
+                    activeSplitIndex={activeSplitIndex}
+                    splitErrors={splitErrors}
+                    splitError={splitError}
+                    allExpenseCategories={allExpenseCategories}
+                    maxDescriptionLength={MAX_DESCRIPTION_LENGTH}
+                    onUpdateField={updateSplitField}
+                    onAddSplit={addSplit}
+                    onRemoveSplit={removeSplit}
+                    onOpenSplit={setActiveSplitIndex}
+                    onAlert={(msg) => setAlertMsg({ title: "Sorry", message: msg })}
+                    splitLabel={splitLabel}
+                    splitBaseName={splitBaseName}
+                  />
                 ) : (
                 <AnimatePresence mode="wait" custom={direction}>
                   <motion.div
