@@ -2481,7 +2481,8 @@ setMerchantsWithImages(
     return {
       id: parseInt(receipt.id),
       storeName: receipt.storeName ?? "",
-      product_name: receipt.product_name ?? "",
+      // Blank Describe Purchase → null (never "0"); "0" would show literally on mobile.
+      product_name: toApiTextValue(receipt.product_name),
       emailAttachment: receipt.emailAttachment ?? "0",
       // purchasePrice is the canonical total in the WebApp (kept equal to
       // total_amount on load; only purchasePrice is edited). Resolve once,
@@ -2501,7 +2502,8 @@ setMerchantsWithImages(
       expense_type: receipt.expense_type ?? "",
       receipt_image: receipt.receipt_image ?? "0",
       store_image: receipt.store_image ?? "",
-      notes: receipt.notes ?? "",
+      // Blank Notes → null (never "0"); "0" would show literally on mobile.
+      notes: toApiTextValue(receipt.notes),
       receipt_forwarded: receipt.receipt_forwarded ?? "0",
       receipt_tag: receipt.receipt_tag ?? "",
       is_draft: parseInt(receipt.is_draft ?? 0) || 0,
@@ -2995,7 +2997,9 @@ setMerchantsWithImages(
         : {
         id: parseInt(receiptId),
         storeName: getValue("storeName", ""),
-        product_name: getValue("product_name", ""),
+        // Never resend "0" for Describe Purchase: a stored/legacy "0" (or "") goes
+        // out as null so mobile stops showing a literal "0"; real text is kept.
+        product_name: toApiTextValue(fromApiTextValue(getValue("product_name", ""))),
         emailAttachment: apiMediaFields.emailAttachment,
         // purchasePrice is the WebApp's single source of truth for the receipt
         // total — the Total field only ever writes purchasePrice, never
@@ -3099,7 +3103,8 @@ setMerchantsWithImages(
         })(),
         receipt_image: apiMediaFields.receipt_image,
         store_image: getValue("store_image", ""),
-        notes: getValue("notes", ""),
+        // Same for Notes: legacy/stored "0" (or "") → null, real text preserved.
+        notes: toApiTextValue(fromApiTextValue(getValue("notes", ""))),
         receipt_forwarded: getValue("receipt_forwarded", "0"),
         receipt_tag: getValue("receipt_tag", ""),
         // Persist draft/verify transitions (e.g. draft -> regular receipt after save)
