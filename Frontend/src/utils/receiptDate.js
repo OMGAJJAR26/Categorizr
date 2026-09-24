@@ -9,13 +9,13 @@ const ONE_DAY_MS = 86400000;
 const UTC_NOON_OFFSET_SEC = 43200; // 12:00:00 UTC — safe calendar-day anchor for all TZs
 
 /**
- * Sentinel written when a receipt date is explicitly cleared ("No Date").
- * The backend treats 0 / "" / null as "no change" (keeps the previous date), so an
- * intentional clear is stored as a tiny non-zero value instead. Any product_date below
- * 1,000,000 is treated as undated everywhere (resolveReceiptCalendarUnix / formatReceiptDate),
- * and the fetch-time normaliser collapses it to 0 for a clean "No Date" receipt.
+ * Value written when a receipt date is explicitly cleared ("No Date").
+ * The backend now clears product_date when it receives 0 (verified live), so an
+ * intentional clear is sent as 0 — not a tiny non-zero sentinel. Any product_date
+ * below 1,000,000 is treated as undated everywhere (resolveReceiptCalendarUnix /
+ * formatReceiptDate), and the fetch-time normaliser collapses it to 0.
  */
-export const NO_DATE_SENTINEL_UNIX = 1;
+export const NO_DATE_SENTINEL_UNIX = 0;
 
 /** Parse API unix seconds (handles ms by mistake). */
 export function parseReceiptUnix(value) {
