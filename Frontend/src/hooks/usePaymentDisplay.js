@@ -2,9 +2,11 @@ import { useCallback } from "react";
 import {
   inferCardTypeFromPayment,
   isCustomCardIssuer,
+  normalizeLast4,
   normalizePaymentField,
   normalizePaymentMatchKey,
   parsePaymentDisplay,
+  stripLast4Suffix,
 } from "../utils/paymentMethodUtils";
 const Visa              = "/payment-logos/Visa.png";
 const MasterCard        = "/payment-logos/MasterCard.png";
@@ -33,7 +35,10 @@ const LOGO_MAP = {
   cash: Cash,
   debitcard: DebitCard,
   creditcard: Creditdebitcardicon,
-  bank: MasterCard, // Use MasterCard logo as default for bank cards (like mobile app)
+  // A bank name says nothing about the card network, so fall back to the neutral
+  // card icon. Defaulting to MasterCard showed e.g. an Amex on "Bank of America"
+  // as a MasterCard, contradicting the network shown elsewhere for that receipt.
+  bank: Creditdebitcardicon,
   other: Creditdebitcardicon, // Use credit card icon for Starbucks, gift cards, and other
 };
 
@@ -73,23 +78,20 @@ export function getPaymentDisplayFromReceipt(receipt) {
   const cashHint = `${issuer} ${type} ${selectedType}`.toLowerCase();
   if (cashHint.includes("cash")) return "Cash";
 
-  let last4 = "";
-  const last4Raw = normalizePaymentField(
-    receipt?.last_4_digit_card || receipt?.last4DigitCard
+  let last4 = normalizeLast4(
+    normalizePaymentField(receipt?.last_4_digit_card || receipt?.last4DigitCard)
   );
-  if (last4Raw && /^\d{3,4}$/.test(last4Raw)) {
-    last4 = last4Raw;
-  } else if (type.includes("*")) {
+  if (!last4 && type.includes("*")) {
     last4 = parsePaymentDisplay(type).last4;
   }
 
-  const typeBase = (type || selectedType).replace(/\s*\*\d{3,4}$/, "").trim();
+  const typeBase = stripLast4Suffix(type || selectedType);
   const brand =
     typeBase ||
     inferCardTypeFromPayment(issuer || type || selectedType);
 
   if (issuer && issuer !== "0") {
-    const cleanIssuer = issuer.replace(/\s*\*\d{3,4}/g, "").trim();
+    const cleanIssuer = stripLast4Suffix(issuer);
     const displayBase = isCustomCardIssuer(cleanIssuer, brand)
       ? cleanIssuer
       : brand || cleanIssuer;
@@ -165,8 +167,7 @@ export function getReceiptsMatchingPaymentMethod(receipts, methodName) {
 
 /** Card type is "Other" — always use the generic credit-card icon until user picks another type. */
 const isOtherCardType = (paymentType) => {
-  const baseType = (paymentType || "").replace(/\s*\*\d{3,4}$/, "").trim().toLowerCase();
-  return baseType === "other";
+  return stripLast4Suffix(paymentType).toLowerCase() === "other";
 };
 
 export const usePaymentDisplay = () => {
@@ -195,7 +196,7 @@ export const usePaymentDisplay = () => {
 
     const networkFromStr = (s) => {
       if (!s || s === "0") return null;
-      const base = s.replace(/\s*\*\d{3,4}$/, "").trim();
+      const base = stripLast4Suffix(s);
       if (!base || base === "0") return null;
       const network = detectCardNetwork(base);
       return network ? LOGO_MAP[network] : null;
@@ -246,7 +247,7 @@ export const usePaymentDisplay = () => {
     const allSources = [paymentType, cardIssuerName, paymentBrand];
     for (const src of allSources) {
       if (!src || src === "0") continue;
-      const base = src.replace(/\s*\*\d{3,4}$/, "").toLowerCase().trim();
+      const base = stripLast4Suffix(src).toLowerCase();
       if (base === "other") return LOGO_MAP.other;
       if (base.includes("starbucks") || base.includes("gift")) {
         return LOGO_MAP.other;
@@ -262,7 +263,7 @@ export const usePaymentDisplay = () => {
     ];
     for (const src of allSources) {
       if (!src || src === "0") continue;
-      const base = src.replace(/\s*\*\d{3,4}$/, "").toLowerCase().trim();
+      const base = stripLast4Suffix(src).toLowerCase();
       if (bankNames.some((b) => base.includes(b)) || /^bm[\s*]/.test(base)) {
         return LOGO_MAP.bank;
       }

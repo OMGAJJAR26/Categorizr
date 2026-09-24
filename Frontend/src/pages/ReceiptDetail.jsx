@@ -61,8 +61,10 @@ import {
   inferCardTypeFromPayment,
   mergePaymentMethodLabels,
   isCustomCardIssuer,
+  normalizeLast4,
   normalizePaymentMatchKey,
   parsePaymentDisplay,
+  stripLast4Suffix,
   paymentCategoryFromApiEnum,
   getPaymentDefaultExpenseType,
   expenseTypeToReceiptCategory,
@@ -899,23 +901,20 @@ useEffect(() => {
         const last4 =
           selectedReceipt.last_4_digit_card?.toString?.().trim?.() || "";
 
-        // Extract base type — strip ALL *digits occurrences (not just the last one)
-        // This handles corrupted values like "Visa *0700 *0700" → "Visa"
-        const baseType = type.replace(/\s*\*\d{3,4}/g, "").trim();
+        // Extract base type — strip EVERY *digits occurrence, whatever the digit
+        // count. This handles both "Visa *0700 *0700" → "Visa" and the junk " *0"
+        // suffix written for cards saved without a card number. Matching only
+        // 3-4 digits left "American Express *0" intact, which the check below then
+        // read as corrupt and threw the real brand away.
+        const baseType = stripLast4Suffix(type);
 
         // Filter out invalid values like "0", "0*0", "0*123"
-        if (
-          !baseType ||
-          baseType === "0" ||
-          baseType === "0*0" ||
-          /^0\*\d*$/.test(baseType) ||
-          /\*\s*0$/.test(baseType)
-        ) {
+        if (!baseType || baseType === "0" || /^0\*\d*$/.test(baseType)) {
           // Use card_issuer_name if available
           if (issuer && issuer !== "0") {
             // Normalize known payment networks to proper format
             // Also strip any accidentally embedded *digits from issuer
-            const cleanIssuer = issuer.replace(/\s*\*\d{3,4}/g, "").trim();
+            const cleanIssuer = stripLast4Suffix(issuer);
             const issuerLower = cleanIssuer.toLowerCase();
             let normalizedIssuer = cleanIssuer;
             if (issuerLower.includes("diners")) {
@@ -935,15 +934,17 @@ useEffect(() => {
               normalizedIssuer = "American Express";
             }
             // Construct display format with *last4 if available
-            return last4 && last4 !== "0"
-              ? `${normalizedIssuer} *${last4}`
+            const realLast4 = normalizeLast4(last4);
+            return realLast4
+              ? `${normalizedIssuer} *${realLast4}`
               : normalizedIssuer;
           }
           // If no issuer, try to construct from paymentBrand if available
           const brand =
             selectedReceipt.paymentBrand?.toString?.().trim?.() || "";
           if (brand && brand !== "0") {
-            return last4 && last4 !== "0" ? `${brand} *${last4}` : brand;
+            const realLast4 = normalizeLast4(last4);
+            return realLast4 ? `${brand} *${realLast4}` : brand;
           }
           return "";
         }

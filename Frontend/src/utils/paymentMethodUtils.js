@@ -20,20 +20,41 @@ export const normalizePaymentMatchKey = (value) =>
     .replace(/\s+/g, " ")
     .toLowerCase();
 
+/**
+ * Strip every "*digits" segment, regardless of digit count.
+ *
+ * Stripping must be more permissive than last4 extraction below: records saved
+ * without a card number end up with a junk " *0" suffix, and a 3-4 digit-only
+ * pattern leaves it behind. That leftover then makes callers treat an otherwise
+ * valid brand ("American Express *0") as corrupt and discard it.
+ */
+export const stripLast4Suffix = (value) =>
+  String(value ?? "")
+    .replace(/\s*\*\d+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+
+/**
+ * A real last4 is 3-4 digits. The API stores "0" (and "-") when a record has no
+ * card number, and that "0" is what leaked out as a " *0" display suffix.
+ * Note a genuine card ending 0000 still passes — only the length rule applies.
+ */
+export const normalizeLast4 = (value) => {
+  const digits = String(value ?? "").trim();
+  return /^\d{3,4}$/.test(digits) ? digits : "";
+};
+
 export const parsePaymentDisplay = (value) => {
   const raw = (value || "").toString().trim();
   if (!raw) return { issuer: "", last4: "" };
 
   // Use the last *#### segment as canonical last4 (handles "Other *0009 *0009" from API)
   const last4Match = raw.match(/\*(\d{3,4})\s*$/);
-  const last4 = last4Match ? last4Match[1] : "";
+  const last4 = normalizeLast4(last4Match ? last4Match[1] : "");
 
-  let issuer = raw;
-  if (last4) {
-    issuer = raw.replace(new RegExp(`(?:\\s*\\*${last4}\\s*)+$`, "i"), "").trim();
-  }
-  // Remove any remaining embedded *#### so brand/issuer is clean (e.g. "Other" not "Other *0009")
-  issuer = issuer.replace(/\s*\*\d{3,4}\s*/g, " ").trim().replace(/\s+/g, " ");
+  // Remove every *digits segment so brand/issuer is clean ("Other" not "Other *0009",
+  // "American Express" not "American Express *0").
+  const issuer = stripLast4Suffix(raw);
 
   return { issuer, last4 };
 };
@@ -216,7 +237,9 @@ export const getLast4FromPaymentApiRecord = (m) => {
   const legacy = parsePaymentDisplay(cn);
   if (legacy.last4) return legacy.last4;
   const digits = cn.replace(/\D/g, "");
-  return digits.length >= 4 ? digits.slice(-4) : digits;
+  // Drop anything that isn't a 3-4 digit last4 (e.g. the API's "0") so a card saved
+  // without a number never produces a " *0" suffix downstream.
+  return normalizeLast4(digits.length >= 4 ? digits.slice(-4) : digits);
 };
 
 export const getBrandFromPaymentApiRecord = (m, payCardMap = {}) => {
