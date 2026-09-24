@@ -12,6 +12,11 @@ import {
 } from "../utils/expenseCategories";
 import { enrichReceiptTaxValues } from "../utils/taxTypeUtils";
 import {
+  CLEARABLE_TEXT_FIELDS,
+  fromApiTextValue,
+  toApiTextValue,
+} from "../utils/receiptTextFields";
+import {
   dedupeReceiptMediaAcrossReceipts,
   resolveReceiptMediaFieldsForApi,
   receiptMediaStorageKey,
@@ -1495,7 +1500,9 @@ export const DataProvider = ({ children }) => {
                 : _rawStoreImage;
               const storeImage = /localhost|127\.0\.0\.1/i.test(_storeImageUnproxied) ? "" : _storeImageUnproxied;
               const expenseType = getReceiptExpenseType(r, apiExpenseCategoriesData);
-              const productName = r.product_name ?? r.productName ?? "";
+              // "0" is the API's cleared-field sentinel, not a description.
+              const productName = fromApiTextValue(r.product_name ?? r.productName);
+              const notes = fromApiTextValue(r.notes);
               // iOS sends purchase_price (snake_case); web sends purchasePrice (camelCase)
               const purchasePrice = r.purchasePrice ?? r.purchase_price ?? "";
               // iOS may send receiptImage (camelCase) instead of receipt_image
@@ -1518,6 +1525,7 @@ export const DataProvider = ({ children }) => {
                 store_image: storeImage,
                 expense_type: expenseType,
                 product_name: productName,
+                notes,
                 purchasePrice: purchasePrice, // normalize snake_case purchase_price → camelCase
                 receipt_image: receiptImage,  // normalize camelCase receiptImage → snake_case
                 emailAttachment: (r.emailAttachment ?? "").toString(),
@@ -3135,6 +3143,17 @@ setMerchantsWithImages(
         updatePayload.receipt_tax_values = Array.isArray(apiUpdates.receipt_tax_values)
           ? apiUpdates.receipt_tax_values
           : [];
+      }
+
+      // Explicit text clear (Describe Purchase / Notes) → honour it in BOTH payload
+      // branches. The backend ignores "" and keeps the previous value, so emptying
+      // Describe Purchase returned 200 with the OLD text echoed back and never saved.
+      // Only convert when the caller actually sent the field, so background syncs
+      // (media heal, logo/expense sync) can't blank a description they never touched.
+      for (const field of CLEARABLE_TEXT_FIELDS) {
+        if (Object.prototype.hasOwnProperty.call(apiUpdates, field)) {
+          updatePayload[field] = toApiTextValue(apiUpdates[field]);
+        }
       }
 
       // Explicit date clear → "No Date". The user cleared the date when product_date is
