@@ -131,6 +131,7 @@ const ReceiptSplitScreen = ({
                             value={t.tax_amount ?? ""}
                             onChange={(e) => {
                               const v = parseFloat(e.target.value) || 0;
+                              if (v < 0) return; // no negative tax amounts on a split
                               if (maxTax > 0 && v > maxTax + 0.005) { onAlert?.(AGGREGATE_MSG); return; }
                               const updatedTaxes = split.receipt_tax_values.map((tv, tvi) => tvi === ti ? { ...tv, tax_amount: e.target.value } : tv);
                               onUpdateField(activeSplitIndex, "receipt_tax_values", updatedTaxes);

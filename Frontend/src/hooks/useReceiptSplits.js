@@ -107,7 +107,9 @@ export function useReceiptSplits(main, opts = {}) {
    */
   const updateSplitField = (idx, field, value) => {
     if (field === "subtotal" || field === "purchasePrice" || field === "tip") {
-      value = sanitizeMoneyInput(value);
+      // Splits have no +/- toggle — negative amounts are never valid here, so drop
+      // any leading minus (sanitizeMoneyInput keeps it for the main form's refunds).
+      value = sanitizeMoneyInput(value).replace(/^-/, "");
     }
     if (field === "product_name") {
       value = (value || "").toString().slice(0, maxDescriptionLength);
