@@ -2,31 +2,34 @@
  * Clearing free-text receipt fields (Describe Purchase, Notes).
  *
  * updateReceiptv1 ignores empty strings: a field sent as "" keeps whatever the
- * server already had, and the response echoes the OLD value back. So emptying
- * Describe Purchase looked like it saved (HTTP 200) but never persisted.
+ * server already had. The WebApp used to send the string "0" to force a clear,
+ * but "0" is NOT user content — iOS and Android render it literally in Describe
+ * Purchase / Notes (they have no sentinel translation). So outgoing blanks now go
+ * out as null (JSON null) instead: no other client ever shows a stray "0".
  *
- * The API's convention for "this field is now blank" is the string "0" — the same
- * sentinel the payment fields already use (see CLEAR_PAYMENT_API_VALUE) and the
- * value receipt filtering already reads as "no description". Sending "0" does
- * overwrite, so clearing goes out as "0" and comes back in as "".
+ * On the way IN we still collapse the legacy "0" sentinel (and null/"") to empty,
+ * so receipts saved by older builds — or by mobile — never display a literal "0".
  */
+
+/** Legacy sentinel older records may still carry in these fields (read-only now). */
 export const CLEAR_TEXT_API_VALUE = "0";
 
 /** Free-text fields the user can legitimately blank out. */
 export const CLEARABLE_TEXT_FIELDS = ["product_name", "notes"];
 
 /**
- * Outgoing value for updateReceiptv1. Blank becomes the clear sentinel, because
- * "" would be silently ignored by the server.
+ * Outgoing value for updateReceiptv1. Blank goes out as null (never "0"), so the
+ * cleared field can't surface as a literal "0" on other devices. Real text passes
+ * through untouched.
  */
 export const toApiTextValue = (value) => {
   const text = (value ?? "").toString();
-  return text.trim() === "" ? CLEAR_TEXT_API_VALUE : text;
+  return text.trim() === "" ? null : text;
 };
 
 /**
- * Incoming value from the API. The clear sentinel is not user content, so it
- * reads back as empty rather than showing a literal "0" in the field.
+ * Incoming value from the API. The legacy clear sentinel "0" is not user content,
+ * so it reads back as empty rather than showing a literal "0" in the field.
  *
  * Trade-off: a description of exactly "0" is indistinguishable from cleared. That
  * already matched existing behaviour — receipt filtering treated product_name "0"
