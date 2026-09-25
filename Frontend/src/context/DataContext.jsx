@@ -503,8 +503,10 @@ export const DataProvider = ({ children }) => {
     const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
     // The store API is parameterized (verified live: a raw apostrophe stores as-is),
     // so DO NOT escape here — escaping would double it ("Lowe's" → "Lowe''s") and
-    // create a mismatched/duplicate merchant on iOS and other platforms.
-    const payload = { store_name: name.trim(), store_image_url: logoUrl || "", fk_user_id };
+    // create a mismatched/duplicate merchant on iOS and other platforms. Un-escape so
+    // an already-doubled name (from a legacy corrupted row) is normalized back to one
+    // apostrophe rather than re-sent doubled.
+    const payload = { store_name: unescapeMerchantName(name.trim()), store_image_url: logoUrl || "", fk_user_id };
     console.log("%c[Merchants] POST /userstore/addStorev1 →", "color:#22c55e;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userstore/addStorev1`, {
@@ -541,8 +543,10 @@ export const DataProvider = ({ children }) => {
     const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
     // Parameterized store API (verified live) — send the raw name. Escaping here was
     // doubling the apostrophe ("Lowe's" → "Lowe''s"), which renamed the merchant and
-    // spawned a duplicate on save (e.g. when only the logo was edited).
-    const payload = { id, store_name: name.trim(), store_image_url: logoUrl || "", fk_user_id };
+    // spawned a duplicate on save (e.g. when only the logo was edited). Un-escape so a
+    // legacy already-doubled name is normalized back to one apostrophe (repairs the row
+    // on the next edit) instead of being re-sent doubled.
+    const payload = { id, store_name: unescapeMerchantName(name.trim()), store_image_url: logoUrl || "", fk_user_id };
     console.log("%c[Merchants] POST /userstore/updateStorev1 →", "color:#f59e0b;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userstore/updateStorev1`, {
