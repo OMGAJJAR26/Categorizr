@@ -890,7 +890,13 @@ useEffect(() => {
       const nonTipTaxValuesFlagged = nonTipTaxValues.map((t) => {
         if (t._isManual) return t;
         const stored = parseFloat(t.tax_amount);
-        if (isNaN(stored) || stored === 0) return t;
+        if (isNaN(stored)) return t; // no amount entered yet → let it auto-compute
+        // An explicitly stored 0 is an intentional "no tax" — including forwarded/split
+        // lines that carry a rate (e.g. Cgst 12%) but a 0 amount. Preserve it on load so
+        // merely opening/sharing the receipt never recomputes 0 into a non-zero tax (which
+        // also silently changed the subtotal). A later total edit still recomputes it, since
+        // handleFieldChange clears _autoFlagged for total changes.
+        if (stored === 0) return { ...t, _isManual: true, _autoFlagged: true };
         const rate = resolveTaxRateForReceipt(t);
         const autoAmount =
           rate > 0
