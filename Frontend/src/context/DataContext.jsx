@@ -501,7 +501,10 @@ export const DataProvider = ({ children }) => {
     if (!token || !name.trim()) return { ok: false, data: null, error: "Missing token or merchant name" };
     untombstoneMerchant(name.trim()); // re-adding clears any prior deletion tombstone
     const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
-    const payload = { store_name: escapeSqlApostrophe(name.trim()), store_image_url: logoUrl || "", fk_user_id };
+    // The store API is parameterized (verified live: a raw apostrophe stores as-is),
+    // so DO NOT escape here — escaping would double it ("Lowe's" → "Lowe''s") and
+    // create a mismatched/duplicate merchant on iOS and other platforms.
+    const payload = { store_name: name.trim(), store_image_url: logoUrl || "", fk_user_id };
     console.log("%c[Merchants] POST /userstore/addStorev1 →", "color:#22c55e;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userstore/addStorev1`, {
@@ -536,7 +539,10 @@ export const DataProvider = ({ children }) => {
     const token = localStorage.getItem("token");
     if (!token) return { ok: false, data: null, error: "Missing token" };
     const fk_user_id = parseInt(localStorage.getItem("fk_user_id")) || 0;
-    const payload = { id, store_name: escapeSqlApostrophe(name.trim()), store_image_url: logoUrl || "", fk_user_id };
+    // Parameterized store API (verified live) — send the raw name. Escaping here was
+    // doubling the apostrophe ("Lowe's" → "Lowe''s"), which renamed the merchant and
+    // spawned a duplicate on save (e.g. when only the logo was edited).
+    const payload = { id, store_name: name.trim(), store_image_url: logoUrl || "", fk_user_id };
     console.log("%c[Merchants] POST /userstore/updateStorev1 →", "color:#f59e0b;font-weight:bold", payload);
     try {
       const res = await fetch(`${BASE_URL}/userstore/updateStorev1`, {
