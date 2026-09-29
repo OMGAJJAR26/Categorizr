@@ -330,6 +330,32 @@ export function resolveReceiptMediaFieldsForApi(receiptId, updates, allReceipts)
 // new receipts, so a child split from an OLD original is always far outside the window.
 const SPLIT_FAMILIES_KEY = "cat_split_media_families";
 
+// Merge families that share any id into one (connected components). Re-splitting a
+// receipt records a new family that overlaps the previous one (both contain the parent);
+// without merging, the parent would belong to only its LAST family and the dedup could
+// blank the shared image on members of the earlier family. Merging keeps the original +
+// ALL its split descendants in one family, so every member keeps the image.
+function mergeConnectedFamilies(list) {
+  const fams = (list || [])
+    .filter((f) => Array.isArray(f))
+    .map((f) => new Set(f.map((x) => String(x))));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let i = 0; i < fams.length; i++) {
+      for (let j = i + 1; j < fams.length; j++) {
+        if ([...fams[j]].some((id) => fams[i].has(id))) {
+          fams[j].forEach((id) => fams[i].add(id));
+          fams.splice(j, 1);
+          changed = true;
+          j--;
+        }
+      }
+    }
+  }
+  return fams.map((s) => [...s]);
+}
+
 export function recordSplitMediaFamily(ids) {
   try {
     const clean = [
@@ -339,8 +365,11 @@ export function recordSplitMediaFamily(ids) {
     const raw = JSON.parse(localStorage.getItem(SPLIT_FAMILIES_KEY) || "[]");
     const list = Array.isArray(raw) ? raw : [];
     list.push(clean);
+    // Merge overlapping families (re-split of the same receipt) so the parent and all its
+    // split descendants stay in ONE family and every member keeps the shared image.
+    const merged = mergeConnectedFamilies(list);
     // Bound the registry so it can't grow without limit.
-    localStorage.setItem(SPLIT_FAMILIES_KEY, JSON.stringify(list.slice(-300)));
+    localStorage.setItem(SPLIT_FAMILIES_KEY, JSON.stringify(merged.slice(-300)));
   } catch {
     /* localStorage unavailable / quota — dedup simply falls back to the 60s window */
   }
