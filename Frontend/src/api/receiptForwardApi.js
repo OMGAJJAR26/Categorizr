@@ -68,6 +68,12 @@ const getReceiptTaxValues = (receipt) => {
   return [];
 };
 
+// forwardreceiptv2 is NOT parameterized — a raw apostrophe in any text field
+// ("Lowe's", "Lowe's (2)") breaks its SQL (non-JSON "Invalid query" error). It builds
+// the query by string concat, so escaping a single quote as '' makes MySQL store ONE
+// literal apostrophe (correct, not doubled).
+const escapeSqlApostrophe = (s) => (s ?? "").toString().replace(/'/g, "''");
+
 /** Tax lines for a newly created receipt on the recipient account. */
 const buildForwardTaxValues = (receipt, recipientUserId) => {
   const recipientId = toPositiveInt(recipientUserId);
@@ -96,7 +102,7 @@ const buildForwardTaxValues = (receipt, recipientUserId) => {
     fk_user_id: recipientId || toPositiveInt(t.fk_user_id),
     fk_receipt_id: 0,
     fk_tax_id: toInt(t.fk_tax_id),
-    tax_name: (t.tax_name || "").toString(),
+    tax_name: escapeSqlApostrophe((t.tax_name || "").toString()),
     tax_rate: (t.tax_rate ?? "0").toString(),
     tax_amount: (parseFloat(t.tax_amount) || 0).toString(),
     created: 0,
@@ -159,8 +165,8 @@ export const buildForwardPayload = (receipt, recipientUserId, opts = {}) => {
   return {
     id: sourceReceiptId,
     forward_to_user_id: recipientId,
-    storeName: receipt.storeName || receipt.store_name || "",
-    product_name: receipt.product_name || receipt.productName || "",
+    storeName: escapeSqlApostrophe(receipt.storeName || receipt.store_name || ""),
+    product_name: escapeSqlApostrophe(receipt.product_name || receipt.productName || ""),
     emailAttachment: (receipt.emailAttachment || "0").toString(),
     purchasePrice: (receipt.purchasePrice ?? receipt.purchase_price ?? "0").toString(),
     total_amount: (
@@ -176,18 +182,18 @@ export const buildForwardPayload = (receipt, recipientUserId, opts = {}) => {
     status: toInt(receipt.status, 1),
     paymentType: basePaymentType || paymentType,
     last_4_digit_card: last4,
-    card_issuer_name: receipt.card_issuer_name || receipt.cardIssuerName || "",
+    card_issuer_name: escapeSqlApostrophe(receipt.card_issuer_name || receipt.cardIssuerName || ""),
     payment_logo_url: receipt.paymentDisplay?.logoUrl || receipt.payment_logo_url || receipt.paymentLogoUrl || "",
     fk_original_receipt_id: originalId,
     fk_forward_from_receipt_id: String(sourceReceiptId),
     receipt_category: toInt(receipt.receipt_category),
     product_date: mobileProductDate,
-    expense_type: receipt.expense_type || receipt.expenseType || "",
-    expenseType: receipt.expense_type || receipt.expenseType || "",  // camelCase alias — some API versions use this field name
+    expense_type: escapeSqlApostrophe(receipt.expense_type || receipt.expenseType || ""),
+    expenseType: escapeSqlApostrophe(receipt.expense_type || receipt.expenseType || ""),  // camelCase alias — some API versions use this field name
     receipt_image: (receipt.receipt_image || receipt.receiptImage || "0").toString(),
     store_image: receipt.store_image || receipt.storeImage || "",
     receipt_tag: receipt.receipt_tag || "0,0,0,0,0,0,0",
-    notes: receipt.notes || "",
+    notes: escapeSqlApostrophe(receipt.notes || ""),
     receipt_forwarded: "1",
     // Match product_date so mobile date heuristics never shift the forwarded day
     create_date: String(
