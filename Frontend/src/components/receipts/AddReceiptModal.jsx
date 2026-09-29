@@ -3178,11 +3178,21 @@ const handleFieldChange = (field, value) => {
   /** POST a payload to addReceiptv1 and return the response data */
   const postNewReceipt = async (payload) => {
     const token = localStorage.getItem("token");
-    console.log("%c[Receipt] POST /api/receipt/addReceiptv1 payload:", "color:#22c55e;font-weight:bold", payload);
+    // addReceiptv1 is NOT parameterized — a raw apostrophe in storeName/product_name
+    // ("Lowe's", "Lowe's (2)") breaks its SQL (non-JSON "Invalid query" error, which then
+    // fails JSON.parse → "Failed to save splits"). It builds the query by string concat, so
+    // escaping a single quote as '' makes MySQL store ONE literal apostrophe (correct).
+    const esc = (s) => (s ?? "").toString().replace(/'/g, "''");
+    const safePayload = {
+      ...payload,
+      storeName: esc(payload.storeName),
+      product_name: esc(payload.product_name),
+    };
+    console.log("%c[Receipt] POST /api/receipt/addReceiptv1 payload:", "color:#22c55e;font-weight:bold", safePayload);
     const response = await fetch("/api/receipt/addReceiptv1", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accesstoken: token },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(safePayload),
     });
     if (!response.ok) throw new Error(`Failed to save receipt: ${response.status}`);
     const data = await response.json();

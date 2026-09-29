@@ -3241,10 +3241,21 @@ useEffect(() => {
   /** POST a new receipt payload to addReceiptv1 */
   const postNewReceiptForSplit = async (payload) => {
     const token = localStorage.getItem("token");
+    // addReceiptv1 is NOT parameterized — a raw apostrophe in storeName/product_name
+    // ("Lowe's", "Lowe's (2)") breaks its SQL (returns a non-JSON "Invalid query" error).
+    // Escape single quotes just for the create (MySQL reads '' as one literal '); the
+    // post-create updateReceiptv1 patch below rewrites the RAW values (that endpoint IS
+    // parameterized), so the stored name ends up correct and un-doubled.
+    const esc = (s) => (s ?? "").toString().replace(/'/g, "''");
+    const safePayload = {
+      ...payload,
+      storeName: esc(payload.storeName),
+      product_name: esc(payload.product_name),
+    };
     const res = await fetch("/api/receipt/addReceiptv1", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accesstoken: token },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(safePayload),
     });
     if (!res.ok) throw new Error(`Failed to save split receipt: ${res.status}`);
     return res.json();
@@ -3484,6 +3495,7 @@ useEffect(() => {
         if (newId) {
           newSplitPatches.push({
             id: newId,
+            storeName, // raw name — updateReceiptv1 (parameterized) rewrites the create's escaped one
             expense_type: splitExpenseType,
             receipt_category: splitCategory,
             product_name: splitProductName,
@@ -3504,6 +3516,7 @@ useEffect(() => {
           newSplitPatches.map((sp) => {
             const patch = {
               id: sp.id,
+              storeName: sp.storeName, // rewrite the escaped create name back to raw (Lowe's, not Lowe''s)
               expense_type: sp.expense_type,
               receipt_category: sp.receipt_category,
               payment_category_type: sp.receipt_category,
