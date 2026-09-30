@@ -153,14 +153,7 @@ export const buildForwardPayload = (receipt, recipientUserId, opts = {}) => {
       ? String(receipt.fk_original_receipt_id)
       : String(sourceReceiptId);
 
-  const mobileProductDate = calendarUnixToMobileUnix(
-    receipt.product_date,
-    receipt.product_date ?? receipt.create_date ?? receipt.createDate,
-    {
-      isDraft: receipt.is_draft === "1" || receipt.is_draft === 1,
-      fk_incoming_email_id: receipt.fk_incoming_email_id,
-    },
-  );
+  const mobileProductDate = calendarUnixToMobileUnix(receipt.product_date);
 
   return {
     id: sourceReceiptId,

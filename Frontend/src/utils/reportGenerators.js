@@ -571,7 +571,7 @@ export const generateSummaryHTML = ({
   const groupedByYear = {};
   filteredReceipts.forEach((receipt) => {
     const year = receipt.product_date
-      ? new Date(Number(receipt.product_date) * 1000).getFullYear()
+      ? new Date(Number(receipt.product_date) * 1000).getUTCFullYear()
       : "No Date";
     if (!groupedByYear[year]) groupedByYear[year] = [];
     groupedByYear[year].push(receipt);

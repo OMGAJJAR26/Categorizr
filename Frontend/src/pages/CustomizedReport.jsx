@@ -4,6 +4,7 @@ import { useDisableToggle } from "../hooks/useDisableToggle";
 import CsvExportModal from "../components/CsvExportModal";
 import PdfDownload from "../components/PdfDownloadCustomisedReport";
 import SimpleAlertModal from "../components/SimpleAlertModal";
+import { pickedCalendarDayMs, receiptCalendarDayMs } from "../utils/receiptDate";
 // import * as XLSX from "xlsx";
 
 // All Hooks
@@ -318,13 +319,16 @@ const CustomizedReport = forwardRef((props, ref) => {
 
       const matchesDate = (() => {
         if (!dateRange.startDate || !dateRange.endDate) return true;
-        const receiptTs = Number(receipt.product_date || receipt.create_date);
-        if (!Number.isFinite(receiptTs)) return false;
-        const d = new Date(receiptTs * 1000);
-        const start = new Date(dateRange.startDate);
-        const end = new Date(dateRange.endDate);
-        end.setHours(23, 59, 59, 999); // inclusive end of day
-        return d >= start && d <= end;
+        // Whole calendar days, so a receipt is reported under the same day the UI
+        // shows it and both ends of the range are inclusive.
+        const day = receiptCalendarDayMs(
+          receipt.product_date || receipt.create_date,
+        );
+        if (!day) return false;
+        const start = pickedCalendarDayMs(dateRange.startDate);
+        const end = pickedCalendarDayMs(dateRange.endDate);
+        if (Number.isNaN(start) || Number.isNaN(end)) return true;
+        return day >= start && day <= end;
       })();
 
       // const matchesTotal =

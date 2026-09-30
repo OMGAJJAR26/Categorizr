@@ -1,7 +1,11 @@
 import { getPaymentDisplayFromReceipt } from "../hooks/usePaymentDisplay";
 import { parseReceiptTags, toTaxLabel } from "./receiptFormatters";
 import { TAG_STATUS_GROUPS } from "./tagStatusGroups";
-import { formatReceiptDate } from "./receiptDate";
+import {
+  formatReceiptDate,
+  pickedCalendarDayMs,
+  receiptCalendarDayMs,
+} from "./receiptDate";
 import {
   normalizePaymentListLabel,
   normalizePaymentMatchKey,
@@ -79,23 +83,19 @@ const matchesDate = (receipt, dateRange) => {
   // No active range (or an incomplete one) → include everything.
   if (!dateRange || !dateRange.startDate || !dateRange.endDate) return true;
 
-  const start = dateRange.startDate instanceof Date
-    ? dateRange.startDate
-    : new Date(dateRange.startDate);
-  const end = dateRange.endDate instanceof Date
-    ? dateRange.endDate
-    : new Date(dateRange.endDate);
+  const start = pickedCalendarDayMs(dateRange.startDate);
+  const end = pickedCalendarDayMs(dateRange.endDate);
 
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return true;
+  if (Number.isNaN(start) || Number.isNaN(end)) return true;
 
   // A valid date range is active: receipts with NO date must be excluded — an
-  // undated receipt can't fall inside a date range. (product_date below the
-  // ~1,000,000 sentinel means "No Date".)
-  const pd = Number(receipt.product_date);
-  if (!pd || pd < 1000000) return false;
+  // undated receipt can't fall inside a date range.
+  // Compare whole calendar days so a receipt is filtered under the same day the
+  // UI shows it, and both end days of the range are inclusive.
+  const day = receiptCalendarDayMs(receipt.product_date);
+  if (!day) return false;
 
-  const productDate = new Date(pd * 1000);
-  return productDate >= start && productDate <= end;
+  return day >= start && day <= end;
 };
 
 const matchesMerchants = (receipt, merchants) => {
