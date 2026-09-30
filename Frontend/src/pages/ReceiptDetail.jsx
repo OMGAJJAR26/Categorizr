@@ -1019,8 +1019,9 @@ useEffect(() => {
         receipt_image: selectedReceipt.receipt_image ?? "0",
         emailAttachment: selectedReceipt.emailAttachment ?? "",
       });
-      // Show TIP field if receipt already has a tip value
-      setTipVisible(receiptTip > 0);
+      // Show TIP whenever the receipt carries a tip line — a $0.00 line (written by
+      // mobile when TIP is selected but left empty) still means TIP is selected.
+      setTipVisible(!!tipEntry || receiptTip > 0);
 
       setEditedTags(editedTagsFromReceiptTag(selectedReceipt.receipt_tag));
     }
@@ -3680,6 +3681,7 @@ useEffect(() => {
         existingTipLine,
         fk_receipt_id: selectedReceipt.id,
         fk_user_id,
+        allowZero: tipVisible,
       });
       if (tipLine) receiptTaxValuesPayload.push(tipLine);
 

@@ -81,6 +81,9 @@ export function findTipLineInReceiptTaxValues(taxValues) {
 
 /**
  * Build a receipt_tax_values line for tip so the API/mobile persist it like other taxes.
+ *
+ * `allowZero` keeps a $0.00 line: mobile writes one when TIP is selected but left empty,
+ * and dropping it here would silently unselect TIP the first time the web app saves.
  */
 export function buildReceiptTipTaxEntry({
   tipAmount,
@@ -89,9 +92,10 @@ export function buildReceiptTipTaxEntry({
   existingTipLine = null,
   fk_receipt_id = 0,
   fk_user_id = 0,
+  allowZero = false,
 }) {
   const amount = parseFloat(tipAmount) || 0;
-  if (amount <= 0) return null;
+  if (amount <= 0 && !allowZero) return null;
 
   const tipPercentage =
     subtotal > 0 ? Math.round((amount / subtotal) * 100) : 0;

@@ -529,10 +529,13 @@ const [localMerchants, setLocalMerchants] = useState([]);
         ...t,
         _isManual: parseFloat(t.tax_amount) > 0,
       }));
+      // A $0.00 tip line still counts as "TIP selected" (mobile writes one when the
+      // field is left empty), so carry it over as "0.00" rather than "" — the TIP
+      // pill and field key off formData.tip !== "".
       const extractedTip =
         (initialData.formData.tip ?? "") !== ""
           ? initialData.formData.tip
-          : tipAmt > 0
+          : tipLine
             ? tipAmt.toFixed(2)
             : "";
       setFormData({
@@ -2637,6 +2640,7 @@ const handleFieldChange = (field, value) => {
         existingTipLine,
         fk_receipt_id: 0,
         fk_user_id: parseInt(localStorage.getItem("fk_user_id")) || 0,
+        allowZero: formData.tip !== "",
       });
       if (tipTaxPayload) {
         console.log("Tip tax payload to save:", tipTaxPayload);
