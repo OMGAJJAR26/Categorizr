@@ -121,9 +121,7 @@ const Signup = () => {
           location: country,
         };
 
-        const query = new URLSearchParams(signupPayload).toString();
-
-        const res = await fetch(`/api/user/signup?${query}`, {
+        const res = await fetch("/api/user/signup", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

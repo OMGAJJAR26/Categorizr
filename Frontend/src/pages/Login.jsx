@@ -46,18 +46,17 @@ const Login = () => {
 
   const handleLogin = async (values) => {
     setLoading(true);
-    const query = new URLSearchParams({
-      userName: values.userName,
-      password: values.password,
-    }).toString();
     try {
-      const res = await fetch(`/api/user/login?${query}`, {
+      const res = await fetch("/api/user/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accesstoken: "-",
         },
-        body: JSON.stringify(values),
+        body: JSON.stringify({
+          userName: values.userName,
+          password: values.password,
+        }),
       });
       const data = await res.json();
       if (res.ok && data.authenticationToken) {

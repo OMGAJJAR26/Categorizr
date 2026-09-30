@@ -6,6 +6,9 @@ import "./styles.css";
 import { LoaderProvider } from "./context/LoaderContext";
 import { CurrencyProvider } from "./context/CurrencyContext";
 import { ThemeProvider } from "./context/ThemeContext";
+import { stripCredentialQueryFromLocation } from "./utils/credentialQuery";
+
+stripCredentialQueryFromLocation();
 
 
 ReactDOM.createRoot(document.getElementById("root")).render(

@@ -4,6 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import https from 'https'
+import { handleAuthRequest, matchCredentialRoute } from './api/_lib/forwardAuth.js'
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -227,6 +228,11 @@ export default defineConfig(({ mode }) => {
       name: 'chat-api-handler',
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
+          const upstreamPath = matchCredentialRoute(req.url || '');
+          if (upstreamPath) {
+            handleAuthRequest(req, res, upstreamPath);
+            return;
+          }
           if (req.url?.startsWith('/api/chat')) {
             chatHandler(req, res);
           } else {
