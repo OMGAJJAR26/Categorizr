@@ -1,12 +1,11 @@
 /**
- * Receipt dates are calendar days (no time-of-day).
- * Stored as Unix seconds; mobile may send UTC midnight or Date.now().
- * resolveReceiptCalendarUnix() picks the calendar day the user entered so
- * the same date shows in every country.
+ * Receipt dates are calendar days (no time-of-day), stored as Unix seconds.
+ *
+ * A receipt's date IS its UTC calendar day: the day is read off the stored
+ * timestamp in UTC, and a day the user picks is written back as a UTC timestamp.
+ * No local-timezone reading and no guessing from create_date — every device and
+ * every country shows the same day for the same receipt.
  */
-
-const ONE_DAY_MS = 86400000;
-const UTC_NOON_OFFSET_SEC = 43200; // 12:00:00 UTC — safe calendar-day anchor for all TZs
 
 /**
  * Value written when a receipt date is explicitly cleared ("No Date").
@@ -28,18 +27,6 @@ export function parseReceiptUnix(value) {
   return Math.floor(n);
 }
 
-/** True when timestamp is exactly 00:00:00 UTC. */
-function isUtcDateOnlyUnix(unixSeconds) {
-  const ts = parseReceiptUnix(unixSeconds);
-  return ts > 0 && ts % 86400 === 0;
-}
-
-/** True when timestamp is exactly 12:00:00 UTC (timezone-neutral calendar day). */
-function isUtcNoonUnix(unixSeconds) {
-  const ts = parseReceiptUnix(unixSeconds);
-  return ts > 0 && ts % 86400 === UTC_NOON_OFFSET_SEC;
-}
-
 /** UTC noon unix for Y/M/D calendar components (API writes). */
 function utcNoonUnixFromParts(year, monthIndex, day) {
   return Math.floor(Date.UTC(year, monthIndex, day, 12, 0, 0) / 1000);
@@ -51,110 +38,26 @@ function utcCalendarDayMs(unixSeconds) {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
-function localCalendarDayMs(unixSeconds) {
-  const ts = parseReceiptUnix(unixSeconds);
-  const d = new Date(ts * 1000);
-  return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
-}
-
-function receiptIsDraft(hints = {}) {
-  if (hints.isDraft === true) return true;
-  const emailId = hints.fk_incoming_email_id;
-  return (
-    emailId != null &&
-    emailId !== "" &&
-    emailId !== "0" &&
-    emailId !== 0
-  );
+/**
+ * Canonical calendar date (UTC midnight unix) for display/storage.
+ *
+ * The stored timestamp is read in UTC, whatever its time-of-day: a receipt dated
+ * 2026-09-30T00:00:00Z is September 30 for everyone. Nothing is inferred from
+ * create_date or from the viewer's timezone, so the day never drifts between the
+ * web app, iOS and Android, and never shifts when a receipt is re-saved.
+ */
+export function resolveReceiptCalendarUnix(productDateUnix) {
+  const ts = parseReceiptUnix(productDateUnix);
+  if (!ts || ts < 1000000) return ts;
+  return Math.floor(utcCalendarDayMs(ts) / 1000);
 }
 
 /**
- * Canonical calendar date (UTC midnight unix) for display/storage.
- * Uses UTC + create_date rules so the entered day is stable across countries.
+ * The calendar day showing on the user's own clock → UTC noon unix (for saves).
+ * The day is taken locally on purpose: it is the day the user believes they are
+ * entering. Storing it at UTC noon then makes that exact day the receipt's UTC
+ * day, so it reads back the same here and on mobile.
  */
-export function resolveReceiptCalendarUnix(
-  productDateUnix,
-  createDateUnix = 0,
-  hints = {},
-) {
-  const ts = parseReceiptUnix(productDateUnix);
-  if (!ts || ts < 1000000) return ts;
-
-  const createTs = parseReceiptUnix(createDateUnix);
-  const utcDay = utcCalendarDayMs(ts);
-  const localDay = localCalendarDayMs(ts);
-
-  // UTC noon = sender's calendar day, stable on iOS/Android/Web in any timezone
-  if (isUtcNoonUnix(ts)) {
-    return Math.floor(utcDay / 1000);
-  }
-
-  // --- Timestamps with a time component (e.g. mobile Date.now()) ---
-  if (!isUtcDateOnlyUnix(ts)) {
-    // Date-picker "local midnight" stored as UTC. The mobile apps store the
-    // PICKED calendar day as local midnight, so the UTC time-of-day is just the
-    // sender's timezone offset (a whole 15-minute step, zero seconds) — NOT a
-    // purchase time. Recover the sender's local calendar day:
-    //   • time-of-day after 12:00 UTC ⇒ sender is EAST of UTC (local midnight fell
-    //     on the next day) ⇒ the intended day is UTC day + 1;
-    //   • at/before 12:00 UTC ⇒ west of/at UTC ⇒ the UTC day already matches.
-    // Fixes the "WebApp shows 1 day behind Android" for UTC+ devices (e.g. UTC+8,
-    // stored as 16:00 UTC). UTC noon (the forwarded-receipt anchor) already
-    // returned above, so it never reaches here.
-    const secOfDay = ts % 86400;
-    if (secOfDay % 900 === 0 && secOfDay !== UTC_NOON_OFFSET_SEC) {
-      return secOfDay > UTC_NOON_OFFSET_SEC
-        ? Math.floor((utcDay + ONE_DAY_MS) / 1000)
-        : Math.floor(utcDay / 1000);
-    }
-    // Genuine instant timestamp — a real time-of-day with minutes/seconds (e.g.
-    // product_date defaulted to Date.now() when no date was picked). Anchor it to
-    // its UTC calendar day so the receipt shows the SAME date on every device in
-    // every timezone (never varying by the viewer's region) — matching how the
-    // date-picker values above resolve deterministically. A previous rule
-    // hardcoded "before-noon UTC ⇒ the day before" (assumed an Americas viewer)
-    // and pushed east-of-UTC receipts a day back; a viewer-local rule would make
-    // the date shift by region. UTC-day is stable everywhere.
-    return Math.floor(utcDay / 1000);
-  }
-
-  // --- UTC midnight (web date picker or mobile UTC-midnight) ---
-  // Android stores the selected calendar date as UTC midnight — trust the UTC date.
-  if (createTs >= 1000000) {
-    const createUtcDay = utcCalendarDayMs(createTs);
-
-    // Product one UTC day ahead of create (UTC vs UTC) — old mobile off-by-one
-    if (utcDay - createUtcDay === ONE_DAY_MS) {
-      return Math.floor(createUtcDay / 1000);
-    }
-
-    // Same UTC day: create in early UTC morning → purchase was prior calendar day
-    if (
-      utcDay === createUtcDay &&
-      !isUtcDateOnlyUnix(createTs) &&
-      new Date(createTs * 1000).getUTCHours() < 12
-    ) {
-      return Math.floor((utcDay - ONE_DAY_MS) / 1000);
-    }
-  }
-
-  // Draft / eReceipt with no create_date: trust the UTC date mobile stored.
-  if (createTs < 1000000 && isUtcDateOnlyUnix(ts) && receiptIsDraft(hints)) {
-    return Math.floor(utcDay / 1000);
-  }
-
-  return Math.floor(utcDay / 1000);
-}
-
-function hintsFromReceipt(receipt) {
-  if (!receipt || typeof receipt !== "object") return {};
-  return {
-    isDraft: receipt.is_draft === "1" || receipt.is_draft === 1,
-    fk_incoming_email_id: receipt.fk_incoming_email_id,
-  };
-}
-
-/** Local calendar today → UTC noon unix (for saves). */
 export function localCalendarDateToUnix(date = new Date()) {
   return utcNoonUnixFromParts(
     date.getFullYear(),
@@ -189,32 +92,9 @@ export function productDateUnixToApiUnix(productDateUnix) {
   );
 }
 
-export function calendarUnixToMobileUnix(
-  productDateUnix,
-  createDateUnix = 0,
-  hints = {},
-) {
-  // A value that is already a clean calendar day — UTC midnight (what
-  // resolveReceiptCalendarUnix returns on load) or UTC noon (what the date
-  // picker and API writes produce) — is a resolved calendar date. Just
-  // re-anchor it to UTC noon of that same UTC day. Re-running the mobile
-  // heuristics on such a value (with the day used as its own create_date)
-  // trips the "evening-before in the Americas" branch and subtracts a day on
-  // EVERY edit for users in timezones behind UTC — a cumulative -1/day drift.
-  const ts = parseReceiptUnix(productDateUnix);
-  if (ts >= 1000000 && (ts % 86400 === 0 || ts % 86400 === UTC_NOON_OFFSET_SEC)) {
-    const d = new Date(ts * 1000);
-    return utcNoonUnixFromParts(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  }
-  // Genuinely raw timestamps (e.g. first sync from mobile with a time component)
-  // still get the full calendar-day resolution. Use product_date as create_date
-  // so a stale create_date never shifts the day.
-  const resolved = resolveReceiptCalendarUnix(
-    productDateUnix,
-    productDateUnix || createDateUnix,
-    hints,
-  );
-  return productDateUnixToApiUnix(resolved);
+/** Re-anchor a stored date to UTC noon of its own UTC day, for API writes. */
+export function calendarUnixToMobileUnix(productDateUnix) {
+  return productDateUnixToApiUnix(resolveReceiptCalendarUnix(productDateUnix));
 }
 
 const RECEIPT_DATE_FORMAT = {
@@ -231,52 +111,34 @@ const RECEIPT_DATE_LONG_FORMAT = {
   year: "numeric",
 };
 
-/**
- * Format for UI. Pass create_date when available (second arg or receipt object).
- */
-export function formatReceiptDate(
-  productDate,
-  createDateOrOptions = 0,
-  options,
-  receiptHints,
-) {
-  let createDate = 0;
-  let fmt = RECEIPT_DATE_FORMAT;
-  let hints = receiptHints || {};
+const isDateFormatOptions = (value) =>
+  !!value &&
+  typeof value === "object" &&
+  !Number.isFinite(Number(value)) &&
+  ("month" in value || "timeZone" in value);
 
+/**
+ * Format for UI, always in UTC. Accepts a receipt object or a product_date; the
+ * create_date argument some callers still pass is ignored (the day comes from
+ * product_date alone). Format options may be passed in place of it or after it.
+ */
+export function formatReceiptDate(productDate, createDateOrOptions = 0, options) {
   if (
     productDate &&
     typeof productDate === "object" &&
     !Number.isFinite(Number(productDate))
   ) {
-    const receipt = productDate;
-    hints = hintsFromReceipt(receipt);
-    return formatReceiptDate(
-      receipt.product_date,
-      receipt.create_date ?? receipt.createDate,
-      createDateOrOptions,
-      hints,
-    );
+    return formatReceiptDate(productDate.product_date, createDateOrOptions, options);
   }
 
-  if (
-    createDateOrOptions &&
-    typeof createDateOrOptions === "object" &&
-    !Number.isFinite(Number(createDateOrOptions)) &&
-    ("month" in createDateOrOptions || "timeZone" in createDateOrOptions)
-  ) {
+  let fmt = RECEIPT_DATE_FORMAT;
+  if (isDateFormatOptions(createDateOrOptions)) {
     fmt = createDateOrOptions;
-  } else {
-    createDate = createDateOrOptions;
-    if (options && typeof options === "object" && "isDraft" in options) {
-      hints = options;
-    } else if (options) {
-      fmt = options;
-    }
+  } else if (isDateFormatOptions(options)) {
+    fmt = options;
   }
 
-  const resolved = resolveReceiptCalendarUnix(productDate, createDate, hints);
-  const ts = Number(resolved);
+  const ts = Number(resolveReceiptCalendarUnix(productDate));
   if (!ts || ts < 1000000) return "—";
   const date = new Date(ts * 1000);
   if (isNaN(date.getTime())) return "—";
@@ -284,15 +146,37 @@ export function formatReceiptDate(
 }
 
 export function formatReceiptDateLong(productDate, createDate = 0) {
-  if (productDate && typeof productDate === "object") {
-    return formatReceiptDate(productDate, RECEIPT_DATE_LONG_FORMAT);
-  }
   return formatReceiptDate(productDate, createDate, RECEIPT_DATE_LONG_FORMAT);
 }
 
-export function productDateToInputValue(productDate, createDate = 0, hints = {}) {
-  const resolved = resolveReceiptCalendarUnix(productDate, createDate, hints);
-  const ts = Number(resolved);
+/**
+ * The UTC calendar day a receipt falls on, as ms — the day the UI shows it under.
+ * 0 when the receipt is undated.
+ */
+export function receiptCalendarDayMs(productDate) {
+  const ts = Number(resolveReceiptCalendarUnix(productDate));
+  if (!ts || ts < 1000000) return 0;
+  return ts * 1000;
+}
+
+/**
+ * The calendar day a date-picker value stands for, as ms, ready to compare against
+ * a receipt's UTC day. A picker gives a day rather than an instant, so a
+ * "YYYY-MM-DD" string is taken at face value and a Date is read on the local clock
+ * the user picked it on.
+ */
+export function pickedCalendarDayMs(value) {
+  if (typeof value === "string") {
+    const [yr, mo, dy] = value.split("-").map(Number);
+    if (yr && mo && dy) return Date.UTC(yr, mo - 1, dy);
+  }
+  const d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d.getTime())) return NaN;
+  return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+export function productDateToInputValue(productDate) {
+  const ts = Number(resolveReceiptCalendarUnix(productDate));
   if (!ts || ts < 1000000) return "";
   const d = new Date(ts * 1000);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;

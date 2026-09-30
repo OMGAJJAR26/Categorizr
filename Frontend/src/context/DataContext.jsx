@@ -1393,22 +1393,12 @@ export const DataProvider = ({ children }) => {
                 }
               }
 
-              const _resolvedDay = resolveReceiptCalendarUnix(
-                normalisedProductDate,
-                createDate,
-                {
-                  isDraft: r.is_draft === "1" || r.is_draft === 1,
-                  fk_incoming_email_id: r.fk_incoming_email_id,
-                },
+              // Anchor the receipt's UTC calendar day at UTC noon. The day itself is
+              // unchanged — noon just keeps it on that day for any client that renders
+              // the timestamp in local time. 0 ("No Date") passes through unchanged.
+              normalisedProductDate = productDateUnixToApiUnix(
+                resolveReceiptCalendarUnix(normalisedProductDate),
               );
-              // Store the resolved calendar day as UTC NOON (not midnight). resolveReceiptCalendarUnix
-              // is then idempotent when the value is re-resolved for display: a UTC-noon value
-              // short-circuits and returns the same day, so it is never shifted back a day by the
-              // create_date "created early-morning → prior day" heuristic — which only applies to raw
-              // UTC-midnight timestamps and otherwise reverts an edit made to the receipt's own
-              // create-date day (e.g. setting the date to Jul 2 on a receipt created Jul 2 06:37).
-              // 0 ("No Date") passes through unchanged.
-              normalisedProductDate = productDateUnixToApiUnix(_resolvedDay);
 
               return {
                 ...r,
@@ -3061,44 +3051,9 @@ setMerchantsWithImages(
         })(),
         product_date: (() => {
           const val = getValue("product_date");
-          if (val === null || val === undefined) {
-            return calendarUnixToMobileUnix(
-              existingReceipt?.product_date ?? 0,
-              existingReceipt?.create_date,
-              {
-                isDraft:
-                  existingReceipt?.is_draft === "1" ||
-                  existingReceipt?.is_draft === 1,
-                fk_incoming_email_id: existingReceipt?.fk_incoming_email_id,
-              },
-            );
-          }
-          const parsed = parseInt(val, 10);
-          if (isNaN(parsed)) {
-            return calendarUnixToMobileUnix(
-              existingReceipt?.product_date ?? 0,
-              existingReceipt?.create_date,
-              {
-                isDraft:
-                  existingReceipt?.is_draft === "1" ||
-                  existingReceipt?.is_draft === 1,
-                fk_incoming_email_id: existingReceipt?.fk_incoming_email_id,
-              },
-            );
-          }
+          const parsed = val === null || val === undefined ? NaN : parseInt(val, 10);
           return calendarUnixToMobileUnix(
-            parsed,
-            existingReceipt?.create_date ?? getValue("create_date"),
-            {
-              isDraft:
-                getValue("is_draft") === "1" ||
-                getValue("is_draft") === 1 ||
-                existingReceipt?.is_draft === "1" ||
-                existingReceipt?.is_draft === 1,
-              fk_incoming_email_id:
-                getValue("fk_incoming_email_id") ??
-                existingReceipt?.fk_incoming_email_id,
-            },
+            isNaN(parsed) ? (existingReceipt?.product_date ?? 0) : parsed,
           );
         })(),
         expense_type: (() => {

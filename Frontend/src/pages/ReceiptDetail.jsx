@@ -5866,10 +5866,7 @@ Thank you for using our receipt management system.
                             value={
                               editedReceipt.product_date === ""
                                 ? ""
-                                : productDateToInputValue(
-                                    editedReceipt.product_date,
-                                    selectedReceipt?.create_date ?? editedReceipt?.create_date,
-                                  )
+                                : productDateToInputValue(editedReceipt.product_date)
                             }
                             onChange={(e) => {
                               if (!e.target.value) {

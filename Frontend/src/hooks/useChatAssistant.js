@@ -657,7 +657,9 @@ async function handleAIQuery(query, analytics) {
         amount: parseFloat(r.purchasePrice) || 0,
         category: r.expense_type || "",
         notes: r.notes || "",
-        date: r.product_date ? new Date(Number(r.product_date) * 1000).toLocaleDateString() : "",
+        date: r.product_date
+          ? new Date(Number(r.product_date) * 1000).toLocaleDateString(undefined, { timeZone: "UTC" })
+          : "",
       }))
       .filter(r => r.store !== "Unknown" || r.amount > 0);
 

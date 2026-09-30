@@ -3,6 +3,8 @@
  * Provides calculations for spending analysis, grouping, and date filtering
  */
 
+import { pickedCalendarDayMs, receiptCalendarDayMs } from "./receiptDate";
+
 /**
  * Validate purchase price - filter out invalid/corrupted values
  * @param {any} price - Price value to validate
@@ -153,8 +155,10 @@ export const groupByMonth = (receipts) => {
   return receipts.reduce((groups, receipt) => {
     const timestamp = Number(receipt.product_date) * 1000;
     const date = new Date(timestamp);
-    const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    const monthName = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    // UTC, matching the date shown on the receipt — otherwise a receipt near a
+    // month boundary lands in a different month than the one on its card.
+    const monthKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+    const monthName = date.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'long', year: 'numeric' });
 
     if (!groups[monthKey]) {
       groups[monthKey] = { total: 0, count: 0, receipts: [], label: monthName };
@@ -190,12 +194,15 @@ export const getTopSpenders = (grouped, limit = 5) => {
 export const filterByDateRange = (receipts, startDate, endDate) => {
   if (!receipts || !Array.isArray(receipts)) return [];
 
-  const start = startDate.getTime();
-  const end = endDate.getTime();
+  // Whole calendar days: a receipt's date is its UTC day, while the range comes
+  // from the user's own calendar ("today", "last month"). Comparing instants
+  // dropped receipts whose UTC-anchored time fell outside the local day.
+  const start = pickedCalendarDayMs(startDate);
+  const end = pickedCalendarDayMs(endDate);
 
   return receipts.filter(receipt => {
-    const timestamp = Number(receipt.product_date) * 1000;
-    return timestamp >= start && timestamp <= end;
+    const day = receiptCalendarDayMs(receipt.product_date);
+    return !!day && day >= start && day <= end;
   });
 };
 
