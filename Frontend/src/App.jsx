@@ -12,6 +12,12 @@ import TaxTypePopup from "./components/filters/TaxTypePopup";
 import Settings from "./pages/Settings";
 import ReceiptGallery from "./pages/ReceiptGallery";
 
+const RequireAuth = ({ children }) => {
+  const token = localStorage.getItem("token");
+  if (!token) return <Navigate to="/login" replace />;
+  return children;
+};
+
 const App = () => {
   return (
     <>
@@ -22,12 +28,12 @@ const App = () => {
             <Route path="/" element={<Navigate to="/login" />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
-            <Route path="/homepage" element={<HomePage />} />
-            <Route path="/receipt-gallery" element={<ReceiptGallery />} />
-            <Route path="/receipt/:id" element={<ReceiptDetail />} />
-            <Route path="/summary-report" element={<SummaryReport />} />
-            <Route path="/tax-report" element={<TaxTypePopup />} />
-            <Route path="/settings" element={<Settings />} />
+            <Route path="/homepage" element={<RequireAuth><HomePage /></RequireAuth>} />
+            <Route path="/receipt-gallery" element={<RequireAuth><ReceiptGallery /></RequireAuth>} />
+            <Route path="/receipt/:id" element={<RequireAuth><ReceiptDetail /></RequireAuth>} />
+            <Route path="/summary-report" element={<RequireAuth><SummaryReport /></RequireAuth>} />
+            <Route path="/tax-report" element={<RequireAuth><TaxTypePopup /></RequireAuth>} />
+            <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
           </Routes>
         </DataProvider>
       </SessionManager>
