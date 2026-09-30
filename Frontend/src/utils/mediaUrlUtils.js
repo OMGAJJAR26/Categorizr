@@ -433,6 +433,19 @@ export function dedupeReceiptMediaAcrossReceipts(receipts) {
       if (selfFam !== undefined && selfFam === splitFamilyMap.get(ownerId)) {
         return true;
       }
+      // Same merchant sharing the exact same uploaded image URL is an intentional split
+      // (a parent and its split children/remainder). Two unrelated receipts never share the
+      // identical uploaded-media URL, so keep it for every same-store member. This is derived
+      // from server data (storeName), so it survives logout — unlike the localStorage split
+      // family above, whose loss was blanking parent/older split receipts after re-login.
+      const norm = (s) => String(s ?? "").trim().toLowerCase();
+      const selfStore = norm(receipt?.storeName ?? receipt?.store_name);
+      const ownerStore = norm(
+        receipts[owner.index]?.storeName ?? receipts[owner.index]?.store_name
+      );
+      if (selfStore && selfStore === ownerStore) {
+        return true;
+      }
       return false;
     });
 
