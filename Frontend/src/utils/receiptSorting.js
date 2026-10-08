@@ -1,8 +1,20 @@
 // ── Sort helpers ─────────────────────────────────────────────────────────────
+// Standard main-screen order (same on every device, after add/edit, and after
+// login). Pinned to English so the alphabetical steps do not change with the
+// browser or OS locale:
+//   1. Date — newest calendar day first
+//   2. Total — highest first, within that day
+//   3. Describe Purchase — A to Z. When that field is empty the main list
+//      shows the merchant name, so the merchant name is the alphabetical key.
+//   4. Merchant — A to Z, when the description label is also the same
+//   5. Receipt id — newest first, only when every field above still ties
 const num = (v) => (v == null ? 0 : Number(v) || 0);
 
 // Total value of a receipt (purchasePrice is the receipt total).
-const priceOf = (r) => num(r?.purchasePrice);
+const priceOf = (r) => num(r?.purchasePrice ?? r?.purchase_price);
+
+// Compare totals in cents so 12.5 and "12.50" are the same total.
+const centsOf = (r) => Math.round(priceOf(r) * 100);
 
 // Raw product_date (unix seconds). 0 when the receipt has no date.
 const dateOf = (r) => (r?.product_date ? Number(r.product_date) : 0);
@@ -15,72 +27,94 @@ const dayOf = (r) => {
   return t ? Math.floor(t / 86400) : 0;
 };
 
-// Stable final tiebreaker. Without this, receipts that tie on date AND total
-// (common for Split/Duplicate) keep whatever order the API returned them in,
-// which can differ between sessions — so the list appears to "reshuffle" after
-// a logout/login. Ordering by receipt id (newest first) makes the order
-// deterministic and identical every time the same data loads.
+const blankText = (value) => {
+  const text = (value ?? "").toString().trim();
+  // "0" is the API's cleared-field sentinel, not a description or merchant.
+  if (!text || text === "0") return "";
+  return text;
+};
+
+// Describe Purchase. Empty when the user left it blank.
+const describeOf = (r) => blankText(r?.product_name ?? r?.productName);
+
+// Merchant name shown on the main list when Describe Purchase is empty.
+const merchantOf = (r) => blankText(r?.storeName ?? r?.store_name ?? r?.merchant);
+
+const compareText = (a, b) =>
+  a.localeCompare(b, "en", { sensitivity: "base" });
+
+// Alphabetical key for step 3: the description, or the merchant when it is blank.
+const describeSortLabel = (r) => describeOf(r) || merchantOf(r);
+
+// Stable final tiebreaker. Without this, receipts that still tie keep whatever
+// order the API returned them in, which can differ between sessions.
 const idOf = (r) => num(r?.id ?? r?.receipt_id ?? r?.pk_receipt_id);
 const byIdDesc = (a, b) => idOf(b) - idOf(a);
 
-// Within a single day, always order by largest total → smallest, then by id.
-const byTotalDescThenId = (a, b) => {
-  const p = priceOf(b) - priceOf(a);
-  if (p !== 0) return p;
+// Same date and same total: Describe Purchase (A–Z), then merchant (A–Z), then id.
+const byDescribeThenMerchantThenId = (a, b) => {
+  const describeCmp = compareText(describeSortLabel(a), describeSortLabel(b));
+  if (describeCmp !== 0) return describeCmp;
+  const merchantCmp = compareText(merchantOf(a), merchantOf(b));
+  if (merchantCmp !== 0) return merchantCmp;
   return byIdDesc(a, b);
 };
 
-// Default main-screen ordering: newest day first, then largest total → smallest
-// for that day, then a stable id tiebreaker. Exported so other sections (e.g. the
-// draft "To Be Verified" list) order Split/Duplicate receipts identically.
+// Within a single day: largest total → smallest, then description, merchant, id.
+const byTotalDescThenLabel = (a, b) => {
+  const p = centsOf(b) - centsOf(a);
+  if (p !== 0) return p;
+  return byDescribeThenMerchantThenId(a, b);
+};
+
+// Default main-screen ordering. Exported so drafts, swipe, and other lists
+// that should match the main screen use the same comparator.
 export const compareByDayThenTotal = (a, b) => {
   const d = dayOf(b) - dayOf(a);
   if (d !== 0) return d;
-  return byTotalDescThenId(a, b);
+  return byTotalDescThenLabel(a, b);
 };
 
 export const sortReceipts = (receipts, sortConfig) => {
   const sortedReceipts = [...receipts];
 
   if (sortConfig.amount) {
-    // Explicit amount sort: total value is primary; break ties by day then id.
+    // Explicit amount sort: total is primary. Ties follow the standard order
+    // from the date step onward (newest day, then description, merchant, id).
     sortedReceipts.sort((a, b) => {
       const p =
         sortConfig.amount === "asc"
-          ? priceOf(a) - priceOf(b)
-          : priceOf(b) - priceOf(a);
+          ? centsOf(a) - centsOf(b)
+          : centsOf(b) - centsOf(a);
       if (p !== 0) return p;
       const d = dayOf(b) - dayOf(a);
       if (d !== 0) return d;
-      return byIdDesc(a, b);
+      return byDescribeThenMerchantThenId(a, b);
     });
   } else if (sortConfig.date) {
-    // Date sort: order by calendar day, then largest total → smallest for that
-    // day, then a stable id tiebreaker (persists across logout/login).
+    // Date sort: calendar day, then the standard within-day order.
     sortedReceipts.sort((a, b) => {
       const d =
         sortConfig.date === "newest"
           ? dayOf(b) - dayOf(a)
           : dayOf(a) - dayOf(b);
       if (d !== 0) return d;
-      return byTotalDescThenId(a, b);
+      return byTotalDescThenLabel(a, b);
     });
   } else if (sortConfig.order) {
-    // Name sort: order by merchant, then day (newest), then total, then id.
+    // Name sort: merchant first, then newest day, then the standard within-day order.
     sortedReceipts.sort((a, b) => {
-      const nameA = a.storeName?.toLowerCase() || "";
-      const nameB = b.storeName?.toLowerCase() || "";
       const n =
         sortConfig.order === "az"
-          ? nameA.localeCompare(nameB)
-          : nameB.localeCompare(nameA);
+          ? compareText(merchantOf(a), merchantOf(b))
+          : compareText(merchantOf(b), merchantOf(a));
       if (n !== 0) return n;
       const d = dayOf(b) - dayOf(a);
       if (d !== 0) return d;
-      return byTotalDescThenId(a, b);
+      return byTotalDescThenLabel(a, b);
     });
   } else {
-    // Default: newest day first, then largest total → smallest, then id.
+    // Default: newest day, highest total, Describe Purchase, merchant, id.
     sortedReceipts.sort(compareByDayThenTotal);
   }
 

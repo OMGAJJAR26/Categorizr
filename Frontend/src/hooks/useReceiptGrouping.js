@@ -70,9 +70,9 @@ export const useReceiptGrouping = (receipts, filters, sortConfig, searchTerm) =>
       if (isToBeVerified(r)) draft.push(r);
       else regular.push(r);
     });
-    // Sort drafts the same way as the main list: newest day first, then largest
-    // total → smallest for that day, then a stable id tiebreaker (so Split /
-    // Duplicate drafts keep the same order across logout/login).
+    // Sort drafts the same way as the main list: newest day, then highest
+    // total, then Describe Purchase (merchant name when that field is empty),
+    // then merchant, then id.
     draft.sort(compareByDayThenTotal);
     // Apply the same filters to drafts so they respect active filter selections
     const filteredDraft = filterReceipts(draft, filters, searchTerm);

@@ -33,6 +33,7 @@ import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationD
 import ForwardReceiptModal from "../components/receipts/ForwardReceiptModal";
 import { isNetworkReceivedReceipt } from "../utils/networkReceiptUtils";
 import { escapeReceiptSqlText } from "../utils/receiptTextFields";
+import { compareByDayThenTotal } from "../utils/receiptSorting";
 import "../App.css";
 const Visa              = "/payment-logos/Visa.png";
 const MasterCard        = "/payment-logos/MasterCard.png";
@@ -1328,9 +1329,7 @@ useEffect(() => {
 
     const orderedReceipts = hasExplicitList
       ? [...receiptsToUse]
-      : [...receiptsToUse].sort(
-          (a, b) => new Date(b.product_date) - new Date(a.product_date)
-        );
+      : [...receiptsToUse].sort(compareByDayThenTotal);
     setSortedReceipts(orderedReceipts);
 
     const currentSelectedId = currentSelectedIdRef.current;
