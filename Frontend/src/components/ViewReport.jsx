@@ -5,7 +5,7 @@ import { formatTaxRate } from "../utils/receiptFormatters";
 import { getPdfProxyUrl, splitMediaField, isPdfUrl } from "../utils/mediaUrlUtils";
 import SimpleAlertModal from "./SimpleAlertModal";
 
-const ViewReport = ({ receipt, onClose }) => {
+const ViewReport = ({ receipt, onClose, reportWindow }) => {
   const { currency, language } = useCurrency();
   const { getDetailedPaymentDisplay } = usePaymentDisplay();
   const hasRun = useRef(false);
@@ -13,28 +13,28 @@ const ViewReport = ({ receipt, onClose }) => {
 
   useEffect(() => {
     if (!receipt || !onClose || hasRun.current) return;
-    
+
     hasRun.current = true;
 
-    // Open in new tab
-    const newTab = window.open("", "_blank");
+    const newTab =
+      reportWindow && !reportWindow.closed ? reportWindow : window.open("", "_blank");
     if (newTab && newTab.document) {
       try {
+        newTab.document.open();
         newTab.document.write(htmlContent);
         newTab.document.close();
+        onClose();
       } catch (error) {
         console.error("Error writing document:", error);
         newTab.close();
         setAlertMsg("Failed to generate report. Please try again.");
       }
+    } else {
+      setAlertMsg("Allow pop-ups to view the report, then try again.");
     }
-    
-    // Immediately call onClose to close the modal
-    onClose();
-    
-    // Return null so nothing is rendered
+
     return () => {};
-  }, [receipt, onClose]);
+  }, [receipt, onClose, reportWindow]);
 
   const formatDate = (timestamp) => {
     if (!timestamp) return "";
@@ -101,6 +101,13 @@ const ViewReport = ({ receipt, onClose }) => {
 
   const paymentDisplayName = getDetailedPaymentDisplay(receipt);
 
+  const esc = (value) =>
+    String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
   const taxRowsHtml = nonTipTaxes
     .map((t) => {
       const rateNum =
@@ -109,7 +116,7 @@ const ViewReport = ({ receipt, onClose }) => {
           : 0;
       const rateStr = `${formatTaxRate(isNaN(rateNum) ? 0 : rateNum)}%`;
       const amt = Number(t?.tax_amount) || 0;
-      const name = (t?.tax_name || "Tax").toString();
+      const name = esc((t?.tax_name || "Tax").toString());
       return `
         <div class="total-row">
           <span>${name} (${rateStr})</span>
@@ -175,7 +182,7 @@ const ViewReport = ({ receipt, onClose }) => {
     <!DOCTYPE html>
     <html>
       <head>
-        <title>Receipt Report - ${receipt.storeName || "Merchant"}</title>
+        <title>Receipt Report - ${esc(receipt.storeName || "Merchant")}</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <style>
           * {
@@ -246,7 +253,7 @@ const ViewReport = ({ receipt, onClose }) => {
             margin-bottom: 25px;
             border: 1px solid #e5e7eb;
             border-radius: 8px;
-            overflow: hidden;
+            overflow: visible;
             background: #fff;
           }
           .section-title {
@@ -258,24 +265,37 @@ const ViewReport = ({ receipt, onClose }) => {
             color: #374151;
           }
           .row { 
-            display: flex; 
-            padding: 10px 16px; 
+            display: table;
+            width: 100%;
+            padding: 0;
             border-bottom: 1px solid #f3f4f6; 
           }
           .row:last-child { border-bottom: none; }
           .label { 
-            width: 180px; 
+            display: table-cell;
+            width: 180px;
+            padding: 10px 16px;
             font-weight: 500;
             color: #4b5563;
+            vertical-align: top;
           }
           .value { 
-            flex: 1; 
+            display: table-cell;
+            padding: 10px 16px;
             color: #111827;
+            vertical-align: top;
           }
           .total-row { 
-            display: flex; 
-            justify-content: space-between; 
-            padding: 10px 16px; 
+            display: table;
+            width: 100%;
+            padding: 0;
+          }
+          .total-row span {
+            display: table-cell;
+            padding: 10px 16px;
+          }
+          .total-row span:last-child {
+            text-align: right;
           }
           .total-row.total {
             border-top: 2px solid #111827;
@@ -287,7 +307,7 @@ const ViewReport = ({ receipt, onClose }) => {
             margin: 25px 0;
             border: 1px solid #e5e7eb;
             border-radius: 8px;
-            overflow: hidden;
+            overflow: visible;
             background: #fff;
           }
           .receipt-image-container {
@@ -359,7 +379,7 @@ const ViewReport = ({ receipt, onClose }) => {
               <polyline points="7 10 12 15 17 10"></polyline>
               <line x1="12" y1="15" x2="12" y2="3"></line>
             </svg>
-            
+            Download
           </button>
           <button id="btn-print" class="btn" onclick="window.print()">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -367,27 +387,27 @@ const ViewReport = ({ receipt, onClose }) => {
               <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
               <rect x="6" y="14" width="12" height="8"></rect>
             </svg>
-         
+            Print
           </button>
           <button id="btn-email" class="btn">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
               <polyline points="22,6 12,13 2,6"></polyline>
             </svg>
-           
+            Email
           </button>
           <button id="btn-close" class="btn" onclick="window.close()">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
             </svg>
-            
+            Close
           </button>
         </div>
         
         <div class="container">
           <div class="header">
-            <div class="merchant">${receipt.storeName || "MERCHANT NAME"}</div>
+            <div class="merchant">${esc(receipt.storeName || "MERCHANT NAME")}</div>
             <div class="date">${formatDate(receipt.product_date)}</div>
           </div>
 
@@ -403,15 +423,15 @@ const ViewReport = ({ receipt, onClose }) => {
             </div>
             <div class="row">
               <div class="label">Merchant</div>
-              <div class="value">${receipt.storeName || "—"}</div>
+              <div class="value">${esc(receipt.storeName || "—")}</div>
             </div>
             <div class="row">
               <div class="label">Expense Category</div>
-              <div class="value">${receipt.expense_type || "—"}</div>
+              <div class="value">${esc(receipt.expense_type || "—")}</div>
             </div>
             <div class="row">
               <div class="label">Payment</div>
-              <div class="value">${paymentDisplayName}</div>
+              <div class="value">${esc(paymentDisplayName)}</div>
             </div>
           </div>
 
@@ -433,11 +453,11 @@ const ViewReport = ({ receipt, onClose }) => {
             <div class="section-title">MORE INFORMATION</div>
             <div class="row">
               <div class="label">Describe Purchase</div>
-              <div class="value">${receipt.product_name || ""}</div>
+              <div class="value">${esc(receipt.product_name || "")}</div>
             </div>
             <div class="row">
               <div class="label">Notes</div>
-              <div class="value">${receipt.notes || ""}</div>
+              <div class="value">${esc(receipt.notes || "")}</div>
             </div>
           </div>
 
@@ -523,44 +543,58 @@ const ViewReport = ({ receipt, onClose }) => {
 
         <script>
           (function() {
-            // Simple email function
             function emailReceipt() {
-              const subject = 'Receipt Report from ${receipt.storeName || ""}';
-              const body = 'Receipt Details:\\n\\n' +
-                         'Date: ${formatDate(receipt.product_date)}\\n' +
-                         'Merchant: ${receipt.storeName || ""}\\n' +
-                         'Amount: ${formatCurrencyFixed2(receipt.purchasePrice || 0)}\\n' +
-                         'Payment: ${paymentDisplayName}\\n\\n' +
-                         'Please find the attached receipt details.';
+              const subject = ${JSON.stringify(`Receipt Report from ${receipt.storeName || ""}`).replace(/</g, "\\u003c")};
+              const body = ${JSON.stringify(
+                [
+                  "Receipt Details:",
+                  "",
+                  `Date: ${formatDate(receipt.product_date) || "-"}`,
+                  `Merchant: ${receipt.storeName || "-"}`,
+                  `Expense Type: ${categoryLabel}`,
+                  `Expense Category: ${receipt.expense_type || "-"}`,
+                  `Payment: ${paymentDisplayName || "-"}`,
+                  `Subtotal: ${formatCurrencyFixed2(receipt.subtotal || 0)}`,
+                  `Total: ${formatCurrencyFixed2(receipt.purchasePrice || 0)}`,
+                  `Description: ${receipt.product_name || "-"}`,
+                  `Notes: ${receipt.notes || "-"}`,
+                ].join("\n")
+              ).replace(/</g, "\\u003c")};
+              const link = document.createElement("a");
+              link.href = "mailto:?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
+              link.style.display = "none";
+              document.body.appendChild(link);
+              link.click();
+              link.remove();
+            }
             
-            window.location.href = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
-          }
-          
           // PDF Generation function for download (without images)
           async function generatePDF() {
+            let pdfContent = null;
             try {
-              // Scroll to top before generating PDF
               window.scrollTo(0, 0);
               
-              // Create a simplified version for PDF without images
-              const pdfContent = document.createElement('div');
+              pdfContent = document.createElement('div');
               pdfContent.style.fontFamily = 'Arial, sans-serif';
               pdfContent.style.padding = '20px';
+              pdfContent.style.position = 'absolute';
+              pdfContent.style.left = '0';
+              pdfContent.style.top = '0';
+              pdfContent.style.width = '800px';
+              pdfContent.style.background = '#ffffff';
+              pdfContent.style.zIndex = '-1';
               
-              // Clone the main content
               const container = document.querySelector('.container').cloneNode(true);
               
-              // Remove buttons from cloned content
               const toolbar = container.querySelector('.toolbar');
               if (toolbar) toolbar.remove();
               
-              // Remove the receipt image section for cleaner PDF
               const imageSection = container.querySelector('.receipt-image-section');
               if (imageSection) imageSection.remove();
               
               pdfContent.appendChild(container);
+              document.body.appendChild(pdfContent);
               
-              // Load html2pdf dynamically
               if (typeof html2pdf === 'undefined') {
                 await new Promise((resolve) => {
                   const script = document.createElement('script');
@@ -570,7 +604,6 @@ const ViewReport = ({ receipt, onClose }) => {
                 });
               }
               
-              // Generate PDF
               const opt = {
                 margin: 10,
                 filename: 'Receipt_${receipt.id || Date.now()}.pdf',
@@ -579,7 +612,8 @@ const ViewReport = ({ receipt, onClose }) => {
                   scale: 2,
                   useCORS: true,
                   logging: false,
-                  scrollY: 0
+                  scrollY: 0,
+                  backgroundColor: '#ffffff'
                 },
                 jsPDF: { 
                   unit: 'mm', 
@@ -592,7 +626,9 @@ const ViewReport = ({ receipt, onClose }) => {
               
             } catch (error) {
               console.error('PDF generation error:', error);
-              setAlertMsg('Failed to generate PDF. Please use the Print option instead.');
+              alert('Failed to generate PDF. Please use the Print option instead.');
+            } finally {
+              if (pdfContent && pdfContent.parentNode) pdfContent.remove();
             }
           }
           

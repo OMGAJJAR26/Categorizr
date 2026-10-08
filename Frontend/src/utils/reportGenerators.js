@@ -335,20 +335,7 @@ export const generateTaxReportHTML = ({
         </div>
       </div>
 
-      <table border="1" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; font-size: 8px; border: 1px solid #333; table-layout: fixed;">
-        <colgroup>
-          <col style="width: 25px;">
-          <col style="width: 65px;">
-          <col style="width: 105px;">
-          <col style="width: 105px;">
-          <col style="width: 85px;">
-          <col style="width: 55px;">
-          <col style="width: 65px;">
-          <col style="width: 50px;">
-          <col style="width: 40px;">
-          <col style="width: 55px;">
-          <col style="width: 32px;">
-        </colgroup>
+      <table border="1" cellspacing="0" cellpadding="4" style="width: 100%; border-collapse: collapse; font-size: 11px; border: 1px solid #333;">
         <thead style="background: #f8f9fa; font-weight: bold; border-bottom: 2px solid #333;">
           <tr>
             <th style="text-align: center; padding: 2px 4px; border: 1px solid #ddd;">#</th>
@@ -449,29 +436,29 @@ export const generateTaxReportHTML = ({
 
     html += `
       <tr style="background: ${background};">
-        <td style="padding: 2px 4px; border: 1px solid #ddd; text-align: center; font-weight: 600; vertical-align: middle; font-size: 8px;">${String(
+        <td style="padding: 2px 4px; border: 1px solid #ddd; text-align: center; font-weight: 600; vertical-align: middle; font-size: 11px;">${String(
           receiptNumber
         ).padStart(3, "0")}</td>
-        <td style="padding: 2px 4px; border: 1px solid #ddd; vertical-align: middle; font-size: 8px; white-space: nowrap;">${dateStr}</td>
-        <td style="padding: 2px 4px; border: 1px solid #ddd; vertical-align: middle; font-size: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${
+        <td style="padding: 2px 4px; border: 1px solid #ddd; vertical-align: middle; font-size: 11px; white-space: nowrap;">${dateStr}</td>
+        <td style="padding: 2px 4px; border: 1px solid #ddd; vertical-align: middle; font-size: 11px; word-break: break-word;">${
           receipt.storeName || "Untitled"
         }</td>
-        <td style="padding: 2px 4px; border: 1px solid #ddd; vertical-align: middle; font-size: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${paymentDisplayText}</td>
-        <td style="padding: 2px 4px; border: 1px solid #ddd; vertical-align: middle; font-size: 8px;">${
+        <td style="padding: 2px 4px; border: 1px solid #ddd; vertical-align: middle; font-size: 11px; word-break: break-word;">${paymentDisplayText}</td>
+        <td style="padding: 2px 4px; border: 1px solid #ddd; vertical-align: middle; font-size: 11px;">${
           receipt.expense_type || "—"
         }</td>
-        <td style="padding: 2px 4px; border: 1px solid #ddd; text-align: right; vertical-align: middle; font-size: 8px;">${formatCurrencyFixed2(
+        <td style="padding: 2px 4px; border: 1px solid #ddd; text-align: right; vertical-align: middle; font-size: 11px;">${formatCurrencyFixed2(
           subtotal
         )}</td>
-        <td style="padding: 2px 4px; border: 1px solid #ddd; text-align: right; vertical-align: middle; font-size: 8px;">${taxTypesHTML}</td>
-        <td style="padding: 2px 4px; border: 1px solid #ddd; text-align: right; vertical-align: middle; font-size: 8px;">${taxAmountsHTML}</td>
-        <td style="padding: 2px 4px; border: 1px solid #ddd; text-align: right; vertical-align: middle; font-size: 8px;">${formatCurrencyFixed2(
+        <td style="padding: 2px 4px; border: 1px solid #ddd; text-align: right; vertical-align: middle; font-size: 11px;">${taxTypesHTML}</td>
+        <td style="padding: 2px 4px; border: 1px solid #ddd; text-align: right; vertical-align: middle; font-size: 11px;">${taxAmountsHTML}</td>
+        <td style="padding: 2px 4px; border: 1px solid #ddd; text-align: right; vertical-align: middle; font-size: 11px;">${formatCurrencyFixed2(
           tipsAmount
         )}</td>
-        <td style="padding: 2px 4px; border: 1px solid #ddd; text-align: right; vertical-align: middle; font-weight: 600; font-size: 8px;">${formatCurrencyFixed2(
+        <td style="padding: 2px 4px; border: 1px solid #ddd; text-align: right; vertical-align: middle; font-weight: 600; font-size: 11px;">${formatCurrencyFixed2(
           total
         )}</td>
-        <td style="padding: 2px 4px; border: 1px solid #ddd; text-align: center; vertical-align: middle; font-size: 8px;">${viewIconHTML}</td>
+        <td style="padding: 2px 4px; border: 1px solid #ddd; text-align: center; vertical-align: middle; font-size: 11px;">${viewIconHTML}</td>
       </tr>
     `;
 
@@ -481,21 +468,21 @@ export const generateTaxReportHTML = ({
   // Add totals row
   html += `
     <tr style="background: #e8f0fe; font-weight: bold; border-top: 2px solid #333;">
-      <td style="padding: 3px 4px; border: 1px solid #ddd; text-align: right; font-size: 8px;" colspan="5">TOTAL</td>
-      <td style="padding: 3px 4px; border: 1px solid #ddd; text-align: right; font-size: 8px;">${formatCurrencyFixed2(
+      <td style="padding: 3px 4px; border: 1px solid #ddd; text-align: right; font-size: 11px;" colspan="5">TOTAL</td>
+      <td style="padding: 3px 4px; border: 1px solid #ddd; text-align: right; font-size: 11px;">${formatCurrencyFixed2(
         grandSubtotal
       )}</td>
-      <td style="padding: 3px 4px; border: 1px solid #ddd; text-align: right; color: #999; font-size: 8px;">—</td>
-      <td style="padding: 3px 4px; border: 1px solid #ddd; text-align: right; font-size: 8px;">${formatCurrencyFixed2(
+      <td style="padding: 3px 4px; border: 1px solid #ddd; text-align: right; color: #999; font-size: 11px;">—</td>
+      <td style="padding: 3px 4px; border: 1px solid #ddd; text-align: right; font-size: 11px;">${formatCurrencyFixed2(
         grandTax
       )}</td>
-      <td style="padding: 3px 4px; border: 1px solid #ddd; text-align: right; font-size: 8px;">${formatCurrencyFixed2(
+      <td style="padding: 3px 4px; border: 1px solid #ddd; text-align: right; font-size: 11px;">${formatCurrencyFixed2(
         grandTips
       )}</td>
-      <td style="padding: 3px 4px; border: 1px solid #ddd; text-align: right; font-size: 8px;">${formatCurrencyFixed2(
+      <td style="padding: 3px 4px; border: 1px solid #ddd; text-align: right; font-size: 11px;">${formatCurrencyFixed2(
         grandTotal
       )}</td>
-      <td style="padding: 3px 4px; border: 1px solid #ddd; text-align: center; color: #999; font-size: 8px;">—</td>
+      <td style="padding: 3px 4px; border: 1px solid #ddd; text-align: center; color: #999; font-size: 11px;">—</td>
     </tr>
   `;
 

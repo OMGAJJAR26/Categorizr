@@ -1,11 +1,11 @@
 import { useState } from "react";
-import html2pdf from "html2pdf.js";
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
 import SimpleAlertModal from "../SimpleAlertModal";
 import { collectReceiptMediaUrls } from "../../utils/mediaUrlUtils";
 import { getPaymentDisplay as getReportPaymentDisplay } from "../../utils/reportGenerators";
 import { matchesTaxTypes } from "../../utils/receiptFilters";
+import { downloadHtmlPdf, renderHtmlToPdfBlob } from "../../utils/htmlToPdf";
 
 // Format a receipt's product_date the same way the report tables do: UTC calendar day
 // (never one day earlier in timezones behind UTC), or "No Date" when undated.
@@ -82,35 +82,18 @@ const ReportModals = ({
           .map((t) => formatCurrencyFixed2(Number(t.tax_amount) || 0))
           .join(", ");
 
-        // Parse receipt tags
-        const receiptTags = receipt.receipt_tag
-          ? receipt.receipt_tag.split(",").map((tag) => tag.trim())
-          : [];
-        const locked = receiptTags[0] === "1" ? "Yes" : "No";
-        const activeTags = [];
-        if (receiptTags[1] === "1") activeTags.push("Starred");
-        if (receiptTags[2] === "1") activeTags.push("Flagged");
-        if (receiptTags[3] === "1") activeTags.push("Verified");
-        if (receiptTags[4] === "1") activeTags.push("Reconciled");
-        if (receiptTags[5] === "1") activeTags.push("Reimbursement");
-        if (receiptTags[6] === "1") activeTags.push("Warrantied");
-
         return {
           "#": String(index + 1).padStart(3, "0"),
           Date: formatCsvDate(receipt.product_date),
           Merchant: receipt.storeName || "Untitled",
-          "Expense Type": receipt.receipt_category == 0 ? "Personal" : receipt.receipt_category == 1 ? "Business" : "—",
-          Status: receipt.status === "0" ? "Unread" : receipt.status === "1" ? "Read" : "—",
           "Payment Method": getReportPaymentDisplay(receipt),
-          Category: receipt.expense_type || "—",
+          "Expense Category": receipt.expense_type || "—",
           Subtotal: formatCurrencyFixed2(subtotal),
           "Tax Types": taxTypesText || "—",
           "Tax Amount": taxAmountsText || "—",
           Tips: formatCurrencyFixed2(tipsAmount),
           Total: formatCurrencyFixed2(total),
           "Receipt Image": collectReceiptMediaUrls(receipt).join(" ") || "—",
-          Locked: locked,
-          Tags: activeTags.join(", ") || "No tags",
         };
       });
     } else {
@@ -120,9 +103,7 @@ const ReportModals = ({
           "#": String(index + 1).padStart(4, "0"),
           Date: formatCsvDate(receipt.product_date),
           Merchant: receipt.storeName || "Untitled",
-          "Expense Type": receipt.receipt_category == 0 ? "Personal" : receipt.receipt_category == 1 ? "Business" : "—",
-          Status: receipt.status === "0" ? "Unread" : receipt.status === "1" ? "Read" : "—",
-          Category: receipt.expense_type || "—",
+          "Expense Category": receipt.expense_type || "—",
           "Payment Method": getReportPaymentDisplay(receipt),
           Total: formatCurrencyFixed2(Number(receipt.purchasePrice) || 0),
           "Receipt Image": collectReceiptMediaUrls(receipt).join(" ") || "—",
@@ -190,19 +171,11 @@ const ReportModals = ({
         });
       }
 
-      const element = document.createElement("div");
-      element.innerHTML = htmlContent;
-
-      const pdfBlob = await html2pdf()
-        .from(element)
-        .set({
-          margin: 10,
-          filename: `${fileName}.pdf`,
-          html2canvas: { scale: 2, useCORS: true, logging: false },
-          jsPDF: { unit: "mm", format: "a3", orientation: "landscape" },
-          enableLinks: true,
-        })
-        .output("blob");
+      const pdfBlob = await renderHtmlToPdfBlob(htmlContent, {
+        filename: `${fileName}.pdf`,
+        jsPDF: { unit: "mm", format: "a3", orientation: "landscape" },
+        enableLinks: true,
+      });
 
       zip.file(`${fileName}.pdf`, pdfBlob);
 
@@ -438,19 +411,11 @@ const ReportModals = ({
         }
 
       } else if (format === "pdf") {
-        const element = document.createElement("div");
-        element.innerHTML = htmlContent;
-        
-        await html2pdf()
-          .from(element)
-          .set({
-            margin: 10,
-            filename: `${fileName}.pdf`,
-            html2canvas: { scale: 2, useCORS: true, logging: false },
-            jsPDF: { unit: "mm", format: "a3", orientation: "landscape" },
-            enableLinks: true,
-          })
-          .save();
+        await downloadHtmlPdf(htmlContent, {
+          filename: `${fileName}.pdf`,
+          jsPDF: { unit: "mm", format: "a3", orientation: "landscape" },
+          enableLinks: true,
+        });
       }
       
       setShowReportModal(false);
