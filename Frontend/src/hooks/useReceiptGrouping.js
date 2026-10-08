@@ -25,18 +25,30 @@ const isToBeVerified = (r) => {
 };
 
 /**
- * Network-forwarded receipts (sent from another Categorizr user via the app)
- * that haven't been opened yet. Goes in the REGULAR section with a blue "New" highlight.
- * Email-received receipts (fk_incoming_email_id) are drafts — they use isToBeVerified instead.
+ * Network-forwarded receipts that haven't been opened on any device.
+ * Blue "New" highlight in the regular list. Email eReceipts use isToBeVerified.
+ *
+ * Cleared when status is 1 (Android/iOS isRead: opened somewhere and not still
+ * pending verification) or when this app sets is_verify to 1 on open.
  */
+export const isReceiptSeen = (r) => {
+  if (!r) return false;
+  const raw = r.status;
+  const status = raw == null || raw === "" ? -1 : Number(raw);
+  if (status !== 1) return false;
+  const emailId = r.fk_incoming_email_id;
+  const isEReceipt =
+    emailId != null && String(emailId).trim() !== "" && String(emailId) !== "0";
+  const isVerify = String(r.is_verify ?? "0") === "1";
+  const isDraft = String(r.is_draft ?? "0") === "1";
+  const pendingVerification = (isEReceipt && !isVerify) || isDraft;
+  return !pendingVerification;
+};
+
 export const isNewForwardedReceipt = (r) => {
   if (!r || r.is_draft === "1" || r.is_verify !== "0") return false;
-  // The "New" highlight on a received (network-forwarded) receipt clears ONLY when
-  // the user actually views it on the WebApp — opening it (tap) or swiping to it —
-  // which sets is_verify="1". We intentionally do NOT key off `status`: the backend
-  // / mobile flip status="1" on unrelated events (e.g. when the NEXT receipt is
-  // received, or an auto-refresh), which was wrongly un-highlighting earlier
-  // receipts that the user had never looked at here.
+  // Seen on Android/iOS (status=1) or already opened here (is_verify=1 above).
+  if (isReceiptSeen(r)) return false;
   const isNetworkReceived =
     r.fk_forward_from_receipt_id != null &&
     String(r.fk_forward_from_receipt_id) !== "0";

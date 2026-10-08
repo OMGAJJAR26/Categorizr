@@ -48,7 +48,7 @@ import "./HomePage.css";
 
 const HomePage = () => {
   const navigate = useNavigate();
-  const { refreshData, silentRefreshData, receipts, loading, updateReceiptStatus, deleteReceipt, bulkDeleteReceipts, updateReceipt, user, applyQuickbooksLinkedIds, markReceiptQuickbooksLinked, syncForwardedReceiptData, markRecoveryEmailVerified, apiExpenseCategories, apiPaymentMethods, scanReceiptsToDrafts } = useData();
+  const { refreshData, silentRefreshData, receipts, loading, deleteReceipt, bulkDeleteReceipts, updateReceipt, user, applyQuickbooksLinkedIds, markReceiptQuickbooksLinked, syncForwardedReceiptData, markRecoveryEmailVerified, apiExpenseCategories, apiPaymentMethods, scanReceiptsToDrafts } = useData();
   const { formatCurrency } = useCurrency();
 
   // Custom hooks for complex logic
@@ -620,21 +620,7 @@ const HomePage = () => {
     });
   }, [receipts, user?.id, apiPaymentMethods, updateReceipt, getPaymentDisplay]);
 
-  const handleReceiptClick = async (receipt, index) => {
-    if (receipt.status === "0") {
-      await updateReceiptStatus(receipt.id, "1");
-    }
-    // Clear the "New" highlight for NETWORK-forwarded receipts on first open.
-    // Email-received eReceipts are drafts — do not set is_verify on open; let the
-    // user explicitly save or discard them from the Draft Mode section.
-    if (receipt.is_verify === "0") {
-      const isNetworkReceived =
-        receipt.fk_forward_from_receipt_id != null &&
-        String(receipt.fk_forward_from_receipt_id) !== "0";
-      if (isNetworkReceived) {
-        updateReceipt(receipt.id, { is_verify: "1" });
-      }
-    }
+  const handleReceiptClick = (receipt, index) => {
     const fresh =
       receipts.find((r) => String(r.id) === String(receipt.id)) || receipt;
     setSelectedReceipt(fresh);

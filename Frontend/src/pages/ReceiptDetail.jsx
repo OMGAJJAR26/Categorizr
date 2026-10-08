@@ -227,7 +227,6 @@ const ReceiptDetail = ({
 
   const {
     receipts,
-    updateReceiptStatus,
     updateReceipt,
     deleteReceipt,
     expenseCategories,
@@ -287,12 +286,17 @@ const ReceiptDetail = ({
   // receipt never triggers this (the receipt isn't being viewed).
   useEffect(() => {
     const r = selectedReceipt;
-    if (r?.id && isNewForwardedReceipt(r)) {
-      updateReceipt(r.id, { is_verify: "1" });
-      setSelectedReceipt((prev) =>
-        prev && String(prev.id) === String(r.id) ? { ...prev, is_verify: "1" } : prev
-      );
-    }
+    if (!r?.id) return;
+    // Viewing (open or swipe) is "seen". Persist status=1 so other devices
+    // clear the highlight, and is_verify=1 for a still-new network forward.
+    const patch = {};
+    if (String(r.status ?? "0") !== "1") patch.status = "1";
+    if (isNewForwardedReceipt(r)) patch.is_verify = "1";
+    if (Object.keys(patch).length === 0) return;
+    updateReceipt(r.id, patch);
+    setSelectedReceipt((prev) =>
+      prev && String(prev.id) === String(r.id) ? { ...prev, ...patch } : prev
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedReceipt?.id]);
   const [startX, setStartX] = useState(null);
@@ -813,14 +817,6 @@ useEffect(() => {
       manageTaxModalBodyRef.current.scrollTop = 0;
     }
   }, [editingTaxId, showAddTaxForm]);
-
-  // Mark receipt as read when component mounts
-  useEffect(() => {
-    if (receipt && receipt.status === "0") {
-      updateReceiptStatus(receipt.id, "1");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [receipt?.id, receipt?.status]);
 
   // Fetch QuickBooks status when share menu opens
   useEffect(() => {
@@ -3776,6 +3772,9 @@ useEffect(() => {
         // Saving a new forwarded receipt (blue "New" highlight) also clears the highlight.
         ...(isDraft ? { is_verify: "1", is_draft: "0" } : {}),
         ...(isNewForwardedReceipt(selectedReceipt) ? { is_verify: "1" } : {}),
+        // The receipt is open, so it is read. Keep status=1 so a save cannot
+        // write the old unread flag back and re-highlight it on other devices.
+        status: "1",
       };
 
       const success = await updateReceipt(selectedReceipt.id, updatedData);
@@ -4114,6 +4113,7 @@ useEffect(() => {
       // Also clear the "New" highlight when saving a forwarded receipt.
       ...(isDraft ? { is_verify: "1", is_draft: "0" } : {}),
       ...(isNewForwardedReceipt(selectedReceipt) ? { is_verify: "1" } : {}),
+      status: "1",
     };
 
     const success = await updateReceipt(selectedReceipt.id, updatedData);
