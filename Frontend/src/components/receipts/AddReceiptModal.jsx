@@ -82,6 +82,7 @@ import {
 } from "../../utils/mediaUrlUtils";
 import PdfThumbnail from "./PdfThumbnail";
 import { findRenamedApiMerchant } from "../../utils/merchantListUtils";
+import { escapeReceiptSqlText } from "../../utils/receiptTextFields";
 import EditPaymentMethodModal from "./EditPaymentMethodModal";
 
 // Payment method logos (for Add Payment Method modal card type list)
@@ -2957,7 +2958,7 @@ const handleFieldChange = (field, value) => {
                 "Content-Type": "application/json",
                 Accesstoken: token,
               },
-              body: JSON.stringify(savePayload),
+              body: JSON.stringify(escapeReceiptSqlText(savePayload)),
             });
 
             if (response.ok) {
@@ -3000,7 +3001,7 @@ const handleFieldChange = (field, value) => {
               "Content-Type": "application/json",
               Accesstoken: token,
             },
-            body: JSON.stringify(savePayload),
+            body: JSON.stringify(escapeReceiptSqlText(savePayload)),
           });
 
           if (createResponse.ok) {
@@ -3182,16 +3183,10 @@ const handleFieldChange = (field, value) => {
   /** POST a payload to addReceiptv1 and return the response data */
   const postNewReceipt = async (payload) => {
     const token = localStorage.getItem("token");
-    // addReceiptv1 is NOT parameterized — a raw apostrophe in storeName/product_name
-    // ("Lowe's", "Lowe's (2)") breaks its SQL (non-JSON "Invalid query" error, which then
-    // fails JSON.parse → "Failed to save splits"). It builds the query by string concat, so
-    // escaping a single quote as '' makes MySQL store ONE literal apostrophe (correct).
-    const esc = (s) => (s ?? "").toString().replace(/'/g, "''");
-    const safePayload = {
-      ...payload,
-      storeName: esc(payload.storeName),
-      product_name: esc(payload.product_name),
-    };
+    // Describe Purchase and Notes are concatenated into SQL. A raw apostrophe
+    // ("Lowe's", "don't") returns "Invalid query" and the previous text stays.
+    // storeName is not escaped — that column stores '' literally (Lowe''s).
+    const safePayload = escapeReceiptSqlText(payload);
     console.log("%c[Receipt] POST /api/receipt/addReceiptv1 payload:", "color:#22c55e;font-weight:bold", safePayload);
     const response = await fetch("/api/receipt/addReceiptv1", {
       method: "POST",
@@ -3207,11 +3202,12 @@ const handleFieldChange = (field, value) => {
   /** PUT payload to updateReceiptv1 */
   const putUpdateReceipt = async (payload) => {
     const token = localStorage.getItem("token");
-    console.log("%c[Receipt] POST /api/receipt/updateReceiptv1 payload:", "color:#f59e0b;font-weight:bold", payload);
+    const safePayload = escapeReceiptSqlText(payload);
+    console.log("%c[Receipt] POST /api/receipt/updateReceiptv1 payload:", "color:#f59e0b;font-weight:bold", safePayload);
     const response = await fetch("/api/receipt/updateReceiptv1", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accesstoken: token },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(safePayload),
     });
     if (!response.ok) throw new Error(`Failed to update receipt: ${response.status}`);
     const data = await response.json();

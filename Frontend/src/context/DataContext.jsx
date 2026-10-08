@@ -13,6 +13,7 @@ import {
 import { enrichReceiptTaxValues } from "../utils/taxTypeUtils";
 import {
   CLEARABLE_TEXT_FIELDS,
+  escapeReceiptSqlText,
   fromApiTextValue,
   toApiTextValue,
 } from "../utils/receiptTextFields";
@@ -2451,7 +2452,7 @@ setMerchantsWithImages(
             "Content-Type": "application/json",
             Accesstoken: token,
           },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(escapeReceiptSqlText(payload)),
         });
         if (response.ok) return true;
         const errText = await response.text().catch(() => "");
@@ -2855,7 +2856,7 @@ setMerchantsWithImages(
         const resp = await fetch(`${BASE_URL}/receipt/addReceiptv1`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Accesstoken: token },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(escapeReceiptSqlText(payload)),
         });
         if (resp.ok) created += 1;
         else failed += 1;
@@ -3157,7 +3158,7 @@ setMerchantsWithImages(
               "Content-Type": "application/json",
               Accesstoken: token,
             },
-            body: JSON.stringify(updatePayload),
+            body: JSON.stringify(escapeReceiptSqlText(updatePayload)),
           });
 
           const text = await response.text();

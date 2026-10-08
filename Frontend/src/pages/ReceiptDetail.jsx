@@ -32,6 +32,7 @@ import {
 import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationDialog";
 import ForwardReceiptModal from "../components/receipts/ForwardReceiptModal";
 import { isNetworkReceivedReceipt } from "../utils/networkReceiptUtils";
+import { escapeReceiptSqlText } from "../utils/receiptTextFields";
 import "../App.css";
 const Visa              = "/payment-logos/Visa.png";
 const MasterCard        = "/payment-logos/MasterCard.png";
@@ -128,6 +129,13 @@ const formatTipPercentage = (tipAmount, subtotal) => {
   return pct >= 1 ? Math.round(pct) : parseFloat(pct.toFixed(2));
 };
 
+const escHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
 // Resolve the canonical card-issuer display name from a raw payment type string.
 // Always returns the full brand name (e.g. "Diners Club", not "Club").
 const resolveIssuerName = (pt) => {
@@ -161,6 +169,8 @@ import warrantedSelect from "../assets/receipttags/warrantied_select.png";
 
 import * as XLSX from "xlsx";
 import JSZip from "jszip";
+import { downloadCsv, objectsToCsv } from "../utils/csv";
+import { downloadHtmlPdf, renderHtmlToPdfBlob } from "../utils/htmlToPdf";
 
 /** Match receipt ids across number/string API shapes. */
 const findReceiptIndexInList = (list, id) => {
@@ -289,6 +299,7 @@ const ReceiptDetail = ({
   const [direction, setDirection] = useState(0);
   const [shareMenu, setShareMenu] = useState(false);
   const [showViewReport, setShowViewReport] = useState(false);
+  const viewReportWindowRef = useRef(null);
   const [isEditMode, setIsEditMode] = useState(true); // Default to edit mode
   const [editedReceipt, setEditedReceipt] = useState({});
   const [isSaving, setIsSaving] = useState(false);
@@ -3138,7 +3149,7 @@ useEffect(() => {
     const response = await fetch("/api/receipt/updateReceiptv1", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accesstoken: token },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(escapeReceiptSqlText(payload)),
     });
     if (!response.ok) throw new Error(`Failed to update receipt: ${response.status}`);
     return response.json();
@@ -3242,17 +3253,10 @@ useEffect(() => {
   /** POST a new receipt payload to addReceiptv1 */
   const postNewReceiptForSplit = async (payload) => {
     const token = localStorage.getItem("token");
-    // addReceiptv1 is NOT parameterized — a raw apostrophe in storeName/product_name
-    // ("Lowe's", "Lowe's (2)") breaks its SQL (returns a non-JSON "Invalid query" error).
-    // Escape single quotes just for the create (MySQL reads '' as one literal '); the
-    // post-create updateReceiptv1 patch below rewrites the RAW values (that endpoint IS
-    // parameterized), so the stored name ends up correct and un-doubled.
-    const esc = (s) => (s ?? "").toString().replace(/'/g, "''");
-    const safePayload = {
-      ...payload,
-      storeName: esc(payload.storeName),
-      product_name: esc(payload.product_name),
-    };
+    // Describe Purchase and Notes are concatenated into SQL. A raw apostrophe
+    // returns "Invalid query" and the previous text is what remains. storeName
+    // is sent raw — escaping it is stored as Lowe''s.
+    const safePayload = escapeReceiptSqlText(payload);
     const res = await fetch("/api/receipt/addReceiptv1", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accesstoken: token },
@@ -3346,7 +3350,7 @@ useEffect(() => {
               fetch("/api/receipt/updateReceiptv1", {
                 method: "POST",
                 headers: { "Content-Type": "application/json", Accesstoken: token },
-                body: JSON.stringify(patch),
+                body: JSON.stringify(escapeReceiptSqlText(patch)),
               }).catch(() => {});
             }
           } catch { /* ignore */ }
@@ -3496,7 +3500,7 @@ useEffect(() => {
         if (newId) {
           newSplitPatches.push({
             id: newId,
-            storeName, // raw name — updateReceiptv1 (parameterized) rewrites the create's escaped one
+            storeName,
             expense_type: splitExpenseType,
             receipt_category: splitCategory,
             product_name: splitProductName,
@@ -3537,7 +3541,7 @@ useEffect(() => {
             return fetch("/api/receipt/updateReceiptv1", {
               method: "POST",
               headers: { "Content-Type": "application/json", Accesstoken: token },
-              body: JSON.stringify(patch),
+              body: JSON.stringify(escapeReceiptSqlText(patch)),
             }).catch(() => {});
           })
         );
@@ -4441,12 +4445,9 @@ useEffect(() => {
     setShareMenu(false);
 
     try {
-      // Import html2pdf dynamically
-      const html2pdf = (await import("html2pdf.js")).default;
-
       // Use the same HTML structure as ViewReport for consistency
       const receipt = r;
-      const paymentDisplayName = getPaymentDisplayName(receipt);
+      const paymentDisplayName = escHtml(getPaymentDisplayName(receipt));
 
       const formatCurrencyFixed2 = (amount) => {
         const num = Number(amount) || 0;
@@ -4492,7 +4493,7 @@ useEffect(() => {
               : 0;
           const rateStr = `${parseFloat((isNaN(rateNum) ? 0 : rateNum).toFixed(3))}%`;
           const amt = Number(t?.tax_amount) || 0;
-          const name = (t?.tax_name || "Tax").toString();
+          const name = escHtml(t?.tax_name || "Tax");
           return `
             <div class="total-row">
               <span>${name} (${rateStr})</span>
@@ -4529,7 +4530,7 @@ useEffect(() => {
         <!DOCTYPE html>
         <html>
           <head>
-            <title>Receipt Report - ${receipt.storeName || "Merchant"}</title>
+            <title>Receipt Report - ${escHtml(receipt.storeName || "Merchant")}</title>
             <meta name="viewport" content="width=device-width, initial-scale=1" />
             <style>
               * {
@@ -4566,7 +4567,7 @@ useEffect(() => {
                 margin-bottom: 25px;
                 border: 1px solid #e5e7eb;
                 border-radius: 8px;
-                overflow: hidden;
+                overflow: visible;
                 background: #fff;
                 page-break-inside: avoid;
               }
@@ -4579,25 +4580,38 @@ useEffect(() => {
                 color: #374151;
               }
               .row {
-                display: flex;
-                padding: 10px 16px;
+                display: table;
+                width: 100%;
+                padding: 0;
                 border-bottom: 1px solid #f3f4f6;
               }
               .row:last-child { border-bottom: none; }
               .label {
+                display: table-cell;
                 width: 180px;
+                padding: 10px 16px;
                 font-weight: 500;
                 color: #4b5563;
+                vertical-align: top;
               }
               .value {
-                flex: 1;
+                display: table-cell;
+                padding: 10px 16px;
                 color: #111827;
+                vertical-align: top;
               }
               .total-row {
-                display: flex;
-                justify-content: space-between;
-                padding: 10px 16px;
+                display: table;
+                width: 100%;
+                padding: 0;
                 page-break-inside: avoid;
+              }
+              .total-row span {
+                display: table-cell;
+                padding: 10px 16px;
+              }
+              .total-row span:last-child {
+                text-align: right;
               }
               .total-row.total {
                 border-top: 2px solid #111827;
@@ -4609,7 +4623,7 @@ useEffect(() => {
                 margin: 25px 0;
                 border: 1px solid #e5e7eb;
                 border-radius: 8px;
-                overflow: hidden;
+                overflow: visible;
                 background: #fff;
                 page-break-inside: avoid;
               }
@@ -4642,9 +4656,9 @@ useEffect(() => {
           <body>
             <div class="container">
               <div class="header">
-                <div class="merchant">${
+                <div class="merchant">${escHtml(
                   receipt.storeName || "MERCHANT NAME"
-                }</div>
+                )}</div>
                 <div class="date">${formatDate(receipt.product_date)}</div>
               </div>
 
@@ -4662,11 +4676,11 @@ useEffect(() => {
                 </div>
                 <div class="row">
                   <div class="label">Merchant</div>
-                  <div class="value">${receipt.storeName || "—"}</div>
+                  <div class="value">${escHtml(receipt.storeName || "—")}</div>
                 </div>
                 <div class="row">
                   <div class="label">Expense Category</div>
-                  <div class="value">${receipt.expense_type || "—"}</div>
+                  <div class="value">${escHtml(receipt.expense_type || "—")}</div>
                 </div>
                 <div class="row">
                   <div class="label">Payment</div>
@@ -4694,11 +4708,11 @@ useEffect(() => {
                 <div class="section-title">MORE INFORMATION</div>
                 <div class="row">
                   <div class="label">Describe Purchase</div>
-                  <div class="value">${receipt.product_name || ""}</div>
+                  <div class="value">${escHtml(receipt.product_name || "")}</div>
                 </div>
                 <div class="row">
                   <div class="label">Notes</div>
-                  <div class="value">${receipt.notes || ""}</div>
+                  <div class="value">${escHtml(receipt.notes || "")}</div>
                 </div>
               </div>
 
@@ -4817,34 +4831,22 @@ useEffect(() => {
         </html>
       `;
 
-      // Create element for PDF generation
-      const element = document.createElement("div");
-      element.innerHTML = htmlContent;
-
-      // PDF options - same as ViewReport
-      const options = {
-        margin: 10,
+      await downloadHtmlPdf(htmlContent, {
         filename: `Receipt_${receipt.id || Date.now()}.pdf`,
-        image: { type: "jpeg", quality: 0.95 },
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          logging: false,
-          scrollY: 0,
-        },
-        jsPDF: {
-          unit: "mm",
-          format: "a4",
-          orientation: "portrait",
-        },
-      };
-
-      // Generate and download PDF
-      await html2pdf().from(element).set(options).save();
+      });
     } catch (error) {
       console.error("Error generating PDF:", error);
       setAlertMsg("Failed to generate PDF. Please try again.");
     }
+  };
+
+  const openMailto = (subject, body) => {
+    const link = document.createElement("a");
+    link.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   };
 
   const handleEmailReceipt = () => {
@@ -4853,70 +4855,64 @@ useEffect(() => {
     const subject = `Receipt from ${r.storeName || "Merchant"} - ${formatDate(
       r.product_date
     )}`;
-    const body = `
-Receipt Details:
+    const body = [
+      "Receipt Details:",
+      "",
+      `Receipt ID: ${r.id || "-"}`,
+      `Date: ${formatDate(r.product_date) || "-"}`,
+      `Merchant: ${r.storeName || "-"}`,
+      `Expense Type: ${String(r.receipt_category) === "0" ? "Personal" : String(r.receipt_category) === "1" ? "Business" : "-"}`,
+      `Expense Category: ${r.expense_type || "-"}`,
+      `Payment Method: ${getPaymentDisplayName(r) || "-"}`,
+      `Subtotal: ${formatCurrency(r.subtotal || r.purchasePrice || 0)}`,
+      `Total: ${formatCurrency(r.total || r.purchasePrice || 0)}`,
+      `Description: ${r.product_name || "-"}`,
+      `Notes: ${r.notes || "-"}`,
+    ].join("\n");
 
-Merchant: ${r.storeName || "-"}
-Date: ${formatDate(r.product_date)}
-Amount: ${formatCurrency(r.total || r.purchasePrice || 0)}
-Payment Method: ${getPaymentDisplayName(r)}
-Category: ${r.expense_type || "-"}
-
-Description: ${r.product_name || "No description provided"}
-Notes: ${r.notes || "No notes provided"}
-
-Thank you for using our receipt management system.
-    `.trim();
-
-    const mailtoLink = `mailto:?subject=${encodeURIComponent(
-      subject
-    )}&body=${encodeURIComponent(body)}`;
-    window.location.href = mailtoLink;
+    openMailto(subject, body);
   };
 
   // Fixed View Report handler
   const handleViewReport = () => {
     setShareMenu(false);
+    const reportWindow = window.open("", "_blank");
+    if (!reportWindow) {
+      setAlertMsg("Allow pop-ups to view the report, then try again.");
+      return;
+    }
+    viewReportWindowRef.current = reportWindow;
     setShowViewReport(true);
   };
+
+  const buildShareCsvRow = () => ({
+    "Receipt ID": r.id ?? "",
+    Date: formatDate(r.product_date),
+    Merchant: r.storeName || "",
+    "Expense Type":
+      String(r.receipt_category) === "0"
+        ? "Personal"
+        : String(r.receipt_category) === "1"
+          ? "Business"
+          : "",
+    "Expense Category": r.expense_type || "",
+    "Payment Method": getPaymentDisplayName(r),
+    Subtotal: r.subtotal || r.purchasePrice || 0,
+    "Total Tax": Array.isArray(r.receipt_tax_values)
+      ? r.receipt_tax_values.reduce(
+          (sum, tax) => sum + (parseFloat(tax.tax_amount) || 0),
+          0
+        )
+      : 0,
+    Total: r.total || r.purchasePrice || 0,
+    Description: r.product_name || "",
+    Notes: r.notes || "",
+  });
 
   // Download CSV handler
   const handleDownloadCSV = () => {
     setShareMenu(false);
-
-    const csvData = {
-      "Receipt ID": r.id,
-      Date: formatDate(r.product_date),
-      Merchant: r.storeName || "",
-      "Expense Type":
-        String(r.receipt_category) === "0" ? "Personal" : "Business",
-      "Expense Category": r.expense_type || "",
-      "Payment Method": getPaymentDisplayName(r),
-      Subtotal: r.subtotal || r.purchasePrice || 0,
-      "Total Tax": Array.isArray(r.receipt_tax_values)
-        ? r.receipt_tax_values.reduce(
-            (sum, tax) => sum + (parseFloat(tax.tax_amount) || 0),
-            0
-          )
-        : 0,
-      Total: r.total || r.purchasePrice || 0,
-      Description: r.product_name || "",
-      Notes: r.notes || "",
-    };
-
-    const csvContent =
-      "data:text/csv;charset=utf-8," +
-      Object.keys(csvData).join(",") +
-      "\n" +
-      Object.values(csvData).join(",");
-
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `receipt_${r.id}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadCsv(`receipt_${r.id}.csv`, objectsToCsv([buildShareCsvRow()]));
   };
 
   // Download ZIP handler
@@ -4927,9 +4923,8 @@ Thank you for using our receipt management system.
       const zip = new JSZip();
 
       // Generate PDF blob (same as direct PDF download)
-      const html2pdf = (await import("html2pdf.js")).default;
       const receipt = r;
-      const paymentDisplayName = getPaymentDisplayName(receipt);
+      const paymentDisplayName = escHtml(getPaymentDisplayName(receipt));
 
       const formatCurrencyFixed2 = (amount) => {
         const num = Number(amount) || 0;
@@ -4975,7 +4970,7 @@ Thank you for using our receipt management system.
               : 0;
           const rateStr = `${parseFloat((isNaN(rateNum) ? 0 : rateNum).toFixed(3))}%`;
           const amt = Number(t?.tax_amount) || 0;
-          const name = (t?.tax_name || "Tax").toString();
+          const name = escHtml(t?.tax_name || "Tax");
           return `
             <div class="total-row">
               <span>${name} (${rateStr})</span>
@@ -5012,7 +5007,7 @@ Thank you for using our receipt management system.
         <!DOCTYPE html>
         <html>
           <head>
-            <title>Receipt Report - ${receipt.storeName || "Merchant"}</title>
+            <title>Receipt Report - ${escHtml(receipt.storeName || "Merchant")}</title>
             <meta name="viewport" content="width=device-width, initial-scale=1" />
             <style>
               * {
@@ -5049,7 +5044,7 @@ Thank you for using our receipt management system.
                 margin-bottom: 25px;
                 border: 1px solid #e5e7eb;
                 border-radius: 8px;
-                overflow: hidden;
+                overflow: visible;
                 background: #fff;
                 page-break-inside: avoid;
               }
@@ -5062,25 +5057,38 @@ Thank you for using our receipt management system.
                 color: #374151;
               }
               .row {
-                display: flex;
-                padding: 10px 16px;
+                display: table;
+                width: 100%;
+                padding: 0;
                 border-bottom: 1px solid #f3f4f6;
               }
               .row:last-child { border-bottom: none; }
               .label {
+                display: table-cell;
                 width: 180px;
+                padding: 10px 16px;
                 font-weight: 500;
                 color: #4b5563;
+                vertical-align: top;
               }
               .value {
-                flex: 1;
+                display: table-cell;
+                padding: 10px 16px;
                 color: #111827;
+                vertical-align: top;
               }
               .total-row {
-                display: flex;
-                justify-content: space-between;
-                padding: 10px 16px;
+                display: table;
+                width: 100%;
+                padding: 0;
                 page-break-inside: avoid;
+              }
+              .total-row span {
+                display: table-cell;
+                padding: 10px 16px;
+              }
+              .total-row span:last-child {
+                text-align: right;
               }
               .total-row.total {
                 border-top: 2px solid #111827;
@@ -5092,7 +5100,7 @@ Thank you for using our receipt management system.
                 margin: 25px 0;
                 border: 1px solid #e5e7eb;
                 border-radius: 8px;
-                overflow: hidden;
+                overflow: visible;
                 background: #fff;
                 page-break-inside: avoid;
               }
@@ -5125,9 +5133,9 @@ Thank you for using our receipt management system.
           <body>
             <div class="container">
               <div class="header">
-                <div class="merchant">${
+                <div class="merchant">${escHtml(
                   receipt.storeName || "MERCHANT NAME"
-                }</div>
+                )}</div>
                 <div class="date">${formatDate(receipt.product_date)}</div>
               </div>
 
@@ -5145,11 +5153,11 @@ Thank you for using our receipt management system.
                 </div>
                 <div class="row">
                   <div class="label">Merchant</div>
-                  <div class="value">${receipt.storeName || "—"}</div>
+                  <div class="value">${escHtml(receipt.storeName || "—")}</div>
                 </div>
                 <div class="row">
                   <div class="label">Expense Category</div>
-                  <div class="value">${receipt.expense_type || "—"}</div>
+                  <div class="value">${escHtml(receipt.expense_type || "—")}</div>
                 </div>
                 <div class="row">
                   <div class="label">Payment</div>
@@ -5177,11 +5185,11 @@ Thank you for using our receipt management system.
                 <div class="section-title">MORE INFORMATION</div>
                 <div class="row">
                   <div class="label">Describe Purchase</div>
-                  <div class="value">${receipt.product_name || ""}</div>
+                  <div class="value">${escHtml(receipt.product_name || "")}</div>
                 </div>
                 <div class="row">
                   <div class="label">Notes</div>
-                  <div class="value">${receipt.notes || ""}</div>
+                  <div class="value">${escHtml(receipt.notes || "")}</div>
                 </div>
               </div>
 
@@ -5300,32 +5308,9 @@ Thank you for using our receipt management system.
         </html>
       `;
 
-      const element = document.createElement("div");
-      element.innerHTML = htmlContent;
-
-      const options = {
-        margin: 10,
+      const pdfBlob = await renderHtmlToPdfBlob(htmlContent, {
         filename: `Receipt_${receipt.id || Date.now()}.pdf`,
-        image: { type: "jpeg", quality: 0.95 },
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          allowTaint: true,
-          foreignObjectRendering: true,
-          logging: false,
-          scrollY: 0,
-        },
-        jsPDF: {
-          unit: "mm",
-          format: "a4",
-          orientation: "portrait",
-        },
-      };
-
-      const pdfBlob = await html2pdf()
-        .from(element)
-        .set(options)
-        .outputPdf("blob");
+      });
 
       // Add PDF to ZIP
       zip.file(`receipt_${r.id}.pdf`, pdfBlob);
@@ -5352,32 +5337,7 @@ Thank you for using our receipt management system.
       };
 
       zip.file("receipt_data.json", JSON.stringify(receiptData, null, 2));
-
-      const csvData = {
-        "Receipt ID": r.id,
-        Date: formatDate(r.product_date),
-        Merchant: r.storeName || "",
-        "Expense Type":
-          String(r.receipt_category) === "0" ? "Personal" : "Business",
-        "Expense Category": r.expense_type || "",
-        "Payment Method": getPaymentDisplayName(r),
-        Subtotal: r.subtotal || r.purchasePrice || 0,
-        "Total Tax": Array.isArray(r.receipt_tax_values)
-          ? r.receipt_tax_values.reduce(
-              (sum, tax) => sum + (parseFloat(tax.tax_amount) || 0),
-              0
-            )
-          : 0,
-        Total: r.total || r.purchasePrice || 0,
-        Description: r.product_name || "",
-        Notes: r.notes || "",
-      };
-
-      const csvContent =
-        Object.keys(csvData).join(",") +
-        "\n" +
-        Object.values(csvData).join(",");
-      zip.file("receipt_data.csv", csvContent);
+      zip.file("receipt_data.csv", objectsToCsv([buildShareCsvRow()]));
 
       const content = await zip.generateAsync({ type: "blob" });
 
@@ -7273,7 +7233,11 @@ Thank you for using our receipt management system.
       {showViewReport && (
         <ViewReport
           receipt={selectedReceipt}
-          onClose={() => setShowViewReport(false)}
+          reportWindow={viewReportWindowRef.current}
+          onClose={() => {
+            viewReportWindowRef.current = null;
+            setShowViewReport(false);
+          }}
         />
       )}
 
