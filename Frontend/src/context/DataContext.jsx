@@ -2178,28 +2178,17 @@ setMerchantsWithImages(
     return () => window.removeEventListener("cat:session-expired", onSessionExpired);
   }, []);
 
-  // Add updateReceiptStatus function
+  // Mark a receipt read on the server (status=1) so Android/iOS drop the
+  // highlight too. Optimistic locally; updateReceipt is assigned later in this
+  // component and is only called from event handlers.
   const updateReceiptStatus = async (receiptId, newStatus) => {
-    try {
-      // Update local state immediately for responsive UI
-      setReceipts(prevReceipts =>
-        prevReceipts.map(receipt =>
-          receipt.id === receiptId ? { ...receipt, status: newStatus } : receipt
-        )
-      );
-
-
-      return true;
-    } catch (error) {
-      console.error("Failed to update receipt status:", error);
-      // Revert the local state change if the API call fails
-      setReceipts(prevReceipts =>
-        prevReceipts.map(receipt =>
-          receipt.id === receiptId ? { ...receipt, status: receipt.status } : receipt
-        )
-      );
-      return false;
-    }
+    const status = String(newStatus);
+    setReceipts((prevReceipts) =>
+      prevReceipts.map((receipt) =>
+        String(receipt.id) === String(receiptId) ? { ...receipt, status } : receipt
+      )
+    );
+    return updateReceipt(receiptId, { status });
   };
 
   const applyQuickbooksLinkedIds = useCallback((ids = []) => {
