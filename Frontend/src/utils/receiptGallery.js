@@ -17,8 +17,10 @@ export function hasActiveReceiptFilters(filters, searchTerm) {
 }
 
 /**
- * Flatten receipts into gallery items (one per image), newest receipt date first.
- * Multiple images on one receipt keep their field order and share the receipt date.
+ * Flatten receipts into gallery items (one per image).
+ * Receipt order is kept as given so the gallery matches the main screen
+ * (date, then total, then Describe Purchase, then merchant).
+ * Multiple images on one receipt keep their field order.
  */
 export function buildReceiptGalleryItems(receipts) {
   if (!Array.isArray(receipts)) return [];
@@ -40,13 +42,6 @@ export function buildReceiptGalleryItems(receipts) {
         receipt,
       });
     });
-  });
-
-  items.sort((a, b) => {
-    if (b.productDate !== a.productDate) return b.productDate - a.productDate;
-    const receiptDiff = Number(b.receiptId) - Number(a.receiptId);
-    if (receiptDiff !== 0) return receiptDiff;
-    return a.imageIndex - b.imageIndex;
   });
 
   return items;
