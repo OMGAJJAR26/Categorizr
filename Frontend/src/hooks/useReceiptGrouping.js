@@ -50,16 +50,18 @@ const isNetworkReceivedReceipt = (r) =>
   String(r.fk_forward_from_receipt_id) !== "0";
 
 /**
- * Blue "New" highlight for a received receipt only.
- * status 1 means that received copy was opened, so the highlight comes off.
- * Other receipts never use this highlight, even when their status is 1.
+ * Blue "New" highlight for a received (network-forwarded) receipt only.
+ *
+ * The highlight stays until a device actually OPENS the receipt, which sets
+ * is_verify=1 (synced across web/iOS/Android). We key off is_verify, NOT status:
+ * a forward arriving from iOS/Android can carry status=1 even though no one has
+ * opened it, which wrongly cleared the highlight on the recipient's web app.
+ * is_verify=0 reliably means "not yet opened on any device".
  */
 export const isNewForwardedReceipt = (r) => {
   if (!r || String(r.is_draft ?? "0") === "1") return false;
   if (!isNetworkReceivedReceipt(r)) return false;
-  const raw = r.status;
-  const status = raw == null || raw === "" ? -1 : Number(raw);
-  return status !== 1;
+  return String(r.is_verify ?? "0") !== "1";
 };
 
 /** @deprecated Use isNewForwardedReceipt instead */
