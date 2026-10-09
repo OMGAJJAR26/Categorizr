@@ -46,7 +46,10 @@ export const isReceiptSeen = (r) => {
 };
 
 export const isNewForwardedReceipt = (r) => {
-  if (!r || r.is_draft === "1" || r.is_verify !== "0") return false;
+  if (!r || String(r.is_draft ?? "0") === "1") return false;
+  // Only an explicit open clears this. Compare as strings so a numeric 0
+  // from a background save is still "not opened".
+  if (String(r.is_verify ?? "0") !== "0") return false;
   // Seen on Android/iOS (status=1) or already opened here (is_verify=1 above).
   if (isReceiptSeen(r)) return false;
   const isNetworkReceived =

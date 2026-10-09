@@ -68,13 +68,8 @@ const getReceiptTaxValues = (receipt) => {
   return [];
 };
 
-// forwardreceiptv2 is NOT parameterized — a raw apostrophe in any text field
-// ("Lowe's", "Lowe's (2)") breaks its SQL (non-JSON "Invalid query" error). It builds
-// the query by string concat, so escaping a single quote as '' makes MySQL store ONE
-// literal apostrophe (correct, not doubled).
-const escapeSqlApostrophe = (s) => (s ?? "").toString().replace(/'/g, "''");
-
-/** Tax lines for a newly created receipt on the recipient account. */
+// The browser sends the typed text. api/user/forwardreceiptv2 adapts apostrophes
+// for the legacy PHP query before they reach emailserver.
 const buildForwardTaxValues = (receipt, recipientUserId) => {
   const recipientId = toPositiveInt(recipientUserId);
   const allTaxValues = getReceiptTaxValues(receipt);
@@ -102,7 +97,7 @@ const buildForwardTaxValues = (receipt, recipientUserId) => {
     fk_user_id: recipientId || toPositiveInt(t.fk_user_id),
     fk_receipt_id: 0,
     fk_tax_id: toInt(t.fk_tax_id),
-    tax_name: escapeSqlApostrophe((t.tax_name || "").toString()),
+    tax_name: (t.tax_name || "").toString(),
     tax_rate: (t.tax_rate ?? "0").toString(),
     tax_amount: (parseFloat(t.tax_amount) || 0).toString(),
     created: 0,
@@ -158,8 +153,8 @@ export const buildForwardPayload = (receipt, recipientUserId, opts = {}) => {
   return {
     id: sourceReceiptId,
     forward_to_user_id: recipientId,
-    storeName: escapeSqlApostrophe(receipt.storeName || receipt.store_name || ""),
-    product_name: escapeSqlApostrophe(receipt.product_name || receipt.productName || ""),
+    storeName: receipt.storeName || receipt.store_name || "",
+    product_name: receipt.product_name || receipt.productName || "",
     emailAttachment: (receipt.emailAttachment || "0").toString(),
     purchasePrice: (receipt.purchasePrice ?? receipt.purchase_price ?? "0").toString(),
     total_amount: (
@@ -172,21 +167,27 @@ export const buildForwardPayload = (receipt, recipientUserId, opts = {}) => {
       opts.paymentCategoryEnum != null && opts.paymentCategoryEnum !== ""
         ? toInt(opts.paymentCategoryEnum)
         : toInt(receipt.payment_category_type),
-    status: toInt(receipt.status, 1),
+    // The copy on account B starts unread. Never copy the sender's status
+    // (usually 1, because they already opened their own receipt) — that made
+    // the recipient's highlight disappear a few seconds later on every device,
+    // as if someone had opened it. status stays 0 until a device actually opens it.
+    status: 0,
+    is_verify: 0,
+    is_draft: 0,
     paymentType: basePaymentType || paymentType,
     last_4_digit_card: last4,
-    card_issuer_name: escapeSqlApostrophe(receipt.card_issuer_name || receipt.cardIssuerName || ""),
+    card_issuer_name: receipt.card_issuer_name || receipt.cardIssuerName || "",
     payment_logo_url: receipt.paymentDisplay?.logoUrl || receipt.payment_logo_url || receipt.paymentLogoUrl || "",
     fk_original_receipt_id: originalId,
     fk_forward_from_receipt_id: String(sourceReceiptId),
     receipt_category: toInt(receipt.receipt_category),
     product_date: mobileProductDate,
-    expense_type: escapeSqlApostrophe(receipt.expense_type || receipt.expenseType || ""),
-    expenseType: escapeSqlApostrophe(receipt.expense_type || receipt.expenseType || ""),  // camelCase alias — some API versions use this field name
+    expense_type: receipt.expense_type || receipt.expenseType || "",
+    expenseType: receipt.expense_type || receipt.expenseType || "",
     receipt_image: (receipt.receipt_image || receipt.receiptImage || "0").toString(),
     store_image: receipt.store_image || receipt.storeImage || "",
     receipt_tag: receipt.receipt_tag || "0,0,0,0,0,0,0",
-    notes: escapeSqlApostrophe(receipt.notes || ""),
+    notes: receipt.notes || "",
     receipt_forwarded: "1",
     // Match product_date so mobile date heuristics never shift the forwarded day
     create_date: String(

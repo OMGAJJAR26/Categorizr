@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { PHP_API_BASE } from "../api/Axios";
 import { getPaymentDisplayFromReceipt } from "../hooks/usePaymentDisplay";
+import { isNewForwardedReceipt } from "../hooks/useReceiptGrouping";
 import {
   parseExpenseCategoryApiResponse,
   getExpenseCategoryNamesFromApi,
@@ -13,7 +14,6 @@ import {
 import { enrichReceiptTaxValues } from "../utils/taxTypeUtils";
 import {
   CLEARABLE_TEXT_FIELDS,
-  escapeReceiptSqlText,
   fromApiTextValue,
   toApiTextValue,
 } from "../utils/receiptTextFields";
@@ -2441,7 +2441,7 @@ setMerchantsWithImages(
             "Content-Type": "application/json",
             Accesstoken: token,
           },
-          body: JSON.stringify(escapeReceiptSqlText(payload)),
+          body: JSON.stringify(payload),
         });
         if (response.ok) return true;
         const errText = await response.text().catch(() => "");
@@ -2456,7 +2456,7 @@ setMerchantsWithImages(
     return false;
   };
 
-  const buildReceiptUpdatePayloadFromRow = (receipt) => {
+  const buildReceiptUpdatePayloadFromRow = (receipt, { keepUnread = false } = {}) => {
     const rawPaymentType = normalizePaymentField(receipt.paymentType ?? receipt.payment_type);
     const normalizedPaymentType = rawPaymentType.replace(/\s*\*\d{3,4}/g, "").trim();
     const rawIssuerName = normalizePaymentField(receipt.card_issuer_name ?? receipt.cardIssuerName);
@@ -2468,7 +2468,7 @@ setMerchantsWithImages(
     })();
     const hasPayment = !!(normalizedPaymentType || rawIssuerName || rawLast4 || inferredLast4);
 
-    return {
+    const payload = {
       id: parseInt(receipt.id),
       storeName: receipt.storeName ?? "",
       // Blank Describe Purchase → null (never "0"); "0" would show literally on mobile.
@@ -2507,6 +2507,13 @@ setMerchantsWithImages(
           : (resolveFreshestReceiptTaxValues(receipt.id) ||
              (Array.isArray(receipt.receipt_tax_values) ? receipt.receipt_tax_values : [])),
     };
+    // Logo/category/media backfill must not mark a forwarded receipt as opened.
+    // Those saves run a few seconds after it arrives, with no one viewing it.
+    if (keepUnread || isNewForwardedReceipt(receipt)) {
+      payload.status = 0;
+      payload.is_verify = 0;
+    }
+    return payload;
   };
 
   // Resolve the freshest, non-empty tax lines for a receipt from the most recent fetch.
@@ -2845,7 +2852,7 @@ setMerchantsWithImages(
         const resp = await fetch(`${BASE_URL}/receipt/addReceiptv1`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Accesstoken: token },
-          body: JSON.stringify(escapeReceiptSqlText(payload)),
+          body: JSON.stringify(payload),
         });
         if (resp.ok) created += 1;
         else failed += 1;
@@ -3147,7 +3154,7 @@ setMerchantsWithImages(
               "Content-Type": "application/json",
               Accesstoken: token,
             },
-            body: JSON.stringify(escapeReceiptSqlText(updatePayload)),
+            body: JSON.stringify(updatePayload),
           });
 
           const text = await response.text();

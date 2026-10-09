@@ -5,6 +5,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import https from 'https'
 import { handleAuthRequest, matchCredentialRoute } from './api/_lib/forwardAuth.js'
+import { forwardLegacyReceiptWrite, matchLegacyReceiptWrite } from '../api/_lib/legacyReceiptWrite.js'
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -231,6 +232,11 @@ export default defineConfig(({ mode }) => {
           const upstreamPath = matchCredentialRoute(req.url || '');
           if (upstreamPath) {
             handleAuthRequest(req, res, upstreamPath);
+            return;
+          }
+          const receiptWrite = matchLegacyReceiptWrite(req.url || '');
+          if (receiptWrite) {
+            forwardLegacyReceiptWrite(req, res, receiptWrite);
             return;
           }
           if (req.url?.startsWith('/api/chat')) {

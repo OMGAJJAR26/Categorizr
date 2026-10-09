@@ -82,7 +82,6 @@ import {
 } from "../../utils/mediaUrlUtils";
 import PdfThumbnail from "./PdfThumbnail";
 import { findRenamedApiMerchant } from "../../utils/merchantListUtils";
-import { escapeReceiptSqlText } from "../../utils/receiptTextFields";
 import EditPaymentMethodModal from "./EditPaymentMethodModal";
 
 // Payment method logos (for Add Payment Method modal card type list)
@@ -2958,7 +2957,7 @@ const handleFieldChange = (field, value) => {
                 "Content-Type": "application/json",
                 Accesstoken: token,
               },
-              body: JSON.stringify(escapeReceiptSqlText(savePayload)),
+              body: JSON.stringify(savePayload),
             });
 
             if (response.ok) {
@@ -3001,7 +3000,7 @@ const handleFieldChange = (field, value) => {
               "Content-Type": "application/json",
               Accesstoken: token,
             },
-            body: JSON.stringify(escapeReceiptSqlText(savePayload)),
+            body: JSON.stringify(savePayload),
           });
 
           if (createResponse.ok) {
@@ -3183,15 +3182,10 @@ const handleFieldChange = (field, value) => {
   /** POST a payload to addReceiptv1 and return the response data */
   const postNewReceipt = async (payload) => {
     const token = localStorage.getItem("token");
-    // Describe Purchase and Notes are concatenated into SQL. A raw apostrophe
-    // ("Lowe's", "don't") returns "Invalid query" and the previous text stays.
-    // storeName is not escaped — that column stores '' literally (Lowe''s).
-    const safePayload = escapeReceiptSqlText(payload);
-    console.log("%c[Receipt] POST /api/receipt/addReceiptv1 payload:", "color:#22c55e;font-weight:bold", safePayload);
     const response = await fetch("/api/receipt/addReceiptv1", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accesstoken: token },
-      body: JSON.stringify(safePayload),
+      body: JSON.stringify(payload),
     });
     if (!response.ok) throw new Error(`Failed to save receipt: ${response.status}`);
     const data = await response.json();
@@ -3202,12 +3196,11 @@ const handleFieldChange = (field, value) => {
   /** PUT payload to updateReceiptv1 */
   const putUpdateReceipt = async (payload) => {
     const token = localStorage.getItem("token");
-    const safePayload = escapeReceiptSqlText(payload);
-    console.log("%c[Receipt] POST /api/receipt/updateReceiptv1 payload:", "color:#f59e0b;font-weight:bold", safePayload);
+    console.log("%c[Receipt] POST /api/receipt/updateReceiptv1 payload:", "color:#f59e0b;font-weight:bold", payload);
     const response = await fetch("/api/receipt/updateReceiptv1", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accesstoken: token },
-      body: JSON.stringify(safePayload),
+      body: JSON.stringify(payload),
     });
     if (!response.ok) throw new Error(`Failed to update receipt: ${response.status}`);
     const data = await response.json();
