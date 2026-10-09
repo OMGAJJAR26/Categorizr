@@ -2493,9 +2493,10 @@ setMerchantsWithImages(
       store_image: receipt.store_image ?? "",
       // Blank Notes → null (never "0"); "0" would show literally on mobile.
       notes: toApiTextValue(receipt.notes),
-      // Integer, same as is_draft / is_verify. A string "1" is ignored by
-      // updateReceiptv1, so a web forward never stuck on the source receipt.
-      receipt_forwarded: parseInt(receipt.receipt_forwarded ?? 0, 10) || 0,
+      // String per the API schema (receipt_forwarded: "0" No / "1" Yes). Sending the
+      // numeric 1 was ignored by updateReceiptv1 (stored 0), so the forwarded flag never
+      // stuck on the receipt. Send "0"/"1" as a string.
+      receipt_forwarded: String(parseInt(receipt.receipt_forwarded ?? 0, 10) || 0),
       receipt_tag: receipt.receipt_tag ?? "",
       is_draft: parseInt(receipt.is_draft ?? 0) || 0,
       is_verify: parseInt(receipt.is_verify ?? 0) || 0,
@@ -3076,7 +3077,8 @@ setMerchantsWithImages(
         store_image: getValue("store_image", ""),
         // Same for Notes: legacy/stored "0" (or "") → null, real text preserved.
         notes: toApiTextValue(fromApiTextValue(getValue("notes", ""))),
-        receipt_forwarded: parseInt(getValue("receipt_forwarded", 0), 10) || 0,
+        // String per the API schema ("0"/"1"); a numeric 1 is ignored by updateReceiptv1.
+        receipt_forwarded: String(parseInt(getValue("receipt_forwarded", 0), 10) || 0),
         receipt_tag: getValue("receipt_tag", ""),
         // Persist draft/verify transitions (e.g. draft -> regular receipt after save)
         is_draft: (() => {
