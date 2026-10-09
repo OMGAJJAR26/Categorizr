@@ -39,35 +39,3 @@ export const fromApiTextValue = (value) => {
   const text = (value ?? "").toString();
   return text.trim() === CLEAR_TEXT_API_VALUE ? "" : text;
 };
-
-/**
- * addReceiptv1 and updateReceiptv1 paste these strings straight into SQL.
- * A raw apostrophe ("Lowe's", "McDonald's", "don't") makes the statement
- * invalid, the write is skipped, and the previous description/notes stay.
- * MySQL reads '' as one apostrophe, so the stored text is unchanged.
- *
- * storeName is left alone: that column accepts a raw apostrophe, and sending
- * '' is stored literally as two apostrophes (Lowe''s).
- */
-export const RECEIPT_SQL_TEXT_FIELDS = [
-  "product_name",
-  "notes",
-  "expense_type",
-  "expenseType",
-  "paymentType",
-  "card_issuer_name",
-];
-
-export const escapeSqlApostrophe = (value) =>
-  (value ?? "").toString().replace(/'/g, "''");
-
-/** Copy of a receipt payload safe to POST. Does not mutate the caller's object. */
-export const escapeReceiptSqlText = (payload) => {
-  if (!payload || typeof payload !== "object") return payload;
-  const next = { ...payload };
-  for (const field of RECEIPT_SQL_TEXT_FIELDS) {
-    if (next[field] == null) continue;
-    next[field] = escapeSqlApostrophe(next[field]);
-  }
-  return next;
-};

@@ -3,8 +3,6 @@ import test from "node:test";
 
 import {
   CLEAR_TEXT_API_VALUE,
-  escapeReceiptSqlText,
-  escapeSqlApostrophe,
   fromApiTextValue,
   toApiTextValue,
 } from "./receiptTextFields.js";
@@ -53,32 +51,4 @@ test("clearing then reading round-trips to empty", () => {
 test("a real description round-trips unchanged", () => {
   const text = "Two litres of paint";
   assert.equal(fromApiTextValue(toApiTextValue(text)), text);
-});
-
-test("escapeSqlApostrophe doubles a straight apostrophe for SQL concat", () => {
-  assert.equal(escapeSqlApostrophe("Lowe's paint"), "Lowe''s paint");
-  assert.equal(escapeSqlApostrophe("don't forget"), "don''t forget");
-  assert.equal(escapeSqlApostrophe("McDonald's"), "McDonald''s");
-  assert.equal(escapeSqlApostrophe(""), "");
-  assert.equal(escapeSqlApostrophe(null), "");
-});
-
-test("escapeReceiptSqlText escapes describe-purchase and notes only on the copy", () => {
-  const payload = {
-    storeName: "Lowe's",
-    product_name: "Lowe's paint",
-    notes: "don't forget",
-    expense_type: "Mom's Retail",
-    paymentType: "O'Brien Visa",
-    card_issuer_name: "O'Brien Bank",
-  };
-  const safe = escapeReceiptSqlText(payload);
-  assert.equal(safe.storeName, "Lowe's");
-  assert.equal(safe.product_name, "Lowe''s paint");
-  assert.equal(safe.notes, "don''t forget");
-  assert.equal(safe.expense_type, "Mom''s Retail");
-  assert.equal(safe.paymentType, "O''Brien Visa");
-  assert.equal(safe.card_issuer_name, "O''Brien Bank");
-  assert.equal(payload.product_name, "Lowe's paint");
-  assert.equal(payload.notes, "don't forget");
 });

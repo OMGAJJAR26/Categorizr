@@ -32,7 +32,6 @@ import {
 import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationDialog";
 import ForwardReceiptModal from "../components/receipts/ForwardReceiptModal";
 import { isNetworkReceivedReceipt } from "../utils/networkReceiptUtils";
-import { escapeReceiptSqlText } from "../utils/receiptTextFields";
 import { compareByDayThenTotal } from "../utils/receiptSorting";
 import "../App.css";
 const Visa              = "/payment-logos/Visa.png";
@@ -3144,7 +3143,7 @@ useEffect(() => {
     const response = await fetch("/api/receipt/updateReceiptv1", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accesstoken: token },
-      body: JSON.stringify(escapeReceiptSqlText(payload)),
+      body: JSON.stringify(payload),
     });
     if (!response.ok) throw new Error(`Failed to update receipt: ${response.status}`);
     return response.json();
@@ -3248,14 +3247,10 @@ useEffect(() => {
   /** POST a new receipt payload to addReceiptv1 */
   const postNewReceiptForSplit = async (payload) => {
     const token = localStorage.getItem("token");
-    // Describe Purchase and Notes are concatenated into SQL. A raw apostrophe
-    // returns "Invalid query" and the previous text is what remains. storeName
-    // is sent raw — escaping it is stored as Lowe''s.
-    const safePayload = escapeReceiptSqlText(payload);
     const res = await fetch("/api/receipt/addReceiptv1", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accesstoken: token },
-      body: JSON.stringify(safePayload),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error(`Failed to save split receipt: ${res.status}`);
     return res.json();
@@ -3345,7 +3340,7 @@ useEffect(() => {
               fetch("/api/receipt/updateReceiptv1", {
                 method: "POST",
                 headers: { "Content-Type": "application/json", Accesstoken: token },
-                body: JSON.stringify(escapeReceiptSqlText(patch)),
+                body: JSON.stringify(patch),
               }).catch(() => {});
             }
           } catch { /* ignore */ }
@@ -3536,7 +3531,7 @@ useEffect(() => {
             return fetch("/api/receipt/updateReceiptv1", {
               method: "POST",
               headers: { "Content-Type": "application/json", Accesstoken: token },
-              body: JSON.stringify(escapeReceiptSqlText(patch)),
+              body: JSON.stringify(patch),
             }).catch(() => {});
           })
         );
