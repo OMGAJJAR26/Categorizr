@@ -2509,6 +2509,8 @@ setMerchantsWithImages(
     };
     // Logo/category/media backfill must not mark a forwarded receipt as opened.
     // Those saves run a few seconds after it arrives, with no one viewing it.
+    // The legacy server still sets is_verify when this body includes tax lines,
+    // so callers must not post this payload for an unread forward at all.
     if (keepUnread || isNewForwardedReceipt(receipt)) {
       payload.status = 0;
       payload.is_verify = 0;
@@ -2595,6 +2597,9 @@ setMerchantsWithImages(
       .filter(
         ({ raw, cleaned }) =>
           cleaned &&
+          // A full-row write re-runs tax mapping and the server sets is_verify.
+          // Leave an unopened forward alone until someone actually opens it.
+          !isNewForwardedReceipt(cleaned) &&
           receiptMediaStorageKey(raw) !== receiptMediaStorageKey(cleaned)
       );
 
@@ -3345,7 +3350,7 @@ setMerchantsWithImages(
             tasks.push(
               (async () => {
                 const token = localStorage.getItem("token");
-                if (!token) return;
+                if (!token || isNewForwardedReceipt(receipt)) return;
                 // Full-row update: updateReceiptv1 replaces the whole row, so a minimal
                 // {id, store_image} patch would delete taxes and every other field.
                 const payload = buildReceiptUpdatePayloadFromRow({
@@ -3374,7 +3379,7 @@ setMerchantsWithImages(
           tasks.push(
             (async () => {
               const token = localStorage.getItem("token");
-              if (!token) return;
+              if (!token || isNewForwardedReceipt(receipt)) return;
               // Full-row update so this logo patch never wipes taxes/other fields.
               const payload = buildReceiptUpdatePayloadFromRow({
                 ...receipt,
@@ -3510,7 +3515,7 @@ setMerchantsWithImages(
         tasks.push(
           (async () => {
             const token = localStorage.getItem("token");
-            if (!token) return;
+            if (!token || isNewForwardedReceipt(receipt)) return;
             // Keep the forwarded receipt's real taxes (never wipe them via this update).
             const freshTax = resolveFreshestReceiptTaxValues(receipt.id);
             const payload = buildReceiptUpdatePayloadFromRow({
@@ -3636,7 +3641,10 @@ setMerchantsWithImages(
                 );
               }
 
-              // Persist all patches to server in one call
+              // Persist all patches to server in one call.
+              // Skip while the forward is still unread: this body includes tax
+              // lines, and that path sets is_verify and sends NewAdd-Tax.
+              if (isNewForwardedReceipt(receipt)) return;
               const payload = buildReceiptUpdatePayloadFromRow(serverPatch);
               await postReceiptUpdatePayload(payload, token);
             } catch { /* ignore */ }

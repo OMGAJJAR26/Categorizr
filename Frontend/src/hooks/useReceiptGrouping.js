@@ -25,11 +25,11 @@ const isToBeVerified = (r) => {
 };
 
 /**
- * Network-forwarded receipts that haven't been opened on any device.
- * Blue "New" highlight in the regular list. Email eReceipts use isToBeVerified.
- *
- * Cleared when status is 1 (Android/iOS isRead: opened somewhere and not still
- * pending verification) or when this app sets is_verify to 1 on open.
+ * Same rule iOS uses for isRead after the first sync:
+ * read only when status is 1 and the receipt is not still pending verification.
+ * Pending verification is an unverified email eReceipt or a draft.
+ * is_verify by itself is not "opened" — the legacy server sets it while copying
+ * tax lines, and that must not clear the blue highlight.
  */
 export const isReceiptSeen = (r) => {
   if (!r) return false;
@@ -45,12 +45,9 @@ export const isReceiptSeen = (r) => {
   return !pendingVerification;
 };
 
+/** Blue "New" highlight: a network forward nobody has opened (status is not 1). */
 export const isNewForwardedReceipt = (r) => {
   if (!r || String(r.is_draft ?? "0") === "1") return false;
-  // Only an explicit open clears this. Compare as strings so a numeric 0
-  // from a background save is still "not opened".
-  if (String(r.is_verify ?? "0") !== "0") return false;
-  // Seen on Android/iOS (status=1) or already opened here (is_verify=1 above).
   if (isReceiptSeen(r)) return false;
   const isNetworkReceived =
     r.fk_forward_from_receipt_id != null &&
