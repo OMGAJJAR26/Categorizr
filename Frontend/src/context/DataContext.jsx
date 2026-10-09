@@ -320,8 +320,7 @@ export const DataProvider = ({ children }) => {
       const token = localStorage.getItem("token");
       if (!token) return [];
       
-      const dateTimeStamp = Date.now();
-      const response = await fetch(`${BASE_URL}/tax/getTax?date_time_stamp=0&fk_user_id=10476`, {
+      const response = await fetch(`${BASE_URL}/tax/getTax?fk_user_id=10476`, {
         headers: {
           accesstoken: `${token}`,
         },
@@ -1239,7 +1238,7 @@ export const DataProvider = ({ children }) => {
           `${BASE_URL}/user/getreceiptfromdatev1?fk_user_id=${fk_user_id}&date_time_stamp=${date_time_stamp}`,
           { method: "GET", headers: { "Content-Type": "application/json", Accesstoken: token } }
         ),
-        fetch(`${BASE_URL}/tax/getTax?date_time_stamp=${Date.now()}`, {
+        fetch(`${BASE_URL}/tax/getTax`, {
           headers: { Accesstoken: token, Authorization: `Bearer ${token}` },
         }).catch(() => null),
         fetch(`${BASE_URL}/userstore/getStorev1`, {
@@ -2494,7 +2493,9 @@ setMerchantsWithImages(
       store_image: receipt.store_image ?? "",
       // Blank Notes → null (never "0"); "0" would show literally on mobile.
       notes: toApiTextValue(receipt.notes),
-      receipt_forwarded: receipt.receipt_forwarded ?? "0",
+      // Integer, same as is_draft / is_verify. A string "1" is ignored by
+      // updateReceiptv1, so a web forward never stuck on the source receipt.
+      receipt_forwarded: parseInt(receipt.receipt_forwarded ?? 0, 10) || 0,
       receipt_tag: receipt.receipt_tag ?? "",
       is_draft: parseInt(receipt.is_draft ?? 0) || 0,
       is_verify: parseInt(receipt.is_verify ?? 0) || 0,
@@ -2551,18 +2552,21 @@ setMerchantsWithImages(
       }));
   };
 
-  const markReceiptAsForwarded = async (receiptId) => {
+  const markReceiptAsForwarded = async (receiptId, receiptOverride = null) => {
     const token = localStorage.getItem("token");
     if (!token || !receiptId) return;
-    const existingReceipt = receipts.find(r => String(r.id) === String(receiptId));
+    const existingReceipt =
+      receipts.find((r) => String(r.id) === String(receiptId)) ||
+      (receiptOverride && String(receiptOverride.id) === String(receiptId)
+        ? receiptOverride
+        : null);
     if (!existingReceipt) return;
     const payload = buildReceiptUpdatePayloadFromRow({
       ...existingReceipt,
-      receipt_forwarded: "1",
+      receipt_forwarded: 1,
     });
     await postReceiptUpdatePayload(payload, token);
-    // Persist locally so badge survives refresh and logout/login
-    // (equivalent to iOS Core Data — backend doesn't update the source receipt)
+    // Keep the badge if a refresh returns before the write is visible.
     try {
       const set = new Set(JSON.parse(localStorage.getItem("cat_locally_forwarded") || "[]"));
       set.add(String(receiptId));
@@ -3072,7 +3076,7 @@ setMerchantsWithImages(
         store_image: getValue("store_image", ""),
         // Same for Notes: legacy/stored "0" (or "") → null, real text preserved.
         notes: toApiTextValue(fromApiTextValue(getValue("notes", ""))),
-        receipt_forwarded: getValue("receipt_forwarded", "0"),
+        receipt_forwarded: parseInt(getValue("receipt_forwarded", 0), 10) || 0,
         receipt_tag: getValue("receipt_tag", ""),
         // Persist draft/verify transitions (e.g. draft -> regular receipt after save)
         is_draft: (() => {

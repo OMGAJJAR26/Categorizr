@@ -188,7 +188,9 @@ export const buildForwardPayload = (receipt, recipientUserId, opts = {}) => {
     store_image: receipt.store_image || receipt.storeImage || "",
     receipt_tag: receipt.receipt_tag || "0,0,0,0,0,0,0",
     notes: receipt.notes || "",
-    receipt_forwarded: "1",
+    // The new copy on the recipient is not a receipt they forwarded.
+    // The sender's own row is marked receipt_forwarded=1 after this call succeeds.
+    receipt_forwarded: 0,
     // Match product_date so mobile date heuristics never shift the forwarded day
     create_date: String(
       mobileProductDate || Math.floor(Date.now() / 1000),

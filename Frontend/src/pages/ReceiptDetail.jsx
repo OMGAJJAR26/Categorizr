@@ -3290,7 +3290,7 @@ useEffect(() => {
     setSelectedReceipt((prev) => (prev ? { ...prev, ...forwardedPatch } : prev));
     setEditedReceipt((prev) => ({ ...prev, receipt_forwarded: "1" }));
 
-    await markReceiptAsForwarded(selectedReceipt.id);
+    await markReceiptAsForwarded(selectedReceipt.id, selectedReceipt);
 
     // The server does not copy expense_type when creating the recipient's receipt.
     // forwardreceiptv2 returns no receipt ID, so we fetch the recipient's list, find
