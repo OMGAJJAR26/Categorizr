@@ -45,14 +45,21 @@ export const isReceiptSeen = (r) => {
   return !pendingVerification;
 };
 
-/** Blue "New" highlight: a network forward nobody has opened (status is not 1). */
+const isNetworkReceivedReceipt = (r) =>
+  r?.fk_forward_from_receipt_id != null &&
+  String(r.fk_forward_from_receipt_id) !== "0";
+
+/**
+ * Blue "New" highlight for a received receipt only.
+ * status 1 means that received copy was opened, so the highlight comes off.
+ * Other receipts never use this highlight, even when their status is 1.
+ */
 export const isNewForwardedReceipt = (r) => {
   if (!r || String(r.is_draft ?? "0") === "1") return false;
-  if (isReceiptSeen(r)) return false;
-  const isNetworkReceived =
-    r.fk_forward_from_receipt_id != null &&
-    String(r.fk_forward_from_receipt_id) !== "0";
-  return isNetworkReceived;
+  if (!isNetworkReceivedReceipt(r)) return false;
+  const raw = r.status;
+  const status = raw == null || raw === "" ? -1 : Number(raw);
+  return status !== 1;
 };
 
 /** @deprecated Use isNewForwardedReceipt instead */
