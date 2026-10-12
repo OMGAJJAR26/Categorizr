@@ -67,6 +67,7 @@ import {
   resolveReceiptCalendarUnix,
   calendarUnixToMobileUnix,
   productDateUnixToApiUnix,
+  productDateToApiReceiptDate,
   NO_DATE_SENTINEL_UNIX,
 } from "../utils/receiptDate";
 import { loadQbLinkedReceipts, saveQbLinkedReceipts, addQbLinkedReceipt } from "../utils/qbStorage";
@@ -2488,6 +2489,8 @@ setMerchantsWithImages(
       fk_forward_from_receipt_id: receipt.fk_forward_from_receipt_id ?? "0",
       receipt_category: parseInt(receipt.receipt_category ?? 0) || 0,
       product_date: parseInt(receipt.product_date ?? 0) || 0,
+      // Raw calendar day ("YYYY-MM-DD" / "0") so the date is identical on every platform.
+      receipt_date: productDateToApiReceiptDate(receipt.product_date),
       expense_type: receipt.expense_type ?? "",
       receipt_image: receipt.receipt_image ?? "0",
       store_image: receipt.store_image ?? "",
@@ -2820,6 +2823,7 @@ setMerchantsWithImages(
       fk_forward_from_receipt_id: "0",
       receipt_category: 0,
       product_date: productDate,
+      receipt_date: productDateToApiReceiptDate(productDate),
       expense_type: "",
       receipt_image: "0",
       store_image: storeImage,
@@ -3063,6 +3067,16 @@ setMerchantsWithImages(
             isNaN(parsed) ? (existingReceipt?.product_date ?? 0) : parsed,
           );
         })(),
+        // Raw calendar day ("YYYY-MM-DD" / "0") mirroring product_date, so the date is
+        // identical across platforms. (A cleared date is forced to "0" below.)
+        receipt_date: (() => {
+          const val = getValue("product_date");
+          const src =
+            val === null || val === undefined || val === ""
+              ? (existingReceipt?.product_date ?? 0)
+              : val;
+          return productDateToApiReceiptDate(src);
+        })(),
         expense_type: (() => {
           const val = getValue("expense_type");
           // If expense_type is explicitly provided (even if empty), use it
@@ -3145,6 +3159,7 @@ setMerchantsWithImages(
           rawPd === null || rawPd === undefined ? "" : String(rawPd).trim();
         if (rawPdStr === "" || rawPdStr === "0") {
           updatePayload.product_date = NO_DATE_SENTINEL_UNIX;
+          updatePayload.receipt_date = "0"; // "0 If Not Set"
         }
       }
 

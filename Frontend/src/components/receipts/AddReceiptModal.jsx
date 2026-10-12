@@ -4,6 +4,7 @@ import {
   parseDateInputToUnix,
   todayLocalCalendarUnix,
   NO_DATE_SENTINEL_UNIX,
+  productDateToApiReceiptDate,
 } from "../../utils/receiptDate";
 
 /**
@@ -2373,6 +2374,7 @@ const handleFieldChange = (field, value) => {
         // the 4 digits ("MasterCard *7836") instead of a bare brand ("MasterCard").
         last_4_digit_card: ocrHasLast4 ? ocrLast4Match[1] : "",
         product_date: parsedDate,
+        receipt_date: productDateToApiReceiptDate(parsedDate),
         subtotal: ocrTaxSubtotalFinal,
         purchasePrice: cleanNumericValue(parsedReceiptData?.total || parsedReceiptData?.subtotal),
         product_name: cleanTextValue(parsedReceiptData?.productName || ""),
@@ -2825,6 +2827,7 @@ const handleFieldChange = (field, value) => {
           uploadedReceiptData?.fk_forward_from_receipt_id || "0",
         receipt_category: parseInt(formData.receipt_category) || 0,
         product_date: productDate,
+        receipt_date: productDateToApiReceiptDate(productDate),
         expense_type: formData.expense_type || "",
         // Mobile always stores images in emailAttachment; receipt_image stays "0".
         // Matching that pattern keeps QuickBooks and display logic consistent.
@@ -3156,6 +3159,7 @@ const handleFieldChange = (field, value) => {
       fk_forward_from_receipt_id: uploadedReceiptData?.fk_forward_from_receipt_id || "0",
       receipt_category: parseInt(formData.receipt_category) || 0,
       product_date: productDate,
+      receipt_date: productDateToApiReceiptDate(productDate),
       expense_type: formData.expense_type || "",
       receipt_image: "0", // Match mobile: images live in emailAttachment only
       store_image: getMerchantImage(formData.storeName) || detectedMerchantLogo || uploadedReceiptData?.store_image || "",
@@ -3337,6 +3341,7 @@ const handleFieldChange = (field, value) => {
         fk_forward_from_receipt_id: "0",
         receipt_category: parseInt(category) || 0,
         product_date: productDate,
+        receipt_date: productDateToApiReceiptDate(productDate),
         expense_type: expenseType || formData.expense_type || "",
         receipt_image: "0",
         store_image: getMerchantImage(formData.storeName) || detectedMerchantLogo || "",

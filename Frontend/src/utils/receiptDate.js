@@ -181,3 +181,22 @@ export function productDateToInputValue(productDate) {
   const d = new Date(ts * 1000);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 }
+
+/**
+ * The `receipt_date` string for API writes (addReceiptv1 / updateReceiptv1 /
+ * forwardreceiptv2): the raw calendar day as "YYYY-MM-DD", or "0" when undated.
+ * Sent alongside the numeric product_date so the day is identical on every platform
+ * and never shifts by timezone/country. Accepts a unix product_date or a receipt.
+ */
+export function productDateToApiReceiptDate(productDate) {
+  if (productDate && typeof productDate === "object") {
+    return productDateToApiReceiptDate(
+      productDate.product_date ?? productDate.productDate,
+    );
+  }
+  // Already a "YYYY-MM-DD" string? Keep it verbatim (don't round-trip through unix).
+  if (typeof productDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(productDate.trim())) {
+    return productDate.trim();
+  }
+  return productDateToInputValue(productDate) || "0";
+}

@@ -101,6 +101,7 @@ import {
   formatReceiptDateLong,
   parseDateInputToUnix,
   productDateToInputValue,
+  productDateToApiReceiptDate,
   NO_DATE_SENTINEL_UNIX,
   formatReceiptDate,
 } from "../utils/receiptDate";
@@ -3477,6 +3478,7 @@ useEffect(() => {
           fk_forward_from_receipt_id: "0",
           receipt_category: splitCategory,
           product_date: productDate,
+          receipt_date: productDateToApiReceiptDate(productDate),
           expense_type: splitExpenseType,
           receipt_image: "0",
           store_image: storeImage,
