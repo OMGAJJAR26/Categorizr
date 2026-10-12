@@ -851,48 +851,46 @@ const [localMerchants, setLocalMerchants] = useState([]);
   // Upload files to /user/uploadmediaV1 and return array of fullImageUrls
   const uploadFilesToMedia = useCallback(async (filesToUpload) => {
     const token = localStorage.getItem("token");
-
-    const formData = new FormData();
-    // Convert any HEIC/HEIF (e.g. straight from an iPhone) to JPEG first, so the
-    // stored image displays everywhere and can be attached in QuickBooks.
-    for (const file of filesToUpload) {
-      const converted = await convertHeicToJpegIfNeeded(file);
-      formData.append("file", sanitizeUploadFile(converted)); // API field name is "file", supports multiple
-    }
-
-    const response = await fetch("/api/user/uploadmediaV1", {
-      method: "POST",
-      headers: {
-        Accesstoken: token,
-      },
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("uploadmediaV1 error:", errorText);
-      throw new Error(`Media upload failed: ${response.status}`);
-    }
-
-    const data = await response.json();
-    console.log("uploadmediaV1 response:", data);
+    const list = Array.from(filesToUpload || []);
+    if (list.length === 0) return [];
 
     const isHttpUrl = (value) =>
       typeof value === "string" && /^https?:\/\//i.test(value.trim());
 
-    let urls = [];
-    if (Array.isArray(data)) {
-      urls = data
-        .map((item) => (item?.fullImageUrl || "").toString().trim())
-        .filter((url) => isHttpUrl(url));
-    } else if (isHttpUrl(data?.fullImageUrl)) {
-      urls = [data.fullImageUrl.toString().trim()];
-    }
+    // uploadmediaV1 returns exactly ONE url — the last "file" part — per request,
+    // regardless of how many parts are sent. Sending several files in one request
+    // therefore keeps only the last and drops the rest, and the surviving url's
+    // position depends on server order, not selection order. So upload each file
+    // in its own request and keep the results index-aligned to the input: the N-th
+    // selected image is always the N-th url. Promise.all preserves that order no
+    // matter which request finishes first, so parallel uploads stay fast and ordered.
+    const uploadOne = async (file) => {
+      // Convert any HEIC/HEIF (e.g. straight from an iPhone) to JPEG first, so the
+      // stored image displays everywhere and can be attached in QuickBooks.
+      const converted = await convertHeicToJpegIfNeeded(file);
+      const formData = new FormData();
+      formData.append("file", sanitizeUploadFile(converted));
 
-    // uploadmediaV1 is cumulative — keep only the file(s) from this request.
-    if (filesToUpload.length > 0 && urls.length > 0) {
-      urls = urls.slice(-filesToUpload.length);
-    }
+      const response = await fetch("/api/user/uploadmediaV1", {
+        method: "POST",
+        headers: { Accesstoken: token },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("uploadmediaV1 error:", errorText);
+        throw new Error(`Media upload failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const item = Array.isArray(data) ? data[data.length - 1] : data;
+      const url = (item?.fullImageUrl || "").toString().trim();
+      return isHttpUrl(url) ? url : "";
+    };
+
+    const results = await Promise.all(list.map(uploadOne));
+    const urls = results.filter(isHttpUrl); // keep order; drop any that failed
 
     // Server attaches the new URL to every receipt — write cleaned values back.
     if (urls.length > 0 && repairReceiptMediaOnServer) {
