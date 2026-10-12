@@ -118,6 +118,9 @@ const HomePage = () => {
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [showQbDeletePrompt, setShowQbDeletePrompt] = useState(false);
   const [pendingScanCount, setPendingScanCount] = useState(0);
+  // Draft count when a multi-scan started, so skeletons retire exactly as the real
+  // drafts appear (keeps the row count stable — no "lost receipts" flicker).
+  const scanBaselineDraftsRef = useRef(0);
   const [receiptToDelete, setReceiptToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
   // ── Multi-select (bulk delete / bulk send) ──
@@ -660,6 +663,10 @@ const HomePage = () => {
   const handleMultiScan = async (files) => {
     const list = Array.from(files || []).slice(0, 5);
     if (list.length === 0) return;
+    // Remember how many drafts exist now; the visible skeletons = pending − drafts that
+    // have since appeared, so a skeleton is only removed once its real draft shows up.
+    // This keeps the Draft section's row count constant (no disappear/reappear).
+    scanBaselineDraftsRef.current = draftReceipts.length;
     setPendingScanCount(list.length);
     setToast({
       isVisible: true,
@@ -667,9 +674,10 @@ const HomePage = () => {
       type: "success",
     });
     try {
-      const { created, failed } = await scanReceiptsToDrafts(list, {
-        onProgress: () => setPendingScanCount((c) => Math.max(0, c - 1)),
-      });
+      // Don't retire skeletons per upload — the real drafts only enter the list at the
+      // end-of-scan refresh, so retiring early leaves an empty gap. The render ties
+      // skeleton count to drafts actually present instead.
+      const { created, failed } = await scanReceiptsToDrafts(list);
       setToast({
         isVisible: true,
         message:
@@ -1345,6 +1353,14 @@ const HomePage = () => {
     "Create Reports",
   ];
 
+  // Skeletons still to show = scans in flight minus the drafts that have already
+  // appeared in the list since the scan started. Keeps (skeletons + drafts) constant,
+  // so a scanned receipt never blinks out before its real draft row renders.
+  const scanSkeletonCount = Math.max(
+    0,
+    pendingScanCount - Math.max(0, draftReceipts.length - scanBaselineDraftsRef.current)
+  );
+
   return (
     <div className="home-page">
       <Header />
@@ -1592,9 +1608,9 @@ const HomePage = () => {
                     <span className="text-amber-700 font-bold">
                       Draft Receipts ({draftReceipts.length}{" "}
                       {draftReceipts.length === 1 ? "Receipt" : "Receipts"})
-                      {pendingScanCount > 0 && (
+                      {scanSkeletonCount > 0 && (
                         <span className="ml-2 font-semibold text-amber-600">
-                          • Scanning {pendingScanCount}…
+                          • Scanning {scanSkeletonCount}…
                         </span>
                       )}
                     </span>
@@ -1605,8 +1621,8 @@ const HomePage = () => {
                     </span>
                   </div>
                   <div className="home-receipts-inner">
-                    {pendingScanCount > 0 &&
-                      Array.from({ length: pendingScanCount }).map((_, i) => (
+                    {scanSkeletonCount > 0 &&
+                      Array.from({ length: scanSkeletonCount }).map((_, i) => (
                         <div key={`scan-skeleton-${i}`} className="mb-3">
                           <ReceiptScanSkeleton />
                         </div>
