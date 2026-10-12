@@ -3,7 +3,7 @@ import {
   filterNonTipReceiptTaxValues,
   findTipLineInReceiptTaxValues,
 } from "../utils/taxTypeUtils";
-import { calendarUnixToMobileUnix } from "../utils/receiptDate";
+import { calendarUnixToMobileUnix, productDateToApiReceiptDate } from "../utils/receiptDate";
 
 const BASE_URL = "/api";
 
@@ -182,6 +182,9 @@ export const buildForwardPayload = (receipt, recipientUserId, opts = {}) => {
     fk_forward_from_receipt_id: String(sourceReceiptId),
     receipt_category: toInt(receipt.receipt_category),
     product_date: mobileProductDate,
+    // Raw calendar day ("YYYY-MM-DD", or "0") so the recipient sees the same date on
+    // every platform regardless of timezone.
+    receipt_date: productDateToApiReceiptDate(receipt.product_date),
     expense_type: receipt.expense_type || receipt.expenseType || "",
     expenseType: receipt.expense_type || receipt.expenseType || "",
     receipt_image: (receipt.receipt_image || receipt.receiptImage || "0").toString(),
