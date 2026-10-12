@@ -68,6 +68,7 @@ import {
   calendarUnixToMobileUnix,
   productDateUnixToApiUnix,
   productDateToApiReceiptDate,
+  parseDateInputToUnix,
   NO_DATE_SENTINEL_UNIX,
 } from "../utils/receiptDate";
 import { loadQbLinkedReceipts, saveQbLinkedReceipts, addQbLinkedReceipt } from "../utils/qbStorage";
@@ -1372,7 +1373,16 @@ export const DataProvider = ({ children }) => {
                 r.create_date ?? r.createDate,
               );
 
-              let normalisedProductDate = rawProductDate;
+              // The backend now also returns receipt_date as a raw "YYYY-MM-DD"
+              // calendar day ("0" when unset). When present it is authoritative:
+              // it is the same day on every platform, never shifted by timezone,
+              // so it wins over the numeric product_date (which can drift).
+              const rawReceiptDate = (r.receipt_date ?? "").toString().trim();
+              const receiptDateUnix = /^\d{4}-\d{2}-\d{2}$/.test(rawReceiptDate)
+                ? parseDateInputToUnix(rawReceiptDate)
+                : 0;
+
+              let normalisedProductDate = receiptDateUnix || rawProductDate;
 
               // Treat timestamps < 1,000,000 as invalid (too close to 1970-01-01)
               if (normalisedProductDate === 0 || normalisedProductDate < 1000000) {
