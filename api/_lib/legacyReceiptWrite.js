@@ -1,22 +1,20 @@
 /**
- * The browser sends the typed text as JSON ("Lowe's paint").
- * addReceiptv1 / updateReceiptv1 / forwardreceiptv2 on emailserver still paste
- * some columns into SQL, so this hop — not the client — doubles ' to '' for
- * those columns only. MySQL stores that as one apostrophe.
+ * Pass-through proxy for the legacy receipt-write endpoints
+ * (addReceiptv1 / updateReceiptv1 / forwardreceiptv2) on emailserver.
  *
- * storeName on add/update is already parameterized. Doubling it would save Lowe''s.
+ * This hop used to double ' to '' for the text columns, because those columns
+ * were once pasted straight into SQL. The backend has since parameterized all
+ * three endpoints — verified live 2026-10-13: a raw "Lowe's" / "Bob's" is now
+ * stored verbatim, and a sent "Lowe''s" is stored doubled. So escaping here now
+ * CORRUPTS the data: it saved Lowe''s / Bob''s, which the web app hid by
+ * un-doubling on read while iOS/Android (which don't) showed the doubled text,
+ * and forwarding re-escaped an already-escaped value into Lowe''''s.
+ *
+ * The body is therefore forwarded unchanged. The client sends the typed text
+ * ("Lowe's paint") and the backend stores exactly that.
  */
 
 const UPSTREAM_ORIGIN = "https://categorizr.com/emailserver";
-
-const RECEIPT_SQL_TEXT_FIELDS = [
-  "product_name",
-  "notes",
-  "expense_type",
-  "expenseType",
-  "paymentType",
-  "card_issuer_name",
-];
 
 const RECEIPT_WRITE_ENDPOINTS = new Set([
   "addReceiptv1",
@@ -26,36 +24,21 @@ const RECEIPT_WRITE_ENDPOINTS = new Set([
   "editReceipt",
 ]);
 
-const escapeSqlApostrophe = (value) =>
-  (value ?? "").toString().replace(/'/g, "''");
-
-export function prepareLegacyReceiptBody(body, { includeStoreName = false } = {}) {
-  if (!body || typeof body !== "object" || Array.isArray(body)) return body;
-  const next = { ...body };
-  const fields = includeStoreName
-    ? ["storeName", ...RECEIPT_SQL_TEXT_FIELDS]
-    : RECEIPT_SQL_TEXT_FIELDS;
-  for (const field of fields) {
-    if (next[field] == null) continue;
-    next[field] = escapeSqlApostrophe(next[field]);
-  }
-  if (includeStoreName && Array.isArray(next.receipt_tax_values)) {
-    next.receipt_tax_values = next.receipt_tax_values.map((line) => {
-      if (!line || typeof line !== "object" || line.tax_name == null) return line;
-      return { ...line, tax_name: escapeSqlApostrophe(line.tax_name) };
-    });
-  }
-  return next;
+// Backend endpoints are parameterized — forward the typed text verbatim, no
+// apostrophe doubling. Kept as a function (not inlined) so the single escape
+// decision stays in one place if a future endpoint ever needs it again.
+export function prepareLegacyReceiptBody(body) {
+  return body;
 }
 
 export function matchLegacyReceiptWrite(url) {
   const path = String(url || "").split("?")[0].replace(/\/+$/, "") || "/";
   const receipt = path.match(/^\/api\/receipt\/([^/]+)$/);
   if (receipt && RECEIPT_WRITE_ENDPOINTS.has(receipt[1])) {
-    return { upstreamPath: path, includeStoreName: false };
+    return { upstreamPath: path };
   }
   if (path === "/api/user/forwardreceiptv2") {
-    return { upstreamPath: path, includeStoreName: true };
+    return { upstreamPath: path };
   }
   return null;
 }
@@ -118,9 +101,7 @@ export async function forwardLegacyReceiptWrite(req, res, route) {
   }
 
   const accessToken = req.headers?.accesstoken || req.headers?.Accesstoken || "";
-  const upstreamBody = prepareLegacyReceiptBody(body, {
-    includeStoreName: route.includeStoreName,
-  });
+  const upstreamBody = prepareLegacyReceiptBody(body);
 
   let upstream;
   try {
