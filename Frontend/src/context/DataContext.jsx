@@ -1546,11 +1546,10 @@ export const DataProvider = ({ children }) => {
                 last_4_digit_card: last4DigitCard,
                 // Ensure draft/verify/email fields are always strings for easy comparison
                 is_draft: String(r.is_draft ?? "0"),
-                // Keep a missing is_verify as "" so an unopened forward (explicit
-                // "0") can be told apart from a payload that never sent the field.
+                // is_verify is the draft / eReceipt verification flag, not read state.
                 is_verify:
                   r.is_verify == null || r.is_verify === ""
-                    ? ""
+                    ? "0"
                     : String(r.is_verify),
                 fk_incoming_email_id: r.fk_incoming_email_id ?? null,
                 fk_original_receipt_id: r.fk_original_receipt_id ?? null,
@@ -1588,47 +1587,11 @@ export const DataProvider = ({ children }) => {
       const formattedReceiptsMediaDeduped =
         dedupeReceiptMediaAcrossReceipts(formattedReceipts);
 
-      // Collapse duplicate RECEIVED (forwarded-in) receipts. When the same source
-      // receipt is forwarded to this user more than once — a double-forward, a
-      // mixed mobile/web re-send, or a backend re-insert — the recipient's list
-      // shows the same receipt several times. Keep exactly one copy per
-      // (sender, source-receipt, store, total) group: prefer the one the user has
-      // already opened (is_verify=1), then the newest. Only received receipts with
-      // a real sender+source are grouped, so a user's own receipts are never merged.
-      const formattedReceiptsDeduped = (() => {
-        const receivedKey = (r) => {
-          const fwdFrom = String(r.fk_forward_from_receipt_id ?? "0").trim();
-          const origId = String(r.fk_original_receipt_id ?? "0").trim();
-          if (!fwdFrom || fwdFrom === "0" || !origId || origId === "0") return null;
-          return [
-            fwdFrom,
-            origId,
-            (r.storeName || "").trim().toLowerCase(),
-            parseFloat(r.purchasePrice ?? 0) || 0,
-          ].join("|");
-        };
-        const isBetter = (a, b) => {
-          const av = String(a.is_verify ?? "0") === "1" ? 1 : 0;
-          const bv = String(b.is_verify ?? "0") === "1" ? 1 : 0;
-          if (av !== bv) return av > bv;
-          return (Number(a.createDate) || 0) >= (Number(b.createDate) || 0);
-        };
-        // First pass: pick the winning receipt id for each duplicate group.
-        const winners = new Map();
-        for (const r of formattedReceiptsMediaDeduped) {
-          const key = receivedKey(r);
-          if (!key) continue;
-          const prev = winners.get(key);
-          if (!prev || isBetter(r, prev)) winners.set(key, r);
-        }
-        // Second pass: keep every non-received receipt, plus only the winner of
-        // each received group — preserving the original list order.
-        return formattedReceiptsMediaDeduped.filter((r) => {
-          const key = receivedKey(r);
-          if (!key) return true;
-          return winners.get(key) === r;
-        });
-      })();
+      // Received-duplicate collapse removed per product decision: show every
+      // receipt returned by getreceiptfromdatev1, including multiple forwards of
+      // the same source receipt (no merging by sender/source/store/total). The
+      // cross-receipt media-dedup above still applies.
+      const formattedReceiptsDeduped = formattedReceiptsMediaDeduped;
 
       // Merge in locally tracked QuickBooks-linked state, so users can see which
       // receipts have already been sent to QuickBooks even after a reload.
@@ -2199,17 +2162,44 @@ setMerchantsWithImages(
     return () => window.removeEventListener("cat:session-expired", onSessionExpired);
   }, []);
 
-  // Mark a receipt read on the server (status=1) so Android/iOS drop the
-  // highlight too. Optimistic locally; updateReceipt is assigned later in this
-  // component and is only called from event handlers.
+  // Mark a receipt read or unread. The spec names this PUT
+  // /receipt/updateReceiptStatus; the live server exposes POST
+  // /receipt/UpdateReceiptStatus (PUT is 405, the camelCase path is 404).
+  // Status only — a full updateReceiptv1 row would rewrite the receipt.
   const updateReceiptStatus = async (receiptId, newStatus) => {
+    const token = localStorage.getItem("token");
+    if (!token || receiptId == null || receiptId === "") return false;
     const status = String(newStatus);
     setReceipts((prevReceipts) =>
       prevReceipts.map((receipt) =>
         String(receipt.id) === String(receiptId) ? { ...receipt, status } : receipt
       )
     );
-    return updateReceipt(receiptId, { status });
+    const params = new URLSearchParams({
+      receiptid: String(receiptId),
+      status,
+    });
+    const paths = [
+      `${BASE_URL}/receipt/UpdateReceiptStatus?${params}`,
+      `${BASE_URL}/receipt/updateReceiptStatus?${params}`,
+    ];
+    for (const url of paths) {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accesstoken: token,
+          },
+        });
+        if (response.ok) return true;
+        if (response.status !== 404 && response.status !== 405) return false;
+      } catch (error) {
+        console.warn("updateReceiptStatus failed:", error);
+        return false;
+      }
+    }
+    return false;
   };
 
   const applyQuickbooksLinkedIds = useCallback((ids = []) => {
@@ -2533,13 +2523,11 @@ setMerchantsWithImages(
           : (resolveFreshestReceiptTaxValues(receipt.id) ||
              (Array.isArray(receipt.receipt_tax_values) ? receipt.receipt_tax_values : [])),
     };
-    // Logo/category/media backfill must not mark a forwarded receipt as opened.
-    // Those saves run a few seconds after it arrives, with no one viewing it.
-    // The legacy server still sets is_verify when this body includes tax lines,
-    // so callers must not post this payload for an unread forward at all.
+    // Logo/category/media backfill must not mark an unread forward as read.
+    // is_verify stays whatever the row already has — it is the draft /
+    // eReceipt verification flag, not the opened flag.
     if (keepUnread || isNewForwardedReceipt(receipt)) {
       payload.status = 0;
-      payload.is_verify = 0;
     }
     return payload;
   };
