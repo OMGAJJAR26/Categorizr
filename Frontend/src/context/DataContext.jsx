@@ -1546,7 +1546,12 @@ export const DataProvider = ({ children }) => {
                 last_4_digit_card: last4DigitCard,
                 // Ensure draft/verify/email fields are always strings for easy comparison
                 is_draft: String(r.is_draft ?? "0"),
-                is_verify: String(r.is_verify ?? "0"),
+                // Keep a missing is_verify as "" so an unopened forward (explicit
+                // "0") can be told apart from a payload that never sent the field.
+                is_verify:
+                  r.is_verify == null || r.is_verify === ""
+                    ? ""
+                    : String(r.is_verify),
                 fk_incoming_email_id: r.fk_incoming_email_id ?? null,
                 fk_original_receipt_id: r.fk_original_receipt_id ?? null,
                 fk_forward_from_receipt_id: String(
@@ -1560,8 +1565,14 @@ export const DataProvider = ({ children }) => {
               });
               const paymentDisplay = formatPaymentDisplayFromReceipt(normalized);
               const badgeStatus = getReceiptBadgeStatus(normalized);
-              // Add status field: default to "0" (unread) if not present
-              const status = r.status !== undefined ? r.status : "0";
+              // Add status field: default to "0" (unread) if not present.
+              // Mobile forwards send "Status"; the list API sends "status".
+              const status =
+                r.status !== undefined
+                  ? r.status
+                  : r.Status !== undefined
+                    ? r.Status
+                    : "0";
               return {
                 ...normalized,
                 subtotal: calculateSubtotal(normalized),

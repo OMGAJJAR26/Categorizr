@@ -52,18 +52,24 @@ const isNetworkReceivedReceipt = (r) =>
 /**
  * Blue "New" highlight for a received (network-forwarded) receipt only.
  *
- * Keyed off `status` — the read flag the receipt API returns for forwards
- * (0 => Unread, 1 => Read). The highlight shows while status is 0 (or absent)
- * and comes off once a device OPENS the receipt, which persists status=1 and
- * syncs across web/iOS/Android. (is_verify is NOT returned for forwarded
- * receipts, so it can't drive this.)
+ * The forward request sends status 0 (unread). The copy that comes back is
+ * often already status 1: forwardreceiptv2 stores the sender's read flag, and
+ * getreceiptfromdatev1 flips 0 → 1 on the next list. is_verify stays "0" until
+ * a device actually opens the receipt (that save persists is_verify=1).
+ *
+ * Highlight while status is not 1, or while is_verify is explicitly "0".
+ * A missing is_verify must not highlight — older list payloads omitted it and
+ * the badge then never cleared.
  */
 export const isNewForwardedReceipt = (r) => {
   if (!r || String(r.is_draft ?? "0") === "1") return false;
   if (!isNetworkReceivedReceipt(r)) return false;
-  const raw = r.status;
+  const raw = r.status != null && r.status !== "" ? r.status : r.Status;
   const status = raw == null || raw === "" ? -1 : Number(raw);
-  return status !== 1;
+  if (status !== 1) return true;
+  const verify = r.is_verify;
+  if (verify == null || String(verify).trim() === "") return false;
+  return String(verify) !== "1";
 };
 
 /** @deprecated Use isNewForwardedReceipt instead */
