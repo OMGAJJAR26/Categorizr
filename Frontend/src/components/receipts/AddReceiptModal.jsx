@@ -186,6 +186,9 @@ const AddReceiptModal = ({ onClose, onReceiptAdded, onMultiScan = null, initialD
   const [alertMsg, setAlertMsg] = useState(null);
   const [showMaxDefaultTaxModal, setShowMaxDefaultTaxModal] = useState(false);
   const [files, setFiles] = useState([]);
+  // When combining several images into ONE receipt, which file OCR reads
+  // (merchant, price, taxes, category, payment). Default = the first image.
+  const [ocrFileIndex, setOcrFileIndex] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [isConvertingFiles, setIsConvertingFiles] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -480,7 +483,10 @@ const [localMerchants, setLocalMerchants] = useState([]);
     setLocalImageFile(null);
     setPdfPreviewUrl(null);
     setDetectedMerchantLogo(null);
-    if (clearFiles) setFiles([]);
+    if (clearFiles) {
+      setFiles([]);
+      setOcrFileIndex(0);
+    }
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (addPhotoInputRef.current) addPhotoInputRef.current.value = "";
   }, []);
@@ -828,6 +834,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
       const readyFiles = await convertHeicFilesForDisplay(validFiles);
       setIsConvertingFiles(false);
       setFiles(readyFiles);
+      setOcrFileIndex(0); // fresh selection → OCR the first image by default
 
       // Generate PDF preview if PDF is dropped
       const firstFile = readyFiles[0];
@@ -1032,6 +1039,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
       const readyFiles = await convertHeicFilesForDisplay(validFiles);
       setIsConvertingFiles(false);
       setFiles(readyFiles);
+      setOcrFileIndex(0); // fresh selection → OCR the first image by default
 
       // Generate PDF preview if PDF is selected
       const firstFile = readyFiles[0];
@@ -1166,6 +1174,13 @@ const [localMerchants, setLocalMerchants] = useState([]);
         });
       }
       return newFiles;
+    });
+    // Keep the OCR selection pointing at the same file: shift down if a file
+    // before it was removed, and fall back to the first if the OCR file itself went.
+    setOcrFileIndex((prev) => {
+      if (index === prev) return 0;
+      if (index < prev) return Math.max(0, prev - 1);
+      return prev;
     });
   };
 
@@ -2090,20 +2105,27 @@ const handleFieldChange = (field, value) => {
     updateTaxAmount(index, neg.toString());
   };
 
-  const handleUpload = async () => {
+  // "Send each to Drafts": 2–5 files → hand off to the parent, which scans each
+  // into its OWN draft receipt (shown in Draft Receipts with a skeleton per file)
+  // and closes this modal. This is the original multi-file behavior, now an
+  // explicit choice alongside "Combine into 1 receipt" (handleUpload).
+  const handleScanToDrafts = () => {
     if (files.length === 0) {
       setError("Please select at least one file to upload.");
       return;
     }
+    if (typeof onMultiScan !== "function") return;
+    const scanFiles = files.slice(0, MAX_SCAN_FILES);
+    onMultiScan(scanFiles);
+    onClose();
+  };
 
-    // Multiple Receipt Scan: 2–5 files → hand off to the parent, which scans each
-    // into its own DRAFT receipt (shown in the Draft Receipts section with a
-    // skeleton per file) and closes this modal. A single file keeps the classic
-    // OCR → editable form → save flow below.
-    if (files.length > 1 && typeof onMultiScan === "function") {
-      const scanFiles = files.slice(0, MAX_SCAN_FILES);
-      onMultiScan(scanFiles);
-      onClose();
+  // "Combine into 1 receipt" (and the single-file Upload): every selected image is
+  // attached to ONE receipt, and OCR runs on the user-chosen image (ocrFileIndex,
+  // default the first). The classic OCR → editable form → save flow follows.
+  const handleUpload = async () => {
+    if (files.length === 0) {
+      setError("Please select at least one file to upload.");
       return;
     }
 
@@ -2117,7 +2139,9 @@ const handleFieldChange = (field, value) => {
 
     try {
       const token = localStorage.getItem("token");
-      const file = files[0];
+      // OCR + the form preview read the user-chosen image, not always the first.
+      const ocrIndex = Math.min(Math.max(0, ocrFileIndex), files.length - 1);
+      const file = files[ocrIndex] || files[0];
 
       // ─── STEP 1: Upload media files to /user/uploadmediaV1 ───────────────
       let mediaUrls = [];
@@ -2173,8 +2197,11 @@ const handleFieldChange = (field, value) => {
       setUploadProgress(80);
 
       // ─── STEP 4: Determine image URL ─────────────────────────────────────
-      // Priority: uploadmediaV1 URL > local object URL (preview only)
-      const primaryRemoteMediaUrl = nonEmptyUrl(mediaUrls[0]) || null;
+      // Priority: uploadmediaV1 URL > local object URL (preview only). mediaUrls is
+      // index-aligned to files, so the chosen OCR image is the cover/preview; fall
+      // back to the first uploaded URL if that slot is missing.
+      const primaryRemoteMediaUrl =
+        nonEmptyUrl(mediaUrls[ocrIndex]) || nonEmptyUrl(mediaUrls[0]) || null;
       const imageUrl =
         primaryRemoteMediaUrl ||
         URL.createObjectURL(file);
@@ -4931,7 +4958,7 @@ const handleSelectLogo = (index) => {
                         Up to {MAX_SCAN_FILES} receipts at a time • 10MB per file
                       </p>
                       <p className="text-xs text-gray-400">
-                        Selecting 2 or more sends each to Draft Receipts to review.
+                        Select 2 or more to combine into one receipt or send each to Drafts.
                       </p>
                     </div>
                     {/* Error Message */}
@@ -4943,15 +4970,46 @@ const handleSelectLogo = (index) => {
                     {/* Selected Files */}
                     {files.length > 0 && (
                       <div className="mt-6">
-                        <h3 className="font-semibold text-gray-900 mb-3">
+                        <h3 className="font-semibold text-gray-900 mb-1">
                           Selected Files ({files.length})
                         </h3>
+                        {files.length > 1 && (
+                          <p className="text-xs text-gray-500 mb-3">
+                            To combine into one receipt, pick the image to scan for merchant, price, taxes, category and payment.
+                          </p>
+                        )}
                         <div className="space-y-2">
-                          {files.map((file, index) => (
+                          {files.map((file, index) => {
+                            const isOcrSource =
+                              files.length > 1 && index === ocrFileIndex;
+                            return (
                             <div
                               key={index}
-                              className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg"
+                              onClick={() => {
+                                if (files.length > 1 && !isUploading) setOcrFileIndex(index);
+                              }}
+                              className={`flex items-center gap-3 p-3 rounded-lg transition-all ${
+                                files.length > 1 ? "cursor-pointer" : ""
+                              } ${
+                                isOcrSource
+                                  ? "bg-blue-50 ring-2 ring-blue-500"
+                                  : "bg-gray-50 hover:bg-gray-100"
+                              }`}
                             >
+                              {files.length > 1 && (
+                                <span
+                                  className={`w-4 h-4 flex-shrink-0 rounded-full border-2 flex items-center justify-center ${
+                                    isOcrSource
+                                      ? "border-blue-600"
+                                      : "border-gray-300"
+                                  }`}
+                                  aria-hidden="true"
+                                >
+                                  {isOcrSource && (
+                                    <span className="w-2 h-2 rounded-full bg-blue-600" />
+                                  )}
+                                </span>
+                              )}
                               <div className="w-10 h-10 flex-shrink-0 rounded overflow-hidden bg-gray-200 flex items-center justify-center">
                                 {file.type.startsWith("image/") ? (
                                   <img
@@ -4981,7 +5039,9 @@ const handleSelectLogo = (index) => {
                                   {file.name}
                                 </p>
                                 <p className="text-xs text-gray-500">
-                                  {(file.size / 1024).toFixed(1)} KB
+                                  {isOcrSource
+                                    ? "Scan this image"
+                                    : `${(file.size / 1024).toFixed(1)} KB`}
                                 </p>
                               </div>
                               <button
@@ -4995,7 +5055,8 @@ const handleSelectLogo = (index) => {
                                 <Trash2 size={16} className="text-gray-500" />
                               </button>
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -5047,7 +5108,7 @@ const handleSelectLogo = (index) => {
                       </div>
                     )}
                     {/* Upload / Skip Buttons */}
-                    <div className="mt-6 flex justify-end gap-3">
+                    <div className="mt-6 flex flex-wrap justify-end gap-3">
                       <button
                         onClick={onClose}
                         disabled={isUploading}
@@ -5062,6 +5123,17 @@ const handleSelectLogo = (index) => {
                       >
                         Enter Manually
                       </button>
+                      {/* 2+ files: let the user send each to its own draft (original
+                          behavior) OR combine every image into one receipt. */}
+                      {files.length > 1 && typeof onMultiScan === "function" && (
+                        <button
+                          onClick={handleScanToDrafts}
+                          disabled={isUploading || isConvertingFiles}
+                          className="px-4 py-2 text-blue-700 font-medium bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {`Send ${files.length} to Drafts`}
+                        </button>
+                      )}
                       <button
                         onClick={handleUpload}
                         disabled={files.length === 0 || isUploading || isConvertingFiles}
@@ -5070,7 +5142,7 @@ const handleSelectLogo = (index) => {
                         {isUploading
                           ? "Uploading..."
                           : files.length > 1
-                          ? `Scan ${files.length} to Drafts`
+                          ? "Combine into 1 receipt"
                           : "Upload"}
                       </button>
                     </div>
