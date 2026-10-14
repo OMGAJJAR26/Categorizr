@@ -428,7 +428,9 @@ const HomePage = () => {
       runSilentAutoRefresh();
     };
 
-    const intervalId = window.setInterval(runSilentAutoRefresh, 15000);
+    // A few seconds, so a receipt opened on another device (status flips to 1)
+    // drops its New highlight without a manual reload.
+    const intervalId = window.setInterval(runSilentAutoRefresh, 4000);
     window.addEventListener("focus", handleVisibilityOrFocus);
     document.addEventListener("visibilitychange", handleVisibilityOrFocus);
 

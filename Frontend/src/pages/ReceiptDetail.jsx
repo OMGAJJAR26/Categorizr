@@ -77,7 +77,6 @@ import {
 import EditPaymentMethodModal from "../components/receipts/EditPaymentMethodModal";
 import { parseTaxRateInput, createTaxRateKeyDownHandler } from "../utils/taxRateInput";
 import { useTaxRateLimitAlert } from "../hooks/useTaxRateLimitAlert";
-import { isNewForwardedReceipt } from "../hooks/useReceiptGrouping";
 import TaxRateChangeWarningModal from "../components/TaxRateChangeWarningModal";
 import {
   buildIncrementedTaxName,
@@ -229,6 +228,7 @@ const ReceiptDetail = ({
   const {
     receipts,
     updateReceipt,
+    updateReceiptStatus,
     deleteReceipt,
     expenseCategories,
     paymentMethods,
@@ -279,24 +279,18 @@ const ReceiptDetail = ({
   const [selectedReceipt, setSelectedReceipt] = useState(openingReceipt);
   const [sortedReceipts, setSortedReceipts] = useState([]);
 
-  // Viewing a received (network-forwarded) receipt on the WebApp — by opening it
-  // (tap) OR by SWIPING to it inside this modal — clears its "New" highlight by
-  // setting is_verify="1". Runs whenever the shown receipt changes, so swiping
-  // through highlighted receipts marks each one as seen. Only network-received,
-  // still-highlighted receipts are touched; a plain refresh or receiving another
-  // receipt never triggers this (the receipt isn't being viewed).
+  // Opening a receipt (Edit) or swiping onto it marks it read.
+  // iOS isRead follows status (0 unread, 1 read). is_verify is only the
+  // draft / eReceipt verification flag, so opening must not change it.
   useEffect(() => {
     const r = selectedReceipt;
     if (!r?.id) return;
-    // Viewing (open or swipe) is "seen". Persist status=1 so other devices
-    // clear the highlight, and is_verify=1 for a still-new network forward.
-    const patch = {};
-    if (String(r.status ?? "0") !== "1") patch.status = "1";
-    if (isNewForwardedReceipt(r)) patch.is_verify = "1";
-    if (Object.keys(patch).length === 0) return;
-    updateReceipt(r.id, patch);
+    const statusRaw = r.status != null && r.status !== "" ? r.status : r.Status;
+    const status = statusRaw == null || statusRaw === "" ? -1 : Number(statusRaw);
+    if (status === 1) return;
+    updateReceiptStatus(r.id, "1");
     setSelectedReceipt((prev) =>
-      prev && String(prev.id) === String(r.id) ? { ...prev, ...patch } : prev
+      prev && String(prev.id) === String(r.id) ? { ...prev, status: "1" } : prev
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedReceipt?.id]);
@@ -3764,10 +3758,9 @@ useEffect(() => {
         card_issuer_name: cardIssuerName,
         paymentType: finalPaymentTypeForAPI || "", // Send WITHOUT *last4 to API
         last_4_digit_card: last4 || "", // Send separately
-        // Saving a draft receipt marks it as verified so it moves to the regular list.
-        // Saving a new forwarded receipt (blue "New" highlight) also clears the highlight.
+        // Saving a draft / unverified eReceipt sets is_verify so it leaves
+        // the pending-verification state. A normal forward is not a draft.
         ...(isDraft ? { is_verify: "1", is_draft: "0" } : {}),
-        ...(isNewForwardedReceipt(selectedReceipt) ? { is_verify: "1" } : {}),
         // The receipt is open, so it is read. Keep status=1 so a save cannot
         // write the old unread flag back and re-highlight it on other devices.
         status: "1",
@@ -4106,9 +4099,7 @@ useEffect(() => {
       paymentType: finalPaymentTypeForAPI || "",
       last_4_digit_card: last4 || "",
       // Keep draft transition behavior consistent with main Save Changes flow.
-      // Also clear the "New" highlight when saving a forwarded receipt.
       ...(isDraft ? { is_verify: "1", is_draft: "0" } : {}),
-      ...(isNewForwardedReceipt(selectedReceipt) ? { is_verify: "1" } : {}),
       status: "1",
     };
 

@@ -25,24 +25,32 @@ const isToBeVerified = (r) => {
 };
 
 /**
- * Same rule iOS uses for isRead after the first sync:
- * read only when status is 1 and the receipt is not still pending verification.
- * Pending verification is an unverified email eReceipt or a draft.
- * is_verify by itself is not "opened" — the legacy server sets it while copying
- * tax lines, and that must not clear the blue highlight.
+ * iOS `shouldShowPendingVerificationBadge`.
+ * is_verify is this verification flag (and drafts), not "the receipt was opened".
+ * An eReceipt is any receipt whose fk_incoming_email_id is present and not "0".
  */
-export const isReceiptSeen = (r) => {
+export const shouldShowPendingVerificationBadge = (r) => {
   if (!r) return false;
-  const raw = r.status;
-  const status = raw == null || raw === "" ? -1 : Number(raw);
-  if (status !== 1) return false;
   const emailId = r.fk_incoming_email_id;
   const isEReceipt =
     emailId != null && String(emailId).trim() !== "" && String(emailId) !== "0";
   const isVerify = String(r.is_verify ?? "0") === "1";
   const isDraft = String(r.is_draft ?? "0") === "1";
-  const pendingVerification = (isEReceipt && !isVerify) || isDraft;
-  return !pendingVerification;
+  return (isEReceipt && !isVerify) || isDraft;
+};
+
+/**
+ * iOS isRead after the first local insert:
+ *   read when status == 1 and the pending-verification badge is off
+ *   unread otherwise (status missing counts as -1, which is unread)
+ * On the very first insert, iOS instead marks every non-pending receipt read
+ * and only the next sync applies this rule. Steady state is this rule.
+ */
+export const isReceiptRead = (r) => {
+  if (!r) return true;
+  const raw = r.status != null && r.status !== "" ? r.status : r.Status;
+  const status = raw == null || raw === "" ? -1 : Number(raw);
+  return status === 1 && !shouldShowPendingVerificationBadge(r);
 };
 
 const isNetworkReceivedReceipt = (r) =>
@@ -50,26 +58,19 @@ const isNetworkReceivedReceipt = (r) =>
   String(r.fk_forward_from_receipt_id) !== "0";
 
 /**
- * Blue "New" highlight for a received (network-forwarded) receipt only.
- *
- * The forward request sends status 0 (unread). The copy that comes back is
- * often already status 1: forwardreceiptv2 stores the sender's read flag, and
- * getreceiptfromdatev1 flips 0 → 1 on the next list. is_verify stays "0" until
- * a device actually opens the receipt (that save persists is_verify=1).
- *
- * Highlight while status is not 1, or while is_verify is explicitly "0".
- * A missing is_verify must not highlight — older list payloads omitted it and
- * the badge then never cleared.
+ * Blue "New" highlight for a received (network-forwarded) receipt.
+ * Shown strictly while the status field is exactly 0 (Unread). Any other value —
+ * 1 (Read), missing, null or empty — shows no highlight. Drafts never highlight.
+ * Opening the receipt sets status to 1 (UpdateReceiptStatus). The next
+ * getreceiptfromdatev1 then drops the highlight on every device.
  */
 export const isNewForwardedReceipt = (r) => {
   if (!r || String(r.is_draft ?? "0") === "1") return false;
   if (!isNetworkReceivedReceipt(r)) return false;
   const raw = r.status != null && r.status !== "" ? r.status : r.Status;
-  const status = raw == null || raw === "" ? -1 : Number(raw);
-  if (status !== 1) return true;
-  const verify = r.is_verify;
-  if (verify == null || String(verify).trim() === "") return false;
-  return String(verify) !== "1";
+  // Only an explicit 0 highlights; missing/empty/null status does not.
+  if (raw == null || raw === "") return false;
+  return Number(raw) === 0;
 };
 
 /** @deprecated Use isNewForwardedReceipt instead */
