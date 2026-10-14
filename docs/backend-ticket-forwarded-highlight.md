@@ -64,10 +64,16 @@ GET): listing must return `status` unchanged. Read-status transitions belong sol
 to `updateReceiptv1` (`status: 1`), which clients already call when the user opens,
 edits, or swipes to a receipt — and which is confirmed to persist correctly.
 
-## Related backend items (same area, separate from this bug)
+## Related items (same area, separate from this bug)
 
-- `receipt_forwarded` is never persisted: `updateReceiptv1` ignores it and
-  `forwardreceiptv2` doesn't set the source receipt's flag, so the sender's
-  "Forwarded" badge can't appear on iOS/Android.
+- `receipt_forwarded` "Forwarded" badge — **RESOLVED on the frontend (2026-10-14),
+  no backend change needed.** The backend already persists it correctly: when
+  `forwardreceiptv2` receives `receipt_forwarded: "1"` in the request body, it sets
+  `receipt_forwarded = 1` on the source receipt (`fk_original_receipt_id`) and leaves
+  the recipient's new copy at `"0"`. The web was sending `receipt_forwarded: 0` in the
+  forward body and relying on a follow-up `updateReceiptv1` (which *does* ignore the
+  field) — so the source was never marked. Fixed by sending `"1"` in the forward body,
+  matching iOS/Android. Note for reference: `updateReceiptv1` does not persist
+  `receipt_forwarded`; the forward body is the only path that marks the source.
 - Rows saved before 2026-10-13 may carry doubled apostrophes (`Lowe''s`) from the
   old escaping; a one-time `'' → '` migration on the text columns is still needed.
