@@ -191,9 +191,14 @@ export const buildForwardPayload = (receipt, recipientUserId, opts = {}) => {
     store_image: receipt.store_image || receipt.storeImage || "",
     receipt_tag: receipt.receipt_tag || "0,0,0,0,0,0,0",
     notes: receipt.notes || "",
-    // The new copy on the recipient is not a receipt they forwarded.
-    // The sender's own row is marked receipt_forwarded=1 after this call succeeds.
-    receipt_forwarded: 0,
+    // Marks the sender's SOURCE receipt as forwarded. forwardreceiptv2 reads this
+    // flag and sets receipt_forwarded=1 on fk_original_receipt_id (the receipt being
+    // forwarded) — the same path iOS/Android use, so the "Forwarded" badge persists
+    // and shows on every platform. The recipient's new copy is NOT affected (the
+    // server doesn't write this column on the inserted copy; it stays "0"). This is
+    // the ONLY path that marks the source: updateReceiptv1 silently ignores
+    // receipt_forwarded. Verified live 2026-10-14 (source → "1", copy → "0").
+    receipt_forwarded: "1",
     // Match product_date so mobile date heuristics never shift the forwarded day
     create_date: String(
       mobileProductDate || Math.floor(Date.now() / 1000),
