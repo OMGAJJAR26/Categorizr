@@ -116,12 +116,13 @@ import unlockedImg from "../../assets/receipttags/unlocked.png";
  * Describe Purchase (`product_name`) for a duplicate. The original is copy #1
  * (shown WITHOUT a suffix), so the first duplicate is "(2)". Duplicating a
  * receipt that already ends in "(N)" increments it — "(2)" → "(3)" — matching
- * the Android app. Blank descriptions default to "Duplicate".
+ * the Android app. A receipt with NO Describe Purchase keeps it blank (never
+ * fabricates "Duplicate") — the main-list Description falls back to the merchant.
  */
 function withDuplicateDefaultProductName(formData) {
   if (!formData) return formData;
   const trimmed = String(formData.product_name ?? "").trim();
-  if (!trimmed) return { ...formData, product_name: "Duplicate" };
+  if (!trimmed) return { ...formData, product_name: "" };
   const m = trimmed.match(/^(.*?)\s*\((\d+)\)$/);
   if (m) {
     const base = m[1].trim();

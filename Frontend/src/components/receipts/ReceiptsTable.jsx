@@ -90,7 +90,7 @@ const ReceiptsTable = ({
         </div>
 
         <div className="text-gray-800 font-medium text-sm xl:text-base truncate">
-          {receipt.product_name || "—"}
+          {receipt.product_name || receipt.storeName || "—"}
         </div>
 
         <div className="flex items-center gap-2 text-gray-900 font-medium">
@@ -303,7 +303,7 @@ const ReceiptsTable = ({
 
         <div className="flex justify-between items-center">
           <div className="text-sm text-gray-600 truncate flex-1 mr-2">
-            {receipt.product_name || "—"}
+            {receipt.product_name || receipt.storeName || "—"}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <button
