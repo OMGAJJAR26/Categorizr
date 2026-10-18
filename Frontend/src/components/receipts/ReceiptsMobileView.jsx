@@ -134,7 +134,7 @@ const ReceiptsMobileView = ({
             Description
           </div>
           <div className={`font-medium ${isUnread ? 'text-gray-400' : ''}`}>
-            {receipt.product_name || "—"}
+            {receipt.product_name || receipt.storeName || "—"}
           </div>
         </div>
         

@@ -53,11 +53,22 @@ export function useReceiptSplits(main, opts = {}) {
     return isNeg && parseFloat(body) !== 0 ? `-${body}` : body;
   };
 
-  /** Base label for splits: the receipt's merchant name. */
+  /** The receipt's own Describe Purchase (product_name), trimmed. */
+  const splitDescBase = () =>
+    (mainRef.current?.product_name || "").toString().trim();
+  /** Row-title base in the split screen — always identifiable: the Describe
+   *  Purchase if the receipt has one, otherwise the merchant name. */
   const splitBaseName = () =>
-    (mainRef.current?.storeName || "Receipt").toString().trim();
+    splitDescBase() || (mainRef.current?.storeName || "Receipt").toString().trim();
   /** Display label for a split row by index (the remainder is the main receipt). */
   const splitLabel = (idx) => `${splitBaseName()} (${idx + 2})`;
+  /** The Describe Purchase to SAVE on a split: the original's + " (N)", or BLANK
+   *  when the original has no Describe Purchase — never fabricate one (the
+   *  main-list Description falls back to the merchant name). */
+  const splitProductName = (idx) => {
+    const base = splitDescBase();
+    return base ? `${base} (${idx + 2})` : "";
+  };
 
   /** A fresh, empty split seeded from the main receipt's tax lines + defaults. */
   const createSplit = () => {
@@ -79,8 +90,9 @@ export function useReceiptSplits(main, opts = {}) {
   /** Add a new blank split and immediately open its detail view. */
   const addSplit = () => {
     const newIdx = splits.length;
-    // Default the description to "<Merchant> (N)" (editable), matching mobile.
-    const newSlot = { ...createSplit(), product_name: splitLabel(newIdx) };
+    // Seed the Describe Purchase from the original's: "<Describe Purchase> (N)",
+    // or blank when the original has none (editable), matching mobile.
+    const newSlot = { ...createSplit(), product_name: splitProductName(newIdx) };
     setSplits((prev) => [...prev, newSlot]);
     setActiveSplitIndex(newIdx);
   };
