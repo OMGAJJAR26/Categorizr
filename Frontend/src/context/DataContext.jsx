@@ -1827,7 +1827,16 @@ setMerchantsWithImages(
         let matchedRec = null;
 
         if (last4 && last4 !== "0") {
-          const candidates = last4ToApiRecs.get(last4) || [];
+          const allCandidates = last4ToApiRecs.get(last4) || [];
+          // Prefer a real branded record over a stray "Other *NNNN" duplicate for the
+          // same last4, so a receipt never binds to the "Other" record (and loses its
+          // brand) when a proper branded one exists. Only fall back to the full list
+          // when there is no branded record at all.
+          const brandedCandidates = allCandidates.filter((p) => {
+            const b = cardTypeIntToBrand(p.card_type);
+            return b && b !== "Other";
+          });
+          const candidates = brandedCandidates.length > 0 ? brandedCandidates : allCandidates;
           // 1. Exact issuer + last4 match (current name in API matches receipt)
           matchedRec = candidates.find(p => {
             const pIssuer = (p.card_issuer_name || "").trim().toLowerCase();
@@ -1855,8 +1864,15 @@ setMerchantsWithImages(
           const newBrand  = cardTypeIntToBrand(matchedRec.card_type); // e.g. "Diners Club"
 
           // Sync card_issuer_name if the API record has a different value
-          // (covers renames: "OM" → "" means card shows as "Discover *1111" now)
-          if (newIssuer !== issuer) {
+          // (covers renames: "OM" → "" means card shows as "Discover *1111" now).
+          // But never let a matched "Other"/blank record strip a brand the receipt
+          // already carries (in its issuer or paymentType) — that is what flipped a
+          // "Mastercard *NNNN" card to generic after split/duplicate.
+          const matchedBrandIsOther = !newBrand || newBrand === "Other";
+          const receiptHasKnownBrand =
+            inferCardTypeFromPayment(issuer) !== "Other" ||
+            inferCardTypeFromPayment(type) !== "Other";
+          if (newIssuer !== issuer && !(matchedBrandIsOther && receiptHasKnownBrand)) {
             enriched.card_issuer_name = newIssuer;
           }
 
