@@ -158,57 +158,39 @@ function getReceiptPrereqValidationMessage(fields, action) {
   return `Please enter ${missing.join(", ")} and ${last} before ${action} this receipt.`;
 }
 
+const isBlankField = (v) => v == null || String(v).trim() === "";
+const isBlankTotal = (raw) => {
+  if (raw == null || String(raw).trim() === "") return true;
+  const n = parseFloat(String(raw).trim());
+  return !Number.isFinite(n) || n === 0;
+};
+
 /**
- * Returns one banner message per required field that is still missing before a
- * receipt can be Split — Date, Expense Category and Total. Returns an empty
- * array when all three are present (Split may proceed).
- *
- * Merchant is intentionally NOT validated: a receipt can never be saved without
- * one because an empty merchant defaults to "Miscellaneous", so there is nothing
- * for the user to fix and no Merchant banner is shown.
+ * The red-banner message for the FIRST required field still missing before a
+ * receipt can be Split, in the iOS order:
+ *   1. Date  2. Merchant  3. Expense Category  4. Total
+ * Returned as a one-element array so the banner shows one message at a time
+ * (matching iOS); empty array when all are present (Split may proceed).
  */
 export function getSplitReceiptMissingMessages(fields) {
   const f = fields || {};
-  const messages = [];
-  if (f.product_date == null || String(f.product_date).trim() === "") {
-    messages.push("Please select Date");
-  }
-  if (f.expense_type == null || String(f.expense_type).trim() === "") {
-    messages.push("Please select Expense Category");
-  }
-  const rawTotal = f.purchasePrice;
-  const total = parseFloat(String(rawTotal ?? "").trim());
-  if (
-    rawTotal == null ||
-    String(rawTotal).trim() === "" ||
-    !Number.isFinite(total) ||
-    total === 0
-  ) {
-    messages.push("Please enter Total");
-  }
-  return messages;
+  if (isBlankField(f.product_date)) return ["Please select Date"];
+  if (isBlankField(f.storeName)) return ["Please select Merchant"];
+  if (isBlankField(f.expense_type)) return ["Please select Expense Category"];
+  if (isBlankTotal(f.purchasePrice)) return ["Please select Total"];
+  return [];
 }
 
+/**
+ * The red-banner message for the FIRST required field still missing before a
+ * receipt can be Duplicated, in the iOS order:
+ *   1. Date  2. Merchant  3. Total
+ * (Expense Category is NOT required for duplicate.) Returns null when all present.
+ */
 export function getDuplicateReceiptValidationMessage(fields) {
-  if (!fields) {
-    return "Please enter Date before duplicating this receipt.";
-  }
-  if (fields.product_date == null || String(fields.product_date).trim() === "") {
-    return "Please enter Date before duplicating this receipt.";
-  }
-  if (fields.storeName == null || String(fields.storeName).trim() === "") {
-    return "Please enter Merchant before duplicating this receipt.";
-  }
-  if (fields.expense_type == null || String(fields.expense_type).trim() === "") {
-    return "Please enter Expense Category before duplicating this receipt.";
-  }
-  const rawTotal = fields.purchasePrice;
-  if (rawTotal == null || String(rawTotal).trim() === "") {
-    return "Please enter Total before duplicating this receipt.";
-  }
-  const total = parseFloat(String(rawTotal).trim());
-  if (!Number.isFinite(total) || total === 0) {
-    return "Please enter Total before duplicating this receipt.";
-  }
+  const f = fields || {};
+  if (isBlankField(f.product_date)) return "Please select Date";
+  if (isBlankField(f.storeName)) return "Please select Merchant";
+  if (isBlankTotal(f.purchasePrice)) return "Please select Total";
   return null;
 }
