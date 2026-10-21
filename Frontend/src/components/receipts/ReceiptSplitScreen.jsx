@@ -45,6 +45,14 @@ const ReceiptSplitScreen = ({
   const AGGREGATE_MSG =
     "Aggregate total of all split totals cannot exceed total of original receipt total.";
 
+  // Format a money field to 2 decimals on blur ("1" → "1.00") so it reads as the
+  // "$1.00" the $ prefix shows; blank stays blank.
+  const toMoney2 = (v) => {
+    if (v == null || String(v).trim() === "") return "";
+    const n = parseFloat(String(v));
+    return Number.isFinite(n) ? n.toFixed(2) : "";
+  };
+
   const mainTotal = parseFloat(main?.total) || 0;
   const mainSubtotal = (parseFloat(main?.subtotal) || 0) || mainTotal;
   const mainTip = parseFloat(main?.tip) || 0;
@@ -126,7 +134,7 @@ const ReceiptSplitScreen = ({
                         </span>
                         <div className="relative min-w-[92px]">
                           <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">$</span>
-                          <input type="number"
+                          <input type="text" inputMode="decimal"
                             className="w-full text-sm text-right pl-5 pr-2 py-1 rounded-md bg-gray-100 border border-transparent focus:border-blue-400 focus:bg-white text-gray-800 outline-none"
                             value={t.tax_amount ?? ""}
                             onChange={(e) => {
@@ -136,7 +144,12 @@ const ReceiptSplitScreen = ({
                               const updatedTaxes = split.receipt_tax_values.map((tv, tvi) => tvi === ti ? { ...tv, tax_amount: e.target.value } : tv);
                               onUpdateField(activeSplitIndex, "receipt_tax_values", updatedTaxes);
                             }}
-                            placeholder="0.00" min="0" step="0.01" />
+                            onBlur={() => {
+                              const formatted = toMoney2(t.tax_amount);
+                              const updatedTaxes = split.receipt_tax_values.map((tv, tvi) => tvi === ti ? { ...tv, tax_amount: formatted } : tv);
+                              onUpdateField(activeSplitIndex, "receipt_tax_values", updatedTaxes);
+                            }}
+                            placeholder="0.00" />
                         </div>
                       </div>
                     );
@@ -149,10 +162,11 @@ const ReceiptSplitScreen = ({
                       </span>
                       <div className="relative min-w-[92px]">
                         <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">$</span>
-                        <input type="number"
+                        <input type="text" inputMode="decimal"
                           className="w-full text-sm text-right pl-5 pr-2 py-1 rounded-md bg-gray-100 border border-transparent focus:border-blue-400 focus:bg-white text-gray-800 outline-none"
                           value={split.tip ?? ""} onChange={(e) => onUpdateField(activeSplitIndex, "tip", e.target.value)}
-                          placeholder="0.00" min="0" max={maxTip} step="0.01" />
+                          onBlur={() => onUpdateField(activeSplitIndex, "tip", toMoney2(split.tip))}
+                          placeholder="0.00" />
                       </div>
                     </div>
                   )}
@@ -163,10 +177,11 @@ const ReceiptSplitScreen = ({
                     </span>
                     <div className="relative min-w-[92px]">
                       <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">$</span>
-                      <input type="number"
+                      <input type="text" inputMode="decimal"
                         className={`w-full text-sm text-right font-bold pl-5 pr-2 py-1 rounded-md bg-gray-100 text-gray-900 outline-none border ${hasAmountErr ? "border-red-400 ring-1 ring-red-300" : "border-transparent focus:border-blue-400 focus:bg-white"}`}
                         value={split.purchasePrice ?? ""} onChange={(e) => onUpdateField(activeSplitIndex, "purchasePrice", e.target.value)}
-                        placeholder="0.00" min="0" max={maxTotal} step="0.01" />
+                        onBlur={() => onUpdateField(activeSplitIndex, "purchasePrice", toMoney2(split.purchasePrice))}
+                        placeholder="0.00" />
                     </div>
                   </div>
                 </div>
@@ -274,8 +289,10 @@ const ReceiptSplitScreen = ({
               <div>
                 <p className="text-blue-600 font-bold text-base mb-2">Splits</p>
                 <div className="space-y-3">
-                  {/* Added splits — info column (left) + breakdown table (right), iOS-style */}
-                  {splits.map((split, idx) => {
+                  {/* Added splits — info column (left) + breakdown table (right), iOS-style.
+                      Newest first: (N) … (3) (2), then the original remainder below —
+                      matching iOS. idx stays the original index (label/open/remove). */}
+                  {[...splits.entries()].reverse().map(([idx, split]) => {
                     const hasErr = !!splitErrors[split._id];
                     const splitType = parseInt(split.receipt_category) === 1 ? "Business" : "Personal";
                     const splitCat = (split.expense_type || "").toString().trim();

@@ -1,16 +1,22 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CheckCircle, XCircle, AlertCircle, X } from "lucide-react";
 
 const Toast = ({ message, type = "success", isVisible, onClose, duration = 3000, actionUrl, actionLabel, actionUrl2, actionLabel2 }) => {
+  // Read onClose through a ref so a parent that passes a fresh onClose on every
+  // render (and re-renders often, e.g. the live Split screen) doesn't keep
+  // resetting the auto-hide timer — which made toasts linger far past `duration`.
+  // The timer resets only when the toast itself changes (visibility/message/duration).
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     if (isVisible && duration > 0) {
       const timer = setTimeout(() => {
-        onClose();
+        onCloseRef.current?.();
       }, duration);
       return () => clearTimeout(timer);
     }
-  }, [isVisible, duration, onClose]);
+  }, [isVisible, duration, message]);
 
   const icons = {
     success: <CheckCircle size={20} className="text-green-500" />,
