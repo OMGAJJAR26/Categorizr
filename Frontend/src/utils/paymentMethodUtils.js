@@ -292,7 +292,20 @@ export const normalizeApiPaymentMethodInput = (input, logoUrl = "", expenseType 
   if (input && typeof input === "object" && !Array.isArray(input)) {
     return {
       cardIssuerName: (input.cardIssuerName ?? input.card_issuer_name ?? "").trim(),
-      cardTypeBrand: (input.cardTypeBrand ?? input.card_type_brand ?? input.cardType ?? "").trim(),
+      // The brand can live in card_issuer_name OR paymentType — a "Mastercard *8195"
+      // card commonly has a blank issuer. Use the explicit brand if given, else infer
+      // from the issuer, then fall back to paymentType, so a branded card is never
+      // written as "Other" just because its brand sits in paymentType.
+      cardTypeBrand: (() => {
+        const explicit = (input.cardTypeBrand ?? input.card_type_brand ?? input.cardType ?? "").trim();
+        if (explicit) return explicit;
+        const issuer = (input.cardIssuerName ?? input.card_issuer_name ?? "").toString();
+        const fromIssuer = inferCardTypeFromPayment(issuer);
+        if (fromIssuer !== "Other") return fromIssuer;
+        const payType = (input.paymentType ?? input.payment_type ?? "").toString();
+        const fromPay = inferCardTypeFromPayment(payType);
+        return fromPay !== "Other" ? fromPay : "";
+      })(),
       last4: String(input.last4 ?? input.last_4_digit_card ?? "").replace(/\D/g, "").slice(0, 4),
       logoUrl: input.logoUrl ?? input.icon_image ?? logoUrl ?? "",
       expenseType: input.expenseType ?? input.default_payment_category ?? expenseType ?? "",
