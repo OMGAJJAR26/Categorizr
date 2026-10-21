@@ -449,6 +449,8 @@ const ReceiptDetail = ({
       receiptCategory: editedReceipt.receipt_category ?? selectedReceipt?.receipt_category ?? 0,
       expenseType: editedReceipt.expense_type ?? selectedReceipt?.expense_type ?? "",
       storeName: editedReceipt.storeName || selectedReceipt?.storeName || "",
+      // Describe Purchase — splits carry "<this> (N)" (blank → blank splits).
+      product_name: editedReceipt.product_name ?? selectedReceipt?.product_name ?? "",
     },
     { onAlert: (msg) => setAlertMsg({ title: "Sorry", message: msg }), maxDescriptionLength: MAX_DESCRIPTION_LENGTH },
   );
