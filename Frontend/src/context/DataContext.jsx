@@ -1357,6 +1357,29 @@ export const DataProvider = ({ children }) => {
         console.error("fetchApiExpenseCategories in fetchData error", apiCatErr);
       }
 
+      // Helper: strip proxy prefix and reject localhost URLs (defined here so it is
+      // available both for the receipt map below and the merchantsWithImages build later).
+      const cleanMerchantImage = (url) => {
+        if (!url || url === "0") return "";
+        const s = url.toString().trim();
+        const marker = "/api/imageproxy?url=";
+        const idx = s.indexOf(marker);
+        const raw = idx !== -1 ? (() => { try { return decodeURIComponent(s.slice(idx + marker.length)); } catch { return s; } })() : s;
+        if (/localhost|127\.0\.0\.1/i.test(raw)) return "";
+        return raw;
+      };
+
+      // Our account's own merchant logos, keyed by normalized name. When a receipt's
+      // merchant already exists in OUR list, its card shows OUR logo — not the one a
+      // forward carried over from another account — so every receipt of the same
+      // merchant looks identical (matching iOS/Android). A merchant we don't have yet
+      // keeps whatever logo arrived in the forward.
+      const accountMerchantLogoByKey = new Map();
+      apiMerchantsData.forEach((m) => {
+        const key = (m.store_name || "").trim().toLowerCase();
+        if (key) accountMerchantLogoByKey.set(key, cleanMerchantImage(m.store_image_url || ""));
+      });
+
       // Build formatted receipts with subtotal, paymentDisplay, badgeStatus, read status,
       // and any locally stored integration flags (e.g. QuickBooks-linked receipts).
       // 1) Normalise dates so we don't show 1970 for valid receipts
@@ -1510,6 +1533,13 @@ export const DataProvider = ({ children }) => {
                 ? (() => { try { return decodeURIComponent(_rawStoreImage.slice(_siIdx + _storeImageMarker.length)); } catch { return _rawStoreImage; } })()
                 : _rawStoreImage;
               const storeImage = /localhost|127\.0\.0\.1/i.test(_storeImageUnproxied) ? "" : _storeImageUnproxied;
+              // If we already have this merchant, show OUR logo (even if blank → letter
+              // avatar) instead of the logo a forward carried from another account. A
+              // merchant we don't have yet keeps the forwarded logo.
+              const _merchantKey = (storeName || "").trim().toLowerCase();
+              const resolvedStoreImage = accountMerchantLogoByKey.has(_merchantKey)
+                ? accountMerchantLogoByKey.get(_merchantKey)
+                : storeImage;
               const expenseType = getReceiptExpenseType(r, apiExpenseCategoriesData);
               // "0" is the API's cleared-field sentinel, not a description.
               const productName = fromApiTextValue(r.product_name ?? r.productName);
@@ -1533,7 +1563,7 @@ export const DataProvider = ({ children }) => {
                 // Overwrite with normalised values so downstream code can use
                 // a single field name regardless of API variant (web vs Android/iOS)
                 storeName,
-                store_image: storeImage,
+                store_image: resolvedStoreImage,
                 expense_type: expenseType,
                 product_name: productName,
                 notes,
@@ -1642,18 +1672,8 @@ export const DataProvider = ({ children }) => {
       // 2. Receipt-derived logo (most recent first, localhost proxy URLs discarded)
       // This guarantees all receipts for the same merchant show the same logo.
 
-      // Helper: strip proxy prefix and reject localhost URLs
-      const cleanMerchantImage = (url) => {
-        if (!url || url === "0") return "";
-        const s = url.toString().trim();
-        // Strip any /api/imageproxy?url= wrapper (localhost or staging)
-        const marker = "/api/imageproxy?url=";
-        const idx = s.indexOf(marker);
-        const raw = idx !== -1 ? (() => { try { return decodeURIComponent(s.slice(idx + marker.length)); } catch { return s; } })() : s;
-        // Reject localhost URLs — they are only valid in local dev
-        if (/localhost|127\.0\.0\.1/i.test(raw)) return "";
-        return raw;
-      };
+      // cleanMerchantImage is defined earlier (before the receipt map) so it can be
+      // reused both there and here.
 
       // Step 1: seed with API merchants (highest priority — canonical logos)
       const merchantsWithImagesMap = new Map();
