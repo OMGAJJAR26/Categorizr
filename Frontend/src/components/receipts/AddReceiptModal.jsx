@@ -286,6 +286,8 @@ const [localMerchants, setLocalMerchants] = useState([]);
       receiptCategory: formData.receipt_category || 0,
       expenseType: formData.expense_type || "",
       storeName: formData.storeName || "",
+      // Describe Purchase — splits carry "<this> (N)" (blank → blank splits).
+      product_name: formData.product_name || "",
     },
     { onAlert: (msg) => setAlertMsg(msg), maxDescriptionLength: MAX_DESCRIPTION_LENGTH },
   );

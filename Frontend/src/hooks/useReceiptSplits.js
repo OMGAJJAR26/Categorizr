@@ -17,7 +17,9 @@ import { filterNonTipReceiptTaxValues } from "../utils/taxTypeUtils";
  *
  * @param {Object} main  normalized main receipt (recomputed by the caller each
  *   render): { subtotal:Number, total:Number, tip:Number, taxValues:Array,
- *   receiptCategory:0|1, expenseType:String, storeName:String }
+ *   receiptCategory:0|1, expenseType:String, storeName:String,
+ *   product_name:String } — product_name (Describe Purchase) seeds each split's
+ *   description as "<product_name> (N)", or blank when the original has none.
  * @param {Object} [opts] { onAlert(message:string), maxDescriptionLength=100 }
  */
 export function useReceiptSplits(main, opts = {}) {
