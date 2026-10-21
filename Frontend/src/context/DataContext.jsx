@@ -2203,10 +2203,9 @@ setMerchantsWithImages(
     return () => window.removeEventListener("cat:session-expired", onSessionExpired);
   }, []);
 
-  // Mark a receipt read or unread. The spec names this PUT
-  // /receipt/updateReceiptStatus; the live server exposes POST
-  // /receipt/UpdateReceiptStatus (PUT is 405, the camelCase path is 404).
-  // Status only — a full updateReceiptv1 row would rewrite the receipt.
+  // Mark a receipt read or unread via POST /receipt/UpdateReceiptStatus
+  // (capital U — the live server's path). Status only; a full updateReceiptv1
+  // row would rewrite the whole receipt.
   const updateReceiptStatus = async (receiptId, newStatus) => {
     const token = localStorage.getItem("token");
     if (!token || receiptId == null || receiptId === "") return false;
@@ -2220,27 +2219,22 @@ setMerchantsWithImages(
       receiptid: String(receiptId),
       status,
     });
-    const paths = [
-      `${BASE_URL}/receipt/UpdateReceiptStatus?${params}`,
-      `${BASE_URL}/receipt/updateReceiptStatus?${params}`,
-    ];
-    for (const url of paths) {
-      try {
-        const response = await fetch(url, {
+    try {
+      const response = await fetch(
+        `${BASE_URL}/receipt/UpdateReceiptStatus?${params}`,
+        {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Accesstoken: token,
           },
-        });
-        if (response.ok) return true;
-        if (response.status !== 404 && response.status !== 405) return false;
-      } catch (error) {
-        console.warn("updateReceiptStatus failed:", error);
-        return false;
-      }
+        }
+      );
+      return response.ok;
+    } catch (error) {
+      console.warn("updateReceiptStatus failed:", error);
+      return false;
     }
-    return false;
   };
 
   const applyQuickbooksLinkedIds = useCallback((ids = []) => {
