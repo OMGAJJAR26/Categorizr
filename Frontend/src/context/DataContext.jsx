@@ -1396,16 +1396,21 @@ export const DataProvider = ({ children }) => {
                 r.create_date ?? r.createDate,
               );
 
-              // The backend now also returns receipt_date as a raw "YYYY-MM-DD"
-              // calendar day ("0" when unset). When present it is authoritative:
-              // it is the same day on every platform, never shifted by timezone,
-              // so it wins over the numeric product_date (which can drift).
+              // receipt_date is the backend's raw "YYYY-MM-DD" calendar day ("0" when
+              // unset). It is the timezone-stable DAY for a receipt that HAS a date, so
+              // it REFINES the numeric product_date (which can drift) — but it must NOT
+              // resurrect a date on an undated receipt. When product_date is 0 (No Date),
+              // a stale receipt_date left behind by a date cleared on another platform is
+              // ignored, so the receipt stays "No Date" everywhere (matching the iPad).
               const rawReceiptDate = (r.receipt_date ?? "").toString().trim();
               const receiptDateUnix = /^\d{4}-\d{2}-\d{2}$/.test(rawReceiptDate)
                 ? parseDateInputToUnix(rawReceiptDate)
                 : 0;
 
-              let normalisedProductDate = receiptDateUnix || rawProductDate;
+              let normalisedProductDate = rawProductDate;
+              if (rawProductDate >= 1000000 && receiptDateUnix) {
+                normalisedProductDate = receiptDateUnix;
+              }
 
               // Treat timestamps < 1,000,000 as invalid (too close to 1970-01-01)
               if (normalisedProductDate === 0 || normalisedProductDate < 1000000) {
