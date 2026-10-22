@@ -116,13 +116,13 @@ import unlockedImg from "../../assets/receipttags/unlocked.png";
  * Describe Purchase (`product_name`) for a duplicate. The original is copy #1
  * (shown WITHOUT a suffix), so the first duplicate is "(2)". Duplicating a
  * receipt that already ends in "(N)" increments it — "(2)" → "(3)" — matching
- * the Android app. A receipt with NO Describe Purchase keeps it blank (never
- * fabricates "Duplicate") — the main-list Description falls back to the merchant.
+ * the Android app. A receipt with NO Describe Purchase gets "Duplicate" (iOS
+ * auto-fills this on the Add Duplicate screen).
  */
 function withDuplicateDefaultProductName(formData) {
   if (!formData) return formData;
   const trimmed = String(formData.product_name ?? "").trim();
-  if (!trimmed) return { ...formData, product_name: "" };
+  if (!trimmed) return { ...formData, product_name: "Duplicate" };
   const m = trimmed.match(/^(.*?)\s*\((\d+)\)$/);
   if (m) {
     const base = m[1].trim();
@@ -4750,7 +4750,9 @@ const handleSelectLogo = (index) => {
                         <Trash2 size={16} className="text-red-500 group-hover:text-red-600" />
                       </button>
 
-                      {/* "..." options menu */}
+                      {/* "..." options menu — hidden on the Add Duplicate screen so
+                          Duplicate/Split aren't offered there (matching iOS). */}
+                      {!isDuplicateMode && (
                       <div className="relative" ref={optionsMenuRef}>
                         <button
                           type="button"
@@ -4789,6 +4791,7 @@ const handleSelectLogo = (index) => {
                           </div>
                         )}
                       </div>
+                      )}
                     </>
                   )}
                 </div>
