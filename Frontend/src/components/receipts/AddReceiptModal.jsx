@@ -3318,23 +3318,9 @@ const handleFieldChange = (field, value) => {
       return;
     }
 
-    // ── Validate every split ─────────────────────────────────────────────────
-    const newSplitErrors = {};
-    splits.forEach((split) => {
-      const errs = {};
-      if (!parseFloat(split.purchasePrice) && !parseFloat(split.subtotal)) {
-        errs.amount = "Please enter an amount for this split.";
-      }
-      if (Object.keys(errs).length) newSplitErrors[split._id] = errs;
-    });
-
-    if (Object.keys(newSplitErrors).length) {
-      setSplitErrors(newSplitErrors);
-      // Open the first split that has errors so the user sees it
-      const firstBadIdx = splits.findIndex(s => newSplitErrors[s._id]);
-      if (firstBadIdx !== -1) setActiveSplitIndex(firstBadIdx);
-      return;
-    }
+    // A split with no total is allowed — a $0.00 split is valid — so clear any
+    // stale per-split amount errors and proceed.
+    setSplitErrors({});
 
     setIsSavingSplits(true);
     setError(null);
@@ -4697,14 +4683,9 @@ const handleSelectLogo = (index) => {
                     <button
                       type="button"
                       onClick={() => {
+                        // No total required — a $0.00 split is allowed; just return
+                        // to the overview and clear any stale amount error.
                         const split = splits[activeSplitIndex];
-                        if (!parseFloat(split?.purchasePrice) && !parseFloat(split?.subtotal)) {
-                          setSplitErrors(prev => ({
-                            ...prev,
-                            [split._id]: { amount: "Please enter an amount for this split." },
-                          }));
-                          return;
-                        }
                         setSplitErrors(prev => {
                           const next = { ...prev };
                           if (split) delete next[split._id];
