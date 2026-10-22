@@ -177,7 +177,7 @@ export function getSplitReceiptMissingMessages(fields) {
   if (isBlankField(f.product_date)) return ["Please select Date"];
   if (isBlankField(f.storeName)) return ["Please select Merchant"];
   if (isBlankField(f.expense_type)) return ["Please select Expense Category"];
-  if (isBlankTotal(f.purchasePrice)) return ["Please select Total"];
+  if (isBlankTotal(f.purchasePrice)) return ["Please enter Total"];
   return [];
 }
 
@@ -191,6 +191,6 @@ export function getDuplicateReceiptValidationMessage(fields) {
   const f = fields || {};
   if (isBlankField(f.product_date)) return "Please select Date";
   if (isBlankField(f.storeName)) return "Please select Merchant";
-  if (isBlankTotal(f.purchasePrice)) return "Please select Total";
+  if (isBlankTotal(f.purchasePrice)) return "Please enter Total";
   return null;
 }
