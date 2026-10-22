@@ -53,6 +53,14 @@ const ReceiptSplitScreen = ({
     return Number.isFinite(n) ? n.toFixed(2) : "";
   };
 
+  // Tip shown as a percentage of the subtotal (Android/iPad style):
+  // round(tip / subtotal * 100). 0 when there's no subtotal.
+  const tipPercent = (tip, subtotal) => {
+    const sub = parseFloat(subtotal) || 0;
+    if (sub <= 0) return 0;
+    return Math.round(((parseFloat(tip) || 0) / sub) * 100);
+  };
+
   const mainTotal = parseFloat(main?.total) || 0;
   const mainSubtotal = (parseFloat(main?.subtotal) || 0) || mainTotal;
   const mainTip = parseFloat(main?.tip) || 0;
@@ -158,7 +166,7 @@ const ReceiptSplitScreen = ({
                   {hasTip && (
                     <div className="flex items-center justify-between gap-2 px-3 py-2.5">
                       <span className="text-sm font-bold text-gray-900">
-                        TIP <span className="font-normal text-gray-400">(max. ${maxTip.toFixed(2)})</span>
+                        TIP ({tipPercent(split.tip, split.subtotal)}%) <span className="font-normal text-gray-400">(max. ${maxTip.toFixed(2)})</span>
                       </span>
                       <div className="relative min-w-[92px]">
                         <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">$</span>
@@ -233,7 +241,7 @@ const ReceiptSplitScreen = ({
               {[
                 ["Subtotal", subtotal, false],
                 ...mainTaxList.map((t, ti) => [`${t.tax_name} (${parseFloat(t.tax_rate) || 0}%)`, taxAt(ti), false]),
-                ...(hasTip ? [["TIP", tip, false]] : []),
+                ...(hasTip ? [[`TIP (${tipPercent(tip, subtotal)}%)`, tip, false]] : []),
                 ["TOTAL", total, true],
               ].map(([lbl, val, bold], i) => (
                 <div key={i} className={`flex items-center justify-between py-1.5 border-b border-gray-100 ${bold ? "font-bold text-gray-900" : ""}`}>
