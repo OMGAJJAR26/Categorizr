@@ -3355,19 +3355,9 @@ useEffect(() => {
       setSplitError("Please add at least one split before saving.");
       return;
     }
-    // Validate
-    const newErrors = {};
-    splits.forEach(split => {
-      if (!parseFloat(split.purchasePrice) && !parseFloat(split.subtotal)) {
-        newErrors[split._id] = { amount: "Please enter an amount for this split." };
-      }
-    });
-    if (Object.keys(newErrors).length) {
-      setSplitErrors(newErrors);
-      const firstBad = splits.findIndex(s => newErrors[s._id]);
-      if (firstBad !== -1) setActiveSplitIndex(firstBad);
-      return;
-    }
+    // A split with no total is allowed — a $0.00 split is valid (matches the
+    // relaxed rule), so clear any stale per-split amount errors and proceed.
+    setSplitErrors({});
 
     setIsSavingSplits(true);
     setSplitError(null);
@@ -5578,11 +5568,9 @@ useEffect(() => {
                     <button
                       type="button"
                       onClick={() => {
+                        // No total required — a $0.00 split is allowed; just return
+                        // to the overview and clear any stale amount error.
                         const split = splits[activeSplitIndex];
-                        if (!parseFloat(split?.purchasePrice) && !parseFloat(split?.subtotal)) {
-                          setSplitErrors(prev => ({ ...prev, [split._id]: { amount: "Please enter an amount." } }));
-                          return;
-                        }
                         setSplitErrors(prev => { const n = { ...prev }; if (split) delete n[split._id]; return n; });
                         setActiveSplitIndex(null);
                       }}
