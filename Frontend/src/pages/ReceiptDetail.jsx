@@ -3548,21 +3548,36 @@ useEffect(() => {
           splits.reduce((s, sp) => s + (parseFloat(sp.tip) || 0), 0).toFixed(2)
         );
         const remTip = parseFloat(Math.max(mainTip - splitsTipTotal, 0).toFixed(2));
-        // Back-calculate remainder subtotal (net of tip) using existing tax rates
         const mainTaxRates = filterNonTipReceiptTaxValues(
           editedReceipt.receipt_tax_values || selectedReceipt?.receipt_tax_values || []
         );
-        const rateSum      = mainTaxRates.reduce((s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0);
-        const remSubtotal  = parseFloat(((remainder - remTip) / (1 + rateSum)).toFixed(2));
-        const remTaxValues = mainTaxRates.map(t => ({
-          ...t,
-          id: parseInt(t.id) || 0,
-          fk_user_id: parseInt(t.fk_user_id) || fkUserId,
-          fk_receipt_id: selectedReceipt?.id || 0,
-          tax_amount: parseFloat(((parseFloat(t.tax_rate) / 100) * remSubtotal).toFixed(2)).toString(),
-          created: parseInt(t.created) || 0,
-          updated: parseInt(t.updated) || 0,
-        }));
+        // Remainder breakdown = main − what the splits took, PER FIELD — exactly the
+        // breakdown the split overview renders for the remainder row. The old code
+        // re-derived the remainder's taxes from tax RATES (rate% × a back-calculated
+        // subtotal), which differs from the subtraction shown on screen, so the
+        // original receipt's tip/taxes changed after saving the split. Deriving the
+        // saved values the same way the screen displays them keeps them identical.
+        const remTaxValues = mainTaxRates.map((t, ti) => {
+          const takenBySplits = splits.reduce(
+            (s, sp) => s + (parseFloat(sp.receipt_tax_values?.[ti]?.tax_amount) || 0),
+            0,
+          );
+          const remTaxAmt = Math.max(
+            0,
+            parseFloat(((parseFloat(t.tax_amount) || 0) - takenBySplits).toFixed(2)),
+          );
+          return {
+            ...t,
+            id: parseInt(t.id) || 0,
+            fk_user_id: parseInt(t.fk_user_id) || fkUserId,
+            fk_receipt_id: selectedReceipt?.id || 0,
+            tax_amount: remTaxAmt.toString(),
+            created: parseInt(t.created) || 0,
+            updated: parseInt(t.updated) || 0,
+          };
+        });
+        const remTaxSum = remTaxValues.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0);
+        const remSubtotal = Math.max(0, parseFloat((remainder - remTip - remTaxSum).toFixed(2)));
         // Keep the leftover tip on the remaining receipt as a "Tip" tax line.
         const remTipLine = buildReceiptTipTaxEntry({
           tipAmount: remTip,

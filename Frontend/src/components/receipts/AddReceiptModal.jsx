@@ -3416,17 +3416,32 @@ const handleFieldChange = (field, value) => {
           splits.reduce((s, sp) => s + (parseFloat(sp.tip) || 0), 0).toFixed(2)
         );
         const remTip = parseFloat(Math.max(mainTip - splitsTipTotal, 0).toFixed(2));
-        // Back-calculate remainder subtotal (net of tip) using the main tax rates
         const mainTaxRates = filterNonTipReceiptTaxValues(formData.receipt_tax_values || []);
-        const rateSum      = mainTaxRates.reduce((s, t) => s + (parseFloat(t.tax_rate) || 0) / 100, 0);
-        const remSubtotal  = parseFloat(((remainder - remTip) / (1 + rateSum)).toFixed(2));
-        const remTaxValues = mainTaxRates.map(t => ({
-          id: 0, fk_user_id: fkUserId, fk_receipt_id: 0,
-          fk_tax_id: parseInt(t.fk_tax_id) || 0,
-          tax_name: t.tax_name || "", tax_rate: t.tax_rate || "0",
-          tax_amount: parseFloat(((parseFloat(t.tax_rate) / 100) * remSubtotal).toFixed(2)).toString(),
-          created: 0, updated: 0,
-        }));
+        // Remainder breakdown = main − what the splits took, PER FIELD — exactly the
+        // breakdown the split overview renders for the remainder row. The old code
+        // re-derived the remainder's taxes from tax RATES (rate% × a back-calculated
+        // subtotal), which differs from the subtraction shown on screen, so the
+        // remainder receipt's tip/taxes changed after saving the split. Deriving the
+        // saved values the same way the screen displays them keeps them identical.
+        const remTaxValues = mainTaxRates.map((t, ti) => {
+          const takenBySplits = splits.reduce(
+            (s, sp) => s + (parseFloat(sp.receipt_tax_values?.[ti]?.tax_amount) || 0),
+            0,
+          );
+          const remTaxAmt = Math.max(
+            0,
+            parseFloat(((parseFloat(t.tax_amount) || 0) - takenBySplits).toFixed(2)),
+          );
+          return {
+            id: 0, fk_user_id: fkUserId, fk_receipt_id: 0,
+            fk_tax_id: parseInt(t.fk_tax_id) || 0,
+            tax_name: t.tax_name || "", tax_rate: t.tax_rate || "0",
+            tax_amount: remTaxAmt.toString(),
+            created: 0, updated: 0,
+          };
+        });
+        const remTaxSum = remTaxValues.reduce((s, t) => s + (parseFloat(t.tax_amount) || 0), 0);
+        const remSubtotal = Math.max(0, parseFloat((remainder - remTip - remTaxSum).toFixed(2)));
         // Persist the leftover tip as a "Tip" tax line on the remainder receipt.
         const remTipLine = buildReceiptTipTaxEntry({
           tipAmount: remTip,
