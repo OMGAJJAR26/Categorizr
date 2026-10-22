@@ -251,8 +251,11 @@ const ReceiptSplitScreen = ({
                 <p className="text-blue-600 font-bold text-base mb-2">Main Receipt</p>
                 <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 flex items-center gap-3">
                   {thumbUrl ? (
-                    <img src={thumbUrl} alt="" loading="lazy"
-                      className="w-12 h-14 object-cover rounded-md border border-gray-200 flex-shrink-0 bg-gray-900" />
+                    <img src={thumbUrl} alt="Receipt" loading="lazy"
+                      role="button"
+                      title="Tap to enlarge"
+                      onClick={() => window.open(thumbUrl, "_blank", "noopener,noreferrer")}
+                      className="w-12 h-14 object-cover rounded-md border border-gray-200 flex-shrink-0 bg-gray-900 cursor-pointer hover:opacity-90" />
                   ) : merchantLogo ? (
                     <img src={merchantLogo} alt="" loading="lazy"
                       className="w-12 h-14 object-contain rounded-md border border-gray-200 flex-shrink-0 bg-white p-1" />
