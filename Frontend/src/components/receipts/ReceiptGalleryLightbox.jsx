@@ -81,6 +81,16 @@ const ReceiptGalleryLightbox = ({ items, initialIndex = 0, onClose }) => {
                   alt={item.storeName || "Receipt"}
                   className="max-w-full max-h-[calc(100vh-120px)] object-contain mx-auto select-none"
                   draggable={false}
+                  onError={(e) => {
+                    // If the image proxy (/api/imageproxy?url=…) is blocked — e.g. an
+                    // ad/privacy extension matches its ?url=http… shape — fall back to
+                    // the raw media URL once. Forwarded receipt media is directly
+                    // viewable, so the enlarge still works without the proxy.
+                    const img = e.currentTarget;
+                    if (img.dataset.rawFallback === "1") return;
+                    img.dataset.rawFallback = "1";
+                    if (item.url && img.src !== item.url) img.src = item.url;
+                  }}
                 />
               )}
             </SwiperSlide>

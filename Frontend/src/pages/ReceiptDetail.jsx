@@ -7104,10 +7104,29 @@ useEffect(() => {
                                     src={proxyImageUrl(u)}
                                     alt="Receipt"
                                     className="w-24 h-auto rounded cursor-pointer border border-gray-200"
-                                    onClick={() => window.open(proxyImageUrl(u), "_blank")}
-                                    onError={(e) =>
-                                      (e.target.style.display = "none")
+                                    // Enlarge opens the RAW media URL, not the proxied
+                                    // one: a top-level tab navigating to
+                                    // /api/imageproxy?url=… is exactly what ad/privacy
+                                    // blockers match, so opening the direct URL is
+                                    // blocker-resistant (forwarded media is viewable raw).
+                                    onClick={() =>
+                                      window.open(
+                                        unproxyImageUrl(u) || u,
+                                        "_blank",
+                                        "noopener,noreferrer",
+                                      )
                                     }
+                                    onError={(e) => {
+                                      // Proxy blocked → try the raw URL once before hiding.
+                                      const img = e.currentTarget;
+                                      const raw = unproxyImageUrl(u) || u;
+                                      if (img.dataset.rawFallback !== "1" && raw && img.src !== raw) {
+                                        img.dataset.rawFallback = "1";
+                                        img.src = raw;
+                                        return;
+                                      }
+                                      img.style.display = "none";
+                                    }}
                                   />
                                 )}
                                 {/* Delete file — blocked when locked (viewing only) */}
