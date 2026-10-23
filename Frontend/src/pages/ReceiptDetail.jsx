@@ -294,6 +294,14 @@ const ReceiptDetail = ({
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedReceipt?.id]);
+
+  // Swiping to another receipt should open it scrolled to the TOP (like Android),
+  // not at wherever the previous receipt was left scrolled. Reset the receipt
+  // body's scroll whenever the shown receipt changes.
+  useEffect(() => {
+    const el = receiptScrollRef.current;
+    if (el) el.scrollTop = 0;
+  }, [selectedReceipt?.id]);
   const [startX, setStartX] = useState(null);
   const [direction, setDirection] = useState(0);
   const [shareMenu, setShareMenu] = useState(false);
@@ -310,6 +318,10 @@ const ReceiptDetail = ({
   const containerRef = useRef(null);
   const dropdownRef = useRef();
   const scrollContentRef = useRef(null);
+  // The scrollable receipt body. Reset to the top when swiping to another receipt
+  // (below) so the next one starts at the top, like Android — not at wherever the
+  // previous receipt was scrolled.
+  const receiptScrollRef = useRef(null);
   // Wraps only the editable fields/tags so "locked" can disable editing while leaving
   // the receipt-image thumbnails interactive (viewing/enlarging stays allowed).
   const editableContentRef = useRef(null);
@@ -5712,7 +5724,7 @@ useEffect(() => {
               )}
 
               {/* Scrollable Content */}
-              <div className="overflow-y-auto flex-1 min-h-0 relative">
+              <div ref={receiptScrollRef} className="overflow-y-auto flex-1 min-h-0 relative">
               <div ref={scrollContentRef}>
                 {/* ── Split Screen ─────────────────────────────────────────── */}
                 {showSplitScreen ? (
