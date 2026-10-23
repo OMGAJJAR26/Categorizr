@@ -53,6 +53,19 @@ const ReceiptSplitScreen = ({
     return Number.isFinite(n) ? n.toFixed(2) : "";
   };
 
+  // Live-sanitize a money input to digits + up to 2 decimals — no letters, signs,
+  // or extra decimal places — matching how the TIP/Total fields are sanitized in
+  // the hook (sanitizeMoneyInput). Blank stays blank.
+  const sanitizeMoney = (raw) => {
+    if (raw == null) return "";
+    const cleaned = String(raw).replace(/[^0-9.]/g, "");
+    if (!cleaned) return "";
+    const [intPart = "", decPart = ""] = cleaned.split(".");
+    const i = intPart.replace(/^0+(?=\d)/, "") || (intPart ? "0" : "");
+    const d = decPart.slice(0, 2);
+    return cleaned.includes(".") ? `${i || "0"}.${d}` : i;
+  };
+
   // Tip shown as a percentage of the subtotal (Android/iPad style):
   // round(tip / subtotal * 100). 0 when there's no subtotal.
   const tipPercent = (tip, subtotal) => {
@@ -146,10 +159,11 @@ const ReceiptSplitScreen = ({
                             className="w-full text-sm text-right pl-5 pr-2 py-1 rounded-md bg-gray-100 border border-transparent focus:border-blue-400 focus:bg-white text-gray-800 outline-none"
                             value={t.tax_amount ?? ""}
                             onChange={(e) => {
-                              const v = parseFloat(e.target.value) || 0;
-                              if (v < 0) return; // no negative tax amounts on a split
+                              // Sanitize like TIP/Total: digits + up to 2 decimals, no letters.
+                              const next = sanitizeMoney(e.target.value);
+                              const v = parseFloat(next) || 0;
                               if (maxTax > 0 && v > maxTax + 0.005) { onAlert?.(AGGREGATE_MSG); return; }
-                              const updatedTaxes = split.receipt_tax_values.map((tv, tvi) => tvi === ti ? { ...tv, tax_amount: e.target.value } : tv);
+                              const updatedTaxes = split.receipt_tax_values.map((tv, tvi) => tvi === ti ? { ...tv, tax_amount: next } : tv);
                               onUpdateField(activeSplitIndex, "receipt_tax_values", updatedTaxes);
                             }}
                             onBlur={() => {
@@ -319,7 +333,7 @@ const ReceiptSplitScreen = ({
                             <span className="text-base leading-none font-bold">−</span>
                           </button>
                           <div className="flex-1 min-w-0">
-                            <p className="font-bold text-gray-900 text-sm truncate">{splitLabel(idx)}</p>
+                            <p className="font-bold text-gray-900 text-sm truncate">{(split.product_name ?? "").toString().trim() || splitLabel(idx)}</p>
                             {splitCat && <p className="text-xs text-gray-600 truncate">{splitCat}</p>}
                             <p className="text-xs text-gray-400">{splitType}</p>
                             {hasErr && <p className="text-xs text-red-500 font-medium">Tap to fix</p>}
