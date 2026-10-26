@@ -2792,10 +2792,15 @@ const handleFieldChange = (field, value) => {
           if (fd4 && fd4 !== "0" && /^\d{3,4}$/.test(fd4)) last4 = fd4;
         }
 
-        // ── STEP D: Generic card fallback ─────────────────────────────────────
+        // ── STEP D: Unknown-brand card → the "Other" card type ────────────────
+        // A card with a last4 but no recognizable brand is "Other" (card_type 8),
+        // NOT the literal "Card". "Other" is a real brand name: it renders as
+        // "Other *7836" and the issuer text field blanks it (isCustomCardIssuer),
+        // exactly like Visa/MasterCard carry their brand. "Card" is not a brand,
+        // so it was treated as a custom issuer and shown verbatim in the field.
         if (last4 && !cardIssuerName) {
-          paymentType = "Card";
-          cardIssuerName = "Card";
+          paymentType = "Other";
+          cardIssuerName = "Other";
         }
       }
 
