@@ -3,7 +3,7 @@ import { Trash2, Link2, Loader2 } from "lucide-react";
 import MerchantAvatar from "../MerchantAvatar";
 import SimpleAlertModal from "../SimpleAlertModal";
 import { formatReceiptDate } from "../../utils/receiptDate";
-import { isNewForwardedReceipt } from "../../hooks/useReceiptGrouping";
+import { isUnreadHighlightReceipt } from "../../hooks/useReceiptGrouping";
 import RowSelectCheckbox from "./RowSelectCheckbox";
 
 const ReceiptsMobileView = ({
@@ -63,7 +63,8 @@ const ReceiptsMobileView = ({
   // Determine if receipt is unread for other text elements
   const isUnread = receipt.status === "0";
 
-  const isNewForwarded = isNewForwardedReceipt(receipt);
+  // "New"/unread highlight for ANY receipt, per the mobile isRead rule.
+  const isNewForwarded = isUnreadHighlightReceipt(receipt);
 
   return (
     <>

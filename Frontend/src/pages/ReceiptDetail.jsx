@@ -3468,7 +3468,9 @@ useEffect(() => {
           purchasePrice: splitTotal.toString(),
           total_amount: splitTotal.toString(),
           payment_category_type: splitCategory,
-          status: 0,
+          // Split child is created by the user → read, status 1 (matches mobile;
+          // self-created receipts are never "unread"/"New").
+          status: 1,
           paymentType,
           last_4_digit_card: last4,
           card_issuer_name: cardIssuerName,

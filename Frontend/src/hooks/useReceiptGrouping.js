@@ -76,6 +76,22 @@ export const isNewForwardedReceipt = (r) => {
 /** @deprecated Use isNewForwardedReceipt instead */
 export const isNewForwardedEmailReceipt = isNewForwardedReceipt;
 
+/**
+ * Blue "New"/unread highlight shown in the receipt list for ANY receipt (normal,
+ * forwarded, received — not just forwards). Mirrors the mobile (iOS/Android)
+ * isRead rule EXACTLY:
+ *   let status = receipt.status ?? -1
+ *   isRead = (status == 1 && !shouldShowPendingVerificationBadge) ? 1 : 0
+ * A receipt is highlighted while it is UNREAD (isRead == 0): status != 1, or it
+ * is still pending verification; a missing status (-1) counts as unread. Drafts
+ * are excluded (they appear in the draft section via isToBeVerified).
+ * isReceiptRead() is that mobile condition, so this is its inverse.
+ */
+export const isUnreadHighlightReceipt = (r) => {
+  if (!r || String(r.is_draft ?? "0") === "1") return false;
+  return !isReceiptRead(r);
+};
+
 export const useReceiptGrouping = (receipts, filters, sortConfig, searchTerm) => {
   // Split ALL receipts into draft vs regular BEFORE applying user filters.
   // Draft receipts bypass the normal filter/sort pipeline and are shown in a
