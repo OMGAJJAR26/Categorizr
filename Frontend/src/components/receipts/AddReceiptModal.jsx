@@ -2851,7 +2851,10 @@ const handleFieldChange = (field, value) => {
         purchasePrice: purchasePrice.toString(),
         total_amount: purchasePrice.toString(),
         payment_category_type: paymentCategoryType,
-        status: parseInt(uploadedReceiptData?.status) || 0,
+        // A receipt the user creates on the WebApp is read by its creator → status 1
+        // (matches mobile: self-added receipts are never "unread"/"New"). Forwarded
+        // copies use forwardreceiptv2 and stay 0 for the recipient.
+        status: 1,
         paymentType: finalPaymentType || "", // Use cleaned paymentType for logo detection
         last_4_digit_card: last4 || "", // Use validated last4 (empty string if invalid, matching mobile format)
         card_issuer_name: cardIssuerName || "",
@@ -3185,7 +3188,8 @@ const handleFieldChange = (field, value) => {
       purchasePrice: (parseFloat(formData.purchasePrice) || 0).toString(),
       total_amount: (parseFloat(formData.purchasePrice) || 0).toString(),
       payment_category_type: parseInt(formData.receipt_category) || 0,
-      status: parseInt(uploadedReceiptData?.status) || 0,
+      // Self-created on the WebApp → read by its creator (status 1), matching mobile.
+      status: 1,
       paymentType: formData.paymentType || "",
       last_4_digit_card: formData.last_4_digit_card || "",
       card_issuer_name: formData.card_issuer_name || "",
@@ -3353,7 +3357,9 @@ const handleFieldChange = (field, value) => {
         purchasePrice: total.toString(),
         total_amount: total.toString(),
         payment_category_type: parseInt(category) || 0,
-        status: 0,
+        // Split children (and the remainder) are created by the user → read, status 1
+        // (matches mobile; self-created receipts are never "unread"/"New").
+        status: 1,
         paymentType: formData.paymentType || "",
         last_4_digit_card: formData.last_4_digit_card || "",
         card_issuer_name: formData.card_issuer_name || "",

@@ -4,7 +4,7 @@ import MerchantAvatar from "../MerchantAvatar";
 import ReceiptBadges from "../ReceiptBadges";
 import SimpleAlertModal from "../SimpleAlertModal";
 import { formatReceiptDate } from "../../utils/receiptDate";
-import { isNewForwardedReceipt } from "../../hooks/useReceiptGrouping";
+import { isUnreadHighlightReceipt } from "../../hooks/useReceiptGrouping";
 import RowSelectCheckbox from "./RowSelectCheckbox";
 
 const ReceiptsTable = ({
@@ -43,7 +43,8 @@ const ReceiptsTable = ({
     return () => document.removeEventListener("mousedown", handler);
   }, [showIntegrateMenu]);
 
-  const isNewForwarded = isNewForwardedReceipt(receipt);
+  // "New"/unread highlight for ANY receipt, per the mobile isRead rule.
+  const isNewForwarded = isUnreadHighlightReceipt(receipt);
 
   const getFormattedDate = () => formatReceiptDate(receipt);
 
