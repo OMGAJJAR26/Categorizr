@@ -59,18 +59,18 @@ const isNetworkReceivedReceipt = (r) =>
 
 /**
  * Blue "New" highlight for a received (network-forwarded) receipt.
- * Shown strictly while the status field is exactly 0 (Unread). Any other value —
- * 1 (Read), missing, null or empty — shows no highlight. Drafts never highlight.
- * Opening the receipt sets status to 1 (UpdateReceiptStatus). The next
- * getreceiptfromdatev1 then drops the highlight on every device.
+ * Highlight follows the mobile (iOS/Android) read rule EXACTLY:
+ *   let status = receipt.status ?? -1
+ *   isRead = (status == 1 && !shouldShowPendingVerificationBadge) ? 1 : 0
+ * The highlight is the inverse — a received forward is highlighted while it is
+ * UNREAD (status != 1, or still pending verification; missing status → -1 →
+ * unread). isReceiptRead() above is that mobile condition, so this is !isRead.
+ * Drafts never highlight here (they surface in the draft section via isToBeVerified).
  */
 export const isNewForwardedReceipt = (r) => {
   if (!r || String(r.is_draft ?? "0") === "1") return false;
   if (!isNetworkReceivedReceipt(r)) return false;
-  const raw = r.status != null && r.status !== "" ? r.status : r.Status;
-  // Only an explicit 0 highlights; missing/empty/null status does not.
-  if (raw == null || raw === "") return false;
-  return Number(raw) === 0;
+  return !isReceiptRead(r);
 };
 
 /** @deprecated Use isNewForwardedReceipt instead */
