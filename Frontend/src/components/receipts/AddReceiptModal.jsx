@@ -197,6 +197,10 @@ const AddReceiptModal = ({ onClose, onReceiptAdded, onMultiScan = null, initialD
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState(null);
   const [step, setStep] = useState("upload"); // "upload" or "form"
+  // Monotonic id for the current OCR/upload run. Cancelling — or starting a new
+  // upload — bumps it, so a stale in-flight handleUpload bails out instead of
+  // opening the form after the user cancelled mid-OCR.
+  const uploadRunIdRef = useRef(0);
   const [uploadedImageUrl, setUploadedImageUrl] = useState(null);
   const [uploadedReceiptData, setUploadedReceiptData] = useState(null);
   const [localImageFile, setLocalImageFile] = useState(null);
@@ -2127,6 +2131,21 @@ const handleFieldChange = (field, value) => {
   // "Combine into 1 receipt" (and the single-file Upload): every selected image is
   // attached to ONE receipt, and OCR runs on the user-chosen image (ocrFileIndex,
   // default the first). The classic OCR → editable form → save flow follows.
+  // Cancel an in-progress OCR/upload. Tesseract has no mid-run abort, so we
+  // invalidate the current run (its result is then discarded by the guards in
+  // handleUpload), clear the loading UI + any staged media, and return to the
+  // upload-image popup so the user can pick again.
+  const cancelUpload = () => {
+    uploadRunIdRef.current++;
+    setIsUploading(false);
+    setIsParsing(false);
+    setUploadProgress(0);
+    setParsedData(null);
+    setError(null);
+    resetReceiptMediaState({ clearFiles: true });
+    setStep("upload");
+  };
+
   const handleUpload = async () => {
     if (files.length === 0) {
       setError("Please select at least one file to upload.");
@@ -2140,6 +2159,8 @@ const handleFieldChange = (field, value) => {
     setParsedData(null);
     // Start each upload session with a clean media state.
     resetReceiptMediaState({ clearFiles: false });
+    // Tag this run so a cancel (or a newer upload) can invalidate it mid-flight.
+    const runId = ++uploadRunIdRef.current;
 
     try {
       const token = localStorage.getItem("token");
@@ -2163,6 +2184,9 @@ const handleFieldChange = (field, value) => {
         // Non-fatal: continue without pre-uploaded URL, fall back to direct upload
       }
 
+      // Bail out if the user cancelled (or started a newer upload) during media upload.
+      if (uploadRunIdRef.current !== runId) return;
+
       // ─── STEP 2: Parse receipt for OCR data ──────────────────────────────
       let parsedReceiptData = null;
       try {
@@ -2182,6 +2206,10 @@ const handleFieldChange = (field, value) => {
       } finally {
         setIsParsing(false);
       }
+
+      // Bail out if the user cancelled during OCR — discard the parse result and
+      // do NOT advance to the form (cancelUpload already reset the UI to upload).
+      if (uploadRunIdRef.current !== runId) return;
 
       setUploadProgress(50);
 
@@ -5103,6 +5131,17 @@ const handleSelectLogo = (index) => {
                             fetching logo...
                           </p>
                         )}
+                        {/* Cancel the in-progress OCR/upload and return to the
+                            upload-image popup. */}
+                        <div className="mt-4 flex justify-center">
+                          <button
+                            type="button"
+                            onClick={cancelUpload}
+                            className="px-5 py-2 text-sm font-semibold text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
                       </div>
                     )}
                     {showTaxDropdown === 1 && (
