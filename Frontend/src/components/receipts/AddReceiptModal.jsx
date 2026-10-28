@@ -2318,6 +2318,20 @@ const handleFieldChange = (field, value) => {
         }
       }
 
+      // OCR extracts the card TYPE + last-4 ONLY — never a custom issuer. Normalize
+      // the raw OCR payment text to its recognized brand so a bank name or the
+      // generic word "Card" collapses to "Other *last4" instead of leaking in as a
+      // bogus issuer. (card_issuer_name stays blank here unless it matched one of the
+      // user's OWN saved cards above, which is reuse, not OCR extraction.)
+      const ocrBrandForType = ocrHasLast4
+        ? inferCardTypeFromPayment(
+            ocrPaymentMethod.replace(/\s*\*\d{3,4}\b/g, "").trim(),
+          )
+        : "";
+      const normalizedOcrPaymentType = ocrHasLast4
+        ? `${ocrBrandForType || "Other"} *${ocrLast4Match[1]}`
+        : "";
+
       const cleanNumericValue = (value) => {
         if (!value) return "";
         const num = parseFloat(value);
@@ -2424,7 +2438,8 @@ const handleFieldChange = (field, value) => {
         storeName: merchantName,
         expense_type: autoCategory,
         ...(ocrReceiptCategory ? { receipt_category: ocrReceiptCategory } : {}),
-        paymentType: cleanPaymentType,
+        // Card TYPE + last4 only (normalized brand) — issuer never comes from OCR.
+        paymentType: normalizedOcrPaymentType,
         card_issuer_name: ocrCardIssuerName,
         // Populate the dedicated last4 field from the OCR-detected card so the
         // payment dropdown's selected label and the Edit Payment Method modal show
