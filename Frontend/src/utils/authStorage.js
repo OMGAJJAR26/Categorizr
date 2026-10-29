@@ -5,7 +5,6 @@
 // re-appear on every login: the "already seen" set was cleared, so previously
 // seen forwarded receipts were treated as new again.
 //
-// - cat_locally_forwarded    : receipts this device forwarded (keeps the badge)
 // - cat_seen_forwards_<uid>  : forwarded receipts already notified to the user
 // - cat_synced_forwards_<uid>: forwarded receipts whose data was already synced
 // - cat_hidden_merchants_<uid>: default/custom merchants this user deleted
@@ -13,7 +12,6 @@
 // - qbLinkedReceipts[_<uid>] : receipts already pushed to QuickBooks, so the
 //   update/delete prompts still fire for them after a re-login
 const PRESERVED_LOCALSTORAGE_PREFIXES = [
-  "cat_locally_forwarded",
   "cat_seen_forwards_",
   "cat_synced_forwards_",
   "cat_hidden_merchants_",
