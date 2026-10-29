@@ -1921,38 +1921,11 @@ setMerchantsWithImages(
       // Update receipts with enriched data (payment fields + logos + tax) and
       // build the payment methods list from the NOW-enriched receipts so renamed
       // payment methods show the updated name, not the stale one.
-      // Merge: preserve receipt_forwarded="1" from in-memory state (same-session flicker)
-      // and from localStorage (survives refresh and logout/login, like iOS Core Data).
-      // Once the backend starts returning "1" for a receipt, the localStorage entry is
-      // cleaned up automatically.
-      setReceipts(prevReceipts => {
-        const prevMap = new Map(prevReceipts.map(r => [String(r.id), r]));
-        let locallyForwarded;
-        try {
-          locallyForwarded = new Set(JSON.parse(localStorage.getItem("cat_locally_forwarded") || "[]"));
-        } catch {
-          locallyForwarded = new Set();
-        }
-        const needsLocalWrite = locallyForwarded.size > 0;
-        const result = receiptsWithIntegrations.map(r => {
-          const rId = String(r.id);
-          const prev = prevMap.get(rId);
-          const shouldBeForwarded =
-            (prev?.receipt_forwarded === "1") || locallyForwarded.has(rId);
-          if (shouldBeForwarded && r.receipt_forwarded !== "1") {
-            const merged = { ...r, receipt_forwarded: "1" };
-            return { ...merged, badgeStatus: getReceiptBadgeStatus(merged) };
-          }
-          if (r.receipt_forwarded === "1" && locallyForwarded.has(rId)) {
-            locallyForwarded.delete(rId);
-          }
-          return r;
-        });
-        if (needsLocalWrite) {
-          try { localStorage.setItem("cat_locally_forwarded", JSON.stringify([...locallyForwarded])); } catch {}
-        }
-        return result;
-      });
+      // Forwarded/Received badges follow the server fields only, matching iOS:
+      // receipt_forwarded drives "Forwarded" and fk_forward_from_receipt_id drives
+      // "Received". No session-local override — the badge reflects exactly what the
+      // backend returns, so web and iOS stay consistent across refreshes and devices.
+      setReceipts(receiptsWithIntegrations);
       // Heal runs on EVERY fetchData call (including silentRefreshData) so that
       // each new upload that re-contaminates older receipts is fixed promptly.
       // The function itself rate-limits per-signature (60 s cooldown, 5 retries).
@@ -2614,17 +2587,8 @@ setMerchantsWithImages(
       receipt_forwarded: 1,
     });
     await postReceiptUpdatePayload(payload, token);
-    // Keep the badge if a refresh returns before the write is visible.
-    try {
-      const set = new Set(JSON.parse(localStorage.getItem("cat_locally_forwarded") || "[]"));
-      set.add(String(receiptId));
-      localStorage.setItem("cat_locally_forwarded", JSON.stringify([...set]));
-    } catch { /* quota */ }
-    setReceipts(prev => prev.map(r => {
-      if (String(r.id) !== String(receiptId)) return r;
-      const updated = { ...r, receipt_forwarded: "1" };
-      return { ...updated, badgeStatus: getReceiptBadgeStatus(updated) };
-    }));
+    // No local override: the "Forwarded" badge appears only once the backend
+    // returns receipt_forwarded="1" on the next fetch, matching iOS.
   };
 
   /**
