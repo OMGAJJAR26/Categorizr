@@ -5191,21 +5191,17 @@ const handleSelectLogo = (index) => {
                       >
                         Enter Manually
                       </button>
-                      {/* 2+ files: let the user send each to its own draft (original
-                          behavior) OR combine every image into one receipt. */}
-                      {files.length > 1 && typeof onMultiScan === "function" && (
-                        <button
-                          onClick={handleScanToDrafts}
-                          disabled={isUploading || isConvertingFiles}
-                          className="px-4 py-2 text-blue-700 font-medium bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {`Send ${files.length} to Drafts`}
-                        </button>
-                      )}
+                      {/* 2+ files: let the user combine every image into one receipt
+                          OR send each to its own draft. "Send to Drafts" is the
+                          default (primary) action and sits on the far right. */}
                       <button
                         onClick={handleUpload}
                         disabled={files.length === 0 || isUploading || isConvertingFiles}
-                        className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className={
+                          files.length > 1
+                            ? "px-4 py-2 text-blue-700 font-medium bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            : "px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        }
                       >
                         {isUploading
                           ? "Uploading..."
@@ -5213,6 +5209,15 @@ const handleSelectLogo = (index) => {
                           ? "Combine into 1 receipt"
                           : "Upload"}
                       </button>
+                      {files.length > 1 && typeof onMultiScan === "function" && (
+                        <button
+                          onClick={handleScanToDrafts}
+                          disabled={isUploading || isConvertingFiles}
+                          className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {`Send ${files.length} to Drafts`}
+                        </button>
+                      )}
                     </div>
                   </div>
                 ) : (
