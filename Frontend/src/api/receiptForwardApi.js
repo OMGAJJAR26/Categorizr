@@ -142,12 +142,6 @@ export const buildForwardPayload = (receipt, recipientUserId, opts = {}) => {
     receipt.last_4_digit_card || receipt.last4DigitCard
   );
 
-  const originalId =
-    receipt.fk_original_receipt_id &&
-    String(receipt.fk_original_receipt_id) !== "0"
-      ? String(receipt.fk_original_receipt_id)
-      : String(sourceReceiptId);
-
   const mobileProductDate = calendarUnixToMobileUnix(receipt.product_date);
 
   return {
@@ -178,7 +172,14 @@ export const buildForwardPayload = (receipt, recipientUserId, opts = {}) => {
     last_4_digit_card: last4,
     card_issuer_name: receipt.card_issuer_name || receipt.cardIssuerName || "",
     payment_logo_url: receipt.paymentDisplay?.logoUrl || receipt.payment_logo_url || receipt.paymentLogoUrl || "",
-    fk_original_receipt_id: originalId,
+    // Always the receipt BEING forwarded (the sender's own id), even when that
+    // receipt was itself received. forwardreceiptv2 marks receipt_forwarded=1 on
+    // this id, so a received receipt that is then forwarded correctly shows BOTH
+    // "Forwarded" and "Received". It also matches how the rest of the app keys the
+    // forward chain (recipient copies are found by fk_original_receipt_id === this
+    // id). Previously a chain-forward sent the upstream root here, so the backend
+    // marked someone else's receipt and the sender's badge never appeared.
+    fk_original_receipt_id: String(sourceReceiptId),
     fk_forward_from_receipt_id: String(sourceReceiptId),
     receipt_category: toInt(receipt.receipt_category),
     product_date: mobileProductDate,
@@ -192,12 +193,12 @@ export const buildForwardPayload = (receipt, recipientUserId, opts = {}) => {
     receipt_tag: receipt.receipt_tag || "0,0,0,0,0,0,0",
     notes: receipt.notes || "",
     // Marks the sender's SOURCE receipt as forwarded. forwardreceiptv2 reads this
-    // flag and sets receipt_forwarded=1 on fk_original_receipt_id (the receipt being
-    // forwarded) — the same path iOS/Android use, so the "Forwarded" badge persists
-    // and shows on every platform. The recipient's new copy is NOT affected (the
-    // server doesn't write this column on the inserted copy; it stays "0"). This is
-    // the ONLY path that marks the source: updateReceiptv1 silently ignores
-    // receipt_forwarded. Verified live 2026-10-14 (source → "1", copy → "0").
+    // flag and sets receipt_forwarded=1 on fk_original_receipt_id (now always the
+    // receipt being forwarded, see above) — the same path iOS/Android use, so the
+    // "Forwarded" badge persists and shows on every platform. The recipient's new
+    // copy is NOT affected (the server doesn't write this column on the inserted
+    // copy; it stays "0"). This is the ONLY path that marks the source:
+    // updateReceiptv1 silently ignores receipt_forwarded.
     receipt_forwarded: "1",
     // Match product_date so mobile date heuristics never shift the forwarded day
     create_date: String(
