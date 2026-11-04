@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import SimpleAlertModal from "../components/SimpleAlertModal";
 import AuthPageLayout from "../components/auth/AuthPageLayout";
 import {
   AuthFormCard,
@@ -22,7 +21,9 @@ import ForgotPasswordModal from "./ForgotPasswordModel";
 import ForgotUsernameModal from "./ForgotUsernameModel";
 
 const Login = () => {
-  const [alertMsg, setAlertMsg] = useState(null);
+  // Combined server-side auth error, shown as a single red banner at the top of
+  // the form (security best practice: never reveal which field was wrong).
+  const [authError, setAuthError] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [showUsernameModel, setShowUsernameModel] = useState(false);
@@ -37,14 +38,17 @@ const Login = () => {
     }
   }, [navigate]);
 
+  // Client-side checks are reserved strictly for empty fields. No password-length
+  // or email-syntax rule here: the first field accepts a username OR a recovery
+  // email, and a legacy password may be shorter than 8 chars — anything else is
+  // decided by the server and surfaced via the combined red banner.
   const validationSchema = Yup.object({
-    userName: Yup.string().required("Username is required"),
-    password: Yup.string()
-      .min(8, "Minimum 8 characters")
-      .required("Password is required"),
+    userName: Yup.string().trim().required("Please enter Username or Email."),
+    password: Yup.string().required("Please enter Password."),
   });
 
   const handleLogin = async (values) => {
+    setAuthError(null);
     setLoading(true);
     try {
       const res = await fetch("/api/user/login", {
@@ -54,7 +58,9 @@ const Login = () => {
           Accesstoken: "-",
         },
         body: JSON.stringify({
-          userName: values.userName,
+          // The user may type a username or their recovery email here; the server
+          // resolves either to the account.
+          userName: values.userName.trim(),
           password: values.password,
         }),
       });
@@ -96,10 +102,17 @@ const Login = () => {
         await refreshDataAfterAuth();
         navigate("/homepage", { replace: true });
       } else {
-        setAlertMsg(data.message || "Login failed");
+        // Any wrong username / email / password combination → one generic banner.
+        setAuthError({
+          title: "Incorrect Username, Email, or Password.",
+          subtitle: "Please try again.",
+        });
       }
-    } catch (err) {
-      setAlertMsg("Login failed: " + err.message);
+    } catch {
+      setAuthError({
+        title: "Something went wrong. Please try again.",
+        subtitle: null,
+      });
     } finally {
       setLoading(false);
     }
@@ -115,25 +128,39 @@ const Login = () => {
         {() => (
           <Form className="w-full flex justify-center">
             <AuthFormCard title="Login">
+              {authError && (
+                <div
+                  role="alert"
+                  className="mb-6 rounded-xl bg-red-500 text-white px-4 py-3 shadow-lg text-center"
+                >
+                  <p className="font-bold text-sm">{authError.title}</p>
+                  {authError.subtitle && (
+                    <p className="text-sm text-red-50/95 mt-0.5">
+                      {authError.subtitle}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div>
                 <Field
                   name="userName"
                   type="text"
-                  placeholder="Username"
+                  placeholder="Enter Username or Email"
                   autoComplete="username"
                   className={authInputClass}
                 />
+                <ErrorMessage
+                  name="userName"
+                  component="div"
+                  className={authErrorClass}
+                />
                 <span
                   onClick={() => setShowUsernameModel(true)}
-                  className={authLinkClass}
+                  className={`${authLinkClass} text-right`}
                 >
                   Forgot Username?
                 </span>
-                <ErrorMessage
-                  name="userName"
-                  component="span"
-                  className={authErrorClass}
-                />
               </div>
 
               <div className="mt-5">
@@ -141,7 +168,7 @@ const Login = () => {
                   <Field
                     name="password"
                     type={showPassword ? "text" : "password"}
-                    placeholder="Password"
+                    placeholder="Enter Password"
                     autoComplete="current-password"
                     className={`${authInputClass} pr-12`}
                   />
@@ -150,17 +177,17 @@ const Login = () => {
                     onToggle={() => setShowPassword(!showPassword)}
                   />
                 </div>
-                <span
-                  onClick={() => setShowForgotModal(true)}
-                  className={authLinkClass}
-                >
-                  Forgot Password?
-                </span>
                 <ErrorMessage
                   name="password"
                   component="div"
                   className={authErrorClass}
                 />
+                <span
+                  onClick={() => setShowForgotModal(true)}
+                  className={`${authLinkClass} text-right`}
+                >
+                  Forgot Password?
+                </span>
               </div>
 
               <AuthPrimaryButton>
@@ -184,9 +211,6 @@ const Login = () => {
       )}
       {showUsernameModel && (
         <ForgotUsernameModal onClose={() => setShowUsernameModel(false)} />
-      )}
-      {alertMsg && (
-        <SimpleAlertModal message={alertMsg} onClose={() => setAlertMsg(null)} />
       )}
     </AuthPageLayout>
   );
