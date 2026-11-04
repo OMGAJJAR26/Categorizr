@@ -7223,23 +7223,27 @@ useEffect(() => {
               {/* ── Sticky Save Bar ── */}
               {!showSplitScreen && (
               <div className="flex-shrink-0 border-t border-gray-200 bg-white px-4 sm:px-6 py-3 flex flex-col gap-2 relative z-40">
+                {isDraft && (
+                  <button
+                    onClick={onClose}
+                    disabled={isSaving}
+                    className="w-full py-3 bg-slate-500 border border-slate-500 text-slate-50 font-semibold rounded-xl hover:bg-slate-600 hover:border-slate-600 transition-colors text-sm"
+                  >
+                    Keep in Review
+                  </button>
+                )}
                 <button
                   onClick={handleSave}
                   disabled={isSaving}
                   className="w-full py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                   title=""
                 >
-                  {isSaving ? "Saving..." : "Save Changes"}
+                  {isSaving
+                    ? "Saving..."
+                    : isDraft
+                    ? "SAVE & COMPLETE REVIEW"
+                    : "Save Changes"}
                 </button>
-                {isDraft && (
-                  <button
-                    onClick={onClose}
-                    disabled={isSaving}
-                    className="w-full py-3 bg-white border border-amber-400 text-amber-600 font-semibold rounded-xl hover:bg-amber-50 transition-colors text-sm"
-                  >
-                    Keep in Draft Mode
-                  </button>
-                )}
               </div>
               )}
             </div>

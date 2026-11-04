@@ -63,7 +63,7 @@ const ReceiptsTable = ({
   return (
     <>
       {/* Desktop View - Large screens (lg+) */}
-      <div className={`hidden lg:grid grid-cols-8 gap-4 items-center border rounded-xl shadow-sm hover:shadow-md hover:bg-gray-50 transition p-3 ${isToBeVerified ? "border-amber-400 border-2 bg-amber-50/30" : isNewForwarded ? "border-blue-500 border-2 bg-blue-50/30" : ""}`}>
+      <div className={`hidden lg:grid grid-cols-8 gap-4 items-center border rounded-xl shadow-sm hover:shadow-md hover:bg-gray-50 transition p-3 ${isToBeVerified ? "border-slate-400 border-2 bg-slate-50" : isNewForwarded ? "border-blue-500 border-2 bg-blue-50/30" : ""}`}>
         <div className="col-span-8 -mt-1 -mb-1">
           <ReceiptBadges receipt={receipt} isToBeVerified={isToBeVerified} isNewForwarded={isNewForwarded} />
         </div>
@@ -239,7 +239,7 @@ const ReceiptsTable = ({
       </div>
 
       {/* Tablet View - Medium screens (md to lg) */}
-      <div className={`hidden md:flex lg:hidden flex-col border rounded-xl shadow-sm hover:shadow-md hover:bg-gray-50 transition p-3 ${isToBeVerified ? "border-amber-400 border-2 bg-amber-50/30" : isNewForwarded ? "border-blue-500 border-2 bg-blue-50/30" : ""}`}>
+      <div className={`hidden md:flex lg:hidden flex-col border rounded-xl shadow-sm hover:shadow-md hover:bg-gray-50 transition p-3 ${isToBeVerified ? "border-slate-400 border-2 bg-slate-50" : isNewForwarded ? "border-blue-500 border-2 bg-blue-50/30" : ""}`}>
         <div className="mb-2">
           <ReceiptBadges receipt={receipt} isToBeVerified={isToBeVerified} isNewForwarded={isNewForwarded} />
         </div>

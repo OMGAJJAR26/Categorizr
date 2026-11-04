@@ -8,8 +8,8 @@ const ReceiptBadges = ({ receipt, isToBeVerified = false, isNewForwarded = false
   return (
     <div className="flex gap-1 mb-2 flex-wrap">
       {isToBeVerified && (
-        <span className="bg-amber-50 text-amber-600 text-xs font-bold px-2 py-1 rounded-full border border-amber-400 uppercase tracking-wide">
-          To Be Verified
+        <span className="bg-slate-500 text-slate-50 text-xs font-bold px-3 py-1 rounded-full tracking-wide">
+          Needs Review
         </span>
       )}
       {isNewForwarded && (
