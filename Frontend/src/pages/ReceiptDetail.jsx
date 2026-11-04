@@ -366,7 +366,7 @@ const ReceiptDetail = ({
   const [newPaymentCardType, setNewPaymentCardType] = useState("");
   const [newCardIssuerName, setNewCardIssuerName] = useState("");
   const [newLast4Digits, setNewLast4Digits] = useState("");
-  const [newPaymentCategoryType, setNewPaymentCategoryType] = useState("");
+  const [newPaymentCategoryType, setNewPaymentCategoryType] = useState("Personal");
   const [payModalError, setPayModalError] = useState(null);
   const [localPaymentMethods, setLocalPaymentMethods] = useState([]);
   const [showPayMethodConfirm, setShowPayMethodConfirm] = useState(false);
@@ -1803,7 +1803,8 @@ useEffect(() => {
     setNewPaymentCardType("");
     setNewCardIssuerName("");
     setNewLast4Digits("");
-    setNewPaymentCategoryType("");
+    // New payment methods default to "Personal"; the user can switch to "Business".
+    setNewPaymentCategoryType("Personal");
     setShowAddPaymentModal(true);
     setShowPaymentDropdown(false);
   };
@@ -1813,7 +1814,7 @@ useEffect(() => {
     setNewPaymentCardType("");
     setNewCardIssuerName("");
     setNewLast4Digits("");
-    setNewPaymentCategoryType("");
+    setNewPaymentCategoryType("Personal");
     setShowAddPaymentModal(false);
     setPayModalEditMode(null);
     setPayModalError(null);
@@ -1890,7 +1891,7 @@ useEffect(() => {
     // API record wins (reflects edits from any device, e.g. iOS); the local override
     // map is only a fallback for methods not present in the API.
     setNewPaymentCategoryType(
-      apiMatch ? paymentCategoryFromApiEnum(apiMatch.default_payment_category) : (_pet[method] || "")
+      (apiMatch ? paymentCategoryFromApiEnum(apiMatch.default_payment_category) : _pet[method]) || "Personal"
     );
     // Store the signature of the payment being edited using its RESOLVED card type, so the
     // duplicate check can exclude it. Inferring the brand from the display name fails for
@@ -3815,7 +3816,8 @@ useEffect(() => {
             void addApiPaymentMethod(
               { cardIssuerName, cardTypeBrand: resolvedBrand, last4 },
               "",
-              updatedData.expense_type || ""
+              // Auto-created from OCR/receipt data — default to Personal.
+              "Personal"
             );
           }
         }

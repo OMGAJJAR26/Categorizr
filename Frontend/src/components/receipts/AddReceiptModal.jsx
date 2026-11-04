@@ -226,7 +226,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const [newPaymentCardType, setNewPaymentCardType] = useState("");
   const [newCardIssuerName, setNewCardIssuerName] = useState("");
   const [newLast4Digits, setNewLast4Digits] = useState("");
-  const [newPaymentCategoryType, setNewPaymentCategoryType] = useState(""); // Business/Personal
+  const [newPaymentCategoryType, setNewPaymentCategoryType] = useState("Personal"); // Business/Personal — new methods default to Personal
   const [payModalError, setPayModalError] = useState(null);
   const [localPaymentMethods, setLocalPaymentMethods] = useState([]); // Local list of payment methods
   const [uploadedMediaUrls, setUploadedMediaUrls] = useState([]);
@@ -3148,7 +3148,8 @@ const handleFieldChange = (field, value) => {
           void addApiPaymentMethod(
             { cardIssuerName, cardTypeBrand: resolvedBrand, last4 },
             "",
-            formData.expense_type || ""
+            // Auto-created from OCR/receipt data — default to Personal.
+            "Personal"
           );
         }
       }
@@ -4062,9 +4063,9 @@ const handleSelectLogo = (index) => {
     setNewPaymentCardType("");
     setNewCardIssuerName("");
     setNewLast4Digits("");
-    // A new payment method starts with no default expense type ("Select Category Type"),
-    // not a pre-selected Business/Personal.
-    setNewPaymentCategoryType("");
+    // New payment methods default to "Personal" (matches the Add Receipt default);
+    // the user can switch to "Business" before saving.
+    setNewPaymentCategoryType("Personal");
     setShowAddPaymentModal(true);
     setShowPaymentDropdown(false);
   };
@@ -4075,7 +4076,7 @@ const handleSelectLogo = (index) => {
     setNewPaymentCardType("");
     setNewCardIssuerName("");
     setNewLast4Digits("");
-    setNewPaymentCategoryType("");
+    setNewPaymentCategoryType("Personal");
     setPayModalEditMode(null);
     setShowAddPaymentModal(false);
     setPayModalError(null);
@@ -4105,7 +4106,7 @@ const handleSelectLogo = (index) => {
     // API record wins (reflects edits from any device, e.g. iOS); the local override
     // map is only a fallback for methods not present in the API.
     setNewPaymentCategoryType(
-      apiMatch ? paymentCategoryFromApiEnum(apiMatch.default_payment_category) : (_pet[method] || "")
+      (apiMatch ? paymentCategoryFromApiEnum(apiMatch.default_payment_category) : _pet[method]) || "Personal"
     );
     // Capture the signature using the RESOLVED card type so the duplicate check can
     // exclude the payment being edited. Inferring the brand from the display name

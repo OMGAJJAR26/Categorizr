@@ -240,10 +240,9 @@ export default function EditPaymentMethodModal({
                 </label>
                 <select
                   className={inputCls}
-                  value={categoryType}
+                  value={categoryType || "Personal"}
                   onChange={(e) => onCategoryChange(e.target.value)}
                 >
-                  <option value="">Select Category Type</option>
                   <option value="Personal">Personal</option>
                   <option value="Business">Business</option>
                 </select>
