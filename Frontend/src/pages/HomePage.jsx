@@ -22,6 +22,7 @@ import CustomizedReportModal from "../components/receipts/CustomizedReportModal"
 import AddReceiptModal from "../components/receipts/AddReceiptModal";
 import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationDialog";
 import ReceiptScanSkeleton from "../components/receipts/ReceiptScanSkeleton";
+import ReceiptsEmptyState from "../components/receipts/ReceiptsEmptyState";
 import BulkActionBar from "../components/receipts/BulkActionBar";
 import Toast from "../components/Toast";
 import IntegrationsModal from "../components/IntegrationsModal";
@@ -1363,6 +1364,12 @@ const HomePage = () => {
     pendingScanCount - Math.max(0, draftReceipts.length - scanBaselineDraftsRef.current)
   );
 
+  // True empty state: the user has no receipts at all (drafts are derived from
+  // `receipts`, so an empty list means zero of everything) and nothing is mid-scan.
+  // In this state we hide search/filters/sort and show the onboarding empty view.
+  // Adding a receipt (or removing them all) flips this automatically.
+  const isEmpty = receipts.length === 0 && pendingScanCount === 0;
+
   return (
     <div className="home-page">
       <Header />
@@ -1394,6 +1401,7 @@ const HomePage = () => {
           </div>
 
           <div className="home-main-card">
+            {!isEmpty && (
             <div className="sticky top-[70px] sm:top-[78px] lg:top-[90px] bg-white z-40 pb-1 sm:pb-1">
               <div className="md:hidden home-sticky-bar-mobile">
                 <div className="flex items-center flex-nowrap min-h-0 w-full justify-between gap-0.5 home-mobile-icon-row">
@@ -1584,6 +1592,7 @@ const HomePage = () => {
                 <div className="text-center">Actions</div>
               </div>
             </div>
+            )}
 
             <div ref={receiptsScrollRef} className="max-h-[calc(100vh-200px)] overflow-y-auto">
 
@@ -1698,10 +1707,16 @@ const HomePage = () => {
                 );
               })}
 
-              {sortedYears.length === 0 && (
-                <div className="home-empty-state">
-                  No receipts found matching your filters
-                </div>
+              {isEmpty ? (
+                <ReceiptsEmptyState onUpload={() => setShowAddReceiptModal(true)} />
+              ) : (
+                sortedYears.length === 0 &&
+                draftReceipts.length === 0 &&
+                scanSkeletonCount === 0 && (
+                  <div className="home-empty-state">
+                    No receipts found matching your filters
+                  </div>
+                )
               )}
             </div>
           </div>
