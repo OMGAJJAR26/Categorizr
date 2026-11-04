@@ -1615,17 +1615,17 @@ const HomePage = () => {
               {/* ── Draft / To Be Verified receipts ── */}
               {(draftReceipts.length > 0 || pendingScanCount > 0) && (
                 <div className="mb-4">
-                  <div className="home-year-header bg-amber-50 border-b border-amber-200 flex items-center justify-between">
-                    <span className="text-amber-700 font-bold">
-                      Draft Receipts ({draftReceipts.length}{" "}
+                  <div className="home-year-header bg-slate-200 border-b border-slate-300 flex items-center justify-between">
+                    <span className="text-slate-700 font-bold">
+                      Receipts to Review ({draftReceipts.length}{" "}
                       {draftReceipts.length === 1 ? "Receipt" : "Receipts"})
                       {scanSkeletonCount > 0 && (
-                        <span className="ml-2 font-semibold text-amber-600">
+                        <span className="ml-2 font-semibold text-slate-600">
                           • Scanning {scanSkeletonCount}…
                         </span>
                       )}
                     </span>
-                    <span className="text-amber-700 font-bold">
+                    <span className="text-slate-700 font-bold">
                       TOTAL: {formatCurrency(
                         draftReceipts.reduce((sum, r) => sum + (parseFloat(r.purchasePrice) || 0), 0)
                       )}

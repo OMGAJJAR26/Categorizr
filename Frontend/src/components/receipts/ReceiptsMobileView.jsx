@@ -68,10 +68,10 @@ const ReceiptsMobileView = ({
 
   return (
     <>
-    <div className={`md:hidden flex flex-col gap-3 border rounded-2xl p-4 bg-white shadow-sm ${isToBeVerified ? 'border-amber-400 border-2 bg-amber-50/30' : isNewForwarded ? 'border-blue-500 border-2 bg-blue-50/30' : 'border-gray-200'}`}>
+    <div className={`md:hidden flex flex-col gap-3 border rounded-2xl p-4 bg-white shadow-sm ${isToBeVerified ? 'border-slate-400 border-2 bg-slate-50' : isNewForwarded ? 'border-blue-500 border-2 bg-blue-50/30' : 'border-gray-200'}`}>
       {isToBeVerified && (
-        <span className="self-start bg-amber-50 text-amber-600 text-xs font-bold px-2 py-1 rounded-full border border-amber-400 uppercase tracking-wide">
-          To Be Verified
+        <span className="self-start bg-slate-500 text-slate-50 text-xs font-bold px-3 py-1 rounded-full tracking-wide">
+          Needs Review
         </span>
       )}
       {isNewForwarded && (
