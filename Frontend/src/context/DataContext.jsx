@@ -2022,7 +2022,8 @@ setMerchantsWithImages(
                   placeholderPm.id,
                   pmInput,
                   pmLogoUrl,
-                  receipt.expense_type || ""
+                  // Backfilled from receipt data — default expense type to Personal.
+                  "Personal"
                 )
               );
               continue;
@@ -2030,7 +2031,8 @@ setMerchantsWithImages(
           }
 
           createdSigs.add(pmSig);
-          pmTasks.push(addApiPaymentMethod(pmInput, pmLogoUrl, receipt.expense_type || ""));
+          // Backfilled from receipt data — default expense type to Personal.
+          pmTasks.push(addApiPaymentMethod(pmInput, pmLogoUrl, "Personal"));
         }
         if (pmTasks.length > 0) {
           Promise.allSettled(pmTasks).then(() => {

@@ -1543,7 +1543,7 @@ const ReceiptInfoInline = ({ type }) => {
   const [newCardType, setNewCardType]         = useState("");
   const [newIssuerName, setNewIssuerName]     = useState("");
   const [newLast4, setNewLast4]               = useState("");
-  const [newExpenseType, setNewExpenseType]   = useState(""); // "" | Personal | Business
+  const [newExpenseType, setNewExpenseType]   = useState("Personal"); // Personal | Business — new methods default to Personal
 
   // localStorage: payment display string → "Personal" or "Business"
   // payEditMode: null = add mode, { item, apiId } = edit an existing payment method via the Add form
@@ -1563,7 +1563,8 @@ const ReceiptInfoInline = ({ type }) => {
     setNewCardType("");
     setNewIssuerName("");
     setNewLast4("");
-    setNewExpenseType("");
+    // New payment methods default to "Personal"; the user can switch to "Business".
+    setNewExpenseType("Personal");
     setPayEditMode(null);
   };
 
@@ -2091,7 +2092,7 @@ const isBlockedTaxRateInput = (val) => {
             }
             // Reset & refresh
             setPayEditMode(null);
-            setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("");
+            setNewCardType(""); setNewIssuerName(""); setNewLast4(""); setNewExpenseType("Personal");
             setShowAddForm(false);
             await Promise.all([refreshData(), fetchApiPaymentMethods()]);
             toast("success", "Payment Method Updated");
@@ -3179,10 +3180,9 @@ const isBlockedTaxRateInput = (val) => {
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Payment Category Type</p>
               <select
                 className={`${mInput} w-full`}
-                value={newExpenseType}
+                value={newExpenseType || "Personal"}
                 onChange={(e) => setNewExpenseType(e.target.value)}
               >
-                <option value="">Select Category Type</option>
                 <option value="Personal">Personal</option>
                 <option value="Business">Business</option>
               </select>
@@ -3434,11 +3434,11 @@ const isBlockedTaxRateInput = (val) => {
                                 // API record wins (reflects edits from any device, e.g. iOS);
                                 // the local override map is only a fallback for methods not in the API.
                                 setNewExpenseType(
-                                  (pApiRecord ?? pApiMatches[0])
+                                  ((pApiRecord ?? pApiMatches[0])
                                     ? paymentCategoryFromApiEnum(
                                         (pApiRecord ?? pApiMatches[0]).default_payment_category
                                       )
-                                    : (payExpenseTypeMap[item.name] || "")
+                                    : payExpenseTypeMap[item.name]) || "Personal"
                                 );
                                 setPayEditMode({ item, apiId: pApiId });
                                 setShowAddForm(true);
