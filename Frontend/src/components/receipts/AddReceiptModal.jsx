@@ -5296,7 +5296,7 @@ const handleSelectLogo = (index) => {
   {/* Merchant with Dropdown */}
   <div className="mb-4 text-left" ref={merchantInputRef}>
     <label className="font-bold">Merchant</label>
-    <div className="relative w-full">
+    <div className="relative w-full mt-2.5">
       {formData.storeName ? (
         <div className="absolute left-2 top-1/2 transform -translate-y-1/2 z-10">
           <MerchantAvatar
@@ -5305,12 +5305,12 @@ const handleSelectLogo = (index) => {
               detectedMerchantLogo ||
               getMerchantImage(formData.storeName)
             }
-            className="w-5 h-5 mt-2"
+            className="w-5 h-5"
           />
         </div>
       ) : null}
       <input
-        className={`${inputClass} ${formData.storeName ? "pl-8" : "pl-3"}`}
+        className={`${inputClass} !mt-0 pr-8 ${formData.storeName ? "pl-8" : "pl-3"}`}
         value={formData.storeName}
         onChange={(e) => {
           const newMerchantName = stripEmoji(e.target.value);
@@ -5465,9 +5465,9 @@ const handleSelectLogo = (index) => {
   {/* Expense Category with Dropdown */}
   <div className="mb-4 text-left" ref={categoryInputRef}>
     <label className="font-bold">Expense Category</label>
-    <div className="relative">
+    <div className="relative w-full mt-2.5">
       <input
-        className={inputClass}
+        className={`${inputClass} !mt-0 pr-8`}
         value={formData.expense_type}
         onChange={(e) => {
           handleFieldChange("expense_type", e.target.value);
@@ -5553,7 +5553,7 @@ const handleSelectLogo = (index) => {
   {/* Payment Method with Dropdown */}
   <div className="mb-4 text-left" ref={paymentInputRef}>
     <label className="font-bold">Payment Method</label>
-    <div className="relative w-full">
+    <div className="relative w-full mt-2.5">
       {(() => {
         const paymentFields = {
           paymentType: formData.paymentType,
@@ -5569,12 +5569,12 @@ const handleSelectLogo = (index) => {
               formData.paymentType ||
               ""
             }
-            className="absolute left-2 top-1/2 transform -translate-y-1/2 w-5 h-5 rounded z-10 mt-1"
+            className="absolute left-2 top-1/2 transform -translate-y-1/2 w-5 h-5 rounded z-10"
           />
         ) : null;
       })()}
       <input
-        className={`${inputClass} pl-8`}
+        className={`${inputClass} !mt-0 pl-8 pr-8`}
         value={(() => {
           const display = getPaymentDisplay({
             paymentType: formData.paymentType,
