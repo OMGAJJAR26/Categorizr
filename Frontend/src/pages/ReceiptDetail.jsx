@@ -1618,7 +1618,15 @@ useEffect(() => {
   const collectReceiptMediaUrlsForSave = () => {
     const urls = [];
     const pushUnique = (candidate) => {
-      const normalized = normalizeMediaUrl(candidate);
+      const raw = (candidate || "").toString().trim();
+      if (!raw) return;
+      // Blob/data URLs can't be normalized — carry them through raw so the async
+      // resolver (resolveReceiptMediaUrlsForSave) can re-upload them at save time.
+      if (raw.startsWith("blob:") || raw.startsWith("data:")) {
+        if (!urls.includes(raw)) urls.push(raw);
+        return;
+      }
+      const normalized = normalizeMediaUrl(raw);
       if (!normalized || normalized === "0" || urls.includes(normalized)) return;
       urls.push(normalized);
     };
@@ -1644,10 +1652,31 @@ useEffect(() => {
       }
     }
 
-    const cleaned = urls.filter(
-      (u) => u && !u.startsWith("data:") && !u.startsWith("blob:")
-    );
+    // Keep blobs in the list; the async resolver will re-upload them.
+    const cleaned = urls.filter(Boolean);
     return dedupeEmailAttachmentPdfUrls(cleaned);
+  };
+
+  // Async version: re-uploads any blob/data URLs collected above so the final
+  // list contains only persistent HTTP URLs safe to send to the backend.
+  const resolveReceiptMediaUrlsForSave = async () => {
+    const rawUrls = collectReceiptMediaUrlsForSave();
+    const resolved = await Promise.all(
+      rawUrls.map(async (url) => {
+        if (!url.startsWith("blob:") && !url.startsWith("data:")) return url;
+        try {
+          const blob = await fetch(url).then((r) => r.blob());
+          const ext = (blob.type.split("/")[1] || "png").split("+")[0];
+          const file = new File([blob], `receipt_${Date.now()}.${ext}`, {
+            type: blob.type || "image/png",
+          });
+          return await uploadPhotoToMedia(file);
+        } catch {
+          return null;
+        }
+      })
+    );
+    return resolved.filter((u) => u && !u.startsWith("blob:") && !u.startsWith("data:"));
   };
 
   const normalizeMatchKey = (value) =>
@@ -3026,7 +3055,13 @@ useEffect(() => {
       try {
         url = await uploadPhotoToMedia(file);
       } catch {
-        setAlertMsg("Photo upload failed. Please check your connection and try again.");
+        // Upload failed — keep the photo visible via a blob URL and re-upload
+        // when the user hits Save Changes (resolveReceiptMediaUrlsForSave handles it).
+        const localUrl = URL.createObjectURL(file);
+        setAdditionalPhotoUrls((prev) =>
+          prev.includes(localUrl) ? prev : [...prev, localUrl]
+        );
+        setAlertMsg("Photo could not be uploaded right now. It will be saved when you tap Save Changes.");
         return;
       }
       const normalizedUrl = normalizeMediaUrl(url);
@@ -3758,7 +3793,7 @@ useEffect(() => {
       // For API: send paymentType WITHOUT *last4 (backend expects just network name)
       const finalPaymentTypeForAPI = basePaymentType || paymentType;
 
-      const mediaUrlsForSave = collectReceiptMediaUrlsForSave();
+      const mediaUrlsForSave = await resolveReceiptMediaUrlsForSave();
       if (pendingAnnotatedMediaRef.current?.persistUrl && mediaUrlsForSave.length === 0) {
         setAlertMsg(
           "Annotation could not be saved to the server. Please tap Save Annotation again, then Save Changes."
@@ -4105,7 +4140,7 @@ useEffect(() => {
 
     const finalPaymentTypeForAPI = basePaymentType || paymentType;
 
-    const mediaUrlsForSave = collectReceiptMediaUrlsForSave();
+    const mediaUrlsForSave = await resolveReceiptMediaUrlsForSave();
     const combinedReceiptImages = buildCombinedMediaField(mediaUrlsForSave);
 
     // Merge edited data with original receipt fields

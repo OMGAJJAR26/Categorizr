@@ -975,7 +975,15 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const collectAddReceiptMediaUrlsForSave = useCallback(() => {
     const urls = [];
     const pushUnique = (candidate) => {
-      const normalized = normalizeMediaUrlCore(candidate);
+      const raw = (candidate || "").toString().trim();
+      if (!raw) return;
+      // Blob/data URLs can't be normalized, but carry them through raw so
+      // persistMediaUrlForApi can re-upload them at save time.
+      if (raw.startsWith("blob:") || raw.startsWith("data:")) {
+        if (!urls.includes(raw)) urls.push(raw);
+        return;
+      }
+      const normalized = normalizeMediaUrlCore(raw);
       if (!normalized || normalized === "0" || urls.includes(normalized)) return;
       urls.push(normalized);
     };
@@ -983,8 +991,10 @@ const [localMerchants, setLocalMerchants] = useState([]);
     if (uploadedMediaUrls.length > 0) {
       uploadedMediaUrls.forEach(pushUnique);
     } else {
-      const preview = nonEmptyUrl(uploadedImageUrl);
-      if (preview) pushUnique(preview);
+      // Fall back to the preview image URL — accept blob: too so a failed initial
+      // upload still gets re-uploaded via persistMediaUrlForApi at save time.
+      const raw = (uploadedImageUrl || "").toString().trim();
+      if (raw && raw !== "0") pushUnique(raw);
     }
 
     const pending = pendingAnnotatedMediaRef.current;
@@ -997,7 +1007,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
       }
     }
 
-    return urls.filter((u) => u && !u.startsWith("blob:"));
+    return urls.filter(Boolean);
   }, [uploadedMediaUrls, uploadedImageUrl]);
 
   const persistMediaUrlForApi = useCallback(
