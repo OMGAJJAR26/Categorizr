@@ -374,7 +374,7 @@ const ReceiptAnnotator = ({ imageUrl, onSave, onClose }) => {
         if (uploadResp.ok) {
           const uploadData = await uploadResp.json();
           const cdnUrl = Array.isArray(uploadData)
-            ? uploadData[0]?.fullImageUrl
+            ? uploadData[uploadData.length - 1]?.fullImageUrl
             : uploadData?.fullImageUrl;
           if (cdnUrl) finalUrl = cdnUrl;
         }
