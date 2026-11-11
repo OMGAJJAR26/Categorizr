@@ -50,7 +50,7 @@ export default async function handler(req, res) {
 
   let upstream;
   try {
-    upstream = await fetch(`${UPSTREAM_ORIGIN}/user/uploadmediaV1`, {
+    upstream = await fetch(`${UPSTREAM_ORIGIN}/api/user/uploadmediaV1`, {
       method: "POST",
       headers: {
         "Content-Type": contentType,
