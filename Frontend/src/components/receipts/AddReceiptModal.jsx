@@ -602,6 +602,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
 
   const acceptedFileTypes = [
     "image/jpeg",
+    "image/jpg", // non-standard but used by some Android camera apps
     "image/png",
     "image/gif",
     "image/webp",
@@ -805,8 +806,8 @@ const [localMerchants, setLocalMerchants] = useState([]);
         errors.push(
           `${file.name}: Invalid file type. Please upload images or PDFs.`,
         );
-      } else if (file.size > 10 * 1024 * 1024) {
-        errors.push(`${file.name}: File too large. Maximum size is 10MB.`);
+      } else if (file.size > 25 * 1024 * 1024) {
+        errors.push(`${file.name}: File too large. Maximum size is 25MB.`);
       } else {
         validFiles.push(file);
       }
@@ -974,7 +975,15 @@ const [localMerchants, setLocalMerchants] = useState([]);
   const collectAddReceiptMediaUrlsForSave = useCallback(() => {
     const urls = [];
     const pushUnique = (candidate) => {
-      const normalized = normalizeMediaUrlCore(candidate);
+      const raw = (candidate || "").toString().trim();
+      if (!raw) return;
+      // Blob/data URLs can't be normalized, but carry them through raw so
+      // persistMediaUrlForApi can re-upload them at save time.
+      if (raw.startsWith("blob:") || raw.startsWith("data:")) {
+        if (!urls.includes(raw)) urls.push(raw);
+        return;
+      }
+      const normalized = normalizeMediaUrlCore(raw);
       if (!normalized || normalized === "0" || urls.includes(normalized)) return;
       urls.push(normalized);
     };
@@ -982,8 +991,10 @@ const [localMerchants, setLocalMerchants] = useState([]);
     if (uploadedMediaUrls.length > 0) {
       uploadedMediaUrls.forEach(pushUnique);
     } else {
-      const preview = nonEmptyUrl(uploadedImageUrl);
-      if (preview) pushUnique(preview);
+      // Fall back to the preview image URL — accept blob: too so a failed initial
+      // upload still gets re-uploaded via persistMediaUrlForApi at save time.
+      const raw = (uploadedImageUrl || "").toString().trim();
+      if (raw && raw !== "0") pushUnique(raw);
     }
 
     const pending = pendingAnnotatedMediaRef.current;
@@ -996,7 +1007,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
       }
     }
 
-    return urls.filter((u) => u && !u.startsWith("blob:"));
+    return urls.filter(Boolean);
   }, [uploadedMediaUrls, uploadedImageUrl]);
 
   const persistMediaUrlForApi = useCallback(
@@ -1078,10 +1089,12 @@ const [localMerchants, setLocalMerchants] = useState([]);
     if (!rawFile) return;
     if (addPhotoInputRef.current) addPhotoInputRef.current.value = "";
     setIsAddingPhoto(true);
+    // Declare outside try so the catch block can reference it for the blob fallback.
+    let file = rawFile;
     try {
       // Convert HEIC → JPEG first so both the upload and the local-URL fallback
       // below produce an image the browser can actually display.
-      const file = await convertHeicToJpegIfNeeded(rawFile);
+      file = await convertHeicToJpegIfNeeded(rawFile);
       const newUrls = await uploadFilesToMedia([file]);
       if (newUrls.length > 0) {
         setUploadedMediaUrls((prev) => {
@@ -1096,7 +1109,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
       }
     } catch (err) {
       console.error("Add photo upload failed:", err);
-      // Fallback: use local object URL
+      // Fallback: use local object URL so the photo appears while the user fills in the form.
       const localUrl = URL.createObjectURL(file);
       setUploadedMediaUrls((prev) => (prev.includes(localUrl) ? prev : [...prev, localUrl]));
     } finally {
