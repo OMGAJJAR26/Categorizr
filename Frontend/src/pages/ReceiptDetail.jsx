@@ -5889,7 +5889,7 @@ useEffect(() => {
                           ref={merchantInputRef}
                         >
                           <label className="font-bold">Merchant</label>
-                          <div className="relative w-full">
+                          <div className="relative w-full mt-2.5">
                             {(() => {
                               // Respect an explicitly cleared merchant ("" wins over the
                               // original) so removing the merchant also removes its logo.
@@ -5904,13 +5904,13 @@ useEffect(() => {
                                   <MerchantAvatar
                                     name={resolvedMerchant}
                                     explicitUrl={resolvedImage}
-                                    className="w-5 h-5 mt-2"
+                                    className="w-5 h-5"
                                   />
                                 </div>
                               );
                             })()}
                             <input
-                              className={`${inputClass} ${(editedReceipt.storeName ?? r.storeName ?? r.merchant ?? "") ? "pl-8" : "pl-3"}`}
+                              className={`${inputClass} !mt-0 pr-8 ${(editedReceipt.storeName ?? r.storeName ?? r.merchant ?? "") ? "pl-8" : "pl-3"}`}
                               value={
                                 editedReceipt.storeName ?? r.storeName ?? ""
                               }
@@ -6045,9 +6045,9 @@ useEffect(() => {
                           ref={categoryInputRef}
                         >
                           <label className="font-bold">Expense Category</label>
-                          <div className="relative">
+                          <div className="relative w-full mt-2.5">
                             <input
-                              className={inputClass}
+                              className={`${inputClass} !mt-0 pr-8`}
                               value={
                                 editedReceipt.expense_type ??
                                 r.expense_type ??
@@ -6139,7 +6139,7 @@ useEffect(() => {
                           ref={paymentInputRef}
                         >
                           <label className="font-bold">Payment Method</label>
-                          <div className="relative w-full">
+                          <div className="relative w-full mt-2.5">
                             {(() => {
                               const paymentFields = {
                                 paymentType: editedReceipt.paymentType ?? "",
@@ -6156,12 +6156,12 @@ useEffect(() => {
                                     paymentFields.card_issuer_name ||
                                     ""
                                   }
-                                  className="absolute left-2 top-1/2 transform -translate-y-1/2 w-5 h-5 rounded z-10 mt-1"
+                                  className="absolute left-2 top-1/2 transform -translate-y-1/2 w-5 h-5 rounded z-10"
                                 />
                               ) : null;
                             })()}
                             <input
-                              className={`${inputClass} pl-8`}
+                              className={`${inputClass} !mt-0 pl-8 pr-8`}
                               value={(() => {
                                 const receiptForDisplay = {
                                   ...r,
