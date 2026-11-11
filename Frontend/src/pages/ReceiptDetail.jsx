@@ -3026,8 +3026,8 @@ useEffect(() => {
       try {
         url = await uploadPhotoToMedia(file);
       } catch {
-        // Fallback to local object URL
-        url = URL.createObjectURL(file);
+        setAlertMsg("Photo upload failed. Please check your connection and try again.");
+        return;
       }
       const normalizedUrl = normalizeMediaUrl(url);
       if (!normalizedUrl) return;

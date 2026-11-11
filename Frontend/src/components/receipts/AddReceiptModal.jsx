@@ -1078,10 +1078,12 @@ const [localMerchants, setLocalMerchants] = useState([]);
     if (!rawFile) return;
     if (addPhotoInputRef.current) addPhotoInputRef.current.value = "";
     setIsAddingPhoto(true);
+    // Declare outside try so the catch block can reference it for the blob fallback.
+    let file = rawFile;
     try {
       // Convert HEIC → JPEG first so both the upload and the local-URL fallback
       // below produce an image the browser can actually display.
-      const file = await convertHeicToJpegIfNeeded(rawFile);
+      file = await convertHeicToJpegIfNeeded(rawFile);
       const newUrls = await uploadFilesToMedia([file]);
       if (newUrls.length > 0) {
         setUploadedMediaUrls((prev) => {
@@ -1096,7 +1098,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
       }
     } catch (err) {
       console.error("Add photo upload failed:", err);
-      // Fallback: use local object URL
+      // Fallback: use local object URL so the photo appears while the user fills in the form.
       const localUrl = URL.createObjectURL(file);
       setUploadedMediaUrls((prev) => (prev.includes(localUrl) ? prev : [...prev, localUrl]));
     } finally {
