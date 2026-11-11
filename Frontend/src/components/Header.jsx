@@ -1,10 +1,9 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import FontLogo from "../assets/categorizrFontLogo.png";
-import { UserCircle, Check, Settings, Sun, Moon } from "lucide-react";
+import { UserCircle, Check, Settings } from "lucide-react";
 import { useData } from "../context/DataContext";
 import { useCurrency } from "../context/CurrencyContext";
-import { useTheme } from "../context/ThemeContext";
 import LogoutConfirmationDialog from "./LogoutConfirmationDialog";
 import { clearAuthLocalStorage } from "../utils/authStorage";
 
@@ -18,7 +17,6 @@ const Header = () => {
   const profileRef = useRef(null);
   const { clearAllData, user } = useData();
   const { language, setLanguage, languages, flags } = useCurrency();
-  const { isDark, toggle: toggleTheme } = useTheme();
   const isOnSettings = location.pathname === "/settings";
 
   const handleLogout = () => {
@@ -110,18 +108,6 @@ const Header = () => {
             </div>
           )}
         </div>
-
-        {/* Theme Toggle */}
-        <button
-          onClick={toggleTheme}
-          aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-          title={isDark ? "Light mode" : "Dark mode"}
-          className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full text-slate-300 hover:text-white hover:bg-white/10 transition-all duration-200 focus:outline-none"
-        >
-          {isDark
-            ? <Sun size={17} className="text-yellow-300" />
-            : <Moon size={17} className="text-slate-300" />}
-        </button>
 
         {/* Settings Icon */}
         <button
