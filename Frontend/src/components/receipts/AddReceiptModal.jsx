@@ -602,6 +602,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
 
   const acceptedFileTypes = [
     "image/jpeg",
+    "image/jpg", // non-standard but used by some Android camera apps
     "image/png",
     "image/gif",
     "image/webp",
@@ -805,8 +806,8 @@ const [localMerchants, setLocalMerchants] = useState([]);
         errors.push(
           `${file.name}: Invalid file type. Please upload images or PDFs.`,
         );
-      } else if (file.size > 10 * 1024 * 1024) {
-        errors.push(`${file.name}: File too large. Maximum size is 10MB.`);
+      } else if (file.size > 25 * 1024 * 1024) {
+        errors.push(`${file.name}: File too large. Maximum size is 25MB.`);
       } else {
         validFiles.push(file);
       }
