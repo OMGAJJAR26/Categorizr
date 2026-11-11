@@ -3666,7 +3666,6 @@ useEffect(() => {
         });
       }
 
-      await refreshData();
       setShowSplitScreen(false);
       setActiveSplitIndex(null);
       setSplits([]);
@@ -3674,6 +3673,10 @@ useEffect(() => {
       setSplitErrors({});
       // Close modal so user can see all receipts including the new splits
       if (onClose) onClose();
+      // Background refresh after a short delay so the backend has time to commit
+      // all the split + remainder writes before we re-fetch. Using silentRefreshData
+      // (non-blocking) so the screen closes immediately instead of waiting here.
+      silentRefreshData?.(1500);
     } catch (err) {
       setSplitError("Failed to save splits: " + (err.message || "Unknown error"));
     } finally {
