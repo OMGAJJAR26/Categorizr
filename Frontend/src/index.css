@@ -12,6 +12,26 @@ html, body, #root {
   overscroll-behavior-x: contain;
 }
 
+/* Prevent iOS Safari auto-zoom on input focus.
+   iOS zooms in whenever a focused input's font-size is below 16px (Tailwind
+   text-sm = 14px, text-xs = 12px). Setting 16px here stops the zoom without
+   disabling pinch-zoom (which would be an accessibility violation). */
+@media screen and (max-width: 767px) {
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="tel"],
+  input[type="search"],
+  input[type="date"],
+  input[type="time"],
+  input[type="url"],
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
 body {
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
   line-height: 1.5;
