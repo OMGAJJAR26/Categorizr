@@ -29,7 +29,7 @@ const ShareOptions = forwardRef(
           className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
           aria-label="Close"
         >
-          <X size={15} className="text-gray-500 dark:text-gray-400" />
+          <X size={15} className="text-gray-700" />
         </button>
       </div>
 
