@@ -5,6 +5,7 @@ import { UserCircle, Check, Settings } from "lucide-react";
 import { useData } from "../context/DataContext";
 import { useCurrency } from "../context/CurrencyContext";
 import LogoutConfirmationDialog from "./LogoutConfirmationDialog";
+import Flag from "./Flag";
 import { clearAuthLocalStorage } from "../utils/authStorage";
 
 const Header = () => {
@@ -16,7 +17,7 @@ const Header = () => {
   const langRef = useRef(null);
   const profileRef = useRef(null);
   const { clearAllData, user } = useData();
-  const { language, setLanguage, languages, flags } = useCurrency();
+  const { language, setLanguage, languages } = useCurrency();
   const isOnSettings = location.pathname === "/settings";
 
   const handleLogout = () => {
@@ -75,9 +76,7 @@ const Header = () => {
             }}
             className="flex items-center gap-1 sm:gap-2 bg-gradient-to-r from-blue-500 to-blue-700 text-white px-2 sm:px-3 md:px-5 py-1.5 sm:py-2 rounded-full shadow-md shadow-blue-500/30 hover:shadow-lg hover:shadow-blue-500/40 transition-all duration-200"
           >
-            <span className="text-sm sm:text-base lg:text-xl leading-none relative -top-0.5">
-              {flags[language]}
-            </span>
+            <Flag language={language} />
             <span className="font-semibold capitalize leading-none text-xs sm:text-sm md:text-base hidden xs:inline">
               {language}
             </span>
@@ -95,9 +94,7 @@ const Header = () => {
                   className="flex items-center justify-between gap-2 sm:gap-3 w-full text-left px-3 sm:px-5 py-2.5 sm:py-3 m-0 transition-all hover:bg-gradient-to-r hover:from-blue-400 hover:to-blue-600 hover:text-white dark:hover:from-blue-600 dark:hover:to-blue-800"
                 >
                   <div className="flex items-center gap-2 sm:gap-3">
-                    <span className="text-sm sm:text-base lg:text-xl leading-none relative -top-0.5">
-                      {flags[lang]}
-                    </span>
+                    <Flag language={lang} />
                     <span className="font-medium capitalize text-sm sm:text-base">
                       {lang}
                     </span>
