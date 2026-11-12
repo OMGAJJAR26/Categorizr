@@ -10,6 +10,7 @@ import PaymentFilterMethod from "./PaymentFilterMethod";
 import TaxtypesAndTipsFilterModel from "./Taxtypes&TipsFilterModel";
 import MoreFiltersMenu from "./MoreFiltersMenu";
 import MobileTagsModal from "./MobileTagsModal";
+import { useKeepInViewport } from "../../hooks/useKeepInViewport";
 
 const FILTER_OPTIONS = [
   { key: "date", label: "Date", modal: DateFilterModal },
@@ -25,6 +26,8 @@ const FilterBar = ({ activeMenu, setActiveMenu, filters, updateFilter, iconOnly 
   const [showModal, setShowModal] = useState(null);
   const [showTagsModal, setShowTagsModal] = useState(false);
   const filterMenuRef = useRef(null);
+  const filterPanelRef = useRef(null);
+  useKeepInViewport(filterPanelRef, activeMenu === "filter");
 
   // Close menu when clicking/tapping outside (mobile + desktop)
   useEffect(() => {
@@ -109,6 +112,7 @@ const FilterBar = ({ activeMenu, setActiveMenu, filters, updateFilter, iconOnly 
 
         {activeMenu === "filter" && (
           <div
+            ref={filterPanelRef}
             className="absolute top-10 sm:top-12 left-0 md:left-auto md:right-0 bg-white text-sm text-gray-700 rounded-lg shadow-lg w-full min-w-[200px] sm:w-56 z-[100] border max-h-[60vh] overflow-y-auto"
             onMouseDown={(e) => e.stopPropagation()}
           >

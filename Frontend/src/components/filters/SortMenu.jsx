@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { SortAsc } from "lucide-react";
+import { useKeepInViewport } from "../../hooks/useKeepInViewport";
 
 const SORT_OPTIONS = [
   { key: "order", value: "az", label: "A to Z" },
@@ -12,6 +13,8 @@ const SORT_OPTIONS = [
 
 const SortMenu = ({ activeMenu, setActiveMenu, sortConfig, updateSort, iconOnly = false }) => {
   const sortMenuRef = useRef(null);
+  const sortPanelRef = useRef(null);
+  useKeepInViewport(sortPanelRef, activeMenu === "sort");
 
   // Close menu when clicking/tapping outside (mobile + desktop)
   useEffect(() => {
@@ -59,6 +62,7 @@ const SortMenu = ({ activeMenu, setActiveMenu, sortConfig, updateSort, iconOnly 
 
       {activeMenu === "sort" && (
         <div
+          ref={sortPanelRef}
           className="absolute top-10 sm:top-12 left-0 md:left-auto md:right-0 bg-white text-sm text-gray-700 rounded-lg shadow-lg w-full min-w-[160px] sm:w-40 z-[100] border max-h-[60vh] overflow-y-auto"
           onMouseDown={(e) => e.stopPropagation()}
         >

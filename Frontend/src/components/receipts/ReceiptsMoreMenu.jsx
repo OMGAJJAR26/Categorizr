@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 import TaxTypePopup from "../filters/TaxTypePopup";
 import { toTaxLabel } from "../../utils/receiptFormatters";
 import { collectReceiptMediaUrls } from "../../utils/mediaUrlUtils";
+import { useKeepInViewport } from "../../hooks/useKeepInViewport";
 
 const ReceiptsMoreMenu = ({
   activeMenu,
@@ -19,7 +20,9 @@ const ReceiptsMoreMenu = ({
 }) => {
   const navigate = useNavigate();
   const menuRef = useRef(null);
+  const panelRef = useRef(null);
   const [isClosing, setIsClosing] = useState(false);
+  useKeepInViewport(panelRef, activeMenu === "more");
   const [showTaxPopup, setShowTaxPopup] = useState(false);
   const [selectedTaxTypes, setSelectedTaxTypes] = useState([]);
   const closeTimeoutRef = useRef(null);
@@ -183,6 +186,7 @@ const ReceiptsMoreMenu = ({
 
         {(activeMenu === "more" || isClosing) && (
           <div
+            ref={panelRef}
             className={`absolute mt-2 sm:mt-4 right-0 bg-white text-black rounded-lg w-44 sm:w-48 z-[9999] overflow-hidden shadow-xl report-dropdown-panel ${
               isClosing ? "report-dropdown-closing" : "animate-report-dropdown"
             }`}

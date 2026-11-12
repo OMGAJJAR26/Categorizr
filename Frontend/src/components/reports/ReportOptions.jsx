@@ -3,6 +3,7 @@ import { FileText } from "lucide-react";
 import CustomizedReport from "../../pages/CustomizedReport";
 import TaxTypePopup from "../filters/TaxTypePopup";
 import { toTaxLabel } from "../../utils/receiptFormatters";
+import { useKeepInViewport } from "../../hooks/useKeepInViewport";
 const ReportOptions = ({ 
   activeMenu, 
   setActiveMenu, 
@@ -16,6 +17,8 @@ const ReportOptions = ({
   const [selectedTaxTypes, setSelectedTaxTypes] = useState([]);
   const [isClosingReport, setIsClosingReport] = useState(false);
   const reportMenuRef = useRef(null);
+  const reportPanelRef = useRef(null);
+  useKeepInViewport(reportPanelRef, activeMenu === "option");
   const closeTimeoutRef = useRef(null);
   const ignoreNextClickRef = useRef(false);
 
@@ -129,7 +132,8 @@ const ReportOptions = ({
 
         {(activeMenu === "option" || isClosingReport) && (
           <div
-            className={`absolute mt-2 sm:mt-4 right-0 bg-white text-black rounded-lg w-40 sm:w-44 z-[9999] overflow-hidden shadow-xl report-dropdown-panel ${
+            ref={reportPanelRef}
+            className={`absolute mt-2 sm:mt-4 ${iconOnly ? "left-0" : "right-0"} bg-white text-black rounded-lg w-40 sm:w-44 z-[9999] overflow-hidden shadow-xl report-dropdown-panel ${
               isClosingReport ? "report-dropdown-closing" : "animate-report-dropdown"
             }`}
             style={{ boxShadow: "0 10px 25px -5px rgb(0 0 0 / 0.12), 0 4px 6px -4px rgb(0 0 0 / 0.08)" }}
