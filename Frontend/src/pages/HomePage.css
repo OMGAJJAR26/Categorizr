@@ -485,9 +485,27 @@
 }
 
 /* ----- Table header row ----- */
+/* Shared column template for the header and every receipt row. Total and Actions
+   have a minimum width so large amounts and the action icons never overlap. */
+.home-table-header,
+.receipt-row-grid {
+  grid-template-columns:
+    minmax(0, 1.15fr) minmax(0, 0.8fr) minmax(0, 1.25fr) minmax(0, 1fr)
+    minmax(0, 1.2fr) minmax(0, 1.4fr) minmax(8rem, 1.1fr) minmax(9.5rem, 0.9fr);
+}
+
+.receipt-row-grid {
+  gap: 1rem 0.75rem;
+}
+
+@media (min-width: 1280px) {
+  .receipt-row-grid {
+    column-gap: 1rem;
+  }
+}
+
 .home-table-header {
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
   gap: 0.75rem;
   padding: 0.5rem 1rem;
   background: #ffffff;

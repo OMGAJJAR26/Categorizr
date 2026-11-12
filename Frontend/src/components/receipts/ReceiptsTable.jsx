@@ -63,7 +63,7 @@ const ReceiptsTable = ({
   return (
     <>
       {/* Desktop View - Large screens (lg+) */}
-      <div className={`hidden lg:grid grid-cols-8 gap-4 items-center border rounded-xl shadow-sm hover:shadow-md hover:bg-gray-50 transition p-3 ${isToBeVerified ? "border-slate-400 border-2 bg-slate-50" : isNewForwarded ? "border-blue-500 border-2 bg-blue-50/30" : ""}`}>
+      <div className={`hidden lg:grid receipt-row-grid items-center border rounded-xl shadow-sm hover:shadow-md hover:bg-gray-50 transition p-3 ${isToBeVerified ? "border-slate-400 border-2 bg-slate-50" : isNewForwarded ? "border-blue-500 border-2 bg-blue-50/30" : ""}`}>
         <div className="col-span-8 -mt-1 -mb-1">
           <ReceiptBadges receipt={receipt} isToBeVerified={isToBeVerified} isNewForwarded={isNewForwarded} />
         </div>
@@ -118,14 +118,14 @@ const ReceiptsTable = ({
           })()}
         </div>
 
-        <div className={`text-right font-bold text-sm xl:text-base ${getTotalColor()}`}>
+        <div className={`text-right font-bold text-sm xl:text-base whitespace-nowrap ${getTotalColor()}`}>
           {formatCurrency(receipt.purchasePrice || 0)}
         </div>
 
-        <div className="flex items-center justify-center gap-2">
+        <div className="flex items-center justify-center gap-2 whitespace-nowrap">
           <button
             onClick={onViewClick}
-            className="text-blue-600 font-semibold hover:underline text-sm xl:text-base"
+            className="text-blue-600 font-semibold hover:underline text-sm xl:text-base flex-shrink-0"
           >
             Edit
           </button>
@@ -220,7 +220,7 @@ const ReceiptsTable = ({
               onDeleteClick && onDeleteClick(receipt);
             }}
             disabled={disableDelete}
-            className={`p-1.5 rounded-full transition-colors group w-auto pr-6 ${disableDelete ? "opacity-40 cursor-not-allowed" : "hover:bg-red-50"}`}
+            className={`p-1.5 rounded-full transition-colors group w-auto ${disableDelete ? "opacity-40 cursor-not-allowed" : "hover:bg-red-50"}`}
             title={disableDelete ? "Draft receipts cannot be swiped/deleted" : "Delete receipt"}
           >
             <Trash2 size={16} className="text-red-500 group-hover:text-red-600" />
