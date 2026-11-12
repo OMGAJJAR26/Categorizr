@@ -3197,7 +3197,7 @@ const isBlockedTaxRateInput = (val) => {
             <div>
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Payment Category Type</p>
               <select
-                className={`${mInput} w-full`}
+                className={`${mInput} select-arrow w-full`}
                 value={newExpenseType || "Personal"}
                 onChange={(e) => setNewExpenseType(e.target.value)}
               >

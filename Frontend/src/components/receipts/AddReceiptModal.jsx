@@ -5269,7 +5269,7 @@ const handleSelectLogo = (index) => {
   <div className="mb-4 text-left">
     <label className="font-bold">Expense Type</label>
     <select
-      className={inputClass}
+      className={`${inputClass} select-arrow`}
       value={formData.receipt_category}
       onChange={(e) =>
         handleFieldChange("receipt_category", e.target.value)

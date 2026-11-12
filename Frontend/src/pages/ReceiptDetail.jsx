@@ -5836,7 +5836,7 @@ useEffect(() => {
                         <div className="mb-4 text-align-left">
                           <label className="font-bold">Expense Type</label>
                           <select
-                            className={inputClass}
+                            className={`${inputClass} select-arrow`}
                             value={
                               editedReceipt.receipt_category ??
                               r.receipt_category

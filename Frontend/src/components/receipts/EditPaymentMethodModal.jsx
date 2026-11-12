@@ -239,7 +239,7 @@ export default function EditPaymentMethodModal({
                   Payment Category Type
                 </label>
                 <select
-                  className={inputCls}
+                  className={`${inputCls} select-arrow`}
                   value={categoryType || "Personal"}
                   onChange={(e) => onCategoryChange(e.target.value)}
                 >
