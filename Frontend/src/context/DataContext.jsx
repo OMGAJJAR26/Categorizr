@@ -2747,7 +2747,7 @@ setMerchantsWithImages(
   const uploadSingleFileToMedia = async (file, token) => {
     const form = new FormData();
     form.append("file", sanitizeUploadFile(file));
-    const resp = await fetch("https://categorizr.com/emailserver/api/user/uploadmediaV1", {
+    const resp = await fetch(`${BASE_URL}/user/uploadmediaV1`, {
       method: "POST",
       headers: { Accesstoken: token },
       body: form,

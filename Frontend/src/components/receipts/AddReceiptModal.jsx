@@ -887,7 +887,7 @@ const [localMerchants, setLocalMerchants] = useState([]);
       const formData = new FormData();
       formData.append("file", sanitizeUploadFile(converted));
 
-      const response = await fetch("https://categorizr.com/emailserver/api/user/uploadmediaV1", {
+      const response = await fetch("/api/user/uploadmediaV1", {
         method: "POST",
         headers: { Accesstoken: token },
         body: formData,
