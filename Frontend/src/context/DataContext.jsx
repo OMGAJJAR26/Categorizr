@@ -321,10 +321,10 @@ export const DataProvider = ({ children }) => {
     try {
       const token = localStorage.getItem("token");
       if (!token) return [];
-      
-      const response = await fetch(`${BASE_URL}/tax/getTax?fk_user_id=10476`, {
+      const fk_user_id = localStorage.getItem("fk_user_id") || "";
+      const response = await fetch(`${BASE_URL}/tax/getTax?fk_user_id=${fk_user_id}`, {
         headers: {
-          accesstoken: `${token}`,
+          Accesstoken: token,
         },
       });
       
