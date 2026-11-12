@@ -2166,6 +2166,7 @@ const isBlockedTaxRateInput = (val) => {
     setShowMerchantEditConfirm(false);
     if (!pendingMerchantEdit) return;
     const { item, newName, keepLogo } = pendingMerchantEdit;
+    setIsSavingEdit(true);
     try {
       // Always propagate merchant edits to existing receipts that use this merchant.
       // This keeps list edits in sync with homepage/edit-receipt merchant name+logo.
@@ -2208,6 +2209,7 @@ const isBlockedTaxRateInput = (val) => {
       await Promise.all([refreshData(), fetchApiMerchants()]);
       toast("success", "Merchant Updated");
     } catch (e) { toast("error", e.message || "Update failed."); }
+    finally { setIsSavingEdit(false); }
     closeEdit();
     setPendingMerchantEdit(null);
   };
@@ -2388,6 +2390,7 @@ const isBlockedTaxRateInput = (val) => {
   const doConfirmCategoryEdit = async () => {
     setShowCategoryEditConfirm(false);
     if (!pendingCategoryEdit) return;
+    setIsSavingEdit(true);
     try {
       await applyCategoryEdit(pendingCategoryEdit.item, pendingCategoryEdit.newName);
       // Re-sync the API list so any stale backend entries are replaced with the latest data
@@ -2395,6 +2398,7 @@ const isBlockedTaxRateInput = (val) => {
     } catch (e) {
       toast("error", e.message || "Update failed.");
     } finally {
+      setIsSavingEdit(false);
       setPendingCategoryEdit(null);
       closeEdit();
     }
@@ -2403,8 +2407,12 @@ const isBlockedTaxRateInput = (val) => {
   const doConfirmPaymentEdit = async () => {
     setShowPaymentEditConfirm(false);
     if (!pendingPaymentEdit) return;
+    // The add form's Save button is driven by isAdding; the inline row's Save by isSavingEdit.
+    const viaForm = typeof pendingPaymentEdit.fn === "function";
+    if (viaForm) setIsAdding(true);
+    else setIsSavingEdit(true);
     try {
-      if (typeof pendingPaymentEdit.fn === "function") {
+      if (viaForm) {
         // Modal-form edit path — execute the stored callback
         await pendingPaymentEdit.fn();
       } else {
@@ -2415,6 +2423,8 @@ const isBlockedTaxRateInput = (val) => {
     } catch (e) {
       toast("error", e.message || "Update failed.");
     } finally {
+      setIsAdding(false);
+      setIsSavingEdit(false);
       setPendingPaymentEdit(null);
     }
   };
@@ -2742,6 +2752,7 @@ const isBlockedTaxRateInput = (val) => {
     if (!pendingTaxRateEdit?.tax) return;
     const targetTax = pendingTaxRateEdit.tax;
     const { nextName, nextRate, nextNumber } = pendingTaxRateEdit;
+    setIsSavingEdit(true);
     try {
       await propagateTaxRateChangeToReceipts({
         receipts,
@@ -2775,6 +2786,7 @@ const isBlockedTaxRateInput = (val) => {
     } catch (e) {
       toast("error", e.message || "Failed.");
     } finally {
+      setIsSavingEdit(false);
       setShowTaxRateChangeWarning(false);
       setPendingTaxRateEdit(null);
     }
@@ -3311,7 +3323,7 @@ const isBlockedTaxRateInput = (val) => {
                             <p className="mt-1 text-xs text-slate-400">* Required</p>
                             {editTaxNumberOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NUMBER_MAX} exceeded</p>}
                           </div>
-                          <button type="button" disabled={!!inlineTaxDuplicateMsg} onClick={async () => {
+                          <button type="button" disabled={isSavingEdit || !!inlineTaxDuplicateMsg} onClick={async () => {
                             const n = editTaxVal.tax_name.trim(), r = editTaxVal.tax_rate.toString().trim(), num = editTaxVal.tax_number.trim();
                             if (!n) return toast("error", "Please enter Tax Name");
                             if (n.length > TAX_NAME_MAX) return toast("error", `Tax Name cannot exceed ${TAX_NAME_MAX} characters`);
@@ -3342,12 +3354,18 @@ const isBlockedTaxRateInput = (val) => {
                               setShowTaxRateChangeWarning(true);
                               return;
                             }
+                            setIsSavingEdit(true);
                             try {
                               await saveTaxTypeWithoutRateChange(originalTax, n, r, num);
                             } catch (e) {
                               toast("error", e.message || "Failed.");
+                            } finally {
+                              setIsSavingEdit(false);
                             }
-                          }} className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg flex-shrink-0">Save</button>
+                          }} className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg flex-shrink-0 flex items-center gap-1">
+                            {isSavingEdit && <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>}
+                            {isSavingEdit ? "Saving…" : "Save"}
+                          </button>
                           <button type="button" onClick={() => { setEditTaxKey(null); clearEditTaxRateLimitAlert(); setEditTaxNameOverflow(false); setEditTaxNumberOverflow(false); setEditTaxRateFocused(false); }} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex-shrink-0">Cancel</button>
                         </div>
                       </div>
@@ -3675,6 +3693,7 @@ const isBlockedTaxRateInput = (val) => {
 
     <TaxRateChangeWarningModal
       isOpen={showTaxRateChangeWarning}
+      isProcessing={isSavingEdit}
       onGoBack={() => {
         setShowTaxRateChangeWarning(false);
         setPendingTaxRateEdit(null);
