@@ -1532,6 +1532,8 @@ const ReceiptInfoInline = ({ type }) => {
   const [showTaxDeleteConfirm, setShowTaxDeleteConfirm] = useState(false);
   const [pendingTaxDeleteId, setPendingTaxDeleteId] = useState(null);
   const [isDeleteSyncing, setIsDeleteSyncing] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   // Add-merchant state
   const [newMerchantName, setNewMerchantName] = useState("");
@@ -1947,6 +1949,8 @@ const isBlockedTaxRateInput = (val) => {
 
   // ── ADD ──
   const handleAdd = async () => {
+    setIsAdding(true);
+    try {
     if (type === "taxes") {
       const n = addTaxVal.tax_name.trim(), r = addTaxVal.tax_rate.toString().trim(), num = addTaxVal.tax_number.trim();
       if (!n) return toast("error", "Please enter Tax Name");
@@ -2152,6 +2156,9 @@ const isBlockedTaxRateInput = (val) => {
     }
     if (!addVal.trim()) return;
     setAddVal("");
+    } finally {
+      setIsAdding(false);
+    }
   };
 
   // ── Merchant edit confirmed ──
@@ -2528,6 +2535,8 @@ const isBlockedTaxRateInput = (val) => {
 
   // ── SAVE EDIT ──
   const handleSaveEdit = async (item) => {
+    setIsSavingEdit(true);
+    try {
     const newName = editVal.trim();
     if (!newName) return;
     if (containsEmoji(newName)) return toast("error", "Emojis are not allowed in names. Please use plain text.");
@@ -2644,6 +2653,9 @@ const isBlockedTaxRateInput = (val) => {
       setPendingPaymentEdit({ item, newName });
       setShowPaymentEditConfirm(true);
       return;
+    }
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
@@ -3126,7 +3138,10 @@ const isBlockedTaxRateInput = (val) => {
               {addTaxNumberOverflow && <p className="text-xs text-red-500 -mt-1">Character limit of {TAX_NUMBER_MAX} exceeded</p>}
             </div>
             <div className="flex justify-end">
-              <button type="button" onClick={handleAdd} disabled={!!addInlineTaxDuplicateMsg} className={`px-4 py-2.5 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn} disabled:opacity-50 disabled:cursor-not-allowed`}>Add</button>
+              <button type="button" onClick={handleAdd} disabled={isAdding || !!addInlineTaxDuplicateMsg} className={`px-4 py-2.5 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn} disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5`}>
+                {isAdding && <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>}
+                {isAdding ? "Adding…" : "Add"}
+              </button>
             </div>
           </>
         )}
@@ -3145,7 +3160,10 @@ const isBlockedTaxRateInput = (val) => {
                   ? <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
                   : <Search size={14} />} Logo
               </button>
-              <button type="button" onClick={handleAdd}  className={`px-4 py-2 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn}`}>Add</button>
+              <button type="button" onClick={handleAdd} disabled={isAdding} className={`px-4 py-2 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn} disabled:opacity-60 flex items-center gap-1.5`}>
+                {isAdding && <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>}
+                {isAdding ? "Adding…" : "Add"}
+              </button>
             </div>
             <LogoGrid options={addLogoOpts} selectedIndex={addLogoSel} onSelect={setAddLogoSel} />
           </>
@@ -3187,14 +3205,20 @@ const isBlockedTaxRateInput = (val) => {
                 <option value="Business">Business</option>
               </select>
             </div>
-            <button type="button" onClick={handleAdd} disabled={!!addInlinePaymentDuplicateMsg} className={`px-4 py-2 rounded-xl text-white text-sm font-semibold self-start ${colors.btn} disabled:opacity-50 disabled:cursor-not-allowed`}>{payEditMode ? "Save" : "Add"}</button>
+            <button type="button" onClick={handleAdd} disabled={isAdding || !!addInlinePaymentDuplicateMsg} className={`px-4 py-2 rounded-xl text-white text-sm font-semibold self-start ${colors.btn} disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5`}>
+              {isAdding && <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>}
+              {isAdding ? (payEditMode ? "Saving…" : "Adding…") : (payEditMode ? "Save" : "Add")}
+            </button>
           </>
         )}
 
         {type === "categories" && (
           <div className="flex gap-2">
             <input className={mInput} placeholder={cfg.addPlaceholder} value={addVal} onChange={e => setAddVal(stripEmoji(e.target.value))} onKeyDown={e => e.key === "Enter" && handleAdd()} />
-            <button type="button" onClick={handleAdd}  className={`px-4 py-2 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn}`}>Add</button>
+            <button type="button" onClick={handleAdd} disabled={isAdding} className={`px-4 py-2 rounded-xl text-white text-sm font-semibold flex-shrink-0 ${colors.btn} disabled:opacity-60 flex items-center gap-1.5`}>
+              {isAdding && <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>}
+              {isAdding ? "Adding…" : "Add"}
+            </button>
           </div>
         )}
 
@@ -3392,7 +3416,10 @@ const isBlockedTaxRateInput = (val) => {
                                 : <Search size={13} />}
                             </button>
                           )}
-                          <button type="button" disabled={!!inlineEditDuplicateMsg} onClick={() => handleSaveEdit(item)} style={{ margin: 0 }} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg flex-shrink-0">Save</button>
+                          <button type="button" disabled={isSavingEdit || !!inlineEditDuplicateMsg} onClick={() => handleSaveEdit(item)} style={{ margin: 0 }} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg flex-shrink-0 flex items-center gap-1">
+                            {isSavingEdit && <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>}
+                            {isSavingEdit ? "Saving…" : "Save"}
+                          </button>
                           <button type="button" onClick={closeEdit} style={{ margin: 0 }} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded-lg flex-shrink-0">Cancel</button>
                         </div>
                         {!!inlineEditDuplicateMsg && <p className="text-xs text-red-600">{inlineEditDuplicateMsg}</p>}
