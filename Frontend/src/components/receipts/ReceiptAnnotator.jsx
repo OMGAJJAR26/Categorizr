@@ -364,7 +364,7 @@ const ReceiptAnnotator = ({ imageUrl, onSave, onClose }) => {
           () => uploadController.abort(),
           15000
         );
-        const uploadResp = await fetch("/api/user/uploadmediaV1", {
+        const uploadResp = await fetch("https://categorizr.com/emailserver/api/user/uploadmediaV1", {
           method: "POST",
           headers: { Accesstoken: token },
           body: formData,
