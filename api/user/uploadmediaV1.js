@@ -4,7 +4,17 @@
  * Vercel rewrites do not reliably forward multipart/form-data bodies to
  * external origins, so this function acts as the hop instead.
  * Target: https://categorizr.com/emailserver/api/user/uploadmediaV1
+ *
+ * bodyParser must be disabled so Vercel hands us the raw stream — if Vercel
+ * pre-parses a multipart body the binary data is corrupted before we can proxy it.
  */
+
+export const config = {
+  api: {
+    bodyParser: false,
+    responseLimit: false,
+  },
+};
 
 const UPSTREAM_URL = "https://categorizr.com/emailserver/api/user/uploadmediaV1";
 
