@@ -872,11 +872,11 @@ const HomePage = () => {
     });
   };
 
-  // Tools shown in the bulk "Send to" menu (Sage is always offered, matching the row menu).
+  // Tools shown in the bulk "Send to" menu. Only QuickBooks is live; the rest are coming soon.
   const bulkProviders = [
     { key: "quickbooks", name: "QuickBooks Online", connected: quickbooksConnected },
-    { key: "sage-bc", name: "Sage", connected: true },
-    { key: "xero", name: "Xero", connected: xeroConnected },
+    { key: "sage-bc", name: "Sage", connected: false, comingSoon: true },
+    { key: "xero", name: "Xero", connected: false, comingSoon: true },
   ];
 
   const handleBulkSend = async (providerKey) => {
@@ -925,11 +925,7 @@ const HomePage = () => {
       onDeleteClick: handleDeleteClick,
       onLinkToQuickBooks: quickbooksConnected ? () => handleLinkToQuickBooks(receipt) : undefined,
       quickbooksConnected,
-      onLinkToSage: () => handleLinkToSage(receipt),
-      onLinkToXero: xeroConnected ? () => handleLinkToXero(receipt) : undefined,
       isLinking: linkingReceiptId === receipt.id,
-      isLinkingSage: linkingSageReceiptId === receipt.id,
-      isLinkingXero: linkingXeroReceiptId === receipt.id,
       formatCurrency,
       isToBeVerified,
       selectionMode,

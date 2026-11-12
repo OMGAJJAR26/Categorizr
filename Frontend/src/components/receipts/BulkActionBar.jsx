@@ -38,7 +38,7 @@ const BulkActionBar = ({
   onClear,
   onDelete,
   onExit,
-  providers = [],        // [{ key, name, connected }]
+  providers = [],        // [{ key, name, connected, comingSoon? }]
   onSend,                // (providerKey) => void
   isDeleting = false,
   isSending = false,
@@ -119,10 +119,12 @@ const BulkActionBar = ({
                     onSend?.(p.key);
                   }}
                   className="w-full text-left px-4 py-3 text-sm font-medium text-gray-800 hover:bg-blue-50 disabled:text-gray-400 disabled:hover:bg-white flex items-center justify-between transition-colors"
-                  title={p.connected ? "" : "Connect this tool first (Integrations)"}
+                  title={p.comingSoon ? "Coming soon" : p.connected ? "" : "Connect this tool first (Integrations)"}
                 >
                   <span>{p.name}</span>
-                  {p.connected ? (
+                  {p.comingSoon ? (
+                    <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Coming soon</span>
+                  ) : p.connected ? (
                     <span className="text-[11px] font-semibold text-emerald-600">Connected</span>
                   ) : (
                     <span className="text-[11px] text-gray-400">Not connected</span>

@@ -5,6 +5,7 @@ import SimpleAlertModal from "../SimpleAlertModal";
 import { formatReceiptDate } from "../../utils/receiptDate";
 import { isUnreadHighlightReceipt } from "../../hooks/useReceiptGrouping";
 import RowSelectCheckbox from "./RowSelectCheckbox";
+import ComingSoonIntegrations from "./ComingSoonIntegrations";
 
 const ReceiptsMobileView = ({
   receipt,
@@ -14,11 +15,7 @@ const ReceiptsMobileView = ({
   onDeleteClick,
   onLinkToQuickBooks,
   quickbooksConnected,
-  onLinkToSage,
   isLinking,
-  isLinkingSage,
-  onLinkToXero,
-  isLinkingXero,
   formatCurrency,
   onClearQuickbooksLink,
   isToBeVerified = false,
@@ -181,18 +178,18 @@ const ReceiptsMobileView = ({
         >
           Edit
         </button>
-        {(onLinkToQuickBooks || onLinkToSage || onLinkToXero) && (
+        {(
           <div className="relative" ref={menuRef}>
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 setShowIntegrateMenu((prev) => !prev);
               }}
-              disabled={isLinking || isLinkingSage || isLinkingXero}
+              disabled={isLinking}
               className="p-1.5 hover:bg-green-50 rounded-full transition-colors group"
               title="Integrate"
             >
-              {isLinking || isLinkingSage ? (
+              {isLinking ? (
                 <Loader2 size={16} className="text-green-500 animate-spin" />
               ) : (
                 <Link2 size={16} className="text-green-500 group-hover:text-green-600" />
@@ -230,34 +227,7 @@ const ReceiptsMobileView = ({
                     Mark as not linked to QuickBooks
                   </button>
                 )}
-                {onLinkToSage && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onLinkToSage();
-                      setShowIntegrateMenu(false);
-                    }}
-                    disabled={isLinkingSage}
-                    className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-2"
-                  >
-                    {isLinkingSage && <Loader2 size={14} className="animate-spin text-green-500" />}
-                    <span>Sage</span>
-                  </button>
-                )}
-                {onLinkToXero && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onLinkToXero();
-                      setShowIntegrateMenu(false);
-                    }}
-                    disabled={isLinkingXero}
-                    className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-2"
-                  >
-                    {isLinkingXero && <Loader2 size={14} className="animate-spin text-green-500" />}
-                    <span>Xero</span>
-                  </button>
-                )}
+                <ComingSoonIntegrations />
               </div>
             )}
           </div>

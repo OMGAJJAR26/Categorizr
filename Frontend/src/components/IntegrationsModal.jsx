@@ -27,25 +27,29 @@ const providers = [
     id: "sage-bc",
     name: "Sage",
     description: "Sage Business Cloud Accounting.",
-    connectable: true,
+    connectable: false,
+    comingSoon: true,
   },
   {
     id: "xero",
     name: "Xero",
     description: "Beautiful accounting software.",
-    connectable: true,
+    connectable: false,
+    comingSoon: true,
   },
   {
     id: "sage-intacct",
-    name: "Sage Intacct (admin only)",
-    description: "Requires server configuration (env vars).",
+    name: "Sage Intacct",
+    description: "Cloud financial management.",
     connectable: false,
+    comingSoon: true,
   },
   {
     id: "freshbooks-classic",
     name: "FreshBooks Classic",
     description: "Accounting made for you.",
-    connectable: true,
+    connectable: false,
+    comingSoon: true,
   },
 ];
 
@@ -234,8 +238,9 @@ const IntegrationsModal = ({ open, onClose, onQuickBooksDisconnected }) => {
             const isQuickBooks = provider.id === "quickbooks";
             const isXero = provider.id === "xero";
             const isQBConnected = isQuickBooks && quickbooksConnected;
-            const isXeroConnected = isXero && xeroConnected;
-            const isLoading = (isQuickBooks && quickbooksLoading) || (isXero && xeroLoading);
+            const comingSoon = !!provider.comingSoon;
+            const isXeroConnected = !comingSoon && isXero && xeroConnected;
+            const isLoading = (isQuickBooks && quickbooksLoading) || (!comingSoon && isXero && xeroLoading);
 
             return (
               <div
@@ -251,7 +256,11 @@ const IntegrationsModal = ({ open, onClose, onQuickBooksDisconnected }) => {
                       {provider.description}
                     </p>
                   </div>
-                  {isLoading ? (
+                  {comingSoon ? (
+                    <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 whitespace-nowrap">
+                      Coming soon
+                    </span>
+                  ) : isLoading ? (
                     <span className="text-xs text-gray-400">Checking...</span>
                   ) : isQBConnected || isXeroConnected ? (
                     <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
@@ -280,7 +289,7 @@ const IntegrationsModal = ({ open, onClose, onQuickBooksDisconnected }) => {
                     </button>
                   </div>
                 )}
-                {isXero && xeroConnected && (
+                {isXeroConnected && (
                   <div className="flex gap-2">
                     <button
                       type="button"
