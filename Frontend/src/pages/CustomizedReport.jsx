@@ -978,13 +978,13 @@ const CustomizedReport = forwardRef((props, ref) => {
           </h2>
           {/* Date Range */}
           <div className="flex flex-col gap-1 mb-3">
-            <div className="flex gap-2 items-center">
-              <div style={{ position: "relative", display: "inline-block" }}>
+            <div className="flex flex-wrap gap-2 items-center">
+              <div style={{ position: "relative", display: "inline-block", flex: "1 1 160px", minWidth: 0, maxWidth: "220px" }}>
                 <button
                   onClick={() => setShowDatePopup(true)}
                   disabled={isDisabled("dateRange")}
                   style={{
-                    width: "220px",
+                    width: "100%",
                     margin: "0",
                     border: "1px solid",
                     borderColor: isDisabled("dateRange") ? "gray" : "blue",
@@ -1030,7 +1030,7 @@ const CustomizedReport = forwardRef((props, ref) => {
                     </span>
                   )}
               </div>
-              <div className="flex items-center gap-2 ml-2 text-blue-600">
+              <div className="flex items-center gap-2 ml-2 text-blue-600 shrink-0 whitespace-nowrap">
                 <input
                   type="checkbox"
                   checked={dateRange.groupByMonth || false}
@@ -1053,13 +1053,13 @@ const CustomizedReport = forwardRef((props, ref) => {
           </div>
           {/* Expense Type */}
           <div className="flex flex-col gap-1 mb-3">
-            <div className="flex gap-2 items-center">
-              <div style={{ position: "relative", display: "inline-block" }}>
+            <div className="flex flex-wrap gap-2 items-center">
+              <div style={{ position: "relative", display: "inline-block", flex: "1 1 160px", minWidth: 0, maxWidth: "220px" }}>
                 <button
                   onClick={() => setShowExpenseTypePopup(true)}
                   disabled={isDisabled("expenseType")}
                   style={{
-                    width: "220px",
+                    width: "100%",
                     margin: "0",
                     border: "1px solid",
                     borderColor: isDisabled("expenseType") ? "gray" : "blue",
@@ -1098,7 +1098,7 @@ const CustomizedReport = forwardRef((props, ref) => {
                     </span>
                   )}
               </div>
-              <div className="flex items-center gap-2 ml-2 text-blue-600">
+              <div className="flex items-center gap-2 ml-2 text-blue-600 shrink-0 whitespace-nowrap">
                 <input
                   type="checkbox"
                   className="h-4 w-4 m-0"
@@ -1126,13 +1126,13 @@ const CustomizedReport = forwardRef((props, ref) => {
 
           {/* Merchant */}
           <div className="flex flex-col gap-1 mb-3">
-            <div className="flex gap-2 items-center">
-              <div style={{ position: "relative", display: "inline-block" }}>
+            <div className="flex flex-wrap gap-2 items-center">
+              <div style={{ position: "relative", display: "inline-block", flex: "1 1 160px", minWidth: 0, maxWidth: "220px" }}>
                 <button
                   onClick={() => setShowMerchantPopup(true)}
                   disabled={isDisabled("merchant")}
                   style={{
-                    width: "220px",
+                    width: "100%",
                     margin: "0",
                     border: "1px solid",
                     borderColor: isDisabled("merchant") ? "gray" : "blue",
@@ -1168,7 +1168,7 @@ const CustomizedReport = forwardRef((props, ref) => {
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2 ml-2 text-blue-600">
+              <div className="flex items-center gap-2 ml-2 text-blue-600 shrink-0 whitespace-nowrap">
                 <input
                   type="checkbox"
                   className="h-4 w-4 m-0"
@@ -1200,13 +1200,13 @@ const CustomizedReport = forwardRef((props, ref) => {
 
           {/* Expense Category */}
           <div className="flex flex-col gap-1 mb-3">
-            <div className="flex gap-2 items-center">
-              <div style={{ position: "relative", display: "inline-block" }}>
+            <div className="flex flex-wrap gap-2 items-center">
+              <div style={{ position: "relative", display: "inline-block", flex: "1 1 160px", minWidth: 0, maxWidth: "220px" }}>
                 <button
                   onClick={() => setShowCategoryPopup(true)}
                   disabled={isDisabled("category")}
                   style={{
-                    width: "220px",
+                    width: "100%",
                     margin: "0",
                     border: "1px solid",
                     borderColor: isDisabled("category") ? "gray" : "blue",
@@ -1243,7 +1243,7 @@ const CustomizedReport = forwardRef((props, ref) => {
                 )}
               </div>
               <div
-                className="flex items-center  text-blue-600 "
+                className="flex items-center  text-blue-600 shrink-0 whitespace-nowrap"
                 style={{
                   flexDirection: "column",
                   alignItems: "flex-start",
@@ -1292,13 +1292,13 @@ const CustomizedReport = forwardRef((props, ref) => {
 
           {/* Payment Method */}
           <div className="flex flex-col gap-1 mb-3">
-            <div className="flex gap-2 items-center">
-              <div style={{ position: "relative", display: "inline-block" }}>
+            <div className="flex flex-wrap gap-2 items-center">
+              <div style={{ position: "relative", display: "inline-block", flex: "1 1 160px", minWidth: 0, maxWidth: "220px" }}>
                 <button
                   onClick={() => setShowPaymentPopup(true)}
                   disabled={isDisabled("paymentMethod")}
                   style={{
-                    width: "220px",
+                    width: "100%",
                     margin: "0",
                     border: "1px solid",
                     borderColor: isDisabled("paymentMethod") ? "gray" : "blue",
@@ -1337,7 +1337,7 @@ const CustomizedReport = forwardRef((props, ref) => {
                     </span>
                   )}
               </div>
-              <div className="flex items-center gap-2 ml-2 text-blue-600">
+              <div className="flex items-center gap-2 ml-2 text-blue-600 shrink-0 whitespace-nowrap">
                 <input
                   type="checkbox"
                   className="h-4 w-4 m-0"
@@ -1376,13 +1376,13 @@ const CustomizedReport = forwardRef((props, ref) => {
 
           {/* Subtotal */}
           <div className="flex flex-col gap-1 mb-3">
-            <div className="flex gap-2 items-center">
-              <div style={{ position: "relative", display: "inline-block" }}>
+            <div className="flex flex-wrap gap-2 items-center">
+              <div style={{ position: "relative", display: "inline-block", flex: "1 1 160px", minWidth: 0, maxWidth: "220px" }}>
                 <button
                   onClick={() => setShowSubTotalPopup(true)}
                   disabled={isDisabled("subTotal")}
                   style={{
-                    width: "220px",
+                    width: "100%",
                     margin: "0",
                     border: "1px solid",
                     borderColor: isDisabled("subTotal") ? "gray" : "blue",
@@ -1423,7 +1423,7 @@ const CustomizedReport = forwardRef((props, ref) => {
                     </span>
                   )}
               </div>
-              <div className="flex items-center gap-2 ml-2 text-blue-600">
+              <div className="flex items-center gap-2 ml-2 text-blue-600 shrink-0 whitespace-nowrap">
                 <input
                   type="checkbox"
                   checked={isDisabled("subTotal")}
@@ -1454,13 +1454,13 @@ const CustomizedReport = forwardRef((props, ref) => {
 
           {/* Tax Type #1 Button */}
           <div className="flex flex-col gap-1 mb-3">
-            <div className="flex gap-2 items-center">
-              <div style={{ position: "relative", display: "inline-block" }}>
+            <div className="flex flex-wrap gap-2 items-center">
+              <div style={{ position: "relative", display: "inline-block", flex: "1 1 160px", minWidth: 0, maxWidth: "220px" }}>
                 <button
                   onClick={() => setShowTaxType1Popup(true)}
                   disabled={isDisabled("taxType1")}
                   style={{
-                    width: "220px",
+                    width: "100%",
                     margin: "0",
                     border: "1px solid",
                     borderColor: isDisabled("taxType1") ? "gray" : "blue",
@@ -1498,7 +1498,7 @@ const CustomizedReport = forwardRef((props, ref) => {
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2 ml-2 text-blue-600">
+              <div className="flex items-center gap-2 ml-2 text-blue-600 shrink-0 whitespace-nowrap">
                 <input
                   type="checkbox"
                   checked={isDisabled("taxType1")}
@@ -1517,13 +1517,13 @@ const CustomizedReport = forwardRef((props, ref) => {
 
           {/* Tax Type #2 Button */}
           <div className="flex flex-col gap-1 mb-3">
-            <div className="flex gap-2 items-center">
-              <div style={{ position: "relative", display: "inline-block" }}>
+            <div className="flex flex-wrap gap-2 items-center">
+              <div style={{ position: "relative", display: "inline-block", flex: "1 1 160px", minWidth: 0, maxWidth: "220px" }}>
                 <button
                   onClick={() => setShowTaxType2Popup(true)}
                   disabled={isDisabled("taxType2")}
                   style={{
-                    width: "220px",
+                    width: "100%",
                     margin: "0",
                     border: "1px solid",
                     borderColor: isDisabled("taxType2") ? "gray" : "blue",
@@ -1561,7 +1561,7 @@ const CustomizedReport = forwardRef((props, ref) => {
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2 ml-2 text-blue-600">
+              <div className="flex items-center gap-2 ml-2 text-blue-600 shrink-0 whitespace-nowrap">
                 <input
                   type="checkbox"
                   checked={isDisabled("taxType2")}
@@ -1580,13 +1580,13 @@ const CustomizedReport = forwardRef((props, ref) => {
 
           {/* Total */}
           <div className="flex flex-col gap-1">
-            <div className="flex gap-2 items-center">
-              <div style={{ position: "relative", display: "inline-block" }}>
+            <div className="flex flex-wrap gap-2 items-center">
+              <div style={{ position: "relative", display: "inline-block", flex: "1 1 160px", minWidth: 0, maxWidth: "220px" }}>
                 <button
                   onClick={() => setShowTotalPopup(true)}
                   disabled={isDisabled("total")}
                   style={{
-                    width: "220px",
+                    width: "100%",
                     margin: "0",
                     border: "1px solid",
                     borderColor: isDisabled("total") ? "gray" : "blue",
@@ -1624,7 +1624,7 @@ const CustomizedReport = forwardRef((props, ref) => {
                     </span>
                   )}
               </div>
-              <div className="flex items-center gap-2 ml-2 text-blue-600">
+              <div className="flex items-center gap-2 ml-2 text-blue-600 shrink-0 whitespace-nowrap">
                 <input
                   type="checkbox"
                   checked={isDisabled("total")}

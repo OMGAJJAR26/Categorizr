@@ -32,6 +32,26 @@ html, body, #root {
   }
 }
 
+/* Date inputs: iOS Safari gives them an intrinsic width and centers the value, so
+   they overflow their card and look misaligned. Keep them inside the container and
+   left-aligned like the other fields. */
+input[type="date"] {
+  min-width: 0;
+  max-width: 100%;
+  text-align: left;
+}
+input[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
+  min-height: 1.5em;
+}
+@supports (-webkit-touch-callout: none) {
+  input[type="date"] {
+    -webkit-appearance: none;
+    appearance: none;
+    min-height: 2.25rem;
+  }
+}
+
 /* Custom dropdown arrow inset from the right edge (native arrow sits flush). */
 select.select-arrow {
   -webkit-appearance: none;
