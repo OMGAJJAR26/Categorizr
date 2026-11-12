@@ -10,6 +10,7 @@
  */
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import { X, Undo2, Trash2, Pen, Eraser, Download, Loader2 } from "lucide-react";
+import { compressImageIfNeeded } from "../../utils/mediaUrlUtils";
 
 const COLORS = ["#EF4444", "#3B82F6", "#000000", "#16A34A", "#F97316", "#7C3AED"];
 
@@ -353,9 +354,11 @@ const ReceiptAnnotator = ({ imageUrl, onSave, onClose }) => {
       let finalUrl = dataUrl;
       try {
         const blob = await fetch(dataUrl).then((r) => r.blob());
-        const file = new File([blob], `annotation_${Date.now()}.png`, {
-          type: "image/png",
-        });
+        const file = await compressImageIfNeeded(
+          new File([blob], `annotation_${Date.now()}.png`, {
+            type: "image/png",
+          })
+        );
         const formData = new FormData();
         formData.append("file", file);
         const token = localStorage.getItem("token");

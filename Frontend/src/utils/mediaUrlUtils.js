@@ -138,27 +138,108 @@ export function isHeicFile(file) {
   return name.endsWith(".heic") || name.endsWith(".heif");
 }
 
+// The upload endpoint rejects bodies over ~2 MB (HTTP 500) and Vercel rejects
+// anything over 4.5 MB (HTTP 413). Phone camera photos are routinely 3-10 MB.
+const MAX_UPLOAD_BYTES = 1.8 * 1024 * 1024;
+const MAX_UPLOAD_DIMENSION = 2400;
+
+async function loadDrawable(file) {
+  if (typeof createImageBitmap === "function") {
+    try {
+      return await createImageBitmap(file, { imageOrientation: "from-image" });
+    } catch {
+      /* fall through to <img> */
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = (e) => {
+      URL.revokeObjectURL(url);
+      reject(e);
+    };
+    img.src = url;
+  });
+}
+
 /**
- * Convert an HEIC/HEIF File to JPEG so it displays in every browser and can be
- * attached in QuickBooks (which does not accept HEIC). Non-HEIC files pass
- * through unchanged. heic2any is loaded on demand so it never bloats the main
- * bundle. If conversion fails, the original file is returned as a fallback.
+ * Shrink a large raster image (re-encoded as JPEG) so it fits under the upload
+ * limit. Small images, PDFs, GIFs and anything that fails to decode pass through
+ * unchanged.
  */
-export async function convertHeicToJpegIfNeeded(file) {
-  if (!isHeicFile(file)) return file;
+export async function compressImageIfNeeded(file, maxBytes = MAX_UPLOAD_BYTES) {
+  if (!file || file.size <= maxBytes) return file;
+  const type = (file.type || "").toLowerCase();
+  if (!type.startsWith("image/") || type === "image/gif" || type === "image/svg+xml") {
+    return file;
+  }
   try {
-    const heic2any = (await import("heic2any")).default;
-    const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
-    const out = Array.isArray(converted) ? converted[0] : converted;
-    const baseName = (file.name || "receipt").replace(/\.(heic|heif)$/i, "");
-    return new File([out], `${baseName}.jpg`, {
+    const drawable = await loadDrawable(file);
+    const srcW = drawable.width || drawable.naturalWidth;
+    const srcH = drawable.height || drawable.naturalHeight;
+    if (!srcW || !srcH) return file;
+
+    let scale = Math.min(1, MAX_UPLOAD_DIMENSION / Math.max(srcW, srcH));
+    let quality = 0.85;
+    let best = null;
+    for (let attempt = 0; attempt < 7; attempt++) {
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(srcW * scale));
+      canvas.height = Math.max(1, Math.round(srcH * scale));
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(drawable, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise((resolve) =>
+        canvas.toBlob(resolve, "image/jpeg", quality)
+      );
+      if (blob) best = blob;
+      if (blob && blob.size <= maxBytes) break;
+      quality = Math.max(0.5, quality - 0.1);
+      if (attempt >= 1) scale *= 0.85;
+    }
+    if (typeof drawable.close === "function") drawable.close();
+    if (!best || best.size >= file.size) return file;
+
+    const baseName = (file.name || "receipt").replace(/\.[^./\\]+$/, "");
+    return new File([best], `${baseName}.jpg`, {
       type: "image/jpeg",
       lastModified: file.lastModified || Date.now(),
     });
   } catch (e) {
-    console.error("HEIC→JPEG conversion failed; uploading original file:", e);
+    console.warn("Image compression failed; uploading original file:", e);
     return file;
   }
+}
+
+/**
+ * Prepare an image for upload: convert HEIC/HEIF to JPEG so it displays in every
+ * browser and can be attached in QuickBooks (which does not accept HEIC), then
+ * shrink anything over the upload size limit. heic2any is loaded on demand so it
+ * never bloats the main bundle. If a step fails, the file is passed through.
+ */
+export async function convertHeicToJpegIfNeeded(file) {
+  let prepared = file;
+  if (isHeicFile(file)) {
+    try {
+      const heic2any = (await import("heic2any")).default;
+      const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
+      const out = Array.isArray(converted) ? converted[0] : converted;
+      const baseName = (file.name || "receipt").replace(/\.(heic|heif)$/i, "");
+      prepared = new File([out], `${baseName}.jpg`, {
+        type: "image/jpeg",
+        lastModified: file.lastModified || Date.now(),
+      });
+    } catch (e) {
+      console.error("HEIC→JPEG conversion failed; uploading original file:", e);
+      return file;
+    }
+  }
+  return compressImageIfNeeded(prepared);
 }
 
 export function getPdfProxyUrl(url) {
