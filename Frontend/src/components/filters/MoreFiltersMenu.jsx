@@ -20,11 +20,10 @@ const MoreFiltersMenu = ({
   // Close menu when clicking/tapping outside (same as Filter and Sort)
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (
-        moreFiltersRef.current &&
-        !moreFiltersRef.current.contains(event.target) &&
-        activeMenu === "moreFilters"
-      ) {
+      const el = moreFiltersRef.current;
+      // Ignore taps while this copy is hidden (see FilterBar) so the visible copy's menu stays open.
+      if (!el || el.offsetParent === null) return;
+      if (!el.contains(event.target) && activeMenu === "moreFilters") {
         setActiveMenu(null);
       }
     };

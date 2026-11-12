@@ -36,6 +36,8 @@ const ReceiptsMoreMenu = ({
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (!menuRef.current || activeMenu !== "more") return;
+      // Ignore taps while this copy is hidden (see FilterBar) so the visible copy's menu stays open.
+      if (menuRef.current.offsetParent === null) return;
       if (!menuRef.current.contains(event.target)) {
         closeMenu();
       }

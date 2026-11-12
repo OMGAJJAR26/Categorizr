@@ -31,6 +31,8 @@ const ReportOptions = ({
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (!reportMenuRef.current || activeMenu !== "option") return;
+      // Ignore taps while this copy is hidden (see FilterBar) so the visible copy's menu stays open.
+      if (reportMenuRef.current.offsetParent === null) return;
       const target = event.target;
       if (!reportMenuRef.current.contains(target)) {
         closeMenu();

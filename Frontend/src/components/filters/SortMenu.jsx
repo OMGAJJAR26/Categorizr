@@ -16,7 +16,10 @@ const SortMenu = ({ activeMenu, setActiveMenu, sortConfig, updateSort, iconOnly 
   // Close menu when clicking/tapping outside (mobile + desktop)
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (sortMenuRef.current && !sortMenuRef.current.contains(event.target)) {
+      const el = sortMenuRef.current;
+      // Ignore taps while this copy is hidden (see FilterBar) so the visible copy's menu stays open.
+      if (!el || el.offsetParent === null) return;
+      if (!el.contains(event.target)) {
         setActiveMenu(null);
       }
     };

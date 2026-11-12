@@ -29,7 +29,12 @@ const FilterBar = ({ activeMenu, setActiveMenu, filters, updateFilter, iconOnly 
   // Close menu when clicking/tapping outside (mobile + desktop)
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (filterMenuRef.current && !filterMenuRef.current.contains(event.target)) {
+      const el = filterMenuRef.current;
+      // The mobile and desktop copies of this menu share activeMenu; the copy hidden
+      // by CSS must not treat a tap inside the visible menu as an outside tap, or the
+      // menu closes on touchstart before the item's click fires (real devices only).
+      if (!el || el.offsetParent === null) return;
+      if (!el.contains(event.target)) {
         setActiveMenu(null);
       }
     };
