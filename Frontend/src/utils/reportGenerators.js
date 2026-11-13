@@ -1,5 +1,6 @@
 import { parseReceiptTags, toTaxLabel } from "./receiptFormatters";
 import { collectReceiptMediaUrls } from "./mediaUrlUtils";
+import { escapeHtml, safeLinkUrl } from "./escapeHtml";
 
 /**
  * Build the "View" receipt-image cell for a report row.
@@ -22,11 +23,13 @@ import { collectReceiptMediaUrls } from "./mediaUrlUtils";
  * reliable hotspot regardless of label length.
  */
 const buildReceiptImageCell = (receipt, fontSize = "11px") => {
-  const urls = collectReceiptMediaUrls(receipt);
+  // Only http(s)/inline-image URLs become links: a javascript: value in a receipt's image
+  // field would otherwise run in the report window when the link is clicked.
+  const urls = collectReceiptMediaUrls(receipt).map(safeLinkUrl).filter(Boolean);
   if (!urls.length) return `<span style="color: #999;">—</span>`;
   const label = urls.length > 1 ? `View (${urls.length})` : "View";
-  const dataImages = urls.join("|").replace(/"/g, "&quot;");
-  const firstUrl = urls[0].replace(/"/g, "&quot;");
+  const dataImages = escapeHtml(urls.join("|"));
+  const firstUrl = escapeHtml(urls[0]);
   return (
     `<a href="${firstUrl}" target="_blank" rel="noopener noreferrer" ` +
     `data-images="${dataImages}" ` +
@@ -150,19 +153,19 @@ const getAppliedFiltersText = (filters, sortConfig, searchTerm, formatCurrencyFi
       .map((cat) => (cat === "0" ? "Personal" : cat === "1" ? "Business" : cat))
       .sort()
       .join(", ");
-    filterTexts.push(`<div style="margin-bottom: 5px;"><strong>Expense Type:</strong> ${receiptCatText}</div>`);
+    filterTexts.push(`<div style="margin-bottom: 5px;"><strong>Expense Type:</strong> ${escapeHtml(receiptCatText)}</div>`);
   }
 
   // Merchant filter
   if (filters.merchant?.length > 0) {
     const merchantText = [...filters.merchant].sort().join(", ");
-    filterTexts.push(`<div style="margin-bottom: 5px;"><strong>Merchant:</strong> ${merchantText}</div>`);
+    filterTexts.push(`<div style="margin-bottom: 5px;"><strong>Merchant:</strong> ${escapeHtml(merchantText)}</div>`);
   }
 
   // Expense Category filter (renamed from Expense Type)
   if (filters.expenseCategory?.length > 0) {
     const categoryText = [...filters.expenseCategory].sort().join(", ");
-    filterTexts.push(`<div style="margin-bottom: 5px;"><strong>Expense Category:</strong> ${categoryText}</div>`);
+    filterTexts.push(`<div style="margin-bottom: 5px;"><strong>Expense Category:</strong> ${escapeHtml(categoryText)}</div>`);
   }
 
 // Payment Method filter with receipt data
@@ -193,7 +196,7 @@ if (filters.paymentMethod?.length > 0 && allReceipts.length > 0) {
 
   if (filteredPaymentMethods.length > 0) {
     const paymentText = filteredPaymentMethods.join(", ");
-    filterTexts.push(`<div style="margin-bottom: 5px;"><strong>Payment Method:</strong> ${paymentText}</div>`);
+    filterTexts.push(`<div style="margin-bottom: 5px;"><strong>Payment Method:</strong> ${escapeHtml(paymentText)}</div>`);
   }
 }
 
@@ -201,7 +204,7 @@ if (filters.paymentMethod?.length > 0 && allReceipts.length > 0) {
   if (filters.taxTypes?.length > 0) {
     const sortedTaxTypes = [...filters.taxTypes].sort();
     const taxText = sortedTaxTypes.join(", ");
-    filterTexts.push(`<div style="margin-bottom: 5px;"><strong>Tax Types:</strong> ${taxText}</div>`);
+    filterTexts.push(`<div style="margin-bottom: 5px;"><strong>Tax Types:</strong> ${escapeHtml(taxText)}</div>`);
   }
 
   // Tags filter (exclude locked/unlocked from tags display)
@@ -231,7 +234,7 @@ if (filters.paymentMethod?.length > 0 && allReceipts.length > 0) {
         .map((tag) => tagDisplayNames[tag] || tag)
         .sort()
         .join(", ");
-      filterTexts.push(`<div style="margin-bottom: 5px;"><strong>Tags:</strong> ${tagsText}</div>`);
+      filterTexts.push(`<div style="margin-bottom: 5px;"><strong>Tags:</strong> ${escapeHtml(tagsText)}</div>`);
     }
   }
 
@@ -289,7 +292,7 @@ if (filters.paymentMethod?.length > 0 && allReceipts.length > 0) {
   // Search filter
   if (searchTerm) {
     filterTexts.push(
-      `<div style="margin-bottom: 5px;"><strong>Search:</strong> "${searchTerm}"</div>`
+      `<div style="margin-bottom: 5px;"><strong>Search:</strong> "${escapeHtml(searchTerm)}"</div>`
     );
   }
 
@@ -309,7 +312,7 @@ export const generateTaxReportHTML = ({
   formatCurrencyFixed2,
   userName = ""
 }) => {
-  const userDisplay = userName ? ` (${userName})` : "";
+  const userDisplay = userName ? ` (${escapeHtml(userName)})` : "";
   let html = `
     <div style="font-family: Arial, sans-serif; padding: 20px;">
       <div style="font-weight: bold; margin-bottom: 10px; font-size: 18px; text-align: left; color: #333;">
@@ -418,7 +421,7 @@ export const generateTaxReportHTML = ({
       }
       taxTypeTotals[taxKey] += taxAmount;
 
-      taxTypesHTML += `<div style="margin: 0; text-align: right; font-weight: 500; line-height: 1.2;">${taxName} (${taxRate}%)</div>`;
+      taxTypesHTML += `<div style="margin: 0; text-align: right; font-weight: 500; line-height: 1.2;">${escapeHtml(taxName)} (${taxRate}%)</div>`;
       taxAmountsHTML += `<div style="margin: 0; text-align: right; font-weight: 500; line-height: 1.2;">${formatCurrencyFixed2(
         taxAmount
       )}</div>`;
@@ -440,13 +443,9 @@ export const generateTaxReportHTML = ({
           receiptNumber
         ).padStart(3, "0")}</td>
         <td style="padding: 2px 4px; border: 1px solid #ddd; vertical-align: middle; font-size: 11px; white-space: nowrap;">${dateStr}</td>
-        <td style="padding: 2px 4px; border: 1px solid #ddd; vertical-align: middle; font-size: 11px; word-break: break-word;">${
-          receipt.storeName || "Untitled"
-        }</td>
-        <td style="padding: 2px 4px; border: 1px solid #ddd; vertical-align: middle; font-size: 11px; word-break: break-word;">${paymentDisplayText}</td>
-        <td style="padding: 2px 4px; border: 1px solid #ddd; vertical-align: middle; font-size: 11px;">${
-          receipt.expense_type || "—"
-        }</td>
+        <td style="padding: 2px 4px; border: 1px solid #ddd; vertical-align: middle; font-size: 11px; word-break: break-word;">${escapeHtml(receipt.storeName || "Untitled")}</td>
+        <td style="padding: 2px 4px; border: 1px solid #ddd; vertical-align: middle; font-size: 11px; word-break: break-word;">${escapeHtml(paymentDisplayText)}</td>
+        <td style="padding: 2px 4px; border: 1px solid #ddd; vertical-align: middle; font-size: 11px;">${escapeHtml(receipt.expense_type || "—")}</td>
         <td style="padding: 2px 4px; border: 1px solid #ddd; text-align: right; vertical-align: middle; font-size: 11px;">${formatCurrencyFixed2(
           subtotal
         )}</td>
@@ -502,7 +501,7 @@ export const generateTaxReportHTML = ({
     Object.entries(taxTypeTotals).forEach(([taxType, totalAmount]) => {
       html += `
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: white; border: 1px solid #ddd; border-radius: 4px;">
-          <span style="font-weight: 600; color: #333; font-size: 12px;">${taxType}</span>
+          <span style="font-weight: 600; color: #333; font-size: 12px;">${escapeHtml(taxType)}</span>
           <span style="font-weight: bold; color: #1e40af; font-size: 12px;">${formatCurrencyFixed2(
             totalAmount
           )}</span>
@@ -527,7 +526,7 @@ export const generateSummaryHTML = ({
   formatCurrencyFixed2,
   userName = ""
 }) => {
-  const userDisplay = userName ? ` (${userName})` : "";
+  const userDisplay = userName ? ` (${escapeHtml(userName)})` : "";
   let html = `
     <div style="font-family: Arial, sans-serif; padding: 20px;">
       <div style="font-weight: bold; margin-bottom: 10px; font-size: 18px; text-align: left; color: #333;">
@@ -623,13 +622,9 @@ export const generateSummaryHTML = ({
             globalIndex
           ).padStart(3, "0")}</td>
           <td style="text-align: left; padding: 6px; font-size: 11px; white-space: nowrap;">${dateStr}</td>
-          <td style="text-align: left; padding: 6px; font-size: 11px;">${
-            receipt.storeName || "Untitled"
-          }</td>
-          <td style="text-align: left; padding: 6px; font-size: 11px;">${
-            receipt.expense_type || "—"
-          }</td>
-          <td style="text-align: left; padding: 6px; font-size: 11px;">${paymentDisplayText}</td>
+          <td style="text-align: left; padding: 6px; font-size: 11px;">${escapeHtml(receipt.storeName || "Untitled")}</td>
+          <td style="text-align: left; padding: 6px; font-size: 11px;">${escapeHtml(receipt.expense_type || "—")}</td>
+          <td style="text-align: left; padding: 6px; font-size: 11px;">${escapeHtml(paymentDisplayText)}</td>
           <td style="text-align: right; padding: 6px; font-size: 11px; font-weight: 600;">${formatCurrencyFixed2(
             receipt.purchasePrice || 0
           )}</td>

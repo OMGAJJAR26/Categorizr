@@ -1,6 +1,7 @@
 import { useState } from "react";
 import html2pdf from "html2pdf.js";
 import SimpleAlertModal from "../components/SimpleAlertModal";
+import { escapeHtml, safeLinkUrl } from "../utils/escapeHtml";
 
 const iconSVG = `
   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="16" viewBox="0 0 14 16">
@@ -136,10 +137,8 @@ const SummaryReport = ({ receipts }) => {
           : "—";
 
         const background = idx % 2 === 0 ? "#ffffff" : "#f8f9fa";
-        const imageUrl =
-          r.emailAttachment && r.emailAttachment.trim() !== ""
-            ? r.emailAttachment
-            : null;
+        // Only http(s)/inline-image URLs become links (a javascript: value would run on click).
+        const imageUrl = safeLinkUrl(r.emailAttachment) || null;
 
         const paymentDisplay = getPaymentDisplayName(r);
 
@@ -149,15 +148,9 @@ const SummaryReport = ({ receipts }) => {
               globalIndex
             ).padStart(4, "0")}</td>
             <td style="text-align: left; padding: 8px;">${dateStr}</td>
-            <td style="text-align: left; padding: 8px;">${
-              r.storeName || "Untitled"
-            }</td>
-            <td style="text-align: left; padding: 8px;">${
-              r.expense_type || "—"
-            }</td>
-            <td style="text-align: left; padding: 8px;">${
-              paymentDisplay || "—"
-            }</td>
+            <td style="text-align: left; padding: 8px;">${escapeHtml(r.storeName || "Untitled")}</td>
+            <td style="text-align: left; padding: 8px;">${escapeHtml(r.expense_type || "—")}</td>
+            <td style="text-align: left; padding: 8px;">${escapeHtml(paymentDisplay || "—")}</td>
             <td style="text-align: right; padding: 8px;">₹${Number(
               r.purchasePrice || 0
             ).toLocaleString(undefined, {
@@ -167,7 +160,7 @@ const SummaryReport = ({ receipts }) => {
             <td style="text-align: center; padding: 8px;">
             ${
               imageUrl
-                ? `<a href="${imageUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; width: 18px; height: 18px;">${iconSVG}</a>`
+                ? `<a href="${escapeHtml(imageUrl)}" target="_blank" rel="noopener noreferrer" style="display: inline-block; width: 18px; height: 18px;">${iconSVG}</a>`
                 : `<span style="display: inline-block; width: 18px; height: 18px; opacity: 0.3;">${iconSVG}</span>`
             }
             </td>
