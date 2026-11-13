@@ -504,8 +504,11 @@
   }
 }
 
+/* The column labels only make sense above the lg breakpoint, where receipts render as
+   table rows; below it receipts are cards. An unconditional `display: grid` here beat
+   Tailwind's `hidden` and squeezed all eight labels on top of each other on phones. */
 .home-table-header {
-  display: grid;
+  display: none;
   gap: 0.75rem;
   padding: 0.5rem 1rem;
   background: #ffffff;
@@ -514,6 +517,12 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: #64748b;
+}
+
+@media (min-width: 1024px) {
+  .home-table-header {
+    display: grid;
+  }
 }
 
 @media (min-width: 1280px) {
