@@ -47,6 +47,7 @@ import {
 } from "../utils/paymentMethodUtils";
 import { hasActiveReceiptFilters } from "../utils/receiptGallery";
 import { lazyWithReload } from "../utils/lazyWithReload";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import "./HomePage.css";
 
 const HomePage = () => {
@@ -161,7 +162,6 @@ const HomePage = () => {
   } = useChatAssistant();
 
   const customizedReportRef = useRef(null);
-  const autoRefreshInFlightRef = useRef(false);
   // False until the first forwarded-receipt scan of this session completes. Used
   // so forwards that already existed at login are marked seen silently (no
   // banner / auto-scroll) — only forwards that arrive later in the session notify.
@@ -407,43 +407,9 @@ const HomePage = () => {
 
   const closeMobileSearch = () => setShowMobileSearch(false);
 
-  // Auto-refresh receipts so incoming eReceipts appear without manual refresh/login cycle.
-  // Uses silent refresh to avoid full-page loading flicker.
-  useEffect(() => {
-    if (!user?.id) return;
-
-    let stopped = false;
-    const runSilentAutoRefresh = async () => {
-      if (stopped || document.hidden || autoRefreshInFlightRef.current) return;
-      autoRefreshInFlightRef.current = true;
-      try {
-        await silentRefreshData(0);
-      } catch (e) {
-        // Keep this non-blocking; regular manual refresh still works.
-        console.error("Auto refresh failed:", e);
-      } finally {
-        autoRefreshInFlightRef.current = false;
-      }
-    };
-
-    // Refresh whenever tab becomes active again.
-    const handleVisibilityOrFocus = () => {
-      runSilentAutoRefresh();
-    };
-
-    // A few seconds, so a receipt opened on another device (status flips to 1)
-    // drops its New highlight without a manual reload.
-    const intervalId = window.setInterval(runSilentAutoRefresh, 4000);
-    window.addEventListener("focus", handleVisibilityOrFocus);
-    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
-
-    return () => {
-      stopped = true;
-      window.clearInterval(intervalId);
-      window.removeEventListener("focus", handleVisibilityOrFocus);
-      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
-    };
-  }, [user?.id, silentRefreshData]);
+  // Auto-refresh receipts so incoming eReceipts appear without a manual refresh/login cycle.
+  // Silent (no loading flicker); also runs right away when the tab regains focus.
+  useAutoRefresh(() => silentRefreshData(0), { enabled: Boolean(user?.id) });
 
   // Detect newly-arrived forwarded receipts: show notification + sync missing data.
   useEffect(() => {
