@@ -170,6 +170,7 @@ import warrantedSelect from "../assets/receipttags/warrantied_select.png";
 import JSZip from "jszip";
 import { downloadCsv, objectsToCsv } from "../utils/csv";
 import { downloadHtmlPdf, renderHtmlToPdfBlob } from "../utils/htmlToPdf";
+import { shouldMarkReceiptRead } from "../utils/receiptReadState";
 
 /** Match receipt ids across number/string API shapes. */
 const findReceiptIndexInList = (list, id) => {
@@ -278,15 +279,12 @@ const ReceiptDetail = ({
   const [selectedReceipt, setSelectedReceipt] = useState(openingReceipt);
   const [sortedReceipts, setSortedReceipts] = useState([]);
 
-  // Opening a receipt (Edit) or swiping onto it marks it read.
-  // iOS isRead follows status (0 unread, 1 read). is_verify is only the
-  // draft / eReceipt verification flag, so opening must not change it.
+  // Opening a receipt (Edit) or swiping onto it marks it read via the status flag
+  // (0 unread, 1 read). is_verify is only the draft / eReceipt verification flag,
+  // so opening must not change it.
   useEffect(() => {
     const r = selectedReceipt;
-    if (!r?.id) return;
-    const statusRaw = r.status != null && r.status !== "" ? r.status : r.Status;
-    const status = statusRaw == null || statusRaw === "" ? -1 : Number(statusRaw);
-    if (status === 1) return;
+    if (!shouldMarkReceiptRead(r)) return;
     updateReceiptStatus(r.id, "1");
     setSelectedReceipt((prev) =>
       prev && String(prev.id) === String(r.id) ? { ...prev, status: "1" } : prev

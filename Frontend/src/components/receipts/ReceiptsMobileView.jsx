@@ -4,6 +4,7 @@ import MerchantAvatar from "../MerchantAvatar";
 import SimpleAlertModal from "../SimpleAlertModal";
 import { formatReceiptDate } from "../../utils/receiptDate";
 import { isUnreadHighlightReceipt } from "../../hooks/useReceiptGrouping";
+import { isReceiptUnread } from "../../utils/receiptReadState";
 import RowSelectCheckbox from "./RowSelectCheckbox";
 import ComingSoonIntegrations from "./ComingSoonIntegrations";
 
@@ -51,14 +52,14 @@ const ReceiptsMobileView = ({
 
   const getTotalColor = () => {
     // If receipt is unread, show light grey color
-    if (receipt.status === "0") {
+    if (isReceiptUnread(receipt)) {
       return "text-gray-400";
     }
     return Number(receipt.purchasePrice) < 0 ? "text-red-600" : "text-green-700";
   };
 
   // Determine if receipt is unread for other text elements
-  const isUnread = receipt.status === "0";
+  const isUnread = isReceiptUnread(receipt);
 
   // "New"/unread highlight for ANY receipt, per the mobile isRead rule.
   const isNewForwarded = isUnreadHighlightReceipt(receipt);

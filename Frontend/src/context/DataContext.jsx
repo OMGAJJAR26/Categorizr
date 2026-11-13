@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef } f
 import { PHP_API_BASE } from "../api/Axios";
 import { getPaymentDisplayFromReceipt } from "../hooks/usePaymentDisplay";
 import { isNewForwardedReceipt } from "../hooks/useReceiptGrouping";
+import { isStatusUpdateSuccessful } from "../utils/receiptReadState";
 import {
   parseExpenseCategoryApiResponse,
   getExpenseCategoryNamesFromApi,
@@ -2194,7 +2195,7 @@ setMerchantsWithImages(
       receiptid: String(receiptId),
       status,
     });
-    try {
+    const sendStatus = async () => {
       const response = await fetch(
         `${BASE_URL}/receipt/UpdateReceiptStatus?${params}`,
         {
@@ -2205,11 +2206,21 @@ setMerchantsWithImages(
           },
         }
       );
-      return response.ok;
-    } catch (error) {
-      console.warn("updateReceiptStatus failed:", error);
-      return false;
+      const bodyText = await response.text().catch(() => "");
+      return isStatusUpdateSuccessful(response.ok, bodyText);
+    };
+    // The screen is already updated above. A failed save would bring the unread
+    // highlight back on the next refresh, so retry once before giving up.
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        if (await sendStatus()) return true;
+        console.warn(`updateReceiptStatus attempt ${attempt} was not accepted for receipt ${receiptId}`);
+      } catch (error) {
+        console.warn(`updateReceiptStatus attempt ${attempt} failed:`, error);
+      }
+      if (attempt === 1) await new Promise((resolve) => setTimeout(resolve, 1000));
     }
+    return false;
   };
 
   const applyQuickbooksLinkedIds = useCallback((ids = []) => {

@@ -1,6 +1,10 @@
 import { useMemo } from "react";
 import { filterReceipts } from "../utils/receiptFilters";
 import { sortReceipts, sortYears, compareByDayThenTotal } from "../utils/receiptSorting";
+import { isNewForwardedReceipt } from "../utils/receiptReadState";
+
+// The read/unread rules live in utils/receiptReadState.js (pure, unit-tested).
+export { isReceiptRead, isNewForwardedReceipt, isUnreadHighlightReceipt } from "../utils/receiptReadState";
 
 /**
  * Receipts that belong in the amber "Draft / To Be Verified" section.
@@ -24,73 +28,8 @@ const isToBeVerified = (r) => {
   return hasEmailId && !isNetworkReceived && String(r?.is_verify ?? "0") !== "1";
 };
 
-/**
- * iOS `shouldShowPendingVerificationBadge`.
- * is_verify is this verification flag (and drafts), not "the receipt was opened".
- * An eReceipt is any receipt whose fk_incoming_email_id is present and not "0".
- */
-export const shouldShowPendingVerificationBadge = (r) => {
-  if (!r) return false;
-  const emailId = r.fk_incoming_email_id;
-  const isEReceipt =
-    emailId != null && String(emailId).trim() !== "" && String(emailId) !== "0";
-  const isVerify = String(r.is_verify ?? "0") === "1";
-  const isDraft = String(r.is_draft ?? "0") === "1";
-  return (isEReceipt && !isVerify) || isDraft;
-};
-
-/**
- * iOS isRead after the first local insert:
- *   read when status == 1 and the pending-verification badge is off
- *   unread otherwise (status missing counts as -1, which is unread)
- * On the very first insert, iOS instead marks every non-pending receipt read
- * and only the next sync applies this rule. Steady state is this rule.
- */
-export const isReceiptRead = (r) => {
-  if (!r) return true;
-  const raw = r.status != null && r.status !== "" ? r.status : r.Status;
-  const status = raw == null || raw === "" ? -1 : Number(raw);
-  return status === 1 && !shouldShowPendingVerificationBadge(r);
-};
-
-const isNetworkReceivedReceipt = (r) =>
-  r?.fk_forward_from_receipt_id != null &&
-  String(r.fk_forward_from_receipt_id) !== "0";
-
-/**
- * Blue "New" highlight for a received (network-forwarded) receipt.
- * Highlight follows the mobile (iOS/Android) read rule EXACTLY:
- *   let status = receipt.status ?? -1
- *   isRead = (status == 1 && !shouldShowPendingVerificationBadge) ? 1 : 0
- * The highlight is the inverse — a received forward is highlighted while it is
- * UNREAD (status != 1, or still pending verification; missing status → -1 →
- * unread). isReceiptRead() above is that mobile condition, so this is !isRead.
- * Drafts never highlight here (they surface in the draft section via isToBeVerified).
- */
-export const isNewForwardedReceipt = (r) => {
-  if (!r || String(r.is_draft ?? "0") === "1") return false;
-  if (!isNetworkReceivedReceipt(r)) return false;
-  return !isReceiptRead(r);
-};
-
 /** @deprecated Use isNewForwardedReceipt instead */
 export const isNewForwardedEmailReceipt = isNewForwardedReceipt;
-
-/**
- * Blue "New"/unread highlight shown in the receipt list for ANY receipt (normal,
- * forwarded, received — not just forwards). Mirrors the mobile (iOS/Android)
- * isRead rule EXACTLY:
- *   let status = receipt.status ?? -1
- *   isRead = (status == 1 && !shouldShowPendingVerificationBadge) ? 1 : 0
- * A receipt is highlighted while it is UNREAD (isRead == 0): status != 1, or it
- * is still pending verification; a missing status (-1) counts as unread. Drafts
- * are excluded (they appear in the draft section via isToBeVerified).
- * isReceiptRead() is that mobile condition, so this is its inverse.
- */
-export const isUnreadHighlightReceipt = (r) => {
-  if (!r || String(r.is_draft ?? "0") === "1") return false;
-  return !isReceiptRead(r);
-};
 
 export const useReceiptGrouping = (receipts, filters, sortConfig, searchTerm) => {
   // Split ALL receipts into draft vs regular BEFORE applying user filters.
