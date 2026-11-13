@@ -1,5 +1,8 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { PHP_API_BASE } from "../api/Axios";
+import { clearAuthLocalStorage } from "../utils/authStorage";
+import { isSessionExpiredResponse } from "../utils/sessionExpired";
 import { getPaymentDisplayFromReceipt } from "../hooks/usePaymentDisplay";
 import { isNewForwardedReceipt } from "../hooks/useReceiptGrouping";
 import { isStatusUpdateSuccessful } from "../utils/receiptReadState";
@@ -129,6 +132,18 @@ const getEntityId = (item) =>
   item?.fk_expense_category_id ??
   null;
 
+// The server rejects an expired token with HTTP 200 and {code:"010"}, so a fetch that only
+// checks `res.ok` quietly shows an empty list. Take the same exit as the inactivity timeout
+// in SessionManager: clear the stored login, reset in-memory data, go to the login screen.
+// `requestToken` guards against a late reply from an old login signing out a newer one
+// (and makes a second reply from the same expiry a no-op).
+const expireSession = (requestToken, navigate) => {
+  if (localStorage.getItem("token") !== requestToken) return;
+  clearAuthLocalStorage();
+  window.dispatchEvent(new CustomEvent("cat:session-expired"));
+  navigate("/login");
+};
+
 const isDeleteResponseSuccessful = (data) => {
   if (data === null || data === undefined) return false;
   if (typeof data !== "object") {
@@ -242,6 +257,12 @@ const calculateReceiptBadges = (receipts) => {
 
 
 export const DataProvider = ({ children }) => {
+  const navigate = useNavigate();
+  // fetchData is memoized with no dependencies, so it reads navigate through a ref.
+  const navigateRef = useRef(navigate);
+  useEffect(() => {
+    navigateRef.current = navigate;
+  }, [navigate]);
   const [receipts, setReceipts] = useState([]);
   const [merchants, setMerchants] = useState([]);
   const [expenseCategories, setExpenseCategories] = useState([]);
@@ -1223,6 +1244,10 @@ export const DataProvider = ({ children }) => {
         });
         if (!userRes.ok) throw new Error("Failed to fetch user data");
         const userJson = await userRes.json();
+        if (isSessionExpiredResponse(userJson)) {
+          expireSession(token, navigateRef.current);
+          return;
+        }
         const userData = normalizeUserResponse(userJson);
         if (!userData) throw new Error("Invalid user data response");
         setUser(userData);
@@ -1257,6 +1282,10 @@ export const DataProvider = ({ children }) => {
 
       if (!receiptRes.ok) throw new Error("Failed to fetch receipts");
       const receiptData = await receiptRes.json();
+      if (isSessionExpiredResponse(receiptData)) {
+        expireSession(token, navigateRef.current);
+        return;
+      }
       console.log("%c[Receipts] getreceiptfromdatev1 response (all receipts):", "color:#06b6d4;font-weight:bold", receiptData);
 
       // Parse tax response
