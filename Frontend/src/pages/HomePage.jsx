@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useMemo, lazy, Suspense } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, Suspense } from "react";
 import { NODE_API_URL } from "../api/Axios";
 import { useNavigate } from "react-router-dom";
 import Header from "../components/Header";
@@ -19,8 +19,8 @@ import ReceiptsTable from "../components/receipts/ReceiptsTable";
 import ReceiptsMobileView from "../components/receipts/ReceiptsMobileView";
 import ReportModals from "../components/reports/ReportModals";
 // Opened on demand; loaded as separate chunks so they stay out of the initial download.
-const CustomizedReportModal = lazy(() => import("../components/receipts/CustomizedReportModal"));
-const AddReceiptModal = lazy(() => import("../components/receipts/AddReceiptModal"));
+const CustomizedReportModal = lazyWithReload(() => import("../components/receipts/CustomizedReportModal"));
+const AddReceiptModal = lazyWithReload(() => import("../components/receipts/AddReceiptModal"));
 import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationDialog";
 import ReceiptScanSkeleton from "../components/receipts/ReceiptScanSkeleton";
 import ReceiptsEmptyState from "../components/receipts/ReceiptsEmptyState";
@@ -46,6 +46,7 @@ import {
   expenseTypeToReceiptCategory,
 } from "../utils/paymentMethodUtils";
 import { hasActiveReceiptFilters } from "../utils/receiptGallery";
+import { lazyWithReload } from "../utils/lazyWithReload";
 import "./HomePage.css";
 
 const HomePage = () => {
