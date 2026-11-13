@@ -1,5 +1,3 @@
-import html2pdf from "html2pdf.js";
-
 function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -63,6 +61,8 @@ async function preparePdfHost(htmlContent) {
 export async function renderHtmlToPdfBlob(htmlContent, options = {}) {
   const host = await preparePdfHost(htmlContent);
   try {
+    // Loaded on first use so the PDF library stays out of the initial download.
+    const { default: html2pdf } = await import("html2pdf.js");
     return await html2pdf()
       .set({
         margin: options.margin ?? 10,

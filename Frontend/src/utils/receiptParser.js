@@ -1,12 +1,10 @@
-import Tesseract from 'tesseract.js';
-import * as pdfjsLib from 'pdfjs-dist';
 import { proxyImageUrl } from '../api/Axios';
 import { getPdfProxyUrl } from './mediaUrlUtils';
 
 // Configure PDF.js worker - use local file from public folder
 let workerConfigured = false;
 
-function configurePDFWorker() {
+function configurePDFWorker(pdfjsLib) {
   if (typeof window === 'undefined') return;
 
   try {
@@ -29,8 +27,25 @@ function configurePDFWorker() {
   }
 }
 
-if (typeof window !== 'undefined') {
-  configurePDFWorker();
+// pdfjs-dist and tesseract.js are large and only needed when a PDF is read or a
+// receipt is OCR'd, so they are loaded on first use instead of with the app.
+let pdfjsPromise = null;
+function loadPdfjs() {
+  if (!pdfjsPromise) {
+    pdfjsPromise = import('pdfjs-dist').then((pdfjsLib) => {
+      configurePDFWorker(pdfjsLib);
+      return pdfjsLib;
+    });
+  }
+  return pdfjsPromise;
+}
+
+let tesseractPromise = null;
+function loadTesseract() {
+  if (!tesseractPromise) {
+    tesseractPromise = import('tesseract.js').then((mod) => mod.default);
+  }
+  return tesseractPromise;
 }
 
 /**
@@ -41,7 +56,8 @@ export async function pdfToImage(pdfFile) {
     console.log('Reading PDF file...', pdfFile.name, pdfFile.size, 'bytes');
     const arrayBuffer = await pdfFile.arrayBuffer();
 
-    configurePDFWorker();
+    const pdfjsLib = await loadPdfjs();
+    configurePDFWorker(pdfjsLib);
     const workerSrc = `${window.location.origin}/pdf.worker.min.mjs`;
     pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
 
@@ -89,7 +105,7 @@ export async function pdfToImage(pdfFile) {
  */
 export async function renderPdfFirstPageFromUrl(pdfUrl, options = {}) {
   const { maxWidth = 256 } = options;
-  configurePDFWorker();
+  const pdfjsLib = await loadPdfjs();
 
   let arrayBuffer;
   if (pdfUrl.startsWith('data:')) {
@@ -185,6 +201,7 @@ async function _prepareImageForOCR(fileOrUrl) {
  * shape as the OCR path, or null when the PDF has no usable text (scanned/image PDF).
  */
 async function extractPdfTextLines(pdfFile) {
+  const pdfjsLib = await loadPdfjs();
   const arrayBuffer = await pdfFile.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, verbosity: 0 }).promise;
   const lines = [];
@@ -274,6 +291,7 @@ export async function extractReceiptData(fileOrUrl) {
   // back empty and NO Total was ever detected. Use a worker, opt into `blocks`,
   // then flatten the block → paragraph → line tree into the flat `lines` array the
   // parser expects: { text, bbox, words: [{ text, bbox }] }.
+  const Tesseract = await loadTesseract();
   const worker = await Tesseract.createWorker('eng', 1, {
     logger: (m) => {
       if (m.status === 'recognizing text') {

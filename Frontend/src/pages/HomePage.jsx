@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, lazy, Suspense } from "react";
 import { NODE_API_URL } from "../api/Axios";
 import { useNavigate } from "react-router-dom";
 import Header from "../components/Header";
@@ -18,8 +18,9 @@ import ActiveFiltersBar from "../components/ActiveFiltersBar";
 import ReceiptsTable from "../components/receipts/ReceiptsTable";
 import ReceiptsMobileView from "../components/receipts/ReceiptsMobileView";
 import ReportModals from "../components/reports/ReportModals";
-import CustomizedReportModal from "../components/receipts/CustomizedReportModal";
-import AddReceiptModal from "../components/receipts/AddReceiptModal";
+// Opened on demand; loaded as separate chunks so they stay out of the initial download.
+const CustomizedReportModal = lazy(() => import("../components/receipts/CustomizedReportModal"));
+const AddReceiptModal = lazy(() => import("../components/receipts/AddReceiptModal"));
 import DeleteConfirmationDialog from "../components/receipts/DeleteConfirmationDialog";
 import ReceiptScanSkeleton from "../components/receipts/ReceiptScanSkeleton";
 import ReceiptsEmptyState from "../components/receipts/ReceiptsEmptyState";
@@ -1742,6 +1743,7 @@ const HomePage = () => {
             }}
           />
 
+          <Suspense fallback={null}>
           {showCustomizedReport && (
             <CustomizedReportModal
               onClose={() => setShowCustomizedReport(false)}
@@ -1773,6 +1775,7 @@ const HomePage = () => {
               onDuplicate={handleDuplicate}
             />
           )}
+          </Suspense>
 
           <DeleteConfirmationDialog
             isOpen={showDeleteConfirmation}

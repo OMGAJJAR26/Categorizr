@@ -6,7 +6,7 @@ const ChatHeader = ({ onClose, onClearHistory }) => {
       <div className="flex items-center justify-between relative">
 
         {/* Close */}
-        <button
+        <button aria-label="Close"
           onClick={onClose}
           className="w-10 h-10 flex items-center justify-center hover:bg-blue-500 rounded-lg transition-colors relative m-0"
           style={{ position: "relative", top: 0, left: 0 }}
@@ -24,7 +24,7 @@ const ChatHeader = ({ onClose, onClearHistory }) => {
         </h2>
 
         {/* Trash */}
-        <button
+        <button aria-label="Clear chat history"
           onClick={onClearHistory}
           className="w-10 h-10 flex items-center justify-center hover:bg-blue-500 rounded-lg transition-colors relative m-0"
           style={{ position: "relative", top: 0, left: 0 }}

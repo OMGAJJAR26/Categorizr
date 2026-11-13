@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 import { FileText } from "lucide-react";
-import CustomizedReport from "../../pages/CustomizedReport";
 import TaxTypePopup from "../filters/TaxTypePopup";
 import { toTaxLabel } from "../../utils/receiptFormatters";
 import { useKeepInViewport } from "../../hooks/useKeepInViewport";

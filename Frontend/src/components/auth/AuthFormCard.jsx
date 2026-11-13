@@ -54,7 +54,7 @@ export const AuthFooter = () => (
     <p>
       Having trouble signing in?{" "}
       <span
-        onClick={() => window.open("https://categorizr.com/#contactus")}
+        onClick={() => window.open("https://categorizr.com/#contactus", "_blank", "noopener,noreferrer")}
         className="underline cursor-pointer font-bold text-white hover:text-sky-200 transition"
       >
         Contact Customer Care
@@ -63,7 +63,7 @@ export const AuthFooter = () => (
     <p>
       By continuing, you agree to our{" "}
       <span
-        onClick={() => window.open("https://categorizr.com/privacy-policy/")}
+        onClick={() => window.open("https://categorizr.com/privacy-policy/", "_blank", "noopener,noreferrer")}
         className="underline cursor-pointer font-bold text-white hover:text-sky-200 transition"
       >
         Privacy Policy

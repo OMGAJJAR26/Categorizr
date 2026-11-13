@@ -56,7 +56,7 @@ const MobileTagsModal = ({ onClose, selectedTags, updateFilter }) => {
             >
               Reset
             </button>
-            <button
+            <button aria-label="Close"
               onClick={onClose}
               className="p-1 hover:bg-gray-200 rounded-full"
             >

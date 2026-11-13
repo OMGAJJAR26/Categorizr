@@ -409,7 +409,7 @@ const ReceiptAnnotator = ({ imageUrl, onSave, onClose }) => {
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
           <h3 className="font-bold text-gray-900 text-base">Annotate Receipt</h3>
-          <button
+          <button aria-label="Close"
             onClick={onClose}
             className="p-1.5 hover:bg-gray-100 rounded-full text-gray-500 hover:text-gray-700"
           >

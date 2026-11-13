@@ -2908,14 +2908,16 @@ setMerchantsWithImages(
       return false;
     }
 
+    // Declared outside try so the catch fallback below can use it too.
+    const receiptIdStr = receiptId?.toString();
+    const receiptMatchesId = (r) => r.id?.toString() === receiptIdStr;
+
     try {
       // Get existing receipt to preserve values for fields not being updated
-      const receiptIdStr = receiptId?.toString();
       const existingReceipt = receipts.find(
         (r) => r.id?.toString() === receiptIdStr
       );
-      const receiptMatchesId = (r) => r.id?.toString() === receiptIdStr;
-      
+
       // Filter out frontend-only fields that shouldn't be sent to API
       const frontendOnlyFields = ['quickbooksLinked', 'paymentDisplay', 'badgeStatus', 'subtotal'];
       const apiUpdates = Object.keys(updates).reduce((acc, key) => {

@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import * as XLSX from "xlsx";
 import TaxTypePopup from "../filters/TaxTypePopup";
 import { toTaxLabel } from "../../utils/receiptFormatters";
 import { collectReceiptMediaUrls } from "../../utils/mediaUrlUtils";
@@ -120,7 +119,7 @@ const ReceiptsMoreMenu = ({
     }
   };
 
-  const handleCsvExport = () => {
+  const handleCsvExport = async () => {
     dismiss();
     const csvData = receiptsForExport.map((receipt) => {
       const taxValues = receipt.receipt_tax_values || [];
@@ -154,11 +153,17 @@ const ReceiptsMoreMenu = ({
       };
     });
 
-    const ws = XLSX.utils.json_to_sheet(csvData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Receipts");
-    const dateStr = new Date().toISOString().split("T")[0];
-    XLSX.writeFile(wb, `receipts_${dateStr}.csv`, { bookType: "csv" });
+    try {
+      // Loaded on first export so the spreadsheet library stays out of the initial download.
+      const XLSX = await import("xlsx");
+      const ws = XLSX.utils.json_to_sheet(csvData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Receipts");
+      const dateStr = new Date().toISOString().split("T")[0];
+      XLSX.writeFile(wb, `receipts_${dateStr}.csv`, { bookType: "csv" });
+    } catch (error) {
+      console.error("CSV export failed:", error);
+    }
   };
 
   return (

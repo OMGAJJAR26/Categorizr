@@ -1,6 +1,4 @@
 import { useState } from "react";
-import JSZip from "jszip";
-import * as XLSX from "xlsx";
 import SimpleAlertModal from "../SimpleAlertModal";
 import { collectReceiptMediaUrls } from "../../utils/mediaUrlUtils";
 import { getPaymentDisplay as getReportPaymentDisplay } from "../../utils/reportGenerators";
@@ -113,9 +111,11 @@ const ReportModals = ({
   };
 
   // Helper function to download CSV
-  const handleDownloadCSV = () => {
+  const handleDownloadCSV = async () => {
     setIsGenerating(true);
     try {
+      // Loaded on first use so the spreadsheet library stays out of the initial download.
+      const XLSX = await import("xlsx");
       const csvData = generateCSVData();
       const ws = XLSX.utils.json_to_sheet(csvData);
       const wb = XLSX.utils.book_new();
@@ -140,6 +140,7 @@ const ReportModals = ({
   const handleDownloadZIP = async () => {
     setIsGenerating(true);
     try {
+      const [{ default: JSZip }, XLSX] = await Promise.all([import("jszip"), import("xlsx")]);
       const zip = new JSZip();
       const fileName = `${reportType}-report-${new Date().toISOString().split("T")[0]}`;
 

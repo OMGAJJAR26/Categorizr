@@ -167,7 +167,6 @@ import verifiedSelect from "../assets/receipttags/verified_select.png";
 import warrantedDeselect from "../assets/receipttags/warrantied_deselect.png";
 import warrantedSelect from "../assets/receipttags/warrantied_select.png";
 
-import * as XLSX from "xlsx";
 import JSZip from "jszip";
 import { downloadCsv, objectsToCsv } from "../utils/csv";
 import { downloadHtmlPdf, renderHtmlToPdfBlob } from "../utils/htmlToPdf";
@@ -5543,7 +5542,7 @@ useEffect(() => {
                 <div className="w-[90px] sm:w-[130px] flex justify-start gap-1">
                   {/* Split screen: back button */}
                   {showSplitScreen ? (
-                    <button
+                    <button aria-label="Back"
                       type="button"
                       onClick={() => {
                         if (activeSplitIndex !== null) {
@@ -5752,7 +5751,7 @@ useEffect(() => {
                     >
                       <span className="text-red-700 text-sm font-medium flex-1">{msg}</span>
                       {i === 0 && (
-                        <button
+                        <button aria-label="Dismiss message"
                           type="button"
                           onClick={() => setSplitPrereqError(null)}
                           className="text-red-400 hover:text-red-600 text-lg leading-none flex-shrink-0"
@@ -7846,7 +7845,7 @@ useEffect(() => {
               {/* Header */}
               <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 bg-white">
                 <h2 className="text-xl font-bold text-gray-900">Add New Merchant</h2>
-                <button
+                <button aria-label="Close"
                   onClick={handleCloseAddMerchantModal}
                   className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors"
                 >
@@ -8334,7 +8333,7 @@ useEffect(() => {
             >
               <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
                 <h2 className="text-xl font-bold text-gray-900">Add Expense Category</h2>
-                <button
+                <button aria-label="Close"
                   onClick={() => { setShowAddCategoryInput(false); setNewCategoryName(""); }}
                   className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors"
                 >
@@ -8436,7 +8435,7 @@ useEffect(() => {
               )}
               <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
                 <h2 className="text-xl font-bold text-gray-900">Edit Expense Category</h2>
-                <button
+                <button aria-label="Close"
                   onClick={() => { if (!isSavingEditCategory) setShowEditCategoryModal(false); }}
                   className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors"
                 >

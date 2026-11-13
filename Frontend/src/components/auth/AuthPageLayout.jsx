@@ -1,5 +1,5 @@
 import Logo from "../../assets/categorizrLogoSimple.png";
-import LoginBackground from "../../assets/categorizrlogin.png";
+import LoginBackground from "../../assets/categorizrlogin.webp";
 import Slider from "react-slick";
 import "slick-carousel/slick/slick.css";
 import "slick-carousel/slick/slick-theme.css";

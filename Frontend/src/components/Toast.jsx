@@ -79,7 +79,7 @@ const Toast = ({ message, type = "success", isVisible, onClose, duration = 3000,
               </div>
             )}
           </div>
-          <button
+          <button aria-label="Dismiss notification"
             onClick={onClose}
             className="ml-2 p-1 hover:bg-black/5 rounded-full transition-colors"
           >

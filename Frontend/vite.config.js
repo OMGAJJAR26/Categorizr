@@ -223,6 +223,11 @@ export default defineConfig(({ mode }) => {
     'https://categorizr-chatbot.onrender.com';
 
   return {
+  // Production builds only: drop console.log/info/debug calls (they print receipt, tax and
+  // merchant payloads). Dev keeps them; console.warn/error are kept everywhere.
+  ...(mode === 'production'
+    ? { esbuild: { pure: ['console.log', 'console.info', 'console.debug'] } }
+    : {}),
   plugins: [
     react(),
     {

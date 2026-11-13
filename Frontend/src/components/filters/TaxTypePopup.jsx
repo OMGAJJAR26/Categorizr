@@ -74,7 +74,7 @@ export default function TaxTypePopup({
           <h4 className="text-lg font-semibold text-center flex-1">
             Select Tax Types
           </h4>
-          <button onClick={onClose} className="absolute right-4 top-4 w-auto m-0">
+          <button aria-label="Close" onClick={onClose} className="absolute right-4 top-4 w-auto m-0">
             <X size={20} className="text-black" strokeWidth={2} style={{ stroke: "#000" }} />
           </button>
         </div>

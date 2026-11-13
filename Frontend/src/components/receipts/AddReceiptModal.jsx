@@ -4705,7 +4705,7 @@ const handleSelectLogo = (index) => {
                 <div className="w-[90px] sm:w-[130px] flex justify-start gap-1">
                   {showSplitScreen && activeSplitIndex !== null ? (
                     // Back from split detail → split overview
-                    <button
+                    <button aria-label="Back"
                       type="button"
                       onClick={() => setActiveSplitIndex(null)}
                       className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors"
@@ -4714,7 +4714,7 @@ const handleSelectLogo = (index) => {
                     </button>
                   ) : showSplitScreen ? (
                     // Back from split overview → form
-                    <button
+                    <button aria-label="Back"
                       type="button"
                       onClick={() => { setShowSplitScreen(false); setActiveSplitIndex(null); }}
                       className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors"
@@ -4872,7 +4872,7 @@ const handleSelectLogo = (index) => {
                     >
                       <span className="text-red-700 text-sm font-medium flex-1">{msg}</span>
                       {i === 0 && (
-                        <button
+                        <button aria-label="Dismiss message"
                           type="button"
                           onClick={() => setActionPrereqError(null)}
                           className="text-red-400 hover:text-red-600 text-lg leading-none flex-shrink-0"
@@ -4895,7 +4895,7 @@ const handleSelectLogo = (index) => {
                   >
                     {error}
                   </span>
-                  <button
+                  <button aria-label="Dismiss message"
                     type="button"
                     onClick={() => setError(null)}
                     className="text-yellow-500 hover:text-yellow-700 text-lg leading-none flex-shrink-0 ml-1"
@@ -5115,7 +5115,7 @@ const handleSelectLogo = (index) => {
                                     : `${(file.size / 1024).toFixed(1)} KB`}
                                 </p>
                               </div>
-                              <button
+                              <button aria-label="Remove file"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   removeFile(index);
@@ -6625,7 +6625,7 @@ const handleSelectLogo = (index) => {
                                 <div key={idx} className="relative group">
                                   <button
                                     type="button"
-                                    onClick={() => window.open(safeUrl, "_blank")}
+                                    onClick={() => window.open(safeUrl, "_blank", "noopener,noreferrer")}
                                     className="w-24 h-[118px] rounded border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors flex flex-col items-center justify-center text-gray-600"
                                     title="Open PDF"
                                   >
@@ -6655,7 +6655,7 @@ const handleSelectLogo = (index) => {
                                   src={displayUrl}
                                   alt={`Receipt ${idx + 1}`}
                                   className="w-24 h-auto rounded cursor-pointer border border-gray-200"
-                                  onClick={() => window.open(safeUrl, "_blank")}
+                                  onClick={() => window.open(safeUrl, "_blank", "noopener,noreferrer")}
                                 />
                                 <button
                                   type="button"
@@ -6691,7 +6691,7 @@ const handleSelectLogo = (index) => {
                               alt="Receipt"
                               className="w-24 h-auto rounded cursor-pointer border border-gray-200"
                               onClick={() =>
-                                window.open(getImagePreviewUrl(), "_blank")
+                                window.open(getImagePreviewUrl(), "_blank", "noopener,noreferrer")
                               }
                             />
                             <button
@@ -7717,7 +7717,7 @@ const handleSelectLogo = (index) => {
             >
               <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
                 <h2 className="text-xl font-bold text-gray-900">Add Expense Category</h2>
-                <button
+                <button aria-label="Close"
                   onClick={() => { setShowAddCategoryInput(false); setNewCategoryName(""); }}
                   className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors"
                 >
@@ -7819,7 +7819,7 @@ const handleSelectLogo = (index) => {
               )}
               <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
                 <h2 className="text-xl font-bold text-gray-900">Edit Expense Category</h2>
-                <button
+                <button aria-label="Close"
                   onClick={() => { if (!isSavingEditCategory) setShowEditCategoryModal(false); }}
                   className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors"
                 >

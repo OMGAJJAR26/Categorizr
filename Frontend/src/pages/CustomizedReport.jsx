@@ -386,7 +386,7 @@ const CustomizedReport = forwardRef((props, ref) => {
             <div className="bg-white rounded-lg p-6 w-full max-w-md max-h-[80vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold">Select Date Range</h2>
-                <button
+                <button aria-label="Close"
                   onClick={() => setShowDatePopup(false)}
                   className="text-gray-500 hover:text-gray-700 w-auto"
                 >
@@ -483,7 +483,7 @@ const CustomizedReport = forwardRef((props, ref) => {
             <div className="bg-white rounded-lg p-6 w-full max-w-md max-h-[80vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold">Select Expense Types</h2>
-                <button
+                <button aria-label="Close"
                   onClick={() => setShowExpenseTypePopup(false)}
                   className="text-gray-500 hover:text-gray-700 w-auto  "
                 >
@@ -523,7 +523,7 @@ const CustomizedReport = forwardRef((props, ref) => {
             <div className="bg-white rounded-lg p-6 w-full max-w-md max-h-[80vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold">Select Merchants</h2>
-                <button
+                <button aria-label="Close"
                   onClick={() => setShowMerchantPopup(false)}
                   className="text-gray-500 hover:text-gray-700 w-auto"
                 >
@@ -567,7 +567,7 @@ const CustomizedReport = forwardRef((props, ref) => {
             <div className="bg-white rounded-lg p-6 w-full max-w-md max-h-[80vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold ">Select Categories</h2>
-                <button
+                <button aria-label="Close"
                   onClick={() => setShowCategoryPopup(false)}
                   className="text-gray-500 hover:text-gray-700 w-auto"
                 >
@@ -607,7 +607,7 @@ const CustomizedReport = forwardRef((props, ref) => {
             <div className="bg-white rounded-lg p-6 w-full max-w-md max-h-[80vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold">Select Payment Methods</h2>
-                <button
+                <button aria-label="Close"
                   onClick={() => setShowPaymentPopup(false)}
                   className="text-gray-500 hover:text-gray-700 w-auto"
                 >
@@ -647,7 +647,7 @@ const CustomizedReport = forwardRef((props, ref) => {
             <div className="bg-white rounded-lg p-6 w-full max-w-md ">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold">Subtotal Range</h2>
-                <button
+                <button aria-label="Close"
                   onClick={() => setShowSubTotalPopup(false)}
                   className="text-gray-500 hover:text-gray-700 w-auto"
                 >
@@ -721,7 +721,7 @@ const CustomizedReport = forwardRef((props, ref) => {
             <div className="bg-white rounded-lg p-6 w-full max-w-md max-h-[80vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold">Select Tax Type #1</h2>
-                <button
+                <button aria-label="Close"
                   onClick={() => setShowTaxType1Popup(false)}
                   className="text-gray-500 hover:text-gray-700 w-auto"
                 >
@@ -782,7 +782,7 @@ const CustomizedReport = forwardRef((props, ref) => {
             <div className="bg-white rounded-lg p-6 w-full max-w-md max-h-[80vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold">Select Tax Type #2</h2>
-                <button
+                <button aria-label="Close"
                   onClick={() => setShowTaxType2Popup(false)}
                   className="text-gray-500 hover:text-gray-700 w-auto"
                 >
@@ -842,7 +842,7 @@ const CustomizedReport = forwardRef((props, ref) => {
             <div className="bg-white rounded-lg p-6 w-full max-w-md ">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold">Tips</h2>
-                <button
+                <button aria-label="Close"
                   onClick={() => setShowTipsPopup(false)}
                   className="text-gray-500 hover:text-gray-700 w-auto"
                 >
@@ -909,7 +909,7 @@ const CustomizedReport = forwardRef((props, ref) => {
             <div className="bg-white rounded-lg p-6 w-full max-w-md">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold">Total Range</h2>
-                <button
+                <button aria-label="Close"
                   onClick={() => setShowTotalPopup(false)}
                   className="text-gray-500 hover:text-gray-700 w-auto"
                 >
