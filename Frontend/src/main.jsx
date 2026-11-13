@@ -6,6 +6,7 @@ import "./styles.css";
 import { LoaderProvider } from "./context/LoaderContext";
 import { CurrencyProvider } from "./context/CurrencyContext";
 import { ThemeProvider } from "./context/ThemeContext";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { stripCredentialQueryFromLocation } from "./utils/credentialQuery";
 
 stripCredentialQueryFromLocation();
@@ -13,14 +14,16 @@ stripCredentialQueryFromLocation();
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <LoaderProvider>
-        <ThemeProvider>
-          <CurrencyProvider>
-            <App />
-          </CurrencyProvider>
-        </ThemeProvider>
-      </LoaderProvider>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <LoaderProvider>
+          <ThemeProvider>
+            <CurrencyProvider>
+              <App />
+            </CurrencyProvider>
+          </ThemeProvider>
+        </LoaderProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
   </React.StrictMode>
 );
