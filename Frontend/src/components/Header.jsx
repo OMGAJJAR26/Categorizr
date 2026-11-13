@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import FontLogo from "../assets/categorizrFontLogo.png";
 import { UserCircle, Check, Settings } from "lucide-react";
 import { useData } from "../context/DataContext";
@@ -57,14 +57,23 @@ const Header = () => {
 
   return (
     <header className="sticky top-0 z-50 bg-[#0f172a] text-white px-3 sm:px-4 md:px-6 py-2 sm:py-3 flex items-center justify-between shadow-lg shadow-blue-900/20">
-      {/* Logo */}
-      <div className="flex items-center">
+      {/* Logo — takes the user back to the homepage */}
+      <Link
+        to="/homepage"
+        aria-label="Go to homepage"
+        className="flex items-center"
+        onClick={() => {
+          setShowLangMenu(false);
+          setShowProfileMenu(false);
+          if (location.pathname === "/homepage") window.scrollTo({ top: 0, behavior: "smooth" });
+        }}
+      >
         <img
           src={FontLogo}
           alt="Categorizr Logo"
           className="h-6 sm:h-7 md:h-8 w-auto object-contain"
         />
-      </div>
+      </Link>
 
       <div className="flex items-center gap-2 sm:gap-3 md:gap-4 relative">
         {/* Language Selector */}

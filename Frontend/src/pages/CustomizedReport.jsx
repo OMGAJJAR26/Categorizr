@@ -1694,8 +1694,7 @@ const CustomizedReport = forwardRef((props, ref) => {
       </div>
 
       <select
-        className="mt-1 block w-64 rounded-md border border-gray-300 bg-white py-2 px-3 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-300 focus:ring-opacity-50 text-gray-700 items-center font-medium"
-        style={{ marginTop: "30px", marginLeft: "36%" }}
+        className="mt-[30px] ml-4 sm:ml-[36%] block w-[calc(100%-2rem)] max-w-full sm:w-64 rounded-md border border-gray-300 bg-white py-2 px-3 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-300 focus:ring-opacity-50 text-gray-700 items-center font-medium"
         value={reportType}
         onChange={(e) => setReportType(e.target.value)}
       >
@@ -1707,8 +1706,7 @@ const CustomizedReport = forwardRef((props, ref) => {
       <button
         type="button"
         onClick={handleCreateReport}
-        className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 w-64 rounded"
-        style={{ marginTop: "20px", marginLeft: "36%" }}
+        className="mt-5 mb-2 ml-4 sm:ml-[36%] w-[calc(100%-2rem)] max-w-full sm:w-64 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded"
       >
         Create Report
       </button>
