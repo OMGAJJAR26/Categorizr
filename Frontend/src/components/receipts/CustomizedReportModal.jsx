@@ -4,8 +4,8 @@ import CustomizedReport from "../../pages/CustomizedReport";
 const CustomizedReportModal = forwardRef(({ onClose, receipts }, ref) => {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg p-4 sm:p-6 w-full max-w-5xl relative max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center mb-4 sticky top-0 bg-white pb-2 border-b border-gray-200">
+      <div className="bg-white rounded-lg w-full max-w-5xl relative max-h-[90vh] flex flex-col overflow-hidden">
+        <div className="flex items-center shrink-0 bg-white px-4 sm:px-6 pt-4 sm:pt-6 pb-2 border-b border-gray-200">
           {/* Close Button - Fixed width for balance */}
           <div className="w-20 flex justify-start">
             <button
@@ -39,12 +39,14 @@ const CustomizedReportModal = forwardRef(({ onClose, receipts }, ref) => {
             </button>
           </div>
         </div>
-        
-        <CustomizedReport
-          ref={ref}
-          receipts={receipts}
-          onClose={onClose}
-        />
+
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-6 pt-4 pb-4 sm:pb-6">
+          <CustomizedReport
+            ref={ref}
+            receipts={receipts}
+            onClose={onClose}
+          />
+        </div>
       </div>
     </div>
   );
