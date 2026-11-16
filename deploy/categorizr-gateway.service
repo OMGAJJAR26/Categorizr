@@ -1,0 +1,17 @@
+[Unit]
+Description=Categorizr API gateway (auth/receipt/upload proxy)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/app.categorizr.com/deploy
+ExecStart=/usr/bin/node /var/www/app.categorizr.com/deploy/gateway.mjs
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+Environment=GATEWAY_PORT=3100
+
+[Install]
+WantedBy=multi-user.target
