@@ -1,6 +1,17 @@
 import { motion, AnimatePresence } from "framer-motion";
 
-const LogoutConfirmationDialog = ({ isOpen, onClose, onConfirm }) => {
+const LogoutConfirmationDialog = ({
+  isOpen,
+  onClose,
+  onConfirm,
+  title = "Logout",
+  message = "Are you sure you want to logout?",
+  cancelLabel = "No",
+  confirmLabel = "Yes",
+  // The default confirm button is red (logging out is destructive); pass false for a
+  // neutral blue button.
+  danger = true,
+}) => {
   if (!isOpen) return null;
 
   const backdropVariants = {
@@ -38,10 +49,10 @@ const LogoutConfirmationDialog = ({ isOpen, onClose, onConfirm }) => {
         >
           <div className="p-6 text-center">
             <h2 className="text-xl font-bold text-gray-900 mb-2">
-              Logout
+              {title}
             </h2>
             <p className="text-gray-600">
-              Are you sure you want to logout?
+              {message}
             </p>
           </div>
 
@@ -50,13 +61,17 @@ const LogoutConfirmationDialog = ({ isOpen, onClose, onConfirm }) => {
               onClick={onClose}
               className="flex-1 px-4 py-3 text-gray-600 font-semibold hover:bg-gray-50 transition-colors border-r border-gray-200"
             >
-              No
+              {cancelLabel}
             </button>
             <button
               onClick={onConfirm}
-              className="flex-1 px-4 py-3 text-red-600 font-semibold hover:bg-red-50 transition-colors"
+              className={`flex-1 px-4 py-3 font-semibold transition-colors ${
+                danger
+                  ? "text-red-600 hover:bg-red-50"
+                  : "text-blue-600 hover:bg-blue-50"
+              }`}
             >
-              Yes
+              {confirmLabel}
             </button>
           </div>
         </motion.div>

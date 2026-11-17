@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Link, useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import FontLogo from "../assets/categorizrFontLogo.png";
 import { UserCircle, Check, Settings } from "lucide-react";
 import { useData } from "../context/DataContext";
@@ -7,6 +7,7 @@ import { useCurrency } from "../context/CurrencyContext";
 import LogoutConfirmationDialog from "./LogoutConfirmationDialog";
 import Flag from "./Flag";
 import { clearAuthLocalStorage } from "../utils/authStorage";
+import { MARKETING_SITE_URL } from "../utils/siteUrls";
 
 const Header = () => {
   const navigate = useNavigate();
@@ -14,18 +15,45 @@ const Header = () => {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showWebsiteConfirm, setShowWebsiteConfirm] = useState(false);
   const langRef = useRef(null);
   const profileRef = useRef(null);
   const { clearAllData, user } = useData();
   const { language, setLanguage, languages } = useCurrency();
   const isOnSettings = location.pathname === "/settings";
+  const isOnHomepage = location.pathname === "/homepage";
 
-  const handleLogout = () => {
+  // Both ways of leaving (profile-menu Logout, and the logo) end the session the same
+  // way; only the destination differs.
+  const endSession = () => {
     setShowProfileMenu(false);
-    setShowLogoutConfirm(false);
     clearAllData();
     clearAuthLocalStorage();
+  };
+
+  const handleLogout = () => {
+    setShowLogoutConfirm(false);
+    endSession();
     navigate("/login", { replace: true });
+  };
+
+  // The logo means "up one level": from any other screen it returns to the homepage; from
+  // the homepage itself it offers the public website. The website is outside the app, so
+  // the user is told it signs them out, and nothing happens unless they confirm.
+  const handleLogoClick = () => {
+    setShowLangMenu(false);
+    setShowProfileMenu(false);
+    if (isOnHomepage) {
+      setShowWebsiteConfirm(true);
+    } else {
+      navigate("/homepage");
+    }
+  };
+
+  const handleLeaveForWebsite = () => {
+    setShowWebsiteConfirm(false);
+    endSession();
+    window.location.assign(MARKETING_SITE_URL);
   };
 
   const handleLogoutClick = () => {
@@ -57,23 +85,20 @@ const Header = () => {
 
   return (
     <header className="sticky top-0 z-50 bg-[#0f172a] text-white px-3 sm:px-4 md:px-6 py-2 sm:py-3 flex items-center justify-between shadow-lg shadow-blue-900/20">
-      {/* Logo — takes the user back to the homepage */}
-      <Link
-        to="/homepage"
-        aria-label="Go to homepage"
-        className="flex items-center"
-        onClick={() => {
-          setShowLangMenu(false);
-          setShowProfileMenu(false);
-          if (location.pathname === "/homepage") window.scrollTo({ top: 0, behavior: "smooth" });
-        }}
+      {/* Logo — homepage from other screens; on the homepage, the website (after a confirm) */}
+      <button
+        type="button"
+        aria-label={isOnHomepage ? "Back to the Categorizr website" : "Go to homepage"}
+        title={isOnHomepage ? "Back to website" : "Homepage"}
+        className="flex items-center rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+        onClick={handleLogoClick}
       >
         <img
           src={FontLogo}
           alt="Categorizr Logo"
           className="h-6 sm:h-7 md:h-8 w-auto object-contain"
         />
-      </Link>
+      </button>
 
       <div className="flex items-center gap-2 sm:gap-3 md:gap-4 relative">
         {/* Language Selector */}
@@ -183,6 +208,16 @@ const Header = () => {
         isOpen={showLogoutConfirm}
         onClose={() => setShowLogoutConfirm(false)}
         onConfirm={handleLogout}
+      />
+      <LogoutConfirmationDialog
+        isOpen={showWebsiteConfirm}
+        onClose={() => setShowWebsiteConfirm(false)}
+        onConfirm={handleLeaveForWebsite}
+        title="Back to website"
+        message="Going back to the website will log you out. Do you want to continue?"
+        cancelLabel="Cancel"
+        confirmLabel="Back to website"
+        danger={false}
       />
     </header>
   );
