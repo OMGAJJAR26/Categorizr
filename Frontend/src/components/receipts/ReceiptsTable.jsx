@@ -4,6 +4,7 @@ import MerchantAvatar from "../MerchantAvatar";
 import ReceiptBadges from "../ReceiptBadges";
 import SimpleAlertModal from "../SimpleAlertModal";
 import { formatReceiptDate } from "../../utils/receiptDate";
+import { receiptDescription } from "../../utils/receiptTextFields";
 import { isUnreadHighlightReceipt } from "../../hooks/useReceiptGrouping";
 import RowSelectCheckbox from "./RowSelectCheckbox";
 import ComingSoonIntegrations from "./ComingSoonIntegrations";
@@ -88,7 +89,7 @@ const ReceiptsTable = ({
         </div>
 
         <div className="text-gray-800 font-medium text-sm xl:text-base truncate">
-          {receipt.product_name || receipt.storeName || "—"}
+          {receiptDescription(receipt) || "—"}
         </div>
 
         <div className="flex items-center gap-2 text-gray-900 font-medium">
@@ -274,7 +275,7 @@ const ReceiptsTable = ({
 
         <div className="flex justify-between items-center">
           <div className="text-sm text-gray-600 truncate flex-1 mr-2">
-            {receipt.product_name || receipt.storeName || "—"}
+            {receiptDescription(receipt) || "—"}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <button

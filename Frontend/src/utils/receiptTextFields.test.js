@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   CLEAR_TEXT_API_VALUE,
+  descriptionWithoutMerchantEcho,
   fromApiTextValue,
+  receiptDescription,
   toApiTextValue,
 } from "./receiptTextFields.js";
 
@@ -51,4 +53,43 @@ test("clearing then reading round-trips to empty", () => {
 test("a real description round-trips unchanged", () => {
   const text = "Two litres of paint";
   assert.equal(fromApiTextValue(toApiTextValue(text)), text);
+});
+
+test("receiptDescription shows only the stored description, never the merchant name", () => {
+  assert.equal(receiptDescription({ product_name: "Team lunch", storeName: "Home Depot" }), "Team lunch");
+  assert.equal(receiptDescription({ product_name: "  Tools  ", storeName: "Home Depot" }), "Tools");
+  assert.equal(receiptDescription({ productName: "Paint", storeName: "Lowe's" }), "Paint");
+});
+
+test("receiptDescription is empty when no description was added", () => {
+  for (const receipt of [
+    { storeName: "Home Depot" },
+    { product_name: "", storeName: "Home Depot" },
+    { product_name: "   ", storeName: "Home Depot" },
+    { product_name: null, storeName: "Home Depot" },
+    { product_name: "0", storeName: "Home Depot" }, // the legacy "cleared" marker
+    {},
+  ]) {
+    assert.equal(receiptDescription(receipt), "", JSON.stringify(receipt));
+  }
+  assert.equal(receiptDescription(null), "");
+  assert.equal(receiptDescription(undefined), "");
+});
+
+test("a description the user wrote that happens to match the merchant is still shown", () => {
+  assert.equal(receiptDescription({ product_name: "Home Depot", storeName: "Home Depot" }), "Home Depot");
+});
+
+test("descriptionWithoutMerchantEcho drops a scanned description that just repeats the merchant", () => {
+  assert.equal(descriptionWithoutMerchantEcho("Home Depot", "Home Depot"), "");
+  assert.equal(descriptionWithoutMerchantEcho("  home depot ", "HOME DEPOT"), "");
+  assert.equal(descriptionWithoutMerchantEcho("Dillard's", "Miscellaneous", "Dillard's"), "");
+});
+
+test("descriptionWithoutMerchantEcho keeps real descriptions and blanks", () => {
+  assert.equal(descriptionWithoutMerchantEcho("Tools and supplies", "Home Depot"), "Tools and supplies");
+  assert.equal(descriptionWithoutMerchantEcho("Home Depot run", "Home Depot"), "Home Depot run");
+  assert.equal(descriptionWithoutMerchantEcho("", "Home Depot"), "");
+  assert.equal(descriptionWithoutMerchantEcho("", ""), "");
+  assert.equal(descriptionWithoutMerchantEcho("Tools"), "Tools");
 });

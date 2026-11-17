@@ -3,6 +3,7 @@ import { Trash2, Link2, Loader2 } from "lucide-react";
 import MerchantAvatar from "../MerchantAvatar";
 import SimpleAlertModal from "../SimpleAlertModal";
 import { formatReceiptDate } from "../../utils/receiptDate";
+import { receiptDescription } from "../../utils/receiptTextFields";
 import { isUnreadHighlightReceipt } from "../../hooks/useReceiptGrouping";
 import { isReceiptUnread } from "../../utils/receiptReadState";
 import RowSelectCheckbox from "./RowSelectCheckbox";
@@ -133,7 +134,7 @@ const ReceiptsMobileView = ({
             Description
           </div>
           <div className={`font-medium ${isUnread ? 'text-gray-400' : ''}`}>
-            {receipt.product_name || receipt.storeName || "—"}
+            {receiptDescription(receipt) || "—"}
           </div>
         </div>
         

@@ -39,3 +39,25 @@ export const fromApiTextValue = (value) => {
   const text = (value ?? "").toString();
   return text.trim() === CLEAR_TEXT_API_VALUE ? "" : text;
 };
+
+/**
+ * The description (Describe Purchase) to SHOW for a receipt: what was stored, trimmed, and
+ * nothing else. A receipt added without a description has none, so this is "" and the
+ * caller shows a dash. The merchant name must never stand in for it.
+ */
+export const receiptDescription = (receipt) =>
+  fromApiTextValue(receipt?.product_name ?? receipt?.productName).trim();
+
+const sameText = (a, b) => {
+  const x = (a ?? "").toString().trim().toLowerCase();
+  const y = (b ?? "").toString().trim().toLowerCase();
+  return x !== "" && x === y;
+};
+
+/**
+ * A scanned receipt can come back with the merchant name repeated as its "product name".
+ * That is the scanner echoing the merchant, not a description anyone wrote, so it is dropped
+ * (the field starts empty). Anything else, including text the user types later, is kept.
+ */
+export const descriptionWithoutMerchantEcho = (description, ...merchantNames) =>
+  merchantNames.some((name) => sameText(description, name)) ? "" : description;

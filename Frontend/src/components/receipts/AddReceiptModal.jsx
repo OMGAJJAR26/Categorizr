@@ -83,6 +83,7 @@ import {
 } from "../../utils/mediaUrlUtils";
 import PdfThumbnail from "./PdfThumbnail";
 import { findRenamedApiMerchant } from "../../utils/merchantListUtils";
+import { descriptionWithoutMerchantEcho } from "../../utils/receiptTextFields";
 import EditPaymentMethodModal from "./EditPaymentMethodModal";
 
 // Payment method logos (for Add Payment Method modal card type list)
@@ -2462,7 +2463,13 @@ const handleFieldChange = (field, value) => {
         receipt_date: productDateToApiReceiptDate(parsedDate),
         subtotal: ocrTaxSubtotalFinal,
         purchasePrice: cleanNumericValue(parsedReceiptData?.total || parsedReceiptData?.subtotal),
-        product_name: cleanTextValue(parsedReceiptData?.productName || ""),
+        // The scanner sometimes returns the merchant name again as the "product name";
+        // that is not a description anyone wrote, so the field starts empty in that case.
+        product_name: descriptionWithoutMerchantEcho(
+          cleanTextValue(parsedReceiptData?.productName || ""),
+          merchantName,
+          parsedReceiptData?.merchantName,
+        ),
         notes: "",
         receipt_tax_values: ocrTaxValues,
         tip: cleanNumericValue(parsedReceiptData?.tip),
