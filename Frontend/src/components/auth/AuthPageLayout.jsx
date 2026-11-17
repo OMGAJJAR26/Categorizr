@@ -30,13 +30,13 @@ const SLIDES = [
   },
 ];
 
+// The headlines slide sideways every 3 seconds and can also be swiped (touch) or dragged
+// (mouse) to the next / previous one. A fade has no drag, so it is deliberately not used.
 const sliderSettings = {
   dots: false,
   arrows: false,
-  fade: true,
   infinite: true,
-  speed: 450,
-  cssEase: "ease-in-out",
+  speed: 700,
   autoplay: true,
   autoplaySpeed: 3000,
   // react-slick pauses autoplay while the pointer is over the slider or it has focus,
@@ -46,6 +46,9 @@ const sliderSettings = {
   pauseOnDotsHover: false,
   slidesToShow: 1,
   slidesToScroll: 1,
+  swipe: true,
+  touchMove: true,
+  draggable: true,
 };
 
 const focusRing =
@@ -100,7 +103,7 @@ const AuthPageLayout = ({ children }) => (
     <main className="relative z-10 flex-1 flex flex-col lg:flex-row">
       {/* Left half: logo and the rotating message, centred both ways. */}
       <section className="w-full lg:w-1/2 flex flex-col items-center justify-center px-6 pt-8 pb-2 lg:p-10 text-center text-blue-900">
-        <div className="w-full max-w-xl">
+        <div className="w-full max-w-4xl">
           <img
             src={Logo}
             alt="Categorizr Logo"
@@ -109,10 +112,10 @@ const AuthPageLayout = ({ children }) => (
           <Slider {...sliderSettings} className="auth-hero-slider">
             {SLIDES.map((slide) => (
               <div key={slide.title}>
-                <h1 className="auth-slide-title text-4xl sm:text-5xl lg:text-6xl font-bold leading-[1.1] tracking-tight">
+                <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-[1.1] tracking-tight">
                   {slide.title}
                 </h1>
-                <p className="auth-slide-sub mt-3 text-lg lg:text-xl font-medium">
+                <p className="mt-3 text-lg lg:text-xl font-medium">
                   {slide.subtitle}
                 </p>
               </div>

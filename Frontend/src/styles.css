@@ -114,60 +114,6 @@ h1.text-5xl {
   }
 }
 
-/* ── Auth pages (login / sign-up): hero message slider ───────────────────────── */
-/* Equal-height slides so the content below never jumps when a headline wraps. */
-.auth-hero-slider .slick-track {
-  display: flex;
-}
-.auth-hero-slider .slick-slide {
-  height: auto;
-}
-.auth-hero-slider .slick-slide > div {
-  height: 100%;
-}
-
-/* Each time a slide becomes active its headline and subtitle rise in one after the
-   other (the slider itself crossfades). Skipped for reduced-motion users. */
-@keyframes auth-slide-rise {
-  from {
-    opacity: 0;
-    transform: translateY(22px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-/* A short delay lets the outgoing slide mostly clear before the new text appears, so the
-   two headlines barely overlap. */
-.auth-hero-slider .slick-active .auth-slide-title {
-  animation: auth-slide-rise 0.8s cubic-bezier(0.22, 1, 0.36, 1) 0.18s both;
-}
-.auth-hero-slider .slick-active .auth-slide-sub {
-  animation: auth-slide-rise 0.8s cubic-bezier(0.22, 1, 0.36, 1) 0.32s both;
-}
-@media (prefers-reduced-motion: reduce) {
-  .auth-hero-slider .slick-active .auth-slide-title,
-  .auth-hero-slider .slick-active .auth-slide-sub {
-    animation: none;
-  }
-}
-
-/* Password inputs that draw their own show/hide eye (login, sign-up, Settings): hide the
-   browser's built-in reveal / clear / autofill icons so two icons never stack on the
-   right-hand side (Edge shows its own eye, Safari its key/contacts button). */
-.has-eye-toggle::-ms-reveal,
-.has-eye-toggle::-ms-clear {
-  display: none;
-}
-.has-eye-toggle::-webkit-credentials-auto-fill-button,
-.has-eye-toggle::-webkit-contacts-auto-fill-button {
-  visibility: hidden;
-  pointer-events: none;
-  position: absolute;
-  right: 0;
-}
-
 /* ── Skeleton loading placeholders (see components/skeleton) ─────────────────── */
 /* A grey block with a light band sweeping across it. The radius is left to the
    component (Tailwind rounded-*) so it can't fight the utility classes. */
