@@ -152,3 +152,18 @@ h1.text-5xl {
     animation: none;
   }
 }
+
+/* Password inputs that draw their own show/hide eye (login, sign-up, Settings): hide the
+   browser's built-in reveal / clear / autofill icons so two icons never stack on the
+   right-hand side (Edge shows its own eye, Safari its key/contacts button). */
+.has-eye-toggle::-ms-reveal,
+.has-eye-toggle::-ms-clear {
+  display: none;
+}
+.has-eye-toggle::-webkit-credentials-auto-fill-button,
+.has-eye-toggle::-webkit-contacts-auto-fill-button {
+  visibility: hidden;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+}

@@ -2,7 +2,8 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef } f
 import { useNavigate } from "react-router-dom";
 import { PHP_API_BASE } from "../api/Axios";
 import { clearAuthLocalStorage } from "../utils/authStorage";
-import { isSessionExpiredResponse } from "../utils/sessionExpired";
+import { classifyAuthFailure } from "../utils/accountGone";
+import { noticeForAuthFailure } from "../utils/authNotices";
 import { getPaymentDisplayFromReceipt } from "../hooks/usePaymentDisplay";
 import { isNewForwardedReceipt } from "../hooks/useReceiptGrouping";
 import { isStatusUpdateSuccessful } from "../utils/receiptReadState";
@@ -132,16 +133,19 @@ const getEntityId = (item) =>
   item?.fk_expense_category_id ??
   null;
 
-// The server rejects an expired token with HTTP 200 and {code:"010"}, so a fetch that only
-// checks `res.ok` quietly shows an empty list. Take the same exit as the inactivity timeout
-// in SessionManager: clear the stored login, reset in-memory data, go to the login screen.
+// The server rejects an expired token with HTTP 200 and {code:"010"}, and answers for a
+// deleted account with a "user not found / deleted" style body, so a fetch that only checks
+// `res.ok` quietly shows an empty list. Take the same exit as the inactivity timeout in
+// SessionManager: clear the stored login, reset in-memory data, go to the login screen, and
+// tell the user why there (`notice`). Nothing else runs: with the user cleared the
+// auto-refresh stops too.
 // `requestToken` guards against a late reply from an old login signing out a newer one
-// (and makes a second reply from the same expiry a no-op).
-const expireSession = (requestToken, navigate) => {
+// (and makes a second reply from the same failure a no-op).
+const expireSession = (requestToken, navigate, notice) => {
   if (localStorage.getItem("token") !== requestToken) return;
   clearAuthLocalStorage();
   window.dispatchEvent(new CustomEvent("cat:session-expired"));
-  navigate("/login");
+  navigate("/login", { replace: true, state: { notice } });
 };
 
 const isDeleteResponseSuccessful = (data) => {
@@ -1244,8 +1248,9 @@ export const DataProvider = ({ children }) => {
         });
         if (!userRes.ok) throw new Error("Failed to fetch user data");
         const userJson = await userRes.json();
-        if (isSessionExpiredResponse(userJson)) {
-          expireSession(token, navigateRef.current);
+        const userFailure = classifyAuthFailure(userJson);
+        if (userFailure) {
+          expireSession(token, navigateRef.current, noticeForAuthFailure(userFailure));
           return;
         }
         const userData = normalizeUserResponse(userJson);
@@ -1282,8 +1287,9 @@ export const DataProvider = ({ children }) => {
 
       if (!receiptRes.ok) throw new Error("Failed to fetch receipts");
       const receiptData = await receiptRes.json();
-      if (isSessionExpiredResponse(receiptData)) {
-        expireSession(token, navigateRef.current);
+      const receiptFailure = classifyAuthFailure(receiptData);
+      if (receiptFailure) {
+        expireSession(token, navigateRef.current, noticeForAuthFailure(receiptFailure));
         return;
       }
       console.log("%c[Receipts] getreceiptfromdatev1 response (all receipts):", "color:#06b6d4;font-weight:bold", receiptData);

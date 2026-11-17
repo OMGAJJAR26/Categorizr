@@ -9,6 +9,7 @@ import {
   AuthFooter,
   AuthPasswordToggle,
   authInputClass,
+  authPasswordInputClass,
   authLinkClass,
   authErrorClass,
 } from "../components/auth/AuthFormCard";
@@ -170,7 +171,7 @@ const Login = () => {
                     type={showPassword ? "text" : "password"}
                     placeholder="Enter Password"
                     autoComplete="current-password"
-                    className={`${authInputClass} pr-12`}
+                    className={authPasswordInputClass}
                   />
                   <AuthPasswordToggle
                     showPassword={showPassword}

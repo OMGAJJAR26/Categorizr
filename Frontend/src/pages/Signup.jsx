@@ -11,6 +11,7 @@ import {
   AuthFooter,
   AuthPasswordToggle,
   authInputClass,
+  authPasswordInputClass,
   authErrorClass,
 } from "../components/auth/AuthFormCard";
 import { useFormik } from "formik";
@@ -299,7 +300,7 @@ const Signup = () => {
                 value={formik.values.password}
                 onChange={formik.handleChange}
                 onBlur={formik.handleBlur}
-                className={`${authInputClass} pr-12`}
+                className={authPasswordInputClass}
               />
               <AuthPasswordToggle
                 showPassword={showPassword}

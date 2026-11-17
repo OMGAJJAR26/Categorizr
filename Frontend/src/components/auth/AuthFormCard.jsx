@@ -1,5 +1,6 @@
 import { Eye, EyeOff } from "lucide-react";
 import FontLogo from "../../assets/categorizrFontLogo.png";
+import AuthNotice from "./AuthNotice";
 
 export const authInputClass =
   "w-full px-4 py-3 rounded-xl bg-white text-slate-900 placeholder:text-slate-400 shadow-sm border border-transparent focus:outline-none focus:ring-2 focus:ring-sky-400/60 focus:border-sky-300 transition";
@@ -17,6 +18,7 @@ export const AuthFormCard = ({ title, children }) => (
       className="h-10 sm:h-11 w-auto object-contain mb-5 sm:mb-6"
     />
     <h2 className="text-3xl font-bold tracking-tight mb-7 sm:mb-8">{title}</h2>
+    <AuthNotice />
     {children}
   </div>
 );
@@ -72,13 +74,22 @@ export const AuthFooter = () => (
   </div>
 );
 
+// Password inputs that carry the eye need room on the right so typed text never runs
+// under it, and the `has-eye-toggle` class (see styles.css) hides the browser's own
+// reveal / autofill icons that would otherwise draw on top of the eye.
+export const authPasswordInputClass = `${authInputClass} pr-14 has-eye-toggle`;
+
+// `m-0 p-0` matter: styles.css gives every button `margin: 10px 0`, which used to push
+// this one 10px below the middle of the field. The button is a 44px square (a
+// comfortable tap target on phones) centred on the input, with the icon centred in it.
 export const AuthPasswordToggle = ({ showPassword, onToggle }) => (
   <button
     type="button"
-    className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-800 hover:text-blue-900 p-1 rounded-md transition"
+    className="absolute right-1 top-1/2 -translate-y-1/2 m-0 p-0 w-11 h-11 grid place-items-center rounded-full text-blue-800 hover:text-blue-900 hover:bg-blue-50 active:bg-blue-100 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
     onClick={onToggle}
     aria-label={showPassword ? "Hide password" : "Show password"}
+    aria-pressed={showPassword}
   >
-    {showPassword ? <Eye size={20} /> : <EyeOff size={20} />}
+    {showPassword ? <Eye size={20} aria-hidden="true" /> : <EyeOff size={20} aria-hidden="true" />}
   </button>
 );

@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
-import { clearAuthLocalStorage } from "../utils/authStorage";
+import { clearAuthLocalStorage, clearLocalDataForUserSwitch } from "../utils/authStorage";
+import { deleteAccountOnServer } from "../utils/deleteAccount";
+import { NOTICE_ACCOUNT_DELETED, NOTICE_SESSION_ENDED } from "../utils/authNotices";
 import { containsEmoji, stripEmoji } from "../utils/emojiUtils";
 import { parseTaxRateInput, createTaxRateKeyDownHandler } from "../utils/taxRateInput";
 import { useTaxRateLimitAlert } from "../hooks/useTaxRateLimitAlert";
@@ -170,6 +172,10 @@ const DEFAULT_PAYMENT_CARD_MAP = {
 /* ─── Shared styles ────────────────────────────────────── */
 const inputCls = "w-full bg-white/95 border border-slate-200 text-slate-900 text-sm rounded-xl px-4 py-2.5 placeholder-slate-400 shadow-sm focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all";
 const labelCls = "block text-[11px] font-semibold text-slate-500 uppercase tracking-[0.08em] mb-1.5";
+// Show/hide-password eye. `m-0 p-0` override styles.css's global `margin: 10px 0` on
+// buttons (it used to sit 10px below the middle of the field); the 40px square is the tap
+// target and stays inside the 42px-high input.
+const eyeToggleCls = "absolute right-1 top-1/2 -translate-y-1/2 m-0 p-0 w-10 h-10 grid place-items-center rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400";
 const sectionCardCls = "bg-white border border-slate-200/80 rounded-2xl shadow-sm";
 
 /* ─── ItemLogo ─────────────────────────────────────────── */
@@ -221,9 +227,30 @@ const COLOR_MAP = {
 /* ─── Content Panels ─────────────────────────────────────── */
 
 /* My Account panel — menu → sub-view */
-const MyAccountPanel = ({ user, onLogoutRequest }) => {
+const MyAccountPanel = ({ user, onLogoutRequest, onAccountDeleted, onSessionEnded }) => {
   const { updateUserProfile } = useData();
   const [view, setView] = useState("menu"); // menu | editProfile | changePassword | deleteConfirm
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+
+  // Permanently deletes the account. Once the server confirms it is gone we do nothing
+  // else: the parent clears every trace of the user and returns to the login page.
+  const handleDeleteAccount = async () => {
+    if (deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    const result = await deleteAccountOnServer(localStorage.getItem("token"));
+    if (result.status === "deleted") {
+      onAccountDeleted();
+      return;
+    }
+    setDeleting(false);
+    if (result.status === "session-ended") {
+      onSessionEnded();
+      return;
+    }
+    setDeleteError(result.message);
+  };
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
 
@@ -385,10 +412,10 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
           <div>
             <label className={labelCls}>New Password</label>
             <div className="relative">
-              <input className={`${inputCls} pr-10`} type={showNew ? "text" : "password"} value={passwords.newPassword}
+              <input className={`${inputCls} pr-12 has-eye-toggle`} type={showNew ? "text" : "password"} value={passwords.newPassword}
                 onChange={e => setPasswords(p => ({ ...p, newPassword: e.target.value }))} placeholder="Enter new password" />
-              <button type="button" onClick={() => setShowNew(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                {showNew ? <EyeOff size={16}/> : <Eye size={16}/>}
+              <button type="button" onClick={() => setShowNew(v => !v)} aria-label={showNew ? "Hide password" : "Show password"} aria-pressed={showNew} className={eyeToggleCls}>
+                {showNew ? <EyeOff size={18} aria-hidden="true"/> : <Eye size={18} aria-hidden="true"/>}
               </button>
             </div>
             {strengthLevel && (
@@ -403,10 +430,10 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
           <div>
             <label className={labelCls}>Confirm New Password</label>
             <div className="relative">
-              <input className={`${inputCls} pr-10`} type={showConfirm ? "text" : "password"} value={passwords.confirmPassword}
+              <input className={`${inputCls} pr-12 has-eye-toggle`} type={showConfirm ? "text" : "password"} value={passwords.confirmPassword}
                 onChange={e => setPasswords(p => ({ ...p, confirmPassword: e.target.value }))} placeholder="Re-enter new password" />
-              <button type="button" onClick={() => setShowConfirm(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                {showConfirm ? <EyeOff size={16}/> : <Eye size={16}/>}
+              <button type="button" onClick={() => setShowConfirm(v => !v)} aria-label={showConfirm ? "Hide password" : "Show password"} aria-pressed={showConfirm} className={eyeToggleCls}>
+                {showConfirm ? <EyeOff size={18} aria-hidden="true"/> : <Eye size={18} aria-hidden="true"/>}
               </button>
             </div>
             {passwords.confirmPassword.length > 0 && (
@@ -438,9 +465,12 @@ const MyAccountPanel = ({ user, onLogoutRequest }) => {
             <p className="text-lg font-bold text-slate-900">Are you sure?</p>
             <p className="text-sm text-slate-500 mt-1 max-w-xs">This will permanently delete your account and all data. This cannot be undone.</p>
           </div>
+          {deleteError && (
+            <p role="alert" className="text-sm font-medium text-red-600 max-w-xs px-2">{deleteError}</p>
+          )}
           <div className="flex gap-3 w-full max-w-xs">
-            <button onClick={() => setView("menu")} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-sm font-semibold hover:bg-slate-50 transition-all">No, Keep It</button>
-            <button className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition-all">Yes, Delete</button>
+            <button disabled={deleting} onClick={() => { setDeleteError(null); setView("menu"); }} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-sm font-semibold hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition-all">No, Keep It</button>
+            <button disabled={deleting} onClick={handleDeleteAccount} className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-semibold transition-all">{deleting ? "Deleting…" : "Yes, Delete"}</button>
           </div>
         </div>
       )}
@@ -561,6 +591,21 @@ const Settings = () => {
     navigate("/login", { replace: true });
   };
 
+  // The account was deleted from here: nothing of the user may stay on this device
+  // (unlike a normal logout, which keeps per-user notification tracking).
+  const handleAccountDeleted = () => {
+    clearAllData();
+    clearLocalDataForUserSwitch();
+    navigate("/login", { replace: true, state: { notice: NOTICE_ACCOUNT_DELETED } });
+  };
+
+  // The login had already expired when deletion was attempted; nothing was deleted.
+  const handleSessionEnded = () => {
+    clearAllData();
+    clearAuthLocalStorage();
+    navigate("/login", { replace: true, state: { notice: NOTICE_SESSION_ENDED } });
+  };
+
   const handleNavClick = (id, soon) => {
     if (soon) return;
     setActive(id);
@@ -678,7 +723,7 @@ const Settings = () => {
             <AnimatePresence mode="wait">
               <motion.div key={active} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.18 }} className={`${sectionCardCls} p-4 sm:p-6`}>
                 {active === "myaccount" && (
-                  <MyAccountPanel user={user} onLogoutRequest={() => setShowLogoutConfirm(true)} />
+                  <MyAccountPanel user={user} onLogoutRequest={() => setShowLogoutConfirm(true)} onAccountDeleted={handleAccountDeleted} onSessionEnded={handleSessionEnded} />
                 )}
                 {active === "mynetwork" && (
                   <MyNetworkPanel
