@@ -119,7 +119,7 @@ const Login = () => {
   };
 
   return (
-    <AuthPageLayout>
+    <AuthPageLayout showBackToWebsite>
       <Formik
         initialValues={{ userName: "", password: "" }}
         validationSchema={validationSchema}

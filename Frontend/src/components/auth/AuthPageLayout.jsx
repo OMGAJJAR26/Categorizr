@@ -43,7 +43,12 @@ const sliderSettings = {
   arrows: true,
 };
 
-const AuthPageLayout = ({ children }) => (
+const MARKETING_SITE_URL = "https://categorizr.com/";
+
+// `showBackToWebsite` adds a link to the main website: pinned to the top-left corner on
+// desktop, and in normal flow above the logo on phones (where the centered logo leaves no
+// room beside it). It is opt-in so the sign-up page keeps its current layout.
+const AuthPageLayout = ({ children, showBackToWebsite = false }) => (
   <div className="relative min-h-screen font-dmsans overflow-hidden">
     <div
       className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat"
@@ -51,6 +56,27 @@ const AuthPageLayout = ({ children }) => (
       aria-hidden
     />
     <div className="fixed inset-0 z-0 bg-white/55 backdrop-blur-[2px]" aria-hidden />
+
+    {showBackToWebsite && (
+      <a
+        href={MARKETING_SITE_URL}
+        className="relative z-20 mt-3 ml-3 lg:absolute lg:top-5 lg:left-6 lg:m-0 flex w-fit items-center gap-1.5 min-h-[44px] px-3 rounded-full text-sm font-semibold text-blue-900 bg-white/80 hover:bg-white shadow-sm backdrop-blur transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+      >
+        <svg
+          viewBox="0 0 20 20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="w-4 h-4 shrink-0"
+          aria-hidden="true"
+        >
+          <path d="M12 4 6 10l6 6" />
+        </svg>
+        <span>Back to Categorizr.com</span>
+      </a>
+    )}
 
     <div className="relative z-10 flex flex-col lg:flex-row min-h-screen">
       <div className="w-full lg:w-1/2 flex flex-col items-center justify-center p-6 pb-0 lg:pb-10 lg:p-10 text-center">
