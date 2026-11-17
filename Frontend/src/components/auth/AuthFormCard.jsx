@@ -5,8 +5,21 @@ import AuthNotice from "./AuthNotice";
 export const authInputClass =
   "w-full px-4 py-3 rounded-xl bg-white text-slate-900 placeholder:text-slate-400 shadow-sm border border-transparent focus:outline-none focus:ring-2 focus:ring-sky-400/60 focus:border-sky-300 transition";
 
-export const authLinkClass =
-  "cursor-pointer block mt-2.5 text-sm font-semibold text-white/95 hover:text-white transition";
+// A "Forgot …?" link under a field. The row spans the field's width but is only a layout
+// box; the button is exactly as wide as its text, so clicking the empty space beside the
+// text does nothing. `m-0` cancels styles.css's global `margin: 10px 0` on buttons, and the
+// row's negative bottom margin keeps the spacing the old inline link had.
+export const AuthTextLink = ({ onClick, children }) => (
+  <div className="flex justify-end mt-1 -mb-1.5">
+    <button
+      type="button"
+      onClick={onClick}
+      className="m-0 px-1 py-1.5 cursor-pointer text-sm font-semibold text-white/95 hover:text-white hover:underline underline-offset-2 transition rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
+    >
+      {children}
+    </button>
+  </div>
+);
 
 export const authErrorClass = "text-red-300 text-sm block mt-1.5";
 

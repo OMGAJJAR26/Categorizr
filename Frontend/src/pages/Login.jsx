@@ -10,7 +10,7 @@ import {
   AuthPasswordToggle,
   authInputClass,
   authPasswordInputClass,
-  authLinkClass,
+  AuthTextLink,
   authErrorClass,
 } from "../components/auth/AuthFormCard";
 import { Formik, Form, Field, ErrorMessage } from "formik";
@@ -156,12 +156,9 @@ const Login = () => {
                   component="div"
                   className={authErrorClass}
                 />
-                <span
-                  onClick={() => setShowUsernameModel(true)}
-                  className={`${authLinkClass} text-right`}
-                >
+                <AuthTextLink onClick={() => setShowUsernameModel(true)}>
                   Forgot Username?
-                </span>
+                </AuthTextLink>
               </div>
 
               <div className="mt-5">
@@ -183,12 +180,9 @@ const Login = () => {
                   component="div"
                   className={authErrorClass}
                 />
-                <span
-                  onClick={() => setShowForgotModal(true)}
-                  className={`${authLinkClass} text-right`}
-                >
+                <AuthTextLink onClick={() => setShowForgotModal(true)}>
                   Forgot Password?
-                </span>
+                </AuthTextLink>
               </div>
 
               <AuthPrimaryButton>
