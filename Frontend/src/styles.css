@@ -167,3 +167,67 @@ h1.text-5xl {
   position: absolute;
   right: 0;
 }
+
+/* ── Skeleton loading placeholders (see components/skeleton) ─────────────────── */
+/* A grey block with a light band sweeping across it. The radius is left to the
+   component (Tailwind rounded-*) so it can't fight the utility classes. */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background-color: #e5e7eb;
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.7), transparent);
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+/* Same block on the dark home banner. */
+.skeleton-on-dark {
+  background-color: rgba(255, 255, 255, 0.16);
+}
+.skeleton-on-dark::after {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.22), transparent);
+}
+@keyframes skeleton-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after {
+    animation: none;
+    display: none;
+  }
+}
+
+/* Placeholder for text whose wording is fixed (menu labels, headings): the real words are
+   kept in the DOM but drawn transparent over a grey band, so it takes exactly the width and
+   wraps exactly where the real text will at any screen size. */
+.skeleton-text {
+  color: transparent;
+  user-select: none;
+  border-radius: 0.25rem;
+  background-image: linear-gradient(90deg, #e5e7eb 25%, #f1f3f6 50%, #e5e7eb 75%);
+  background-size: 200% 100%;
+  animation: skeleton-text-shimmer 1.5s linear infinite;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+@keyframes skeleton-text-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-text {
+    animation: none;
+    background-image: none;
+    background-color: #e5e7eb;
+  }
+}

@@ -8,6 +8,7 @@ import SessionManager from "./components/SessionManager";
 import { DataProvider } from "./context/DataContext";
 import TaxTypePopup from "./components/filters/TaxTypePopup";
 import { lazyWithReload } from "./utils/lazyWithReload";
+import RouteSkeleton from "./components/skeleton/RouteSkeleton";
 
 // Login/Signup load with the app; everything after sign-in is split into its own
 // chunk so the login screen no longer downloads PDF/OCR/spreadsheet libraries.
@@ -18,12 +19,6 @@ const ReceiptDetail = lazyWithReload(() => import("./pages/ReceiptDetail"));
 const SummaryReport = lazyWithReload(() => import("./pages/SummaryReport"));
 const Settings = lazyWithReload(() => import("./pages/Settings"));
 const ReceiptGallery = lazyWithReload(() => import("./pages/ReceiptGallery"));
-
-const RouteFallback = () => (
-  <div className="min-h-screen flex items-center justify-center" role="status" aria-label="Loading">
-    <div className="w-8 h-8 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin" />
-  </div>
-);
 
 const RequireAuth = ({ children }) => {
   const token = localStorage.getItem("token");
@@ -44,7 +39,7 @@ const App = () => {
       <SessionManager>
         <GlobalLoader />
         <DataProvider>
-          <Suspense fallback={<RouteFallback />}>
+          <Suspense fallback={<RouteSkeleton />}>
           <Routes>
             <Route path="/" element={<Navigate to="/login" />} />
             <Route path="/login" element={<Login />} />

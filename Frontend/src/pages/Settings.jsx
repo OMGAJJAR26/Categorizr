@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { clearAuthLocalStorage, clearLocalDataForUserSwitch } from "../utils/authStorage";
 import { deleteAccountOnServer } from "../utils/deleteAccount";
+import { SettingsPanelSkeleton } from "../components/skeleton/SettingsSkeleton";
 import { NOTICE_ACCOUNT_DELETED, NOTICE_SESSION_ENDED } from "../utils/authNotices";
 import { containsEmoji, stripEmoji } from "../utils/emojiUtils";
 import { parseTaxRateInput, createTaxRateKeyDownHandler } from "../utils/taxRateInput";
@@ -572,7 +573,7 @@ const TITLES = {
 /* ─── Main Settings Component ───────────────────────────── */
 const Settings = () => {
   const navigate = useNavigate();
-  const { clearAllData, user } = useData();
+  const { clearAllData, user, loading: dataLoading } = useData();
 
   const [active, setActive]               = useState("myaccount");
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -732,9 +733,11 @@ const Settings = () => {
                   />
                 )}
                 {MANAGE_TYPES.includes(active) && (
-                  <ReceiptInfoInline type={active} />
+                  dataLoading ? <SettingsPanelSkeleton /> : <ReceiptInfoInline type={active} />
                 )}
-                {active === "myinfo" && <MyInformationPanel user={user} />}
+                {active === "myinfo" && (
+                  dataLoading && !user ? <SettingsPanelSkeleton rows={3} /> : <MyInformationPanel user={user} />
+                )}
                 {(active === "driver" || active === "vehicle" || active === "property") && (
                   <div className="flex flex-col items-center justify-center py-16 gap-4 text-center">
                     <div className="w-16 h-16 rounded-full bg-yellow-50 flex items-center justify-center">

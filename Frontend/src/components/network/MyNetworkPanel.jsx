@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Search, X, Network, Loader2, UserMinus } from "lucide-react";
+import { SkeletonListRows } from "../skeleton/SettingsSkeleton";
 import {
   searchUsersForNetwork,
   getMyNetwork,
@@ -390,10 +391,7 @@ const MyNetworkPanel = ({ user, onPendingCountChange }) => {
           badgeVariant="alert"
         />
         {loadingPending ? (
-          <div className="flex items-center gap-2 text-sm text-slate-500 py-4">
-            <Loader2 size={14} className="animate-spin" />
-            Loading…
-          </div>
+          <SkeletonListRows rows={2} label="Loading your network" />
         ) : pendingRequests.length === 0 ? (
           <div className="text-sm text-slate-400 py-3 px-1">No pending requests.</div>
         ) : (
@@ -432,10 +430,7 @@ const MyNetworkPanel = ({ user, onPendingCountChange }) => {
       <div>
         <SectionHeader title="My Network" count={myNetwork.length} />
         {loadingNetwork ? (
-          <div className="flex items-center gap-2 text-sm text-slate-500 py-4">
-            <Loader2 size={14} className="animate-spin" />
-            Loading…
-          </div>
+          <SkeletonListRows rows={2} label="Loading your network" />
         ) : myNetwork.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-12 text-center bg-slate-50 border border-slate-200 rounded-2xl">
             <div className="w-14 h-14 rounded-full bg-white border border-slate-200 flex items-center justify-center shadow-sm">

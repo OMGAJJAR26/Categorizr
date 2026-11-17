@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import Header from "../components/Header";
-import PropagateLoader from "react-spinners/PropagateLoader";
+import { GalleryGridSkeleton } from "../components/skeleton/GallerySkeleton";
 import { useData } from "../context/DataContext";
 import { useReceiptFilters } from "../hooks/useReceiptFilters";
 import { useReceiptGrouping } from "../hooks/useReceiptGrouping";
@@ -91,9 +91,7 @@ const ReceiptGallery = () => {
       </div>
 
       {loading ? (
-        <div className="flex justify-center items-center py-24">
-          <PropagateLoader color="#2563eb" size={12} />
-        </div>
+        <GalleryGridSkeleton />
       ) : galleryItems.length === 0 ? (
         <div className="text-center py-24 px-6 text-slate-500">
           <p className="text-lg font-medium text-slate-700">No receipt images</p>

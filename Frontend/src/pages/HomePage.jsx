@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 import { useCurrency } from "../context/CurrencyContext";
 import { useData } from "../context/DataContext";
-import PropagateLoader from "react-spinners/PropagateLoader";
+import HomeSkeleton from "../components/skeleton/HomeSkeleton";
 import Slider from "react-slick";
 import "slick-carousel/slick/slick.css";
 import "slick-carousel/slick/slick-theme.css";
@@ -1339,9 +1339,7 @@ const HomePage = () => {
       <Header />
 
       {loading ? (
-        <div className="home-loader-wrap">
-          <PropagateLoader color="#2563eb" size={15} />
-        </div>
+        <HomeSkeleton />
       ) : (
         <>
           <div className={`home-hero ${!showSlider ? "home-hero-mobile-hidden" : ""}`}>
