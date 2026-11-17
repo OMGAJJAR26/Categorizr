@@ -16,6 +16,7 @@ const Header = () => {
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showWebsiteConfirm, setShowWebsiteConfirm] = useState(false);
+  const [leavingForWebsite, setLeavingForWebsite] = useState(false);
   const langRef = useRef(null);
   const profileRef = useRef(null);
   const { clearAllData, user } = useData();
@@ -50,10 +51,15 @@ const Header = () => {
     }
   };
 
+  // Loading another site takes a moment, so the popup stays open showing a spinner until
+  // the browser actually leaves; the short wait lets the spinner paint before that starts.
   const handleLeaveForWebsite = () => {
-    setShowWebsiteConfirm(false);
-    endSession();
-    window.location.assign(MARKETING_SITE_URL);
+    if (leavingForWebsite) return;
+    setLeavingForWebsite(true);
+    setTimeout(() => {
+      endSession();
+      window.location.assign(MARKETING_SITE_URL);
+    }, 150);
   };
 
   const handleLogoutClick = () => {
@@ -218,6 +224,8 @@ const Header = () => {
         cancelLabel="Cancel"
         confirmLabel="Back to website"
         danger={false}
+        loading={leavingForWebsite}
+        loadingLabel="Opening…"
       />
     </header>
   );

@@ -51,19 +51,32 @@ const sliderSettings = {
 const focusRing =
   "focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#141414]";
 
-// Dark top bar in the style of the main website. The logo is the only way out to the
-// website, so there are no extra links or buttons here.
+// Dark top bar in the style of the main website's own navigation: the logo (a link to the
+// website) on the left, and the same "Key Features" / "Contact Us" links on the right,
+// pointing at those sections of the website.
+const linkClass = `inline-flex items-center min-h-[44px] px-2 sm:px-3 rounded-sm text-[10px] min-[360px]:text-[11px] sm:text-[13px] font-semibold uppercase tracking-[0.08em] sm:tracking-[0.12em] text-white/85 hover:text-white transition whitespace-nowrap ${focusRing}`;
+
 const SiteHeader = () => (
   <header className="relative z-20 bg-[#141414] text-white border-b border-white/10">
-    <div className="flex items-center h-16 px-4 sm:px-6 lg:px-10">
+    <div className="flex items-center justify-between gap-2 h-16 px-3 sm:px-6 lg:px-10">
       <a
         href={MARKETING_SITE_URL}
         aria-label="Go to the Categorizr website"
         title="Categorizr website"
         className={`flex items-center shrink-0 min-h-[44px] rounded-sm ${focusRing}`}
       >
-        <img src={FontLogo} alt="Categorizr" className="h-8 sm:h-9 w-auto" />
+        <img src={FontLogo} alt="Categorizr" className="h-6 min-[360px]:h-7 sm:h-9 w-auto" />
       </a>
+
+      <nav aria-label="Website" className="flex items-center sm:gap-1">
+        <a href={`${MARKETING_SITE_URL}#keyfeatures`} className={linkClass}>
+          {/* Shortened to "Features" on the narrowest phones so both links fit. */}
+          <span className="hidden min-[400px]:inline">Key&nbsp;</span>Features
+        </a>
+        <a href={`${MARKETING_SITE_URL}#contactus`} className={linkClass}>
+          Contact Us
+        </a>
+      </nav>
     </div>
   </header>
 );
