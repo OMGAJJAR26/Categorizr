@@ -5,9 +5,7 @@ import Header from "../components/Header";
 import { useCurrency } from "../context/CurrencyContext";
 import { useData } from "../context/DataContext";
 import HomeSkeleton from "../components/skeleton/HomeSkeleton";
-import Slider from "react-slick";
-import "slick-carousel/slick/slick.css";
-import "slick-carousel/slick/slick-theme.css";
+import HomeCards from "../components/home/HomeCards";
 import { Search, Plus, Link, ListChecks, Check } from "lucide-react";
 import ReceiptDetail from "./ReceiptDetail";
 import FilterBar from "../components/filters/FilterBar";
@@ -174,7 +172,6 @@ const HomePage = () => {
   const mobileSearchInputRef = useRef(null);
   const receiptsScrollRef = useRef(null);
   const [showMobileSearch, setShowMobileSearch] = useState(false);
-  const [showSlider, setShowSlider] = useState(true);
 
   // Ref to track modal state for popstate handler
   const modalStateRef = useRef({
@@ -378,27 +375,6 @@ const HomePage = () => {
     return () => window.removeEventListener("popstate", handlePopState);
   }, [navigate]);
 
-  // Mobile scroll effect
-  useEffect(() => {
-    if (loading) return;
-    const scrollEl = receiptsScrollRef.current;
-    const isMobile = () => window.matchMedia("(max-width: 767px)").matches;
-    const THRESHOLD = 40;
-
-    const handleScroll = () => {
-      if (!isMobile()) return;
-      if (scrollEl) {
-        setShowSlider(scrollEl.scrollTop <= THRESHOLD);
-      }
-    };
-
-    if (scrollEl) {
-      scrollEl.addEventListener("scroll", handleScroll, { passive: true });
-      handleScroll();
-      return () => scrollEl.removeEventListener("scroll", handleScroll);
-    }
-    return undefined;
-  }, [loading]);
 
   const openMobileSearch = () => {
     setShowMobileSearch(true);
@@ -1312,14 +1288,6 @@ const HomePage = () => {
     setActiveMenu(null);
   };
 
-  const sliderContent = [
-    "Track Expenses",
-    "Organize Receipts",
-    "Visual Reports",
-    "Maximize Tax Deductions",
-    "Create Reports",
-  ];
-
   // Skeletons still to show = scans in flight minus the drafts that have already
   // appeared in the list since the scan started. Keeps (skeletons + drafts) constant,
   // so a scanned receipt never blinks out before its real draft row renders.
@@ -1342,25 +1310,7 @@ const HomePage = () => {
         <HomeSkeleton />
       ) : (
         <>
-          <div className={`home-hero ${!showSlider ? "home-hero-mobile-hidden" : ""}`}>
-            <Slider
-              dots={false}
-              infinite
-              speed={700}
-              autoplay
-              autoplaySpeed={3000}
-              slidesToShow={1}
-              slidesToScroll={1}
-              arrows={false}
-            >
-              {sliderContent.map((title, index) => (
-                <div key={index} className="home-hero-slide">
-                  <h1 className="home-hero-title">{title}</h1>
-                  <p className="home-hero-subtitle">AI-Powered Tools</p>
-                </div>
-              ))}
-            </Slider>
-          </div>
+          <HomeCards />
 
           <div className="home-main-card">
             {!isEmpty && (

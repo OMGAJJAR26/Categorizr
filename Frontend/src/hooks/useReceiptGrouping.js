@@ -13,7 +13,7 @@ export { isReceiptRead, isNewForwardedReceipt, isUnreadHighlightReceipt } from "
  *   2. Email-received eReceipts (fk_incoming_email_id set, NOT a network-forward)
  *      that haven't been saved yet (is_verify !== "1")
  */
-const isToBeVerified = (r) => {
+export const isToBeVerified = (r) => {
   if (!r) return false;
   if (r.is_draft === "1") return true;
   const hasEmailId =

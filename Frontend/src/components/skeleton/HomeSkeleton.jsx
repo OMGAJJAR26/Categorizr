@@ -108,16 +108,47 @@ const ReceiptRowSkeleton = () => (
   </div>
 );
 
-// The home screen while receipts load: the dark banner, the toolbar, the column
+// One summary card at the top of the home page (same grid cell and padding as the real ones).
+const SummaryCardSkeleton = () => (
+  <div className="h-full min-h-[232px] md:min-h-[310px] xl:min-h-[337px] rounded-2xl bg-white border border-slate-200/80 shadow-sm p-4 sm:p-5 flex flex-col">
+    <div className="flex items-start justify-between gap-3">
+      <div className="flex items-center gap-3">
+        <Skeleton className="w-11 h-11 rounded-xl" />
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-5 w-28" />
+          <Skeleton className="h-3 w-20" />
+        </div>
+      </div>
+      <Skeleton className="h-9 w-[96px] rounded-full" />
+    </div>
+    <div className="mt-5 flex-1 flex flex-col gap-3">
+      <Skeleton className="h-4 w-2/3" />
+      <Skeleton className="h-8 w-1/2" />
+      <Skeleton className="h-4 w-1/3" />
+    </div>
+    <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between h-10">
+      <Skeleton className="h-4 w-24" />
+      <Skeleton className="h-4 w-14" />
+    </div>
+  </div>
+);
+
+// The row of four summary cards (Merchant, Payment Method, Expense Category, Tax Type).
+const HomeCardsSkeleton = () => (
+  <div className="px-3 sm:px-4 md:px-6 pt-4 pb-3 sm:pt-5">
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-stretch">
+      {[0, 1, 2, 3].map((i) => (
+        <SummaryCardSkeleton key={i} />
+      ))}
+    </div>
+  </div>
+);
+
+// The home screen while receipts load: the summary cards, the toolbar, the column
 // headings, a year heading and a handful of receipts. Rendered below the real <Header />.
 export const HomeSkeleton = ({ rows = 6 }) => (
   <SkeletonRegion label="Loading your receipts">
-    <div className="home-hero">
-      <div className="home-hero-slide">
-        <Skeleton onDark className="h-9 sm:h-12 w-64 sm:w-[28rem] max-w-[85%]" />
-        <Skeleton onDark className="h-4 w-32 mt-4" />
-      </div>
-    </div>
+    <HomeCardsSkeleton />
 
     <div className="home-main-card">
       <div className="bg-white pb-1 lg:pb-[3px]">
