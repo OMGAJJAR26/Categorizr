@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Toast from "../components/Toast";
 import SimpleAlertModal from "../components/SimpleAlertModal";
@@ -79,6 +79,13 @@ const Signup = () => {
   const [alertMsg, setAlertMsg] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
+
+  // Already signed in: skip the sign-up form and go to the app (same as the Login page).
+  useEffect(() => {
+    if (localStorage.getItem("token")) {
+      navigate("/homepage", { replace: true });
+    }
+  }, [navigate]);
   const { setLoading } = useLoader();
   const { refreshDataAfterAuth } = useData();
 
