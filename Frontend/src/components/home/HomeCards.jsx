@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Reorder } from "framer-motion";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, LayoutGrid } from "lucide-react";
 import { useData } from "../../context/DataContext";
 import { useCurrency } from "../../context/CurrencyContext";
@@ -10,7 +11,9 @@ import {
   taxDimension,
 } from "../../utils/periodStats";
 import { normalizeMerchantKey } from "../../utils/merchantListUtils";
+import { mergeVisibleOrder, moveWithin, normalizeOrder, sameOrder } from "../../utils/cardOrder";
 import ExpenseTypeCard from "./ExpenseTypeCard";
+import ReorderableCard from "./ReorderableCard";
 import MerchantSummaryCard from "./MerchantSummaryCard";
 import PaymentMethodCard from "./PaymentMethodCard";
 import ExpenseCategoryCard from "./ExpenseCategoryCard";
@@ -37,6 +40,16 @@ const CARD_LIST = [
   { id: "tax", label: "Tax Type" },
 ];
 
+const DEFAULT_ORDER = CARD_LIST.map((c) => c.id);
+const ORDER_KEY = "home_cards_order";
+const readOrder = () => {
+  try {
+    return normalizeOrder(JSON.parse(localStorage.getItem(ORDER_KEY) || "null"), DEFAULT_ORDER);
+  } catch {
+    return DEFAULT_ORDER;
+  }
+};
+
 const VISIBLE_KEY = "home_cards_visible";
 const allOn = () => Object.fromEntries(CARD_LIST.map((c) => [c.id, true]));
 const readVisible = () => {
@@ -53,7 +66,7 @@ const NO_RECEIPTS = [];
 const CARD_WIDTH = 380; // px, from tablet width up; on phones the cards stack full width
 
 // The "Cards" button and the list of cards it can show or hide.
-const CardsMenu = ({ visible, onChange, onAll }) => {
+const CardsMenu = ({ visible, onChange, onAll, orderChanged, onResetOrder }) => {
   const [open, setOpen] = useState(false);
   const wrap = useRef(null);
   const count = CARD_LIST.filter((c) => visible[c.id]).length;
@@ -127,6 +140,15 @@ const CardsMenu = ({ visible, onChange, onAll }) => {
               Hide all
             </button>
           </div>
+          {orderChanged && (
+            <button
+              type="button"
+              onClick={onResetOrder}
+              className="mt-1 w-full m-0 p-1 text-left text-sm font-semibold text-[#2b3f78] hover:underline"
+            >
+              Reset card order
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -169,6 +191,56 @@ const HomeCards = ({ receipts, hasAnyReceipts }) => {
     setVisible(next);
   };
 
+  const [order, setOrder] = useState(readOrder);
+  const commitOrder = (next) => {
+    setOrder(next);
+    try {
+      localStorage.setItem(ORDER_KEY, JSON.stringify(next));
+    } catch {
+      /* storage unavailable: the new order still applies for this visit */
+    }
+  };
+
+  // Side by side from tablet width up, stacked on phones: that decides which way cards drag.
+  const [wide, setWide] = useState(() => window.matchMedia("(min-width: 768px)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const on = () => setWide(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+
+  // While a card is lifted, scroll the row (or the page, on phones) when it is dragged to an edge.
+  const strip = useRef(null);
+  const [lifting, setLifting] = useState(false);
+  const pointer = useRef({ x: 0, y: 0 });
+  useEffect(() => {
+    if (!lifting) return undefined;
+    const track = (e) => {
+      pointer.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener("pointermove", track);
+    let raf = 0;
+    const EDGE = 80;
+    const tick = () => {
+      const { x, y } = pointer.current;
+      if (wide && strip.current) {
+        const r = strip.current.getBoundingClientRect();
+        if (x < r.left + EDGE) strip.current.scrollLeft -= 14;
+        else if (x > r.right - EDGE) strip.current.scrollLeft += 14;
+      } else if (!wide) {
+        if (y < EDGE + 60) window.scrollBy(0, -12);
+        else if (y > window.innerHeight - EDGE) window.scrollBy(0, 12);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      window.removeEventListener("pointermove", track);
+      cancelAnimationFrame(raf);
+    };
+  }, [lifting, wide]);
+
   const expenseTypes = useMemo(() => listEntities(saved, expenseTypeDimension), [saved]);
 
   // Every merchant with a saved receipt, minus the ones the user hid or deleted. (The
@@ -203,7 +275,6 @@ const HomeCards = ({ receipts, hasAnyReceipts }) => {
   }, [merchantsWithImages]);
 
   // Sideways scrolling: arrows appear at an end only while there is more that way.
-  const strip = useRef(null);
   const [more, setMore] = useState({ left: false, right: false });
   const measure = useCallback(() => {
     const el = strip.current;
@@ -255,13 +326,27 @@ const HomeCards = ({ receipts, hasAnyReceipts }) => {
       node: <TaxTypeCard receipts={saved} taxTypes={taxTypes} formatCurrency={formatCurrency} />,
     },
   ];
-  const shown = cards.filter((c) => visible[c.id] && c.show);
+  const shown = cards
+    .filter((c) => visible[c.id] && c.show)
+    .sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+  const shownIds = shown.map((c) => c.id);
   const anyChosen = CARD_LIST.some((c) => visible[c.id]);
+
+  // Hidden cards keep their slot while the visible ones are rearranged.
+  const rearrange = (ids) => commitOrder(mergeVisibleOrder(order, ids));
+  const moveCard = (id, delta) => rearrange(moveWithin(shownIds, id, delta));
 
   return (
     <section aria-label="Summary cards" className="px-3 sm:px-4 md:px-6 pt-3 pb-3">
-      <div className="flex justify-end mb-3">
-        <CardsMenu visible={visible} onChange={toggleCard} onAll={setAll} />
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <p className="text-xs text-slate-400">Press and hold a card to rearrange</p>
+        <CardsMenu
+          visible={visible}
+          onChange={toggleCard}
+          onAll={setAll}
+          orderChanged={!sameOrder(order, DEFAULT_ORDER)}
+          onResetOrder={() => commitOrder(DEFAULT_ORDER)}
+        />
       </div>
 
       {anyChosen && shown.length === 0 && (
@@ -270,16 +355,27 @@ const HomeCards = ({ receipts, hasAnyReceipts }) => {
 
       {shown.length > 0 && (
         <div className="relative">
-          <div
+          <Reorder.Group
+            as="div"
+            axis={wide ? "x" : "y"}
+            values={shownIds}
+            onReorder={rearrange}
+            layoutScroll
             ref={strip}
-            className="flex flex-col md:flex-row gap-4 items-stretch md:overflow-x-auto md:snap-x md:pb-2"
+            className="flex flex-col md:flex-row gap-4 items-stretch md:overflow-x-auto md:pb-2"
           >
             {shown.map((c) => (
-              <div key={c.id} className="min-w-0 md:w-[380px] md:shrink-0 md:snap-start">
+              <ReorderableCard
+                key={c.id}
+                id={c.id}
+                onLift={setLifting}
+                onMove={moveCard}
+                className="min-w-0 md:w-[380px] md:shrink-0"
+              >
                 {c.node}
-              </div>
+              </ReorderableCard>
             ))}
-          </div>
+          </Reorder.Group>
           {more.left && (
             <button
               type="button"

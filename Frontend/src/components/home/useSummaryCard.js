@@ -123,6 +123,8 @@ export function useSummaryCard({ receipts, dimension, entities, noun, formatCurr
       const start = drag.current;
       drag.current = null;
       if (!start) return;
+      // The card was lifted by a press-and-hold to be rearranged: that drag is not a swipe.
+      if (e.currentTarget.closest('[data-reordering="true"]')) return;
       run(classifySwipe(e.clientX - start.x, e.clientY - start.y));
     },
     onPointerCancel: () => {
