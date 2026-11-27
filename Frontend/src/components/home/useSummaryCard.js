@@ -1,13 +1,20 @@
 import { useMemo, useRef, useState } from "react";
 import { useReducedMotion } from "framer-motion";
-import { defaultEntityIndex, entityPeriodSummary } from "../../utils/periodStats";
+import {
+  defaultEntityIndex,
+  earliestOffset,
+  entityPeriodSummary,
+  periodRange,
+  periodSubtitle,
+  shortPeriodLabel,
+} from "../../utils/periodStats";
 import { classifySwipe } from "../../utils/swipeGesture";
 
 // State and gestures shared by every summary card (merchant, payment method, expense
 // category, tax type):
 //
 //   swipe left / right  -> next / previous item (A to Z, wrapping round)
-//   swipe down          -> one month / quarter / year back
+//   swipe down          -> one month / quarter / year back (never past the oldest receipt)
 //   swipe up            -> back to the current month / quarter / year
 //
 // The same moves are on the arrow keys, and each card also shows buttons for them, because
@@ -21,13 +28,44 @@ export const slideVariants = {
 
 export const receiptsLabel = (n) => `${n} ${n === 1 ? "receipt" : "receipts"}`;
 
-export function useSummaryCard({ receipts, dimension, entities, noun, formatCurrency }) {
+// Whether a card shows its year-over-year part is remembered per card.
+const yoyKey = (cardId) => `home_card_yoy_${cardId}`;
+const readYoy = (cardId) => {
+  if (!cardId) return false;
+  try {
+    return localStorage.getItem(yoyKey(cardId)) === "1";
+  } catch {
+    return false;
+  }
+};
+
+export function useSummaryCard({ receipts, dimension, entities, noun, formatCurrency, cardId }) {
   const reduceMotion = useReducedMotion();
   const [selectedKey, setSelectedKey] = useState(null);
   const [kind, setKind] = useState("M");
   const [offset, setOffset] = useState(0);
   const [dir, setDir] = useState({ x: 0, y: 0 });
+  const [showYoy, setShowYoy] = useState(() => readYoy(cardId));
   const drag = useRef(null);
+
+  const toggleYoy = () => {
+    setShowYoy((on) => {
+      if (cardId) {
+        try {
+          localStorage.setItem(yoyKey(cardId), on ? "0" : "1");
+        } catch {
+          /* storage unavailable: still toggles for this visit */
+        }
+      }
+      return !on;
+    });
+  };
+
+  // The user may go back as far as the oldest receipt on the card (in the current unit) and
+  // no further; periods in between with no spend simply show $0.00.
+  const oldest = useMemo(() => earliestOffset(receipts, kind), [receipts, kind]);
+  const at = Math.max(offset, oldest); // `offset` may be stale after the receipts changed
+  const canGoBack = at - 1 >= oldest;
 
   const count = entities.length;
   // Until the user swipes, open on the first item (A to Z) that has a receipt this month.
@@ -44,9 +82,10 @@ export function useSummaryCard({ receipts, dimension, entities, noun, formatCurr
     setDir({ x: step, y: 0 });
     setSelectedKey(entities[(index + step + count) % count].key);
   };
-  const goPeriod = (nextOffset) => {
-    if (nextOffset === offset) return;
-    setDir({ x: 0, y: nextOffset < offset ? -1 : 1 });
+  const goPeriod = (wanted) => {
+    const nextOffset = Math.min(0, Math.max(wanted, oldest));
+    if (nextOffset === at) return;
+    setDir({ x: 0, y: nextOffset < at ? -1 : 1 });
     setOffset(nextOffset);
   };
   const chooseKind = (nextKind) => {
@@ -59,7 +98,7 @@ export function useSummaryCard({ receipts, dimension, entities, noun, formatCurr
   const run = (direction) => {
     if (direction === "left") goEntity(1);
     else if (direction === "right") goEntity(-1);
-    else if (direction === "down") goPeriod(offset - 1);
+    else if (direction === "down") goPeriod(at - 1);
     else if (direction === "up") goPeriod(0);
   };
 
@@ -98,7 +137,7 @@ export function useSummaryCard({ receipts, dimension, entities, noun, formatCurr
     },
   };
 
-  const summary = entity ? entityPeriodSummary(receipts, dimension, entity.key, kind, offset) : null;
+  const summary = entity ? entityPeriodSummary(receipts, dimension, entity.key, kind, at) : null;
 
   // Props for a block that should slide in whenever `key` changes.
   const custom = { ...dir, still: !!reduceMotion };
@@ -110,6 +149,8 @@ export function useSummaryCard({ receipts, dimension, entities, noun, formatCurr
     animate: "center",
     transition: { duration: 0.16, ease: "easeOut" },
   });
+
+  const range = periodRange(kind, at);
 
   let spoken = "";
   if (entity && summary) {
@@ -127,7 +168,13 @@ export function useSummaryCard({ receipts, dimension, entities, noun, formatCurr
     index,
     count,
     kind,
-    offset,
+    offset: at,
+    canGoBack,
+    backLabel: canGoBack ? shortPeriodLabel(kind, at - 1) : "",
+    upLabel: at < 0 ? shortPeriodLabel(kind, 0) : "",
+    subtitle: periodSubtitle(range),
+    showYoy,
+    toggleYoy,
     summary,
     spoken,
     rootProps,

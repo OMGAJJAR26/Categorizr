@@ -1310,7 +1310,7 @@ const HomePage = () => {
         <HomeSkeleton />
       ) : (
         <>
-          <HomeCards />
+          <HomeCards receipts={filteredReceipts} hasAnyReceipts={!isEmpty} />
 
           <div className="home-main-card">
             {!isEmpty && (

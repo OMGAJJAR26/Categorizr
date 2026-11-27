@@ -101,6 +101,59 @@ const isBlank = (value) => {
   return !s || s === "0" || s === "—" || s === "-";
 };
 
+// ── Labels and limits for the cards ─────────────────────────────────────────────────────
+
+// Receipts dated before 2001 are bad data (the app treats them as invalid), so they never
+// decide how far back a card lets the user go.
+const MIN_VALID_DAY = Date.UTC(2001, 0, 1);
+
+// The oldest valid receipt day (UTC ms), or 0 when there is none.
+export function earliestDayMs(receipts) {
+  let min = 0;
+  (receipts || []).forEach((r) => {
+    const d = dayMsOf(r);
+    if (d >= MIN_VALID_DAY && (!min || d < min)) min = d;
+  });
+  return min;
+}
+
+// How many steps back (0, -1, -2 ...) the oldest receipt is, for month / quarter / year.
+// A card lets the user go back to that period and no further.
+export function earliestOffset(receipts, kind, now = new Date()) {
+  const day = earliestDayMs(receipts);
+  if (!day) return 0;
+  const d = new Date(day);
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth();
+  const ny = now.getFullYear();
+  const nm = now.getMonth();
+  let steps;
+  if (kind === "Y") steps = y - ny;
+  else if (kind === "Q") steps = y * 4 + Math.floor(m / 3) - (ny * 4 + Math.floor(nm / 3));
+  else steps = y * 12 + m - (ny * 12 + nm);
+  return Math.min(0, steps);
+}
+
+// Short name for the button that jumps to a period: "2025", "Q3", "Oct". A period in an
+// earlier year than this one gets the year too ("Q4 ’25", "Dec ’25").
+export function shortPeriodLabel(kind, offset, now = new Date()) {
+  const start = new Date(periodRange(kind, offset, now).startMs);
+  const y = start.getUTCFullYear();
+  if (kind === "Y") return String(y);
+  const tail = y === now.getFullYear() ? "" : ` ’${String(y).slice(2)}`;
+  if (kind === "Q") return `Q${Math.floor(start.getUTCMonth() / 3) + 1}${tail}`;
+  return `${MONTHS[start.getUTCMonth()]}${tail}`;
+}
+
+// The line under the item's name: "Yearly · Jan – Dec", "Quarterly · Oct – Dec", "Monthly · Nov 1 – 30".
+export function periodSubtitle(range) {
+  if (range.kind === "Y") return `Yearly · ${range.detail}`;
+  if (range.kind === "Q") return `Quarterly · ${range.detail}`;
+  const start = new Date(range.startMs);
+  const lastDay = new Date(range.endMs - 86400000).getUTCDate();
+  return `Monthly · ${MONTHS[start.getUTCMonth()]} 1 – ${lastDay}`;
+}
+
 // ── Dimensions ──────────────────────────────────────────────────────────────────────────
 // entries(receipt) -> [{ key, name, amount }] : what the receipt belongs to, and how much
 // it adds to each. An empty list means the receipt is not part of that card.
@@ -118,6 +171,17 @@ export const categoryDimension = {
     const raw = r?.expense_type ?? r?.expenseType;
     if (isBlank(raw)) return [];
     return [{ key: looseKey(raw), name: String(raw).trim(), amount: priceOf(r) }];
+  },
+};
+
+// Personal / Business, from the receipt's category ("0" = Personal, "1" = Business).
+// Receipts with no type set belong to neither.
+export const expenseTypeDimension = {
+  entries(r) {
+    const v = String(r?.receipt_category ?? "").trim();
+    if (v === "0") return [{ key: "personal", name: "Personal", amount: priceOf(r) }];
+    if (v === "1") return [{ key: "business", name: "Business", amount: priceOf(r) }];
+    return [];
   },
 };
 

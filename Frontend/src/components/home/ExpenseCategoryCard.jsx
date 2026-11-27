@@ -91,7 +91,7 @@ const ExpenseCategoryCard = ({ receipts, categories, formatCurrency }) => {
         </Motion.div>
       </div>
 
-      <CardControls tone="dark" noun="expense category" index={card.index} count={card.count} kind={kind} offset={offset} onEntity={card.goEntity} onPeriod={card.goPeriod} />
+      <CardControls tone="dark" noun="expense category" index={card.index} count={card.count} kind={kind} offset={offset} canGoBack={card.canGoBack} onEntity={card.goEntity} onPeriod={card.goPeriod} />
     </div>
   );
 };

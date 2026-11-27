@@ -9,6 +9,10 @@ import {
   defaultEntityIndex,
   merchantDimension,
   categoryDimension,
+  expenseTypeDimension,
+  earliestOffset,
+  shortPeriodLabel,
+  periodSubtitle,
   paymentDimension,
   taxDimension,
 } from "./periodStats.js";
@@ -173,6 +177,45 @@ test("tax types: add up the tax amount lines, ignore tips", () => {
   assert.equal(hst.current.count, 2);
   assert.equal(hst.prior.total, 130);
   assert.equal(hst.yoy, 25);
+});
+
+test("how far back a card may go: the oldest receipt's period, ignoring bad dates", () => {
+  const rs = [rc("A", 1, 2024, 3, 3), rc("A", 1, 2026, 1, 1), { ...rc("A", 1, 1971, 1, 1) }];
+  assert.equal(earliestOffset(rs, "Y", NOW), -2); // 2024
+  assert.equal(earliestOffset(rs, "Q", NOW), -11); // Q1 2024 is 11 quarters before Q4 2026
+  assert.equal(earliestOffset(rs, "M", NOW), -32); // Mar 2024 is 32 months before Nov 2026
+  assert.equal(earliestOffset([], "Y", NOW), 0);
+  assert.equal(earliestOffset([rc("A", 1, 2027, 5, 1)], "Y", NOW), 0); // only future dates
+});
+
+test("short labels for the jump buttons", () => {
+  assert.equal(shortPeriodLabel("Y", -1, NOW), "2025");
+  assert.equal(shortPeriodLabel("Y", 0, NOW), "2026");
+  assert.equal(shortPeriodLabel("M", 0, NOW), "Nov");
+  assert.equal(shortPeriodLabel("M", -1, NOW), "Oct");
+  assert.equal(shortPeriodLabel("M", -11, NOW), "Dec ’25");
+  assert.equal(shortPeriodLabel("Q", 0, NOW), "Q4");
+  assert.equal(shortPeriodLabel("Q", -2, NOW), "Q2");
+  assert.equal(shortPeriodLabel("Q", -4, NOW), "Q4 ’25");
+});
+
+test("subtitles under the item name", () => {
+  assert.equal(periodSubtitle(periodRange("Y", 0, NOW)), "Yearly · Jan – Dec");
+  assert.equal(periodSubtitle(periodRange("Q", 0, NOW)), "Quarterly · Oct – Dec");
+  assert.equal(periodSubtitle(periodRange("M", 0, NOW)), "Monthly · Nov 1 – 30");
+  assert.equal(periodSubtitle(periodRange("M", -9, NOW)), "Monthly · Feb 1 – 28");
+});
+
+test("expense types: Personal (0) and Business (1) only", () => {
+  const rs = [
+    { ...rc("A", 10, 2026, 11, 3), receipt_category: "0" },
+    { ...rc("A", 30, 2026, 11, 4), receipt_category: "1" },
+    { ...rc("A", 5, 2026, 11, 5), receipt_category: "2" },
+    { ...rc("A", 7, 2026, 11, 5), receipt_category: "" },
+  ];
+  const list = listEntities(rs, expenseTypeDimension);
+  assert.deepEqual(list.map((e) => e.name), ["Business", "Personal"]);
+  assert.equal(entityPeriodSummary(rs, expenseTypeDimension, "business", "M", 0, NOW).current.total, 30);
 });
 
 test("swipe directions", () => {

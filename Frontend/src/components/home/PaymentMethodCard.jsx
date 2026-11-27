@@ -71,7 +71,7 @@ const PaymentMethodCard = ({ receipts, methods, formatCurrency }) => {
         </Motion.div>
       </div>
 
-      <CardControls noun="payment method" index={card.index} count={card.count} kind={kind} offset={offset} onEntity={card.goEntity} onPeriod={card.goPeriod} />
+      <CardControls noun="payment method" index={card.index} count={card.count} kind={kind} offset={offset} canGoBack={card.canGoBack} onEntity={card.goEntity} onPeriod={card.goPeriod} />
     </div>
   );
 };

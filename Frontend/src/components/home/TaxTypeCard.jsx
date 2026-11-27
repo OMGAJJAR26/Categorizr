@@ -60,7 +60,7 @@ const TaxTypeCard = ({ receipts, taxTypes, formatCurrency }) => {
         </Motion.div>
       </div>
 
-      <CardControls noun="tax type" index={card.index} count={card.count} kind={kind} offset={offset} onEntity={card.goEntity} onPeriod={card.goPeriod} />
+      <CardControls noun="tax type" index={card.index} count={card.count} kind={kind} offset={offset} canGoBack={card.canGoBack} onEntity={card.goEntity} onPeriod={card.goPeriod} />
     </div>
   );
 };

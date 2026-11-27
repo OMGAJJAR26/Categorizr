@@ -1,15 +1,16 @@
-import { useMemo, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, LayoutGrid } from "lucide-react";
 import { useData } from "../../context/DataContext";
 import { useCurrency } from "../../context/CurrencyContext";
-import { isToBeVerified } from "../../hooks/useReceiptGrouping";
 import {
   categoryDimension,
+  expenseTypeDimension,
   listEntities,
   merchantDimension,
   taxDimension,
 } from "../../utils/periodStats";
 import { normalizeMerchantKey } from "../../utils/merchantListUtils";
+import ExpenseTypeCard from "./ExpenseTypeCard";
 import MerchantSummaryCard from "./MerchantSummaryCard";
 import PaymentMethodCard from "./PaymentMethodCard";
 import ExpenseCategoryCard from "./ExpenseCategoryCard";
@@ -27,43 +28,148 @@ const onlyKnown = (items, knownNames, keyOf) => {
   return kept.length ? kept : items;
 };
 
-const OPEN_KEY = "home_summary_cards_open";
-const readOpen = () => {
+// Left to right. `label` is what the Cards menu shows.
+const CARD_LIST = [
+  { id: "expenseType", label: "Expense Type" },
+  { id: "merchant", label: "Merchant" },
+  { id: "payment", label: "Payment Method" },
+  { id: "category", label: "Expense Category" },
+  { id: "tax", label: "Tax Type" },
+];
+
+const VISIBLE_KEY = "home_cards_visible";
+const allOn = () => Object.fromEntries(CARD_LIST.map((c) => [c.id, true]));
+const readVisible = () => {
   try {
-    return localStorage.getItem(OPEN_KEY) !== "0";
+    const saved = JSON.parse(localStorage.getItem(VISIBLE_KEY) || "null");
+    if (saved && typeof saved === "object") return { ...allOn(), ...saved };
   } catch {
-    return true;
+    /* unreadable: show everything */
   }
+  return allOn();
 };
 
-// The row of summary cards at the top of the home page: Merchant, Payment Method, Expense
-// Category and Tax Type. Cards ignore the list's filters and search: they always summarise
-// everything saved. A card with nothing to show is left out.
-const HomeCards = () => {
+const NO_RECEIPTS = [];
+const CARD_WIDTH = 380; // px, from tablet width up; on phones the cards stack full width
+
+// The "Cards" button and the list of cards it can show or hide.
+const CardsMenu = ({ visible, onChange, onAll }) => {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef(null);
+  const count = CARD_LIST.filter((c) => visible[c.id]).length;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const away = (e) => {
+      if (wrap.current && !wrap.current.contains(e.target)) setOpen(false);
+    };
+    const esc = (e) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("pointerdown", away);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrap} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        className="m-0 px-3 h-10 inline-flex items-center gap-2 rounded-xl border border-[#14203f] bg-white text-sm font-semibold text-[#14203f] hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+      >
+        <LayoutGrid size={16} aria-hidden="true" />
+        Cards
+        <span className="min-w-[22px] h-[22px] px-1.5 inline-flex items-center justify-center rounded-full bg-[#14203f] text-xs font-bold text-white tabular-nums">
+          {count}
+        </span>
+        <ChevronDown size={16} aria-hidden="true" className={`transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div
+          role="dialog"
+          aria-label="Show cards"
+          className="absolute right-0 top-[calc(100%+8px)] z-30 w-[250px] rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_12px_32px_rgba(20,32,63,0.18)]"
+        >
+          <p className="px-1 pb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400">Show cards</p>
+          <ul className="flex flex-col">
+            {CARD_LIST.map((c) => (
+              <li key={c.id}>
+                <label className="flex items-center gap-3 px-1 py-2 rounded-lg cursor-pointer hover:bg-slate-50 text-[15px] font-semibold text-[#14203f]">
+                  <input
+                    type="checkbox"
+                    checked={!!visible[c.id]}
+                    onChange={() => onChange(c.id)}
+                    className="peer sr-only"
+                  />
+                  <span
+                    aria-hidden="true"
+                    className={`m-0 w-5 h-5 rounded-md border-2 inline-flex items-center justify-center peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500 ${
+                      visible[c.id] ? "bg-[#2b3f78] border-[#2b3f78] text-white" : "border-slate-300 bg-white"
+                    }`}
+                  >
+                    {visible[c.id] && <Check size={14} strokeWidth={3} />}
+                  </span>
+                  {c.label}
+                </label>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2 pt-2 border-t border-slate-200 flex items-center justify-between">
+            <button type="button" onClick={() => onAll(true)} className="m-0 p-1 text-sm font-semibold text-[#2b3f78] hover:underline">
+              Show all
+            </button>
+            <button type="button" onClick={() => onAll(false)} className="m-0 p-1 text-sm font-semibold text-[#2b3f78] hover:underline">
+              Hide all
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// The summary cards at the top of the home page: Expense Type, Merchant, Payment Method,
+// Expense Category and Tax Type, in a row that scrolls sideways (stacked on phones).
+//
+// `receipts` is what the list below is currently showing: saved receipts that pass the
+// filters and search, so the cards always add up exactly what the user has filtered to.
+// A card with nothing to show is left out.
+const HomeCards = ({ receipts, hasAnyReceipts }) => {
   const {
-    receipts,
     isMerchantHidden,
     merchantsWithImages,
     expenseCategories: visibleCategoryNames,
     taxData,
   } = useData();
   const { formatCurrency } = useCurrency();
-  // On phones the four cards stack and push the receipts far down, so they can be folded
-  // away (the choice is remembered). From tablet width up they are always shown.
-  const [open, setOpen] = useState(readOpen);
-  const toggleOpen = () => {
-    setOpen((v) => {
-      try {
-        localStorage.setItem(OPEN_KEY, v ? "0" : "1");
-      } catch {
-        /* storage unavailable: still toggles for this visit */
-      }
-      return !v;
+  const saved = receipts || NO_RECEIPTS;
+
+  const [visible, setVisible] = useState(readVisible);
+  const persist = (next) => {
+    try {
+      localStorage.setItem(VISIBLE_KEY, JSON.stringify(next));
+    } catch {
+      /* storage unavailable: still applies for this visit */
+    }
+  };
+  const toggleCard = (id) =>
+    setVisible((v) => {
+      const next = { ...v, [id]: !v[id] };
+      persist(next);
+      return next;
     });
+  const setAll = (on) => {
+    const next = Object.fromEntries(CARD_LIST.map((c) => [c.id, on]));
+    persist(next);
+    setVisible(next);
   };
 
-  // Drafts ("to be verified") are not saved receipts yet, so they do not count.
-  const saved = useMemo(() => (receipts || []).filter((r) => !isToBeVerified(r)), [receipts]);
+  const expenseTypes = useMemo(() => listEntities(saved, expenseTypeDimension), [saved]);
 
   // Every merchant with a saved receipt, minus the ones the user hid or deleted. (The
   // merchant dropdowns also drop "starter" stores the account never saved, which would
@@ -96,48 +202,106 @@ const HomeCards = () => {
     return map;
   }, [merchantsWithImages]);
 
-  if (!merchants.length && !methods.length && !categories.length && !taxTypes.length) return null;
+  // Sideways scrolling: arrows appear at an end only while there is more that way.
+  const strip = useRef(null);
+  const [more, setMore] = useState({ left: false, right: false });
+  const measure = useCallback(() => {
+    const el = strip.current;
+    if (!el) return;
+    setMore({
+      left: el.scrollLeft > 4,
+      right: el.scrollLeft + el.clientWidth < el.scrollWidth - 4,
+    });
+  }, []);
+  useEffect(() => {
+    const el = strip.current;
+    measure();
+    if (!el) return undefined;
+    el.addEventListener("scroll", measure, { passive: true });
+    window.addEventListener("resize", measure);
+    return () => {
+      el.removeEventListener("scroll", measure);
+      window.removeEventListener("resize", measure);
+    };
+  });
+  const scrollBy = (dir) => strip.current?.scrollBy({ left: dir * (CARD_WIDTH + 16), behavior: "smooth" });
+
+  if (!hasAnyReceipts) return null;
+
+  const cards = [
+    {
+      id: "expenseType",
+      show: expenseTypes.length > 0,
+      node: <ExpenseTypeCard receipts={saved} types={expenseTypes} formatCurrency={formatCurrency} />,
+    },
+    {
+      id: "merchant",
+      show: merchants.length > 0,
+      node: <MerchantSummaryCard receipts={saved} merchants={merchants} logoByKey={logoByKey} formatCurrency={formatCurrency} />,
+    },
+    {
+      id: "payment",
+      show: methods.length > 0,
+      node: <PaymentMethodCard receipts={saved} methods={methods} formatCurrency={formatCurrency} />,
+    },
+    {
+      id: "category",
+      show: categories.length > 0,
+      node: <ExpenseCategoryCard receipts={saved} categories={categories} formatCurrency={formatCurrency} />,
+    },
+    {
+      id: "tax",
+      show: taxTypes.length > 0,
+      node: <TaxTypeCard receipts={saved} taxTypes={taxTypes} formatCurrency={formatCurrency} />,
+    },
+  ];
+  const shown = cards.filter((c) => visible[c.id] && c.show);
+  const anyChosen = CARD_LIST.some((c) => visible[c.id]);
 
   return (
-    <section aria-label="Summary cards" className="px-3 sm:px-4 md:px-6 pt-4 pb-3 sm:pt-5">
-      <div className="md:hidden flex items-center justify-between mb-2">
-        <h2 className="text-sm font-bold text-slate-700">Summary</h2>
-        <button
-          type="button"
-          onClick={toggleOpen}
-          aria-expanded={open}
-          aria-controls="home-summary-cards"
-          className="m-0 p-0 min-h-[36px] inline-flex items-center gap-1 px-2 rounded-full text-sm font-semibold text-blue-700 hover:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-        >
-          {open ? "Hide" : "Show"}
-          {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-        </button>
+    <section aria-label="Summary cards" className="px-3 sm:px-4 md:px-6 pt-3 pb-3">
+      <div className="flex justify-end mb-3">
+        <CardsMenu visible={visible} onChange={toggleCard} onAll={setAll} />
       </div>
-      <div
-        id="home-summary-cards"
-        className={`${open ? "grid" : "hidden md:grid"} grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-stretch`}
-      >
-        {merchants.length > 0 && (
-          <div className="min-w-0">
-            <MerchantSummaryCard receipts={saved} merchants={merchants} logoByKey={logoByKey} formatCurrency={formatCurrency} />
+
+      {anyChosen && shown.length === 0 && (
+        <p className="py-6 text-center text-sm text-slate-500">No receipts match the current filters.</p>
+      )}
+
+      {shown.length > 0 && (
+        <div className="relative">
+          <div
+            ref={strip}
+            className="flex flex-col md:flex-row gap-4 items-stretch md:overflow-x-auto md:snap-x md:pb-2"
+          >
+            {shown.map((c) => (
+              <div key={c.id} className="min-w-0 md:w-[380px] md:shrink-0 md:snap-start">
+                {c.node}
+              </div>
+            ))}
           </div>
-        )}
-        {methods.length > 0 && (
-          <div className="min-w-0">
-            <PaymentMethodCard receipts={saved} methods={methods} formatCurrency={formatCurrency} />
-          </div>
-        )}
-        {categories.length > 0 && (
-          <div className="min-w-0">
-            <ExpenseCategoryCard receipts={saved} categories={categories} formatCurrency={formatCurrency} />
-          </div>
-        )}
-        {taxTypes.length > 0 && (
-          <div className="min-w-0">
-            <TaxTypeCard receipts={saved} taxTypes={taxTypes} formatCurrency={formatCurrency} />
-          </div>
-        )}
-      </div>
+          {more.left && (
+            <button
+              type="button"
+              onClick={() => scrollBy(-1)}
+              aria-label="Scroll cards left"
+              className="hidden md:inline-flex absolute left-1 top-1/2 -translate-y-1/2 m-0 p-0 w-10 h-10 items-center justify-center rounded-full bg-white/95 border border-slate-300 shadow-md text-[#14203f] hover:bg-white"
+            >
+              <ChevronLeft size={20} />
+            </button>
+          )}
+          {more.right && (
+            <button
+              type="button"
+              onClick={() => scrollBy(1)}
+              aria-label="Scroll cards right"
+              className="hidden md:inline-flex absolute right-1 top-1/2 -translate-y-1/2 m-0 p-0 w-10 h-10 items-center justify-center rounded-full bg-white/95 border border-slate-300 shadow-md text-[#14203f] hover:bg-white"
+            >
+              <ChevronRight size={20} />
+            </button>
+          )}
+        </div>
+      )}
     </section>
   );
 };

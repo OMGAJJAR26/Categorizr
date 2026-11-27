@@ -74,7 +74,7 @@ const CONTROL_TONES = {
 
 // Previous / next item with a "3 / 12" counter on the left, previous period / back to the
 // current period on the right. `noun` is the singular name of the items ("merchant" ...).
-export const CardControls = ({ tone = "light", noun, index, count, kind, offset, onEntity, onPeriod }) => {
+export const CardControls = ({ tone = "light", noun, index, count, kind, offset, canGoBack = true, onEntity, onPeriod }) => {
   const c = CONTROL_TONES[tone];
   const unit = PERIOD_NAMES[kind].toLowerCase();
   const btn = `m-0 p-0 w-8 h-8 inline-flex items-center justify-center rounded-full disabled:opacity-30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition ${c.btn}`;
@@ -91,7 +91,7 @@ export const CardControls = ({ tone = "light", noun, index, count, kind, offset,
           </button>
         </div>
         <div className="flex items-center gap-1">
-          <button type="button" className={btn} onClick={() => onPeriod(offset - 1)} aria-label={`Previous ${unit}`} title={`Previous ${unit}`}>
+          <button type="button" className={btn} onClick={() => onPeriod(offset - 1)} disabled={!canGoBack} aria-label={`Previous ${unit}`} title={`Previous ${unit}`}>
             <ChevronDown size={18} />
           </button>
           <button type="button" className={btn} onClick={() => onPeriod(0)} disabled={offset === 0} aria-label={`Back to the current ${unit}`} title={`Back to the current ${unit}`}>
